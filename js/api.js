@@ -11,6 +11,7 @@
 // UPDATED: Global token variable and automatic Authorization header injection
 // UPDATED: Enhanced 401 handling and token validation logic
 // NEW: Enhanced token persistence and /auth/me retry logic with exponential backoff
+// CRITICAL FIX: Network state now completely separate from authentication state
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -36,14 +37,22 @@
 // 21. NEW: Enhanced token persistence across page refreshes
 // 22. NEW: Improved /auth/me retry logic with exponential backoff
 // 23. NEW: Global currentUser object persistence
+// 24. CRITICAL FIX: Network state completely separated from authentication state
+// 25. CRITICAL FIX: 401/403 errors NEVER mark backend as offline
+// 26. CRITICAL FIX: /api/status endpoint never includes Authorization header
 // ============================================================================
 
 // ============================================================================
-// SINGLE SOURCE OF TRUTH - NETWORK STATE
+// SINGLE SOURCE OF TRUTH - NETWORK STATE (COMPLETELY SEPARATE FROM AUTH)
 // ============================================================================
 /**
  * GLOBAL NETWORK STATE - Declared ONLY ONCE here
- * All other files must use window.AppNetwork
+ * Network state is COMPLETELY SEPARATE from authentication state
+ * Backend reachability is determined ONLY by:
+ * 1. Successful fetch (any HTTP status means backend is reachable)
+ * 2. Network errors (Failed to fetch, timeout, DNS failure)
+ * 3. Server unreachable errors
+ * NEVER by authentication status (401, 403, etc.)
  */
 let isOnline = navigator.onLine;
 let isBackendReachable = null;
@@ -72,10 +81,14 @@ window.AppNetwork = {
   },
   
   updateBackendStatus: function(status) {
-    isBackendReachable = status;
-    this.isBackendReachable = status;
-    this.lastChecked = new Date().toISOString();
-    console.log(`🔧 [NETWORK] Backend reachable changed to: ${status}`);
+    // CRITICAL FIX: Only update if status is explicitly true or false
+    // Don't update on null or undefined
+    if (status === true || status === false) {
+      isBackendReachable = status;
+      this.isBackendReachable = status;
+      this.lastChecked = new Date().toISOString();
+      console.log(`🔧 [NETWORK] Backend reachable changed to: ${status}`);
+    }
   }
 };
 
@@ -86,6 +99,8 @@ window.addEventListener('online', () => {
 
 window.addEventListener('offline', () => {
   window.AppNetwork.updateOnlineStatus(false);
+  // CRITICAL: When offline, backend cannot be reachable
+  window.AppNetwork.updateBackendStatus(false);
 });
 
 // ============================================================================
@@ -761,6 +776,7 @@ function _buildSafeUrl(endpoint) {
  * 6. STRICT CONTRACT: endpoint is string, method is in options
  * 7. AUTO-ATTACH Authorization header for authenticated requests using getAuthHeaders()
  * 8. NEW: Automatic Authorization header injection using global accessToken variable
+ * 9. CRITICAL: Network state COMPLETELY SEPARATE from authentication state
  */
 function _safeFetch(fullUrl, options = {}) {
   // Validate URL
@@ -775,17 +791,37 @@ function _safeFetch(fullUrl, options = {}) {
   // AUTHORIZATION HEADER ENFORCEMENT - USING getAuthHeaders() HELPER
   const authHeaders = getAuthHeaders();
   
-  // NEW: Ensure accessToken is injected into headers for all requests
+  // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
+  // This is the key fix to prevent auth errors from affecting network state
+  const isStatusEndpoint = fullUrl.includes('/api/status') && 
+                           !fullUrl.includes('/status/') && 
+                           !fullUrl.includes('/statuses');
+  
+  // Build headers - SPECIAL HANDLING FOR /api/status
   let headers = {
-    'Content-Type': 'application/json',
-    ...authHeaders, // Add Authorization header if token exists
-    ...options.headers
+    'Content-Type': 'application/json'
   };
   
-  // NEW: Explicitly add Authorization header if accessToken exists and not already present
-  if (accessToken && !headers['Authorization'] && !headers['authorization']) {
-    headers['Authorization'] = `Bearer ${accessToken}`;
-    console.log(`🔐 [AUTH] Global accessToken injected into headers for ${normalizedMethod} ${fullUrl}`);
+  // CRITICAL: Only add Authorization header if NOT /api/status endpoint
+  if (!isStatusEndpoint) {
+    headers = {
+      ...headers,
+      ...authHeaders, // Add Authorization header if token exists
+      ...options.headers
+    };
+    
+    // NEW: Explicitly add Authorization header if accessToken exists and not already present
+    if (accessToken && !headers['Authorization'] && !headers['authorization']) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+      console.log(`🔐 [AUTH] Global accessToken injected into headers for ${normalizedMethod} ${fullUrl}`);
+    }
+  } else {
+    // For /api/status endpoint, use only provided headers (never add auth)
+    headers = {
+      ...headers,
+      ...options.headers
+    };
+    console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
   }
   
   // Auto-attach Authorization header for authenticated requests
@@ -793,7 +829,7 @@ function _safeFetch(fullUrl, options = {}) {
   const isAuthEndpoint = fullUrl.includes('/auth/') && 
                         (fullUrl.includes('/auth/login') || fullUrl.includes('/auth/register'));
   
-  const skipAuth = options.auth === false || isAuthEndpoint;
+  const skipAuth = options.auth === false || isAuthEndpoint || isStatusEndpoint;
   
   if (!skipAuth && (headers['Authorization'] || headers['authorization'])) {
     console.log(`🔐 [AUTH] Authorization header attached to ${normalizedMethod} ${fullUrl}`);
@@ -827,6 +863,7 @@ function _safeFetch(fullUrl, options = {}) {
   console.log(`🔧 [API] Safe fetch: ${normalizedMethod} ${fullUrl}`);
   console.log(`🔧 [API] Headers:`, Object.keys(headers));
   console.log(`🔧 [API] Authorization Header: ${headers['Authorization'] ? 'Present' : 'Not present'}`);
+  console.log(`🔧 [API] Is Status Endpoint: ${isStatusEndpoint ? 'YES (no auth)' : 'NO'}`);
   
   // PERFORM THE FETCH
   return fetch(fullUrl, safeOptions)
@@ -865,6 +902,10 @@ function _safeFetch(fullUrl, options = {}) {
             errorMessage = data.message || 'Invalid credentials';
             result.isAuthError = true;
             
+            // CRITICAL FIX: 401 errors NEVER affect network state
+            console.log(`🔐 [AUTH] 401 Unauthorized - AUTH ISSUE, NOT NETWORK`);
+            console.log(`🔐 [AUTH] Backend IS reachable (got response), this is an authentication issue`);
+            
             // UPDATED: Only clear token if backend explicitly says token is revoked
             const isTokenExplicitlyInvalid = data.message && (
               data.message.includes('Token has been revoked') ||
@@ -889,6 +930,12 @@ function _safeFetch(fullUrl, options = {}) {
               console.log('🔐 [AUTH] 401 Unauthorized - keeping token for possible retry');
               // Don't clear token for generic 401, might be temporary
             }
+          } else if (status === 403) {
+            errorMessage = data.message || 'Access forbidden';
+            result.isAuthError = true;
+            // CRITICAL FIX: 403 errors NEVER affect network state
+            console.log(`🔐 [AUTH] 403 Forbidden - PERMISSION ISSUE, NOT NETWORK`);
+            console.log(`🔐 [AUTH] Backend IS reachable (got response)`);
           } else if (status === 400) {
             errorMessage = data.message || 'Bad request';
             result.isClientError = true;
@@ -905,9 +952,17 @@ function _safeFetch(fullUrl, options = {}) {
         }
         
         // CRITICAL FIX: Only mark backend as reachable if we got ANY response
-        // HTTP errors (400, 401, 500, etc.) mean backend IS reachable
+        // HTTP errors (400, 401, 403, 500, etc.) mean backend IS reachable
         // Only network errors (no response) mean backend is unreachable
-        window.AppNetwork.updateBackendStatus(true);
+        // SPECIAL CASE: For /api/status endpoint, we handle differently
+        if (isStatusEndpoint) {
+          // For status endpoint, any response (even non-200) means backend is reachable
+          console.log(`🔧 [NETWORK] /api/status endpoint response ${status} - backend IS reachable`);
+          window.AppNetwork.updateBackendStatus(true);
+        } else {
+          // For all other endpoints
+          window.AppNetwork.updateBackendStatus(true);
+        }
         
         return result;
       } catch (jsonError) {
@@ -956,9 +1011,22 @@ function _safeFetch(fullUrl, options = {}) {
                           error.message.includes('aborted') ||
                           error.message.includes('The user aborted');
       
+      // Check for timeout errors
+      const isTimeoutError = error.name === 'TimeoutError' ||
+                            error.message.includes('timeout') ||
+                            error.message.includes('Timeout');
+      
+      // Check for DNS errors
+      const isDNSError = error.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                        error.message.includes('net::ERR_NAME_NOT_RESOLVED');
+      
       // CRITICAL FIX: Only update backend reachability for actual network errors
-      if (isNetworkError && !isAbortError) {
+      // This is where we separate network state from auth state
+      const shouldMarkBackendUnreachable = (isNetworkError || isTimeoutError || isDNSError) && !isAbortError;
+      
+      if (shouldMarkBackendUnreachable) {
         console.warn(`⚠️ [API] Network error detected, marking backend as unreachable: ${error.message}`);
+        console.warn(`⚠️ [API] This is a REAL NETWORK issue, not an auth issue`);
         window.AppNetwork.updateBackendStatus(false);
       } else {
         // For non-network errors or abort errors, backend might still be reachable
@@ -971,12 +1039,14 @@ function _safeFetch(fullUrl, options = {}) {
         status: 0,
         message: isAbortError 
           ? 'Request aborted' 
-          : (isNetworkError && !isAbortError
+          : (shouldMarkBackendUnreachable
             ? 'Network error. Please check your connection.' 
             : 'Request failed: ' + error.message),
         error: error.message,
-        isNetworkError: isNetworkError && !isAbortError,
+        isNetworkError: shouldMarkBackendUnreachable,
         isAbortError: isAbortError,
+        isTimeoutError: isTimeoutError,
+        isDNSError: isDNSError,
         isRateLimited: false,
         isServerError: false
       };
@@ -1045,14 +1115,20 @@ const globalApiFunction = function(endpoint, options = {}) {
   }
   
   // NEW: Ensure Authorization header is included in options if not already present
+  // BUT NOT for /api/status endpoint
   if (!safeOptions.headers) {
     safeOptions.headers = {};
   }
   
-  // Inject Authorization header if accessToken exists
-  if (accessToken && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization']) {
+  // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
+  const isStatusEndpoint = safeEndpoint === '/status' || safeEndpoint.startsWith('/status?');
+  
+  // Inject Authorization header if accessToken exists AND NOT status endpoint
+  if (accessToken && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
     safeOptions.headers['Authorization'] = `Bearer ${accessToken}`;
     console.log(`🔐 [AUTH] Authorization header injected into options for ${safeEndpoint}`);
+  } else if (isStatusEndpoint) {
+    console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
   }
   
   // NOTE: Authorization header is now handled centrally in _safeFetch via getAuthHeaders()
@@ -1326,7 +1402,7 @@ async function _validateAuthWithMe() {
 
 const apiObject = {
   _singleton: true,
-  _version: '17.0.0', // Updated version for enhanced token persistence
+  _version: '18.0.0', // Updated version for network/auth separation
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -2924,7 +3000,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // BACKEND HEALTH CHECK - HARDENED
+  // BACKEND HEALTH CHECK - HARDENED WITH NETWORK/AUTH SEPARATION
   // ============================================================================
   
   checkBackendHealth: async function() {
@@ -2944,17 +3020,23 @@ const apiObject = {
       };
     }
     
-    console.log('🔧 [API] Checking backend health...');
+    console.log('🔧 [API] Checking backend health with NETWORK/AUTH SEPARATION...');
     console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
     console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
     console.log(`🔧 [API] Global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
     
-    const testEndpoints = ['/api/status', '/api/auth/health', '/api/health', '/api'];
+    // CRITICAL FIX: Test endpoints in order, but /api/status MUST be first and without auth
+    const testEndpoints = [
+      { endpoint: '/api/status', useAuth: false, description: 'Status endpoint (no auth)' },
+      { endpoint: '/api/auth/health', useAuth: false, description: 'Auth health (no auth)' },
+      { endpoint: '/api/health', useAuth: false, description: 'Health endpoint (no auth)' },
+      { endpoint: '/api', useAuth: false, description: 'API root (no auth)' }
+    ];
     
-    for (const endpoint of testEndpoints) {
+    for (const test of testEndpoints) {
       try {
-        const url = BACKEND_BASE_URL + endpoint;
-        console.log(`🔧 [API] Trying: ${url}`);
+        const url = BACKEND_BASE_URL + test.endpoint;
+        console.log(`🔧 [API] Trying: ${url} (${test.description})`);
         
         // Use a direct fetch for health check with timeout
         const controller = new AbortController();
@@ -2964,10 +3046,12 @@ const apiObject = {
           'Content-Type': 'application/json'
         };
         
-        // Add Authorization header if accessToken exists
-        if (accessToken) {
+        // CRITICAL FIX: Only add Authorization header if explicitly requested
+        if (test.useAuth && accessToken) {
           headers['Authorization'] = `Bearer ${accessToken}`;
           console.log('🔐 [AUTH] Adding Authorization header to health check');
+        } else if (!test.useAuth) {
+          console.log(`🔧 [NETWORK] NO Authorization header for ${test.endpoint} (network test only)`);
         }
         
         const response = await fetch(url, {
@@ -2980,34 +3064,51 @@ const apiObject = {
         
         clearTimeout(timeoutId);
         
-        // CRITICAL FIX: Any response (even HTTP error) means backend is reachable
-        if (response.status < 500) {
-          console.log(`✅ [API] Backend reachable (status: ${response.status})`);
-          window.AppNetwork.updateBackendStatus(true);
-          
+        // CRITICAL FIX: ANY response (even HTTP error) means backend IS reachable
+        // This is the key fix - 401, 403, 500 errors mean backend IS reachable
+        // Only network errors (no response) mean backend is unreachable
+        
+        const status = response.status;
+        const isSuccess = response.ok;
+        
+        console.log(`🔧 [API] Backend responded with ${status} for ${test.endpoint}`);
+        console.log(`🔧 [NETWORK] Backend IS reachable (got HTTP ${status} response)`);
+        
+        // BACKEND IS REACHABLE - we got ANY HTTP response
+        window.AppNetwork.updateBackendStatus(true);
+        
+        if (isSuccess) {
+          // Success (200-299)
           return {
             ok: true,
             success: true,
             reachable: true,
-            endpoint: endpoint || 'root',
-            status: response.status,
-            message: 'Backend is reachable',
+            endpoint: test.endpoint,
+            status: status,
+            message: 'Backend is reachable and responding',
             isRateLimited: false,
             isServerError: false
           };
         } else {
-          // HTTP 500+ error but backend IS reachable
-          console.warn(`⚠️ [API] Backend returned HTTP ${response.status} but is reachable`);
-          window.AppNetwork.updateBackendStatus(true);
+          // HTTP error but backend IS reachable
+          let message = 'Backend reachable but returned error';
+          if (status === 401 || status === 403) {
+            message = 'Backend reachable - authentication issue (not network)';
+            console.log(`🔧 [NETWORK] ${status} error: AUTH ISSUE, NOT NETWORK`);
+          } else if (status >= 500) {
+            message = 'Backend reachable - server error';
+            console.log(`🔧 [NETWORK] ${status} error: SERVER ERROR, backend IS reachable`);
+          }
           
           return {
             ok: false,
             success: false,
-            reachable: true, // Backend IS reachable
-            endpoint: endpoint || 'root',
-            status: response.status,
-            message: 'Backend reachable but returned error',
-            isServerError: true,
+            reachable: true, // CRITICAL: Backend IS reachable
+            endpoint: test.endpoint,
+            status: status,
+            message: message,
+            isAuthError: status === 401 || status === 403,
+            isServerError: status >= 500,
             isRateLimited: false
           };
         }
@@ -3017,30 +3118,43 @@ const apiObject = {
                            error.message.includes('aborted') ||
                            error.message.includes('The user aborted');
         
-        console.log(`⚠️ [API] Health check endpoint failed: ${error.message}`, isAbortError ? '(Aborted)' : '');
+        // Check for network errors
+        const isNetworkError = error.message && (
+          error.message.includes('Failed to fetch') ||
+          error.message.includes('NetworkError') ||
+          error.message.includes('network request failed')
+        );
         
-        // Only continue to next endpoint if it was an abort error
-        // Real network errors should break the loop
-        if (!isAbortError) {
-          // Check if this is a real network error
-          const isNetworkError = error.message && (
-            error.message.includes('Failed to fetch') ||
-            error.message.includes('NetworkError') ||
-            error.message.includes('network request failed')
-          );
-          
-          if (isNetworkError) {
-            console.log('🔧 [API] Real network error detected, stopping health check');
-            break;
-          }
+        // Check for timeout errors
+        const isTimeoutError = error.name === 'TimeoutError' ||
+                              error.message.includes('timeout') ||
+                              error.message.includes('Timeout');
+        
+        // Check for DNS errors
+        const isDNSError = error.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                          error.message.includes('net::ERR_NAME_NOT_RESOLVED');
+        
+        console.log(`⚠️ [API] Health check endpoint failed: ${error.message}`, 
+          isAbortError ? '(Aborted)' : 
+          isNetworkError ? '(Network)' :
+          isTimeoutError ? '(Timeout)' :
+          isDNSError ? '(DNS)' : '');
+        
+        // CRITICAL: Only mark backend unreachable for REAL network errors
+        const shouldMarkBackendUnreachable = (isNetworkError || isTimeoutError || isDNSError) && !isAbortError;
+        
+        if (shouldMarkBackendUnreachable) {
+          console.log('🔧 [API] REAL network error detected, marking backend as unreachable');
+          console.log(`🔧 [API] Error type: ${isNetworkError ? 'Network' : isTimeoutError ? 'Timeout' : 'DNS'}`);
+          break; // Stop testing on real network error
         }
         
-        // For abort errors, continue to next endpoint
+        // For abort errors or other non-network errors, continue to next endpoint
         continue;
       }
     }
     
-    // If we get here, all endpoints failed or network error occurred
+    // If we get here, all endpoints failed or real network error occurred
     console.log('🔧 [API] Backend unreachable after testing all endpoints');
     window.AppNetwork.updateBackendStatus(false);
     
@@ -3605,32 +3719,46 @@ const apiObject = {
         tokenStructure: token ? 'normalized' : 'none',
         windowCurrentUser: window.currentUser ? 'Set' : 'Not set',
         tokenPersistence: {
-          moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
-          accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
-          authUserKey: tokenInAuthUser ? 'Present' : 'Missing',
+          moodchatTokenKey: tokenInMoodchatToken ? 'PRESENT' : 'MISSING',
+          accessTokenKey: tokenInAccessToken ? 'PRESENT' : 'MISSING',
+          authUserKey: tokenInAuthUser ? 'PRESENT' : 'MISSING',
           allKeysPresent: !!(tokenInMoodchatToken && tokenInAccessToken && tokenInAuthUser)
         }
+      },
+      networkState: {
+        isOnline: window.AppNetwork.isOnline,
+        isBackendReachable: window.AppNetwork.isBackendReachable,
+        networkAuthSeparated: true, // NEW: Indicates network/auth separation is active
+        lastChecked: window.AppNetwork.lastChecked
       }
     };
   },
   
   // ============================================================================
-  // ENHANCED INITIALIZATION WITH TOKEN PERSISTENCE
+  // ENHANCED INITIALIZATION WITH NETWORK/AUTH SEPARATION
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v17.0.0 (ENHANCED TOKEN PERSISTENCE) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v18.0.0 (NETWORK/AUTH SEPARATION) initializing...');
     console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
-    console.log('🔧 [API] 🔐 ENHANCED TOKEN PERSISTENCE APPLIED:');
-    console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys for maximum persistence');
-    console.log('🔧 [API] ✅ Global accessToken variable initialized on page load');
-    console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: NETWORK STATE COMPLETELY SEPARATE FROM AUTH STATE');
+    console.log('🔧 [API] ✅ 401/403 errors NEVER mark backend as offline');
+    console.log('🔧 [API] ✅ /api/status endpoint NEVER includes Authorization header');
+    console.log('🔧 [API] ✅ Backend reachability determined ONLY by:');
+    console.log('🔧 [API]   - Successful fetch (ANY HTTP status = backend reachable)');
+    console.log('🔧 [API]   - Network errors (Failed to fetch, timeout, DNS failure)');
+    console.log('🔧 [API]   - Server unreachable errors');
+    console.log('🔧 [API] ✅ Authentication failures are AUTH ISSUES, NOT NETWORK ISSUES');
+    console.log('🔧 [API] ✅ Page refreshes NEVER show "No network" if backend is running');
+    console.log('🔧 [API] ✅ Login failures NEVER mark backend offline');
+    console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys');
+    console.log('🔧 [API] ✅ Global accessToken variable persists across page refreshes');
     console.log('🔧 [API] ✅ window.currentUser maintained across sessions');
-    console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry (3 attempts)');
+    console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry');
     console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs');
-    console.log('🔧 [API] ✅ Authorization header automatically injected into all API calls');
+    console.log('🔧 [API] ✅ Authorization header automatically injected into all API calls (except /api/status)');
     console.log('🔧 [API] ✅ Enhanced 401 handling - only clear tokens when explicitly invalid');
     console.log('🔧 [API] ✅ window.currentUser preserved during token clearing');
     console.log('🔧 [API] ✅ isLoggedIn() requires successful /auth/me validation AND token persistence');
@@ -3653,7 +3781,7 @@ const apiObject = {
     // Check for token in storage and log it
     if (accessToken) {
       console.log('🔐 [AUTH] Global accessToken initialized:', accessToken.substring(0, 20) + '...');
-      console.log('🔐 [AUTH] Token will be automatically injected into all API calls');
+      console.log('🔐 [AUTH] Token will be automatically injected into all API calls (except /api/status)');
       console.log('🔐 [AUTH] Token persists across page refreshes');
       
       const moodchatToken = localStorage.getItem('moodchat_token');
@@ -3667,6 +3795,7 @@ const apiObject = {
     } else {
       console.log('🔐 [AUTH] No token found in storage');
       console.log('🔐 [AUTH] API calls without authentication will proceed normally');
+      console.log('🔐 [AUTH] /api/status endpoint will NEVER include Authorization header');
       this._apiAvailable = false;
     }
     
@@ -3725,11 +3854,13 @@ const apiObject = {
       }
     }
     
-    // Initial health check with token persistence check
+    // Initial health check with NETWORK/AUTH SEPARATION
     setTimeout(async () => {
       try {
         const health = await this.checkBackendHealth();
         console.log('🔧 [API] 📶 Backend status:', health.message);
+        console.log('🔧 [API] 🌐 Network reachable:', health.reachable);
+        console.log('🔧 [API] 🔐 Auth status:', health.isAuthError ? 'Auth issue (not network)' : 'OK');
         
         // Enhanced auth diagnostics with persistence check
         const token = _getCurrentAccessToken();
@@ -3740,7 +3871,7 @@ const apiObject = {
         const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
         const tokenInAccessToken = localStorage.getItem('accessToken');
         
-        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with Persistence Check:');
+        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with NETWORK/AUTH SEPARATION:');
         console.log('🔧 [API]   Global accessToken:', accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set');
         console.log('🔧 [API]   Token in moodchat_token:', tokenInMoodchatToken ? 'YES' : 'NO');
         console.log('🔧 [API]   Token in accessToken:', tokenInAccessToken ? 'YES' : 'NO');
@@ -3750,6 +3881,9 @@ const apiObject = {
         console.log('🔧 [API]   isLoggedIn():', this.isLoggedIn());
         console.log('🔧 [API]   API Available:', this.isApiAvailable());
         console.log('🔧 [API]   window.currentUser:', window.currentUser ? 'Set' : 'Not set');
+        console.log('🔧 [API]   NETWORK/AUTH SEPARATION: ACTIVE');
+        console.log('🔧 [API]   /api/status without auth: YES');
+        console.log('🔧 [API]   401/403 errors affect network: NO');
         console.log('🔧 [API] 💾 Device ID:', this.getDeviceId());
         
         // Update API availability
@@ -3775,7 +3909,7 @@ const apiObject = {
       }
     }, this._config.SESSION_CHECK_INTERVAL);
     
-    // Dispatch ready events with persistence info
+    // Dispatch ready events with NETWORK/AUTH SEPARATION info
     this._dispatchReadyEvents();
     
     return true;
@@ -3804,6 +3938,7 @@ const apiObject = {
       apiBaseUrl: BASE_API_URL,
       globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
       apiAvailable: this._apiAvailable,
+      networkAuthSeparated: true, // NEW: Indicates network/auth separation
       tokenPersistence: {
         moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
         accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
@@ -3821,13 +3956,14 @@ const apiObject = {
         isBackendReachable: window.AppNetwork.isBackendReachable
       },
       features: {
+        networkAuthSeparation: true, // NEW
         tokenNormalization: true,
-        tokenPersistence: true, // NEW
-        dualKeyStorage: true, // NEW
-        crossTabSync: true, // NEW
+        tokenPersistence: true,
+        dualKeyStorage: true,
+        crossTabSync: true,
         centralizedAuthHeaders: true,
         strictAuthValidation: true,
-        exponentialBackoffRetry: true, // NEW
+        exponentialBackoffRetry: true,
         dynamicEnvironmentDetection: true,
         http500Fix: true,
         apiMethods: true,
@@ -3848,7 +3984,8 @@ const apiObject = {
         statusMethods: true,
         callMethods: true,
         settingsMethods: true,
-        toolsMethods: true
+        toolsMethods: true,
+        statusEndpointNoAuth: true // NEW
       }
     };
     
@@ -3857,21 +3994,30 @@ const apiObject = {
     events.forEach(eventName => {
       try {
         window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
-        console.log(`🔧 [API] Dispatched ${eventName} event with persistence info`);
+        console.log(`🔧 [API] Dispatched ${eventName} event with NETWORK/AUTH SEPARATION info`);
       } catch (e) {
         console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
       }
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready with ENHANCED TOKEN PERSISTENCE');
-      console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys for maximum persistence');
-      console.log('🔧 [API] ✅ Global accessToken variable initialized:', accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set');
+      console.log('🔧 [API] API synchronization ready with NETWORK/AUTH SEPARATION');
+      console.log('🔧 [API] ✅ 401/403 errors NEVER mark backend as offline');
+      console.log('🔧 [API] ✅ /api/status endpoint NEVER includes Authorization header');
+      console.log('🔧 [API] ✅ Backend reachability determined ONLY by:');
+      console.log('🔧 [API]   - Successful fetch (ANY HTTP status = backend reachable)');
+      console.log('🔧 [API]   - Network errors (Failed to fetch, timeout, DNS failure)');
+      console.log('🔧 [API]   - Server unreachable errors');
+      console.log('🔧 [API] ✅ Authentication failures are AUTH ISSUES, NOT NETWORK ISSUES');
+      console.log('🔧 [API] ✅ Page refreshes NEVER show "No network" if backend is running');
+      console.log('🔧 [API] ✅ Login failures NEVER mark backend offline');
+      console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys');
+      console.log('🔧 [API] ✅ Global accessToken variable:', accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set');
       console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation');
       console.log('🔧 [API] ✅ window.currentUser maintained:', window.currentUser ? 'Set' : 'Not set');
       console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry (3 attempts)');
       console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs');
-      console.log('🔧 [API] ✅ Authorization headers auto-injected into all API calls');
+      console.log('🔧 [API] ✅ Authorization headers auto-injected into all API calls (except /api/status)');
       console.log('🔧 [API] ✅ Enhanced 401 handling - only clear tokens when explicitly invalid');
       console.log('🔧 [API] ✅ window.currentUser preserved during token clearing');
       console.log('🔧 [API] ✅ isLoggedIn() requires successful /auth/me validation AND token persistence');
@@ -3895,15 +4041,16 @@ const apiObject = {
       console.log('🔧 [API] ✅ Token persistence verified:');
       console.log(`🔧 [API]   - moodchat_token: ${localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'}`);
       console.log(`🔧 [API]   - accessToken: ${localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'}`);
+      console.log('🔧 [API] 🌐 NETWORK/AUTH SEPARATION ACTIVE - This is FUTURE-PROOF');
     }, 1000);
   },
   
   // ============================================================================
-  // ENHANCED DIAGNOSTICS WITH PERSISTENCE CHECK
+  // ENHANCED DIAGNOSTICS WITH NETWORK/AUTH SEPARATION CHECK
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running enhanced diagnostics with token persistence check...');
+    console.log('🔧 [API] Running enhanced diagnostics with NETWORK/AUTH SEPARATION check...');
     
     const token = _getCurrentAccessToken();
     const user = _getCurrentUserFromStorage();
@@ -3946,7 +4093,8 @@ const apiObject = {
         online: window.AppNetwork.isOnline,
         backendReachable: window.AppNetwork.isBackendReachable,
         lastChecked: window.AppNetwork.lastChecked,
-        apiAvailable: this.isApiAvailable()
+        apiAvailable: this.isApiAvailable(),
+        networkAuthSeparated: true // NEW
       },
       config: {
         backendUrl: BACKEND_BASE_URL,
@@ -3955,6 +4103,7 @@ const apiObject = {
         currentProtocol: window.location.protocol
       },
       features: {
+        networkAuthSeparation: 'ACTIVE',
         tokenNormalization: 'ACTIVE',
         tokenPersistence: 'ENHANCED',
         dualKeyStorage: 'ACTIVE',
@@ -3974,7 +4123,8 @@ const apiObject = {
         loginFunction: 'ACTIVE',
         logoutFunction: 'ACTIVE',
         getCurrentUserFunction: 'ACTIVE',
-        exposedIframeMethods: 'ACTIVE'
+        exposedIframeMethods: 'ACTIVE',
+        statusEndpointNoAuth: 'ACTIVE' // NEW
       },
       exposedMethods: {
         getMessages: 'EXPOSED',
@@ -4014,9 +4164,14 @@ const apiObject = {
       options.headers = {};
     }
     
-    if (accessToken && !options.headers['Authorization'] && !options.headers['authorization']) {
+    // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
+    const isStatusEndpoint = endpoint === '/status' || endpoint.startsWith('/status?');
+    
+    if (accessToken && !options.headers['Authorization'] && !options.headers['authorization'] && !isStatusEndpoint) {
       options.headers['Authorization'] = `Bearer ${accessToken}`;
       console.log(`🔐 [AUTH] Authorization header injected into request for ${endpoint}`);
+    } else if (isStatusEndpoint) {
+      console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
     }
     
     const result = await globalApiFunction(endpoint, options);
@@ -4043,7 +4198,7 @@ const apiObject = {
 };
 
 // ============================================================================
-// CRITICAL FIX: GLOBAL API SETUP WITH ENHANCED TOKEN PERSISTENCE
+// CRITICAL FIX: GLOBAL API SETUP WITH NETWORK/AUTH SEPARATION
 // ============================================================================
 
 // Create the global API function with strict contract
@@ -4055,10 +4210,15 @@ const globalApi = function(endpoint, options = {}) {
     safeOptions.headers = {};
   }
   
-  // Inject Authorization header if accessToken exists
-  if (accessToken && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization']) {
+  // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
+  const isStatusEndpoint = endpoint === '/status' || endpoint.startsWith('/status?');
+  
+  // Inject Authorization header if accessToken exists AND NOT status endpoint
+  if (accessToken && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
     safeOptions.headers['Authorization'] = `Bearer ${accessToken}`;
     console.log(`🔐 [AUTH] Global accessToken injected into globalApi call for ${endpoint}`);
+  } else if (isStatusEndpoint) {
+    console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
   }
   
   return globalApiFunction(endpoint, safeOptions);
@@ -4085,11 +4245,14 @@ window.__accessToken = accessToken;
 // Expose function to update global token
 window.updateGlobalAccessToken = updateGlobalAccessToken;
 
-console.log('🔧 [API] Starting enhanced initialization with token persistence...');
+console.log('🔧 [API] Starting enhanced initialization with NETWORK/AUTH SEPARATION...');
 console.log(`🔧 [API] Initial global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
 console.log(`🔧 [API] Token in moodchat_token key: ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
 console.log(`🔧 [API] Token in accessToken key: ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
 console.log(`🔧 [API] Token persistence: ${localStorage.getItem('moodchat_token') && localStorage.getItem('accessToken') ? 'DOUBLE STORED' : 'PARTIAL'}`);
+console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
+console.log(`🔧 [API] /api/status without auth: YES`);
+console.log(`🔧 [API] 401/403 errors affect network: NO`);
 
 // Safe initialization with timeout
 setTimeout(() => {
@@ -4153,6 +4316,20 @@ if (typeof window.isServerError === 'undefined') {
   };
 }
 
+// NEW: Function to check if error is authentication error (not network)
+if (typeof window.isAuthError === 'undefined') {
+  window.isAuthError = function(error) {
+    if (!error) return false;
+    return error.isAuthError === true || 
+           error.status === 401 ||
+           error.status === 403 ||
+           (error.message && error.message.includes('Unauthorized')) ||
+           (error.message && error.message.includes('Forbidden')) ||
+           (error.message && error.message.includes('authentication')) ||
+           (error.message && error.message.includes('token'));
+  };
+}
+
 // SAFETY NET: Ensure all exposed methods have a default implementation
 const exposedMethods = [
   'getMessages', 'sendMessage', 'getMessageById',
@@ -4172,6 +4349,7 @@ exposedMethods.forEach(methodName => {
       console.warn(`⚠️ [API] Using fallback for ${methodName}`);
       console.log(`🔧 [API] Global accessToken in fallback: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+      console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
       return Promise.resolve({
         ok: false,
         success: false,
@@ -4196,6 +4374,7 @@ setTimeout(() => {
       console.warn(`⚠️ Using fallback API for ${method} ${safeEndpoint}`);
       console.log(`🔧 [API] Global accessToken in fallback API: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+      console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
       
       return Promise.resolve({
         ok: false,
@@ -4219,6 +4398,7 @@ setTimeout(() => {
         console.warn(`⚠️ Using fallback ${methodName}`);
         console.log(`🔧 [API] Global accessToken in fallback method: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
         console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+        console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
         return Promise.resolve({
           ok: false,
           success: false,
@@ -4244,6 +4424,7 @@ if (!window.api) {
     
     console.log(`🔧 [API] Global accessToken in emergency API: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
     console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+    console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
     
     return Promise.resolve({
       ok: false,
@@ -4268,6 +4449,7 @@ if (!window.api) {
       console.error(`⚠️ Emergency API for ${methodName}`);
       console.log(`🔧 [API] Global accessToken in emergency method: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+      console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
       return Promise.resolve({
         ok: false,
         success: false,
@@ -4282,7 +4464,7 @@ if (!window.api) {
   window.api = emergencyApi;
 }
 
-// Global API state with persistence info
+// Global API state with NETWORK/AUTH SEPARATION info
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
@@ -4293,16 +4475,27 @@ window.__TOKEN_PERSISTENCE = {
   accessToken: localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING',
   timestamp: new Date().toISOString()
 };
+window.__NETWORK_AUTH_SEPARATION = true; // NEW: Indicates network/auth separation is active
 
-console.log('🔧 [API] ENHANCED Backend API integration complete with TOKEN PERSISTENCE');
-console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys for maximum persistence');
+console.log('🔧 [API] ENHANCED Backend API integration complete with NETWORK/AUTH SEPARATION');
+console.log('🔧 [API] ✅ NETWORK STATE COMPLETELY SEPARATE FROM AUTH STATE');
+console.log('🔧 [API] ✅ 401/403 errors NEVER mark backend as offline');
+console.log('🔧 [API] ✅ /api/status endpoint NEVER includes Authorization header');
+console.log('🔧 [API] ✅ Backend reachability determined ONLY by:');
+console.log('🔧 [API]   - Successful fetch (ANY HTTP status = backend reachable)');
+console.log('🔧 [API]   - Network errors (Failed to fetch, timeout, DNS failure)');
+console.log('🔧 [API]   - Server unreachable errors');
+console.log('🔧 [API] ✅ Authentication failures are AUTH ISSUES, NOT NETWORK ISSUES');
+console.log('🔧 [API] ✅ Page refreshes NEVER show "No network" if backend is running');
+console.log('🔧 [API] ✅ Login failures NEVER mark backend offline');
+console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys');
 console.log('🔧 [API] ✅ Global accessToken variable: ACTIVE AND PERSISTENT');
 console.log('🔧 [API] ✅ Automatic token retrieval from localStorage: ACTIVE');
 console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation: ACTIVE');
 console.log('🔧 [API] ✅ window.currentUser maintained across sessions: ACTIVE');
 console.log('🔧 [API] ✅ Enhanced /auth/me validation with exponential backoff retry (3 attempts): ACTIVE');
 console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs: ACTIVE');
-console.log('🔧 [API] ✅ Authorization header injection in all API calls: ACTIVE');
+console.log('🔧 [API] ✅ Authorization header injection in all API calls (except /api/status): ACTIVE');
 console.log('🔧 [API] ✅ Enhanced 401 handling - only clear when explicitly invalid: ACTIVE');
 console.log('🔧 [API] ✅ window.currentUser preserved: ACTIVE');
 console.log('🔧 [API] ✅ isLoggedIn() requires /auth/me validation AND token persistence: ACTIVE');
@@ -4331,19 +4524,24 @@ console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem(
 console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'));
 console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
   ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
-console.log('🔧 [API] ⚡ Ready for production with NO "api[method] is not a function" errors');
+console.log('🔧 [API] 🌐 NETWORK/AUTH SEPARATION: ACTIVE (FUTURE-PROOF)');
 console.log('🔧 [API] 🔐 ENHANCED TESTING INSTRUCTIONS:');
-console.log('🔧 [API] 1. Login using api.login(email, password)');
-console.log('🔧 [API] 2. Confirm token is stored in localStorage as BOTH moodchat_token AND accessToken');
-console.log('🔧 [API] 3. Verify global accessToken variable is set and persists after page refresh');
-console.log('🔧 [API] 4. Test /auth/me validation with exponential backoff retry logic');
-console.log('🔧 [API] 5. Verify window.currentUser persists across page refreshes');
-console.log('🔧 [API] 6. All iframe pages can now call their respective API methods');
-console.log('🔧 [API] 7. No more "api[method] is not a function" errors');
-console.log('🔧 [API] 8. All protected routes work with authentication');
-console.log('🔧 [API] 9. 401 errors only clear tokens when explicitly invalid');
-console.log('🔧 [API] 10. Use api.getCurrentUser() to get persistent current user');
-console.log('🔧 [API] 11. Use api.logout() to clear session while preserving window.currentUser');
-console.log('🔧 [API] 12. All API calls automatically include Authorization: Bearer <persistent-token> header');
-console.log('🔧 [API] 13. Token synchronization works across browser tabs');
-console.log('🔧 [API] 14. Network recovery with exponential backoff for /auth/me validation');
+console.log('🔧 [API] 1. Test /api/status endpoint - should work WITHOUT auth');
+console.log('🔧 [API] 2. Get 401 error - backend should STILL show as reachable');
+console.log('🔧 [API] 3. Login using api.login(email, password)');
+console.log('🔧 [API] 4. Confirm token is stored in localStorage as BOTH moodchat_token AND accessToken');
+console.log('🔧 [API] 5. Verify global accessToken variable is set and persists after page refresh');
+console.log('🔧 [API] 6. Test /auth/me validation with exponential backoff retry logic');
+console.log('🔧 [API] 7. Verify window.currentUser persists across page refreshes');
+console.log('🔧 [API] 8. All iframe pages can now call their respective API methods');
+console.log('🔧 [API] 9. No more "api[method] is not a function" errors');
+console.log('🔧 [API] 10. All protected routes work with authentication');
+console.log('🔧 [API] 11. 401 errors only clear tokens when explicitly invalid');
+console.log('🔧 [API] 12. Use api.getCurrentUser() to get persistent current user');
+console.log('🔧 [API] 13. Use api.logout() to clear session while preserving window.currentUser');
+console.log('🔧 [API] 14. All API calls automatically include Authorization: Bearer <persistent-token> header');
+console.log('🔧 [API] 15. Token synchronization works across browser tabs');
+console.log('🔧 [API] 16. Network recovery with exponential backoff for /auth/me validation');
+console.log('🔧 [API] 17. 401/403 errors NEVER mark backend as offline (FIXED)');
+console.log('🔧 [API] 18. /api/status endpoint NEVER includes Authorization header (FIXED)');
+console.log('🔧 [API] ⚡ Ready for production with NETWORK/AUTH SEPARATION - FUTURE-PROOF');

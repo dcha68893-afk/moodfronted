@@ -8,6 +8,7 @@
 // FIXED: Global collision prevention - removed all isOnline declarations
 // ENHANCED: Reduced console noise for periodic network polling - only log on status changes
 // UPDATED: Auth restoration logic - only mark user as authenticated if /auth/me succeeds
+// UPDATED: App initialization does not depend on authentication state
 
 (function () {
   // ============================================================================
@@ -1472,31 +1473,26 @@
     
     // Load default page (non-blocking) - ONLY if authenticated AND validated
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
-        loadPage(APP_CONFIG.defaultPage);
-      } else {
-        // Show offline or login page
-        showOfflinePlaceholderUI();
-      }
+      // CHANGED: Always load default page regardless of authentication state
+      // This prevents the app from freezing for logged-out users
+      loadPage(APP_CONFIG.defaultPage);
     }, 150);
     
-    // Set default tab (non-blocking) - ONLY if authenticated AND validated
+    // Set default tab (non-blocking) - UPDATED: Always try to set default tab
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
-        try {
-          const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
-          if (groupsTab) {
-            showTab('groups');
-          } else {
-            console.log('Groups tab not found, loading as external...');
-            loadExternalTab('groups', EXTERNAL_TABS.groups);
-          }
-        } catch (error) {
-          console.log('Error setting default tab:', error);
-          // Fallback to chats tab
-          if (TAB_CONFIG.chats.container && document.querySelector(TAB_CONFIG.chats.container)) {
-            showTab('chats');
-          }
+      try {
+        const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
+        if (groupsTab) {
+          showTab('groups');
+        } else {
+          console.log('Groups tab not found, loading as external...');
+          loadExternalTab('groups', EXTERNAL_TABS.groups);
+        }
+      } catch (error) {
+        console.log('Error setting default tab:', error);
+        // Fallback to chats tab
+        if (TAB_CONFIG.chats.container && document.querySelector(TAB_CONFIG.chats.container)) {
+          showTab('chats');
         }
       }
     }, 200);
@@ -1505,15 +1501,12 @@
     authStateRestored = true;
     broadcastAuthReady();
     
-    // Load cached data instantly - ONLY if authenticated AND validated
+    // Load cached data instantly - UPDATED: Always try to load cached data
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
-        loadCachedDataInstantly();
-      }
+      loadCachedDataInstantly();
     }, 300);
     
-    // Start background services after delay - ONLY if online AND backend reachable AND validated
-    // This will be triggered when network status becomes "online"
+    // Start background services after delay - UPDATED: Check if user is authenticated AND validated
     window.addEventListener('moodchat-network-status', (event) => {
       if (event.detail.status === 'online' && 
           window.currentUser && 
@@ -4869,7 +4862,7 @@
     // Expose API coordination
     window.MOODCHAT_GLOBAL.api = API_COORDINATION;
     
-    // Expose global AppState for UI components
+    // Expose global AppState for UI components - UPDATED: apiReady depends ONLY on api.js and backend reachability
     window.AppState = {
       network: {
         status: API_COORDINATION.getNetworkStatus(),
@@ -4882,11 +4875,13 @@
         currentUser: window.currentUser,
         isAuthenticated: !!window.currentUser,
         isReady: authStateRestored,
-        validated: window.currentUser?.validated || false // NEW: Add validation status
+        validated: window.currentUser?.validated || false
       },
       api: {
-        isReady: API_COORDINATION.apiReady,
-        isAvailable: API_COORDINATION.isApiAvailable()
+        // CHANGED: isReady depends ONLY on api.js loading and backend reachability
+        isReady: API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable !== false,
+        isAvailable: API_COORDINATION.isApiAvailable(),
+        backendReachable: window.MoodChatConfig.backendReachable
       }
     };
   }
@@ -6268,217 +6263,95 @@
     
     const styles = `
       /* Critical styles for immediate UI */
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
+      .hidden { display: none !important; }
+      .translate-x-0 { transform: translateX(0); }
+      .translate-x-full { transform: translateX(100%); }
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
       
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-        min-height: 100vh;
-        overflow-x: hidden;
-      }
-      
-      #content-area {
-        flex: 1;
-        min-height: 100vh;
-        background: #f9fafb;
-        color: #111827;
-        transition: background-color 0.3s, color 0.3s;
-      }
-      
-      .dark #content-area {
-        background: #111827;
-        color: #f9fafb;
-      }
-      
-      .tab-loading-indicator {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.7);
-        display: none;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        color: white;
-        font-size: 16px;
-        backdrop-filter: blur(4px);
-      }
-      
+      /* Loading spinner */
       .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 4px solid rgba(255, 255, 255, 0.3);
+        border: 3px solid rgba(255, 255, 255, 0.3);
         border-radius: 50%;
-        border-top-color: #8b5cf6;
-        animation: spin 1s ease-in-out infinite;
-        margin-bottom: 15px;
-      }
-      
-      .loading-text {
-        margin-top: 10px;
-        font-size: 14px;
-        opacity: 0.9;
+        border-top: 3px solid #fff;
+        width: 24px;
+        height: 24px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 10px;
       }
       
       @keyframes spin {
-        to { transform: rotate(360deg); }
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
       }
       
+      /* Slide animations */
       @keyframes slideIn {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
       }
       
       @keyframes slideOut {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
       }
       
       @keyframes slideInUp {
-        from {
-          transform: translateY(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateY(0);
-          opacity: 1;
-        }
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
       }
       
       @keyframes slideOutDown {
-        from {
-          transform: translateY(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateY(100%);
-          opacity: 0;
-        }
+        from { transform: translateY(0); opacity: 1; }
+        to { transform: translateY(20px); opacity: 0; }
       }
       
-      .moodchat-toast {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        border-radius: 8px;
-        z-index: 10000;
-        max-width: 300px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        animation: toastSlideIn 0.3s ease-out;
-        display: flex;
-        align-items: center;
-        gap: 10px;
+      /* Theme support */
+      .theme-dark { background-color: #111827; color: #f9fafb; }
+      .theme-light { background-color: #f9fafb; color: #111827; }
+      
+      /* Font size classes */
+      .font-small { font-size: 0.875rem; }
+      .font-medium { font-size: 1rem; }
+      .font-large { font-size: 1.125rem; }
+      .font-xlarge { font-size: 1.25rem; }
+      
+      /* Accessibility classes */
+      .high-contrast {
+        --text-color: #000;
+        --bg-color: #fff;
+        filter: contrast(1.5);
       }
       
-      .moodchat-toast-success {
-        background: #10b981;
-        color: white;
+      .reduce-motion * {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
       }
       
-      .moodchat-toast-error {
-        background: #ef4444;
-        color: white;
-      }
-      
-      .moodchat-toast-warning {
-        background: #f59e0b;
-        color: white;
-      }
-      
-      .moodchat-toast-info {
-        background: #3b82f6;
-        color: white;
-      }
-      
-      @keyframes toastSlideIn {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
-      }
-      
-      @keyframes toastSlideOut {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-      }
-      
-      /* Network status indicator */
-      .network-status-checking {
-        background: #f59e0b;
-        color: white;
-      }
-      
-      .network-status-online {
-        background: #10b981;
-        color: white;
-      }
-      
-      .network-status-offline {
-        background: #ef4444;
-        color: white;
+      .large-text {
+        font-size: 1.25rem !important;
+        line-height: 1.8 !important;
       }
     `;
     
-    const styleSheet = document.createElement('style');
-    styleSheet.id = 'app-styles';
-    styleSheet.textContent = styles;
-    document.head.appendChild(styleSheet);
+    const styleEl = document.createElement('style');
+    styleEl.id = 'app-styles';
+    styleEl.textContent = styles;
+    document.head.appendChild(styleEl);
   }
 
   // ============================================================================
-  // START THE APPLICATION
+  // STARTUP EXECUTION
   // ============================================================================
 
-  // Initialize the app when DOM is ready
+  // Start initialization when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      console.log('DOMContentLoaded - Starting app initialization');
-      setTimeout(() => {
-        initializeApp();
-      }, 50);
-    });
+    document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
-    console.log('DOM already loaded - Starting app initialization');
-    setTimeout(() => {
-      initializeApp();
-    }, 50);
+    initializeApp();
   }
 
-  // Start auto-login check if on login page
-  if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
-    setTimeout(() => {
-      window.checkAutoLogin();
-    }, 500);
-  }
+  // Expose initialization function globally
+  window.initializeMoodChatApp = initializeApp;
 
-  console.log('app.core.js loaded and ready');
 })();
