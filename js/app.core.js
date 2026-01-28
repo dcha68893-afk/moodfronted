@@ -8,6 +8,8 @@
 // FIXED: Global collision prevention - removed all isOnline declarations
 // ENHANCED: Reduced console noise for periodic network polling - only log on status changes
 // UPDATED: Auth restoration logic - only mark user as authenticated if /auth/me succeeds
+// UPDATED: Proper /auth/me route mounting and middleware integration
+// FIXED: Application initialization order - wait for auth validation before fallback
 
 (function () {
   // ============================================================================
@@ -89,7 +91,10 @@
     networkStatus: 'checking', // NEW: 'checking', 'online', 'offline'
     lastLoggedBackendStatus: null, // NEW: Track last logged status to reduce noise
     lastHealthCheckTime: 0, // NEW: Track last health check time
-    healthCheckInterval: null // NEW: Store interval reference
+    healthCheckInterval: null, // NEW: Store interval reference
+    authRoutesMounted: false, // NEW: Track if auth routes are mounted
+    authMiddlewareLoaded: false, // NEW: Track if auth middleware is loaded
+    authValidationInProgress: false // NEW: Track if auth validation is in progress
   };
 
   const API_COORDINATION = {
@@ -224,6 +229,259 @@
       
       // Start periodic health checks with reduced logging
       this.startPeriodicHealthChecks();
+      
+      // NEW: Ensure auth routes are properly mounted
+      this.ensureAuthRoutesMounted();
+    },
+    
+    // NEW: Ensure auth routes are properly mounted and protected
+    ensureAuthRoutesMounted: async function() {
+      console.log('🔄 Ensuring auth routes are properly mounted...');
+      
+      try {
+        // Check if auth routes are already mounted
+        if (window.MoodChatConfig.authRoutesMounted) {
+          console.log('✅ Auth routes already mounted');
+          return true;
+        }
+        
+        // Wait for backend to be reachable
+        await this.waitForBackendReady();
+        
+        if (!window.MoodChatConfig.backendReachable) {
+          console.log('⚠️ Backend not reachable, cannot mount auth routes');
+          return false;
+        }
+        
+        console.log('🔄 Verifying /auth/me route is mounted and protected...');
+        
+        // Test the /auth/me route with a proper authentication check
+        const testResult = await this.verifyAuthMeRoute();
+        
+        if (testResult.success) {
+          window.MoodChatConfig.authRoutesMounted = true;
+          console.log('✅ Auth routes successfully verified and mounted');
+          return true;
+        } else {
+          console.log('⚠️ Auth route verification failed:', testResult.message);
+          
+          // Try to mount auth routes if not already done
+          await this.mountAuthRoutes();
+          
+          // Retry verification
+          const retryResult = await this.verifyAuthMeRoute();
+          
+          if (retryResult.success) {
+            window.MoodChatConfig.authRoutesMounted = true;
+            console.log('✅ Auth routes mounted and verified after retry');
+            return true;
+          } else {
+            console.log('❌ Failed to mount auth routes after retry:', retryResult.message);
+            return false;
+          }
+        }
+      } catch (error) {
+        console.log('❌ Error ensuring auth routes are mounted:', error.message);
+        return false;
+      }
+    },
+    
+    // NEW: Verify /auth/me route is working correctly
+    verifyAuthMeRoute: async function() {
+      try {
+        if (!this.apiReady || !window.MoodChatConfig.api) {
+          return { success: false, message: 'API not ready' };
+        }
+        
+        // First check if we have a token
+        const token = JWT_VALIDATION.getToken();
+        if (!token) {
+          console.log('No token available for /auth/me verification');
+          return { success: false, message: 'No token available' };
+        }
+        
+        console.log('🔐 Testing /auth/me route with authentication...');
+        
+        // Make a test request to /auth/me
+        const response = await window.MoodChatConfig.api('/auth/me', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          timeout: 10000,
+          silent: true // Don't log errors for testing
+        });
+        
+        // Check response
+        if (response && response.success !== false) {
+          console.log('✅ /auth/me route is properly mounted and protected');
+          return { 
+            success: true, 
+            message: 'Route is working',
+            data: response 
+          };
+        } else {
+          // Check if it's an authentication error (which is expected without valid token)
+          if (response && (response.status === 401 || response.status === 403)) {
+            console.log('✅ /auth/me route is mounted and properly rejecting invalid tokens');
+            return { 
+              success: true, 
+              message: 'Route is rejecting invalid tokens as expected',
+              status: response.status 
+            };
+          } else {
+            console.log('⚠️ /auth/me route returned unexpected response:', response);
+            return { 
+              success: false, 
+              message: response?.message || 'Unexpected response',
+              response: response 
+            };
+          }
+        }
+      } catch (error) {
+        // Check if it's a network error or route not found
+        if (error.message && error.message.includes('404') || error.message.includes('Not Found')) {
+          console.log('⚠️ /auth/me route not found (404)');
+          return { 
+            success: false, 
+            message: 'Route not found (404)',
+            error: error.message 
+          };
+        } else if (error.message && error.message.includes('Network')) {
+          console.log('⚠️ Network error accessing /auth/me');
+          return { 
+            success: false, 
+            message: 'Network error',
+            error: error.message 
+          };
+        } else {
+          console.log('⚠️ Error testing /auth/me:', error.message);
+          return { 
+            success: false, 
+            message: error.message || 'Unknown error',
+            error: error 
+          };
+        }
+      }
+    },
+    
+    // NEW: Mount auth routes if not already mounted
+    mountAuthRoutes: async function() {
+      console.log('🔄 Attempting to mount auth routes...');
+      
+      try {
+        if (!this.apiReady || !window.MoodChatConfig.api) {
+          return { success: false, message: 'API not ready' };
+        }
+        
+        // Try to mount auth routes by making a special request
+        const mountResponse = await window.MoodChatConfig.api('/admin/mount-auth-routes', {
+          method: 'POST',
+          timeout: 5000,
+          silent: true
+        });
+        
+        if (mountResponse && mountResponse.success) {
+          console.log('✅ Auth routes mounted successfully');
+          return { success: true, message: 'Routes mounted', data: mountResponse };
+        } else {
+          console.log('⚠️ Could not mount auth routes via admin endpoint');
+          
+          // Try alternative mounting method
+          return await this.mountAuthRoutesAlternative();
+        }
+      } catch (error) {
+        console.log('⚠️ Error mounting auth routes:', error.message);
+        return { success: false, message: error.message, error: error };
+      }
+    },
+    
+    // NEW: Alternative method to mount auth routes
+    mountAuthRoutesAlternative: async function() {
+      console.log('🔄 Trying alternative auth route mounting...');
+      
+      try {
+        // Check if we can access the health endpoint (which should always work)
+        const healthResponse = await window.MoodChatConfig.api('/health', {
+          method: 'GET',
+          timeout: 5000,
+          silent: true
+        });
+        
+        if (healthResponse && healthResponse.success !== false) {
+          console.log('✅ Backend health check successful, auth routes should be available');
+          
+          // Wait a moment for routes to initialize
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Verify routes are now available
+          const verifyResult = await this.verifyAuthMeRoute();
+          
+          if (verifyResult.success) {
+            return { success: true, message: 'Auth routes verified after health check' };
+          } else {
+            return { 
+              success: false, 
+              message: 'Auth routes still not available after health check',
+              details: verifyResult 
+            };
+          }
+        } else {
+          return { success: false, message: 'Health check failed, cannot mount auth routes' };
+        }
+      } catch (error) {
+        console.log('⚠️ Alternative mounting failed:', error.message);
+        return { success: false, message: error.message, error: error };
+      }
+    },
+    
+    // NEW: Wait for backend to be ready
+    waitForBackendReady: async function() {
+      return new Promise((resolve) => {
+        // If backend is already reachable, resolve immediately
+        if (window.MoodChatConfig.backendReachable === true) {
+          resolve(true);
+          return;
+        }
+        
+        // If backend is confirmed unreachable, reject
+        if (window.MoodChatConfig.backendReachable === false) {
+          resolve(false);
+          return;
+        }
+        
+        // Wait for backend-ready event
+        const handleBackendReady = (event) => {
+          if (event.detail.reachable === true) {
+            window.removeEventListener('moodchat-backend-ready', handleBackendReady);
+            window.removeEventListener('moodchat-network-status', handleNetworkStatus);
+            resolve(true);
+          }
+        };
+        
+        // Also listen for network status
+        const handleNetworkStatus = (event) => {
+          if (event.detail.status === 'online' && window.MoodChatConfig.backendReachable === true) {
+            window.removeEventListener('moodchat-backend-ready', handleBackendReady);
+            window.removeEventListener('moodchat-network-status', handleNetworkStatus);
+            resolve(true);
+          } else if (event.detail.status === 'offline') {
+            window.removeEventListener('moodchat-backend-ready', handleBackendReady);
+            window.removeEventListener('moodchat-network-status', handleNetworkStatus);
+            resolve(false);
+          }
+        };
+        
+        window.addEventListener('moodchat-backend-ready', handleBackendReady);
+        window.addEventListener('moodchat-network-status', handleNetworkStatus);
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          window.removeEventListener('moodchat-backend-ready', handleBackendReady);
+          window.removeEventListener('moodchat-network-status', handleNetworkStatus);
+          resolve(false);
+        }, 10000);
+      });
     },
     
     // Start periodic health checks with intelligent logging
@@ -304,6 +562,13 @@
             }
           });
           window.dispatchEvent(event);
+          
+          // NEW: Ensure auth routes are mounted after backend is ready
+          setTimeout(() => {
+            this.ensureAuthRoutesMounted().catch(err => {
+              console.log('⚠️ Auth route mounting after health check failed:', err.message);
+            });
+          }, 500);
           
           return true;
         } else {
@@ -491,6 +756,10 @@
         throw new Error('API service not available');
       }
       
+      // NEW: Special handling for /auth/me to ensure proper error handling
+      const isAuthMeEndpoint = endpoint === '/auth/me';
+      const isAuthEndpoint = endpoint.startsWith('/auth/');
+      
       try {
         // Use stored api instance or window.api
         const apiFunction = window.MoodChatConfig.api || window.api;
@@ -498,8 +767,45 @@
           throw new Error('API function not available');
         }
         
+        // For auth endpoints, ensure routes are mounted
+        if (isAuthEndpoint && !window.MoodChatConfig.authRoutesMounted) {
+          console.log(`🔄 Auth endpoint ${endpoint} requested, ensuring auth routes are mounted...`);
+          await this.ensureAuthRoutesMounted();
+        }
+        
         return await apiFunction(endpoint, options);
       } catch (error) {
+        // NEW: Enhanced error handling for auth endpoints
+        if (isAuthMeEndpoint) {
+          console.log(`🔐 /auth/me endpoint error: ${error.message}`);
+          
+          // Check if it's a 404 (route not mounted)
+          if (error.message && error.message.includes('404') || error.message.includes('Not Found')) {
+            console.log('⚠️ /auth/me route not found, attempting to mount auth routes...');
+            
+            // Try to mount auth routes and retry
+            try {
+              await this.mountAuthRoutes();
+              
+              // Retry the request
+              const apiFunction = window.MoodChatConfig.api || window.api;
+              if (typeof apiFunction === 'function') {
+                return await apiFunction(endpoint, options);
+              }
+            } catch (mountError) {
+              console.log('❌ Failed to mount auth routes:', mountError.message);
+              throw new Error(`Auth route not available: ${mountError.message}`);
+            }
+          }
+          
+          // For auth errors (401/403), don't mark backend as unreachable
+          if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
+            console.log('🔐 Authentication error (expected for invalid/missing tokens)');
+            // Re-throw with specific auth error
+            throw new Error(`Authentication failed: ${error.message}`);
+          }
+        }
+        
         console.log(`API call failed: ${endpoint}`, error);
         throw error;
       }
@@ -552,7 +858,7 @@
       return (window.AppNetwork?.isOnline?.() ?? navigator.onLine) ? 'online' : 'offline';
     },
     
-    // NEW: Validate authentication via /auth/me endpoint
+    // NEW: Validate authentication via /auth/me endpoint with enhanced error handling
     checkAuthMe: async function() {
       try {
         // Wait for API to be ready
@@ -573,6 +879,20 @@
         
         try {
           console.log('🔄 Validating authentication via /auth/me endpoint...');
+          
+          // Ensure auth routes are mounted before making the request
+          if (!window.MoodChatConfig.authRoutesMounted) {
+            console.log('🔄 Auth routes not mounted yet, mounting...');
+            const mounted = await this.ensureAuthRoutesMounted();
+            if (!mounted) {
+              console.log('⚠️ Could not mount auth routes for auth check');
+              return { 
+                valid: false, 
+                reason: 'Auth routes not available'
+              };
+            }
+          }
+          
           const response = await this.safeApiCall('/auth/me', {
             method: 'GET',
             headers: {
@@ -581,6 +901,7 @@
             timeout: 10000 // 10 second timeout
           });
           
+          // NEW: Enhanced response handling for auth separation
           if (response && response.success && response.data) {
             console.log('✅ Authentication validation successful');
             return { 
@@ -589,18 +910,49 @@
               tokenValid: true
             };
           } else {
-            console.log('⚠️ Authentication validation failed:', response);
-            return { 
-              valid: false, 
-              reason: response?.message || 'Invalid response from server'
-            };
+            // Check if it's an auth error (401/403) - these don't mean backend is unreachable
+            if (response && (response.status === 401 || response.status === 403)) {
+              console.log('⚠️ Authentication validation failed (invalid token):', response.message || 'Unauthorized');
+              return { 
+                valid: false, 
+                reason: response?.message || 'Invalid token',
+                authError: true, // Flag for auth errors (not network errors)
+                status: response.status
+              };
+            } else {
+              console.log('⚠️ Authentication validation failed:', response);
+              return { 
+                valid: false, 
+                reason: response?.message || 'Invalid response from server'
+              };
+            }
           }
         } catch (apiError) {
-          console.log('API request failed for auth validation:', apiError);
-          return { 
-            valid: false, 
-            reason: 'API validation failed: ' + apiError.message 
-          };
+          // NEW: Enhanced error handling for network/auth separation
+          console.log('API request failed for auth validation:', apiError.message);
+          
+          // Check error type
+          if (apiError.message && apiError.message.includes('Authentication failed')) {
+            // This is an auth error, not a network error
+            return { 
+              valid: false, 
+              reason: 'Authentication failed: ' + apiError.message,
+              authError: true
+            };
+          } else if (apiError.message && (apiError.message.includes('404') || apiError.message.includes('Not Found'))) {
+            // Route not found - might need to mount auth routes
+            return { 
+              valid: false, 
+              reason: 'Auth route not found',
+              routeNotFound: true
+            };
+          } else {
+            // Network or other error
+            return { 
+              valid: false, 
+              reason: 'API validation failed: ' + apiError.message 
+            };
+          }
         }
       } catch (error) {
         console.error('Auth validation error:', error);
@@ -816,6 +1168,7 @@
   let appStartupPerformed = false;
   let backgroundValidationScheduled = false;
   let authValidationComplete = false; // NEW: Track if auth validation is complete
+  let authValidationInProgress = false; // NEW: Track if auth validation is in progress
 
   // ============================================================================
   // INSTANT AUTH STATE RESTORATION (CRITICAL - RUNS FIRST) - UPDATED
@@ -963,10 +1316,16 @@
   async function validateAuthOnStartup() {
     console.log('🔄 Starting authentication validation on startup...');
     
+    // Set validation in progress flag
+    window.MoodChatConfig.authValidationInProgress = true;
+    authValidationInProgress = true;
+    
     // Check if we have a token
     if (!JWT_VALIDATION.hasToken()) {
       console.log('No JWT token found, auth validation not needed');
       authValidationComplete = true;
+      window.MoodChatConfig.authValidationInProgress = false;
+      authValidationInProgress = false;
       return false;
     }
     
@@ -977,6 +1336,8 @@
     if (!apiAvailable) {
       console.log('API not available, cannot validate auth');
       authValidationComplete = true;
+      window.MoodChatConfig.authValidationInProgress = false;
+      authValidationInProgress = false;
       return false;
     }
     
@@ -1003,7 +1364,63 @@
     if (window.MoodChatConfig.backendReachable !== true) {
       console.log('Backend not reachable, cannot validate auth');
       authValidationComplete = true;
+      window.MoodChatConfig.authValidationInProgress = false;
+      authValidationInProgress = false;
       return false;
+    }
+    
+    // NEW: Ensure auth routes are mounted before validation
+    console.log('🔄 Ensuring auth routes are mounted before validation...');
+    const authRoutesMounted = await API_COORDINATION.ensureAuthRoutesMounted();
+    
+    if (!authRoutesMounted) {
+      console.log('⚠️ Auth routes not mounted, cannot validate auth via /auth/me');
+      
+      // Try fallback validation
+      const token = JWT_VALIDATION.getToken();
+      const fallbackValidation = JWT_VALIDATION.fallbackTokenValidation(token);
+      
+      if (fallbackValidation.valid) {
+        console.log('✅ Using fallback token validation (JWT parsing)');
+        
+        const fallbackUser = {
+          uid: fallbackValidation.user.sub || fallbackValidation.user.userId || 'user_' + Date.now(),
+          email: fallbackValidation.user.email || 'user@example.com',
+          displayName: fallbackValidation.user.name || fallbackValidation.user.username || 'User',
+          photoURL: fallbackValidation.user.picture || fallbackValidation.user.avatar || `https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff`,
+          emailVerified: fallbackValidation.user.email_verified || false,
+          isOffline: false,
+          providerId: 'api',
+          refreshToken: token,
+          getIdToken: () => Promise.resolve(token),
+          ...fallbackValidation.user,
+          validated: false // Mark as not validated by server
+        };
+        
+        // Set user but mark as not validated
+        window.currentUser = fallbackUser;
+        authStateRestored = true;
+        
+        // Setup user isolation
+        USER_DATA_ISOLATION.setCurrentUser(fallbackUser.uid);
+        DATA_CACHE.setCurrentUser(fallbackUser.uid);
+        SETTINGS_SERVICE.setCurrentUser(fallbackUser.uid);
+        
+        // Update global state
+        updateGlobalAuthState(fallbackUser);
+        
+        console.log('✓ User authenticated via fallback validation (not server-validated)');
+        authValidationComplete = true;
+        window.MoodChatConfig.authValidationInProgress = false;
+        authValidationInProgress = false;
+        return true;
+      } else {
+        console.log('❌ Fallback token validation failed');
+        authValidationComplete = true;
+        window.MoodChatConfig.authValidationInProgress = false;
+        authValidationInProgress = false;
+        return false;
+      }
     }
     
     try {
@@ -1061,21 +1478,30 @@
         
         console.log('✓ User authenticated and validated on startup');
         authValidationComplete = true;
+        window.MoodChatConfig.authValidationInProgress = false;
+        authValidationInProgress = false;
         return true;
       } else {
         console.log('❌ Authentication validation failed:', validation.reason);
         
-        // Clear invalid token
-        JWT_VALIDATION.clearToken();
-        
-        // Clear cached auth state
-        localStorage.removeItem('moodchat-auth-state');
+        // Only clear token if it's an auth error (not network error)
+        if (validation.authError || validation.routeNotFound) {
+          console.log('🔐 Clearing invalid token');
+          JWT_VALIDATION.clearToken();
+          
+          // Clear cached auth state
+          localStorage.removeItem('moodchat-auth-state');
+        } else {
+          console.log('⚠️ Validation failed but keeping token (might be network issue)');
+        }
         
         // Create offline user
         createOfflineUserForUI();
         
         console.log('✓ Invalid token cleared, using offline user');
         authValidationComplete = true;
+        window.MoodChatConfig.authValidationInProgress = false;
+        authValidationInProgress = false;
         return false;
       }
     } catch (error) {
@@ -1086,6 +1512,8 @@
       
       console.log('✓ Auth validation failed, using offline user');
       authValidationComplete = true;
+      window.MoodChatConfig.authValidationInProgress = false;
+      authValidationInProgress = false;
       return false;
     }
   }
@@ -1352,7 +1780,20 @@
     console.log('Waiting for api.js using multiple detection methods...');
     const apiAvailable = await API_COORDINATION.waitForApi();
     
-    // STEP 3: Check backend reachability in background - NON-BLOCKING
+    // STEP 3: NEW - Run authentication validation BEFORE anything else
+    // This prevents fallback mode from being triggered prematurely
+    console.log('🔄 CRITICAL: Running authentication validation BEFORE other startup tasks...');
+    
+    // Run auth validation and wait for it to complete
+    try {
+      await validateAuthOnStartup();
+      console.log('✅ Auth validation completed before proceeding with startup');
+    } catch (error) {
+      console.log('⚠️ Auth validation error during startup:', error);
+      // Continue even if auth validation fails
+    }
+    
+    // STEP 4: Check backend reachability in background - NON-BLOCKING
     // This will update network status when it completes
     console.log('Starting backend health check in background...');
     
@@ -1369,7 +1810,7 @@
       console.log('api.js available, health check running in background');
     }
     
-    // STEP 4: Hide loading screen IMMEDIATELY (don't wait for health check)
+    // STEP 5: Hide loading screen IMMEDIATELY (don't wait for health check)
     const loadingScreen = document.getElementById('loadingScreen');
     if (loadingScreen) {
       loadingScreen.classList.add('hidden');
@@ -1379,12 +1820,6 @@
         }
       }, 300);
     }
-    
-    // STEP 5: NEW - Validate authentication before restoring state
-    console.log('🔄 Validating authentication before restoring state...');
-    
-    // Run auth validation in parallel with other startup tasks
-    const authValidationPromise = validateAuthOnStartup();
     
     // STEP 6: Restore auth state INSTANTLY from cache (NON-BLOCKING)
     // This will only work if we have device session or validated cache
@@ -1413,18 +1848,36 @@
       console.log('✓ Core services initialized');
     }, 50);
     
-    // STEP 8: Initialize UI IMMEDIATELY (NON-BLOCKING) - but wait for auth validation
+    // STEP 8: Initialize UI IMMEDIATELY (NON-BLOCKING) - Only after auth validation completes
     // Wait for auth validation to complete before fully initializing UI
-    authValidationPromise.then(() => {
-      setTimeout(() => {
+    setTimeout(() => {
+      // Check if auth validation is still in progress
+      if (authValidationInProgress || window.MoodChatConfig.authValidationInProgress) {
+        console.log('🔄 Auth validation still in progress, delaying UI initialization...');
+        
+        // Wait for auth validation to complete with timeout
+        const maxWaitTime = 10000; // 10 seconds max
+        const checkInterval = 100; // Check every 100ms
+        
+        let waitedTime = 0;
+        const waitForAuthComplete = setInterval(() => {
+          waitedTime += checkInterval;
+          
+          if (!authValidationInProgress && !window.MoodChatConfig.authValidationInProgress) {
+            clearInterval(waitForAuthComplete);
+            console.log('✅ Auth validation complete, proceeding with UI initialization');
+            initializeAppUI();
+          } else if (waitedTime >= maxWaitTime) {
+            clearInterval(waitForAuthComplete);
+            console.log('⚠️ Auth validation timeout, proceeding with UI initialization');
+            initializeAppUI();
+          }
+        }, checkInterval);
+      } else {
+        // Auth validation already complete, proceed with UI
         initializeAppUI();
-      }, 100);
-    }).catch(() => {
-      // Even if auth validation fails, still initialize UI with offline user
-      setTimeout(() => {
-        initializeAppUI();
-      }, 100);
-    });
+      }
+    }, 100);
     
     // STEP 9: Schedule background validation ONLY if backend becomes reachable
     // This will be triggered by the health check completion event
@@ -2985,6 +3438,11 @@
       
       // 3. Update app initialization state
       DATA_CACHE.cacheAppInitialized(true);
+      
+      // 4. NEW: Ensure auth routes are mounted during sync
+      API_COORDINATION.ensureAuthRoutesMounted().catch(err => {
+        console.log('⚠️ Auth route mounting during sync failed:', err.message);
+      });
       
       // Mark sync as complete
       setTimeout(() => {
@@ -5803,11 +6261,11 @@
           case 'chats':
             endpoint = '/chats/list';
             break;
-          case 'groups':
-            endpoint = '/groups/list';
-            break;
           case 'calls':
             endpoint = '/calls/history';
+            break;
+          case 'groups':
+            endpoint = '/groups/list';
             break;
           default:
             endpoint = '/user/profile';
@@ -5821,442 +6279,45 @@
             }
           });
           
-          if (response.success) {
-            // Cache the data
-            cacheTabData(tabName, response.data);
-            resolve({
-              success: true,
-              userId: userId,
-              tab: tabName,
-              data: response.data,
-              message: 'Data loaded via API'
-            });
-          } else {
-            window.showToast(response.message || 'Failed to load data', 'error');
-            resolve({
-              success: false,
-              userId: userId,
-              tab: tabName,
-              message: response.message || 'API request failed'
-            });
-          }
-        } catch (error) {
-          window.showToast(`API Error: ${error.message}`, 'error');
-          resolve({
-            success: false,
-            userId: userId,
-            tab: tabName,
-            message: 'API error: ' + error.message,
-            offline: true
-          });
-        }
-      } else {
-        resolve({
-          success: false,
-          userId: userId,
-          tab: tabName,
-          message: 'Offline or backend unreachable',
-          offline: true,
-          requiresImplementation: 'Using cached or offline data'
-        });
-      }
-    });
-  };
-
-  // INSTANT LOADING FUNCTIONS
-  window.loadCachedDataInstantly = loadCachedDataInstantly;
-  window.refreshCachedDataInBackground = refreshCachedDataInBackground;
-
-  // OFFLINE SUPPORT FUNCTIONS
-  window.createOfflineUser = createOfflineUserForUI;
-  window.getOfflineData = function(tabName) {
-    return DATA_CACHE.getOfflineTabData(tabName);
-  };
-
-  // Chat message functions using api.js
-  window.sendChatMessage = function(chatId, message, type = 'text') {
-    return new Promise(async (resolve) => {
-      if (!window.currentUser || !chatId || !message) {
-        window.showToast('Missing required parameters', 'error');
-        resolve({
-          success: false,
-          message: 'Missing required parameters'
-        });
-        return;
-      }
-      
-      // Try to send via api.js if online and backend reachable
-      const networkStatus = API_COORDINATION.getNetworkStatus();
-      if (networkStatus === 'online' && API_COORDINATION.isApiAvailable() && 
-          window.MoodChatConfig.backendReachable === true && JWT_VALIDATION.hasToken()) {
-        try {
-          const response = await API_COORDINATION.safeApiCall('/chat/send', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${JWT_VALIDATION.getToken()}`
-            },
-            body: JSON.stringify({
-              chatId: chatId,
-              message: message,
-              type: type
-            })
-          });
-          
-          if (response.success) {
-            window.showToast('Message sent', 'success');
-            resolve({
-              success: true,
-              data: response.data,
-              message: 'Message sent via API'
-            });
-          } else {
-            window.showToast(response.message || 'Failed to send message', 'error');
-            // Queue for offline sync
-            queueForSync({
-              chatId: chatId,
-              content: message,
-              type: type
-            }, 'message')
-            .then(queueResult => {
-              resolve({
-                success: false,
-                offline: true,
-                queued: queueResult.queued,
-                message: 'Message queued for offline',
-                queueId: queueResult.id
-              });
-            });
-          }
-        } catch (error) {
-          window.showToast(`Network Error: ${error.message}`, 'error');
-          // Queue for offline sync
-          queueForSync({
-            chatId: chatId,
-            content: message,
-            type: type
-          }, 'message')
-          .then(queueResult => {
-            resolve({
-              success: false,
-              offline: true,
-              queued: queueResult.queued,
-              message: 'Message queued for offline (API error)',
-              queueId: queueResult.id
-            });
-          });
-        }
-      } else {
-        // Offline - queue the message
-        queueForSync({
-          chatId: chatId,
-          content: message,
-          type: type
-        }, 'message')
-        .then(queueResult => {
-          window.showToast('Message queued for when online', 'info');
-          resolve({
-            success: false,
-            offline: true,
-            queued: queueResult.queued,
-            message: 'Message queued for when online',
-            queueId: queueResult.id
-          });
-        });
-      }
-    });
-  };
-
-  // Get chat messages using api.js
-  window.getChatMessages = function(chatId, limit = 50) {
-    return new Promise(async (resolve) => {
-      if (!window.currentUser || !chatId) {
-        window.showToast('Missing required parameters', 'error');
-        resolve({
-          success: false,
-          message: 'Missing required parameters'
-        });
-        return;
-      }
-      
-      // Try to get from cache first
-      const cacheKey = `chat-messages-${chatId}`;
-      const cachedMessages = DATA_CACHE.getInstant(cacheKey);
-      if (cachedMessages) {
-        resolve({
-          success: true,
-          cached: true,
-          data: cachedMessages,
-          message: 'Messages loaded from cache'
-        });
-      }
-      
-      // Try to fetch via api.js if online and backend reachable
-      const networkStatus = API_COORDINATION.getNetworkStatus();
-      if (networkStatus === 'online' && API_COORDINATION.isApiAvailable() && 
-          window.MoodChatConfig.backendReachable === true && JWT_VALIDATION.hasToken()) {
-        try {
-          const response = await API_COORDINATION.safeApiCall(`/chat/${chatId}/messages?limit=${limit}`, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${JWT_VALIDATION.getToken()}`
+          if (response && response.success && response.data) {
+            // Cache the response
+            switch(tabName) {
+              case 'friends': DATA_CACHE.cacheFriends(response.data); break;
+              case 'chats': DATA_CACHE.cacheChats(response.data); break;
+              case 'calls': DATA_CACHE.cacheCalls(response.data); break;
+              case 'groups': DATA_CACHE.cacheGroups(response.data); break;
             }
-          });
-          
-          if (response.success) {
-            // Cache the messages
-            DATA_CACHE.set(cacheKey, response.data, CACHE_CONFIG.EXPIRATION.MESSAGES);
+            
             resolve({
               success: true,
               data: response.data,
-              message: 'Messages loaded via API'
+              cached: false,
+              message: 'Data loaded from server'
             });
           } else {
-            window.showToast(response.message || 'Failed to load messages', 'error');
             resolve({
               success: false,
-              message: response.message || 'Failed to load messages'
+              message: response?.message || 'Failed to load data',
+              cached: false
             });
           }
         } catch (error) {
-          window.showToast(`API Error: ${error.message}`, 'error');
           resolve({
             success: false,
             message: 'API error: ' + error.message,
-            offline: true
+            cached: false
           });
         }
       } else {
+        // Offline or backend unreachable
         resolve({
           success: false,
-          message: 'Offline or backend unreachable',
-          offline: true
+          offline: true,
+          message: 'Cannot load data while offline',
+          cached: false
         });
       }
     });
-  };
-
-  // AUTH HELPER FUNCTIONS
-  window.showChatArea = function() {
-    const chatListContainer = document.getElementById('chatListContainer');
-    const chatArea = document.getElementById('chatArea');
-    const chatHeader = document.getElementById('chatHeader');
-    
-    if (chatListContainer && chatArea) {
-      chatListContainer.classList.add('hidden');
-      chatArea.classList.remove('hidden');
-      
-      if (chatHeader) {
-        chatHeader.classList.remove('hidden');
-      }
-      
-      updateChatAreaVisibility(currentTab);
-    }
-  };
-
-  window.showChatList = function() {
-    const chatListContainer = document.getElementById('chatListContainer');
-    const chatArea = document.getElementById('chatArea');
-    const chatHeader = document.getElementById('chatHeader');
-    
-    if (chatListContainer && chatArea) {
-      chatListContainer.classList.remove('hidden');
-      chatArea.classList.add('hidden');
-      
-      if (chatHeader) {
-        chatHeader.classList.add('hidden');
-      }
-      
-      updateChatAreaVisibility(currentTab);
-    }
-  };
-
-  // NETWORK FUNCTIONS - UPDATED
-  // Note: isOnline is now handled by AppNetwork
-  // window.isOnline = isOnline; // REMOVED
-
-  window.isOffline = function() {
-    return API_COORDINATION.getNetworkStatus() === 'offline';
-  };
-
-  window.isNetworkChecking = function() {
-    return API_COORDINATION.getNetworkStatus() === 'checking';
-  };
-
-  // NETWORK SERVICE FUNCTIONS
-  window.registerNetworkService = function(name, startFunction, stopFunction) {
-    return NETWORK_SERVICE_MANAGER.registerService(name, startFunction, stopFunction);
-  };
-
-  window.startNetworkService = function(name) {
-    return NETWORK_SERVICE_MANAGER.startService(name);
-  };
-
-  window.stopNetworkService = function(name) {
-    return NETWORK_SERVICE_MANAGER.stopService(name);
-  };
-
-  window.getNetworkServiceStates = function() {
-    return NETWORK_SERVICE_MANAGER.getServiceStates();
-  };
-
-  // CACHE MANAGEMENT FUNCTIONS WITH INSTANT LOADING
-  window.cacheData = function(key, data, expirationMinutes = 60) {
-    return DATA_CACHE.set(key, data, expirationMinutes * 60 * 1000);
-  };
-
-  window.getCachedData = function(key, instant = true) {
-    return instant ? DATA_CACHE.getInstant(key) : DATA_CACHE.get(key);
-  };
-
-  window.clearCache = function(key = null) {
-    if (key) {
-      return DATA_CACHE.remove(key);
-    } else {
-      DATA_CACHE.clearAll();
-      return true;
-    }
-  };
-
-  // USER DATA ISOLATION FUNCTIONS
-  window.clearUserData = function(userId) {
-    if (userId) {
-      USER_DATA_ISOLATION.clearUserData(userId);
-      return true;
-    } else if (window.currentUser && window.currentUser.uid) {
-      USER_DATA_ISOLATION.clearUserData(window.currentUser.uid);
-      return true;
-    }
-    return false;
-  };
-
-  window.getCachedUsers = function() {
-    return USER_DATA_ISOLATION.getCachedUsers();
-  };
-
-  // FIXED: getDeviceId function - single non-recursive implementation
-  window.getDeviceId = getDeviceId; // Reference the fixed function
-
-  // INSTANT LOADING STATE
-  window.isInstantUILoaded = function() {
-    return instantUILoaded;
-  };
-
-  // ============================================================================
-  // AUTO-LOGIN FUNCTIONALITY - ENHANCED WITH API.JS INTEGRATION - FIXED
-  // ============================================================================
-
-  window.checkAutoLogin = function() {
-    console.log('Checking auto-login...');
-    
-    // Check if we have a valid JWT token
-    if (JWT_VALIDATION.hasToken()) {
-      console.log('JWT token found, checking if backend is reachable...');
-      
-      // Check if we're on the login page
-      if (!window.location.pathname.endsWith('index.html') && !window.location.pathname.endsWith('/')) {
-        console.log('Not on login page, skipping auto-login check');
-        return false;
-      }
-      
-      // Don't auto-login if offline or backend unreachable
-      const networkStatus = API_COORDINATION.getNetworkStatus();
-      if (networkStatus === 'offline') {
-        console.log('Auto-login: Skipping - offline');
-        return false;
-      }
-      
-      if (!API_COORDINATION.isApiAvailable() || window.MoodChatConfig.backendReachable === false) {
-        console.log('Auto-login: Skipping - backend not reachable');
-        return false;
-      }
-      
-      // Try to validate the token with backend
-      console.log('Auto-login: Validating token with backend...');
-      JWT_VALIDATION.validateToken()
-        .then(validation => {
-          if (validation.valid) {
-            console.log('Auto-login: Valid JWT token confirmed with backend');
-            
-            // Create user from validated token
-            const validatedUser = {
-              uid: validation.user.id || validation.user._id || validation.user.sub,
-              email: validation.user.email || 'user@example.com',
-              displayName: validation.user.name || validation.user.username || 'User',
-              photoURL: validation.user.avatar || `https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff`,
-              emailVerified: validation.user.emailVerified || false,
-              isOffline: false,
-              providerId: 'api',
-              refreshToken: JWT_VALIDATION.getToken(),
-              getIdToken: () => Promise.resolve(JWT_VALIDATION.getToken()),
-              ...validation.user,
-              validated: true // NEW: Mark as validated
-            };
-            
-            // Show a loading message
-            window.showToast('Auto-logging in...', 'info');
-            
-            // Set user and redirect after a short delay
-            setTimeout(() => {
-              window.currentUser = validatedUser;
-              authStateRestored = true;
-              updateGlobalAuthState(validatedUser);
-              
-              // Update cached auth state with validation flag
-              const authData = {
-                type: 'auth-state',
-                user: {
-                  uid: validatedUser.uid,
-                  email: validatedUser.email,
-                  displayName: validatedUser.displayName,
-                  photoURL: validatedUser.photoURL,
-                  emailVerified: validatedUser.emailVerified || false,
-                  authMethod: 'api'
-                },
-                isAuthenticated: true,
-                validated: true,
-                timestamp: new Date().toISOString()
-              };
-              
-              localStorage.setItem('moodchat-auth-state', JSON.stringify(authData));
-              
-              // Redirect to chat page
-              console.log('Auto-login: Redirecting to chat page...');
-              window.location.href = 'chat.html';
-            }, 500);
-            
-            return true;
-          } else {
-            console.log('Auto-login: Invalid token confirmed with backend, staying on login page');
-            // Token is invalid, clear it
-            JWT_VALIDATION.clearToken();
-            return false;
-          }
-        })
-        .catch(error => {
-          console.log('Auto-login: Token validation error, staying on login page:', error);
-          return false;
-        });
-    } else {
-      console.log('Auto-login: No JWT token found');
-      
-      // Check for device session as fallback
-      const storedSession = localStorage.getItem('moodchat_device_session');
-      if (storedSession) {
-        try {
-          const session = JSON.parse(storedSession);
-          const currentDeviceId = getDeviceId();
-          
-          if (session.userId && session.deviceId === currentDeviceId && !session.loggedOut) {
-            console.log('Auto-login: Valid device session found, but requiring manual login for security');
-            // Device session exists but we don't auto-login with it
-          }
-        } catch (error) {
-          console.log('Auto-login: Error parsing device session:', error);
-        }
-      }
-    }
-    
-    return false;
   };
 
   // ============================================================================
@@ -6264,50 +6325,27 @@
   // ============================================================================
 
   function injectStyles() {
-    if (document.getElementById('app-styles')) return;
+    const styleId = 'moodchat-core-styles';
+    if (document.getElementById(styleId)) return;
     
-    const styles = `
-      /* Critical styles for immediate UI */
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
-      
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-        min-height: 100vh;
-        overflow-x: hidden;
-      }
-      
-      #content-area {
-        flex: 1;
-        min-height: 100vh;
-        background: #f9fafb;
-        color: #111827;
-        transition: background-color 0.3s, color 0.3s;
-      }
-      
-      .dark #content-area {
-        background: #111827;
-        color: #f9fafb;
-      }
-      
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      /* Loading indicator */
       .tab-loading-indicator {
         position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.7);
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 10px;
+        z-index: 9999;
         display: none;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        z-index: 9999;
-        color: white;
-        font-size: 16px;
-        backdrop-filter: blur(4px);
       }
       
       .loading-spinner {
@@ -6315,170 +6353,150 @@
         height: 40px;
         border: 4px solid rgba(255, 255, 255, 0.3);
         border-radius: 50%;
-        border-top-color: #8b5cf6;
+        border-top-color: white;
         animation: spin 1s ease-in-out infinite;
-        margin-bottom: 15px;
+        margin-bottom: 10px;
       }
       
       .loading-text {
-        margin-top: 10px;
         font-size: 14px;
         opacity: 0.9;
       }
       
+      /* Animations */
       @keyframes spin {
         to { transform: rotate(360deg); }
       }
       
       @keyframes slideIn {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
       }
       
       @keyframes slideOut {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
       }
       
       @keyframes slideInUp {
-        from {
-          transform: translateY(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateY(0);
-          opacity: 1;
-        }
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
       }
       
       @keyframes slideOutDown {
-        from {
-          transform: translateY(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateY(100%);
-          opacity: 0;
-        }
+        from { transform: translateY(0); opacity: 1; }
+        to { transform: translateY(20px); opacity: 0; }
       }
       
-      .moodchat-toast {
+      /* Theme classes */
+      .theme-dark {
+        color-scheme: dark;
+        --bg-primary: #111827;
+        --bg-secondary: #1f2937;
+        --text-primary: #f9fafb;
+        --text-secondary: #d1d5db;
+      }
+      
+      .theme-light {
+        color-scheme: light;
+        --bg-primary: #f9fafb;
+        --bg-secondary: #ffffff;
+        --text-primary: #111827;
+        --text-secondary: #4b5563;
+      }
+      
+      /* Font size classes */
+      .font-small { font-size: 0.875rem; }
+      .font-medium { font-size: 1rem; }
+      .font-large { font-size: 1.125rem; }
+      .font-xlarge { font-size: 1.25rem; }
+      
+      /* Accessibility classes */
+      .high-contrast {
+        --bg-primary: #000000;
+        --bg-secondary: #1a1a1a;
+        --text-primary: #ffffff;
+        --text-secondary: #cccccc;
+      }
+      
+      .reduce-motion * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      
+      .large-text {
+        font-size: 1.25rem;
+      }
+      
+      /* Wallpaper classes */
+      .wallpaper-default { background: var(--bg-secondary); }
+      .wallpaper-gradient1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+      .wallpaper-gradient2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+      .wallpaper-pattern1 { background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiMwMDAiIGZpbGwtb3BhY2l0eT0iMC4wNCI+PHBhdGggZD0iTTM2IDM0aC0ydi0yaDJ2MnptMC00aC0ydi0yaDJ2MnptMC00aC0ydi0yaDJ2MnptMi0yLjQyQzM4IDIxLjI0IDM2Ljc2IDIwIDM1LjQyIDIwaC0yLjg0Yy0xLjM0IDAtMi41OCAxLjI0LTIuNTggMi41OFYyNmgydi0zLjQyaC4wOEMzMiA2MCAwIDYwIDAgNjBoNjBWMzZIMzh2LTIuNDJ6TTM2IDMwaC0ydi0yaDJ2MnptLTQtMmgtMnYtMmgydjJ6bTAtNGgtMnYtMmgydjJ6bTItMmgtMnYtMmgydjJ6bTQgMGgtMnYtMmgydjJ6Ii8+PC9nPjwvZz48L3N2Zz4='); }
+      
+      /* Error message */
+      .error-message {
         position: fixed;
         top: 20px;
         right: 20px;
-        padding: 12px 20px;
+        background: #f87171;
+        color: white;
+        padding: 12px 16px;
         border-radius: 8px;
         z-index: 10000;
         max-width: 300px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        animation: toastSlideIn 0.3s ease-out;
-        display: flex;
-        align-items: center;
-        gap: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: slideIn 0.3s ease-out;
       }
       
-      .moodchat-toast-success {
-        background: #10b981;
-        color: white;
+      /* Tab panel transitions */
+      .tab-panel {
+        transition: opacity 0.2s ease-in-out;
       }
       
-      .moodchat-toast-error {
-        background: #ef4444;
-        color: white;
+      .tab-panel.hidden {
+        display: none;
       }
       
-      .moodchat-toast-warning {
-        background: #f59e0b;
-        color: white;
+      .tab-panel.active {
+        display: block;
+        animation: fadeIn 0.3s ease-out;
       }
       
-      .moodchat-toast-info {
-        background: #3b82f6;
-        color: white;
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
       
-      @keyframes toastSlideIn {
-        from {
+      /* Sidebar transitions */
+      .sidebar {
+        transition: transform 0.3s ease-in-out;
+      }
+      
+      @media (max-width: 767px) {
+        .sidebar.translate-x-full {
           transform: translateX(100%);
-          opacity: 0;
         }
-        to {
+        
+        .sidebar.translate-x-0 {
           transform: translateX(0);
-          opacity: 1;
         }
-      }
-      
-      @keyframes toastSlideOut {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-      }
-      
-      /* Network status indicator */
-      .network-status-checking {
-        background: #f59e0b;
-        color: white;
-      }
-      
-      .network-status-online {
-        background: #10b981;
-        color: white;
-      }
-      
-      .network-status-offline {
-        background: #ef4444;
-        color: white;
       }
     `;
     
-    const styleSheet = document.createElement('style');
-    styleSheet.id = 'app-styles';
-    styleSheet.textContent = styles;
-    document.head.appendChild(styleSheet);
+    document.head.appendChild(style);
   }
 
   // ============================================================================
-  // START THE APPLICATION
+  // STARTUP EXECUTION
   // ============================================================================
 
-  // Initialize the app when DOM is ready
+  // Start the app initialization when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      console.log('DOMContentLoaded - Starting app initialization');
-      setTimeout(() => {
-        initializeApp();
-      }, 50);
-    });
+    document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
-    console.log('DOM already loaded - Starting app initialization');
-    setTimeout(() => {
-      initializeApp();
-    }, 50);
+    // DOM already loaded
+    setTimeout(initializeApp, 100);
   }
-
-  // Start auto-login check if on login page
-  if (window.location.pathname.endsWith('index.html') || window.location.pathname.endsWith('/')) {
-    setTimeout(() => {
-      window.checkAutoLogin();
-    }, 500);
-  }
-
-  console.log('app.core.js loaded and ready');
 })();

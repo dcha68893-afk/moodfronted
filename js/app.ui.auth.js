@@ -4,6 +4,8 @@
 // FIXED: Never shows "No network" for auth problems
 // URGENT FIX: Network status only reflects connectivity, auth status handled separately
 // CRITICAL FIX: Reliable auth state across refreshes - prevents white screens and auth loops
+// NEW FIX: /auth/me endpoint handling improved with proper token validation and response parsing
+// LOGIN FLOW FIX: Login waits for backend authentication validation before redirecting
 
 // ============================================================================
 // PREVENT DOUBLE INITIALIZATION
@@ -148,6 +150,10 @@ function saveAuthData(token, userData) {
   // Also save user info separately for easy access
   localStorage.setItem('currentUser', JSON.stringify(userData));
   
+  // Save token in multiple formats for compatibility
+  localStorage.setItem('moodchat_token', token);
+  localStorage.setItem('accessToken', token);
+  
   // Assign to window.currentUser for compatibility
   window.currentUser = userData;
   
@@ -161,23 +167,50 @@ function saveAuthData(token, userData) {
 }
 
 /**
- * Retrieves auth data from localStorage
+ * Retrieves auth data from localStorage - checks multiple token keys
  */
 function getAuthData() {
   try {
+    // First check the combined authUser object
     const authUserStr = localStorage.getItem('authUser');
-    if (!authUserStr) return null;
-    
-    const authUser = JSON.parse(authUserStr);
-    
-    // Check if token exists
-    if (!authUser.token) {
-      console.log('No token found in auth data');
-      return null;
+    if (authUserStr) {
+      const authUser = JSON.parse(authUserStr);
+      
+      // Check if token exists
+      if (authUser.token) {
+        console.log('Auth data retrieved from authUser');
+        return authUser;
+      }
     }
     
-    console.log('Auth data retrieved successfully');
-    return authUser;
+    // Check for individual token keys
+    const moodchatToken = localStorage.getItem('moodchat_token');
+    const accessToken = localStorage.getItem('accessToken');
+    const token = moodchatToken || accessToken;
+    
+    if (token) {
+      // Try to get user from currentUser
+      const userStr = localStorage.getItem('currentUser');
+      let user = null;
+      
+      if (userStr) {
+        try {
+          user = JSON.parse(userStr);
+        } catch (e) {
+          console.error('Error parsing currentUser:', e);
+        }
+      }
+      
+      console.log('Auth data retrieved from individual token keys');
+      return {
+        token: token,
+        user: user,
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    console.log('No auth data found in localStorage');
+    return null;
   } catch (error) {
     console.error('Error retrieving auth data:', error);
     return null;
@@ -185,15 +218,24 @@ function getAuthData() {
 }
 
 /**
- * Gets ONLY the token from localStorage
+ * Gets ONLY the token from localStorage - checks multiple keys
  */
 function getAuthToken() {
   try {
+    // Check authUser first
     const authUserStr = localStorage.getItem('authUser');
-    if (!authUserStr) return null;
+    if (authUserStr) {
+      const authUser = JSON.parse(authUserStr);
+      if (authUser.token) {
+        return authUser.token;
+      }
+    }
     
-    const authUser = JSON.parse(authUserStr);
-    return authUser.token || null;
+    // Check individual token keys
+    const moodchatToken = localStorage.getItem('moodchat_token');
+    const accessToken = localStorage.getItem('accessToken');
+    
+    return moodchatToken || accessToken || null;
   } catch (error) {
     console.error('Error retrieving auth token:', error);
     return null;
@@ -209,21 +251,42 @@ function validateToken(token) {
   // Basic validation - token should be a string
   if (typeof token !== 'string') return false;
   
-  // Check token format (at least 10 characters)
-  if (token.length < 10) return false;
+  // Check token format (JWT tokens have 3 parts separated by dots)
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
   
-  return true;
+  // Check if each part is valid base64
+  try {
+    // Try to decode the payload to check if it's a valid JWT
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    
+    // Check if token has expired
+    if (payload.exp && Date.now() >= payload.exp * 1000) {
+      console.log('Token has expired');
+      return false;
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('Token validation error:', e);
+    return false;
+  }
 }
 
 /**
  * Clears auth data from localStorage (logout)
- * ONLY call this when we have explicit reason to clear (invalid token, expired, user logout)
+ * Clears ALL token formats for compatibility
  */
 function clearAuthData() {
   console.log('Clearing auth data from localStorage');
+  
+  // Clear all token formats
   localStorage.removeItem('authUser');
   localStorage.removeItem('currentUser');
   localStorage.removeItem('authToken');
+  localStorage.removeItem('moodchat_token');
+  localStorage.removeItem('accessToken');
+  
   window.currentUser = null;
   
   // Update AuthStatus - move to unauthenticated state
@@ -237,6 +300,7 @@ function clearAuthData() {
 
 /**
  * Safely handles API response (api.js returns parsed JSON, not Response object)
+ * Enhanced to handle /auth/me responses specifically
  */
 function handleApiResponse(response) {
   // api.js returns already-parsed JSON, not a Response object
@@ -244,8 +308,22 @@ function handleApiResponse(response) {
     throw new Error('Invalid API response format');
   }
   
+  console.log('API Response received:', response);
+  
+  // Handle /auth/me endpoint responses specifically
+  // The /auth/me endpoint might return user data directly or in data.user
+  if (response.user || response.data?.user) {
+    // This is a successful /auth/me response
+    return {
+      success: true,
+      user: response.user || response.data.user,
+      message: response.message || 'User info retrieved',
+      status: response.status || 200
+    };
+  }
+  
   // Check for HTTP errors in the response object
-  const success = response.success;
+  const success = response.success || response.ok || false;
   const message = response.data?.message || response.message || 'Unknown server error';
   const status = response.status || response.statusCode || 500;
   
@@ -313,6 +391,7 @@ function showLoginAttemptCountdown(blockInfo) {
 /**
  * CRITICAL FIX: Reliable auth check on app load
  * Prevents white screens and auth loops
+ * Enhanced with better /auth/me endpoint handling
  */
 async function checkAuthOnAppLoad() {
   console.log('🔐 CRITICAL: Checking authentication on app load...');
@@ -322,7 +401,7 @@ async function checkAuthOnAppLoad() {
   window.AuthStatus.checking = true;
   
   try {
-    // 1. Check for token in localStorage
+    // 1. Check for token in localStorage (multiple keys)
     const token = getAuthToken();
     
     if (!token) {
@@ -395,21 +474,26 @@ async function checkAuthOnAppLoad() {
     // 4. CRITICAL: Call /auth/me to verify token with backend
     console.log('🔐 CRITICAL: Calling /auth/me to verify token with backend...');
     
+    // Set authorization header with Bearer token
     const response = await window.api('/auth/me', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
     });
     
     console.log('🔐 /auth/me response:', response);
     
     // 5. Check if /auth/me succeeded
-    if (response && (response.success === true || response.user)) {
+    // Handle different response formats from /auth/me
+    if (response && (response.success === true || response.ok === true || response.user || response.data?.user)) {
       console.log('🔐 CRITICAL: /auth/me succeeded - user is authenticated');
       
-      const user = response.user || response.data?.user;
-      if (user) {
+      // Extract user data from different possible response formats
+      const user = response.user || response.data?.user || response;
+      
+      if (user && (user.id || user.username || user.email)) {
         // Update auth state
         window.AuthStatus.state = 'authenticated';
         window.AuthStatus.user = user;
@@ -442,8 +526,8 @@ async function checkAuthOnAppLoad() {
           // App will render normally
         }
       } else {
-        // Response succeeded but no user data
-        console.log('🔐 /auth/me succeeded but no user data - clearing token');
+        // Response succeeded but no valid user data
+        console.log('🔐 /auth/me succeeded but no valid user data - clearing token');
         clearAuthData();
         window.AuthStatus.state = 'unauthenticated';
         
@@ -454,9 +538,12 @@ async function checkAuthOnAppLoad() {
           window.location.href = 'index.html';
         }, 1000);
       }
-    } else {
-      // 6. /auth/me failed - token is invalid
-      console.log('🔐 CRITICAL: /auth/me failed - clearing invalid token');
+    } else if (response && (response.status === 401 || response.statusCode === 401 || 
+                           response.message?.includes('Unauthorized') || 
+                           response.message?.includes('invalid token') ||
+                           response.message?.includes('expired'))) {
+      // 6. /auth/me returned 401 - token is invalid or expired
+      console.log('🔐 CRITICAL: /auth/me returned 401 - clearing invalid token');
       clearAuthData();
       window.AuthStatus.state = 'unauthenticated';
       
@@ -475,15 +562,37 @@ async function checkAuthOnAppLoad() {
         console.log('🔐 Redirecting to login page');
         window.location.href = 'index.html';
       }
+    } else if (response && (response.status === 404 || response.statusCode === 404)) {
+      // 7. /auth/me returned 404 - user not found (after token validation)
+      console.log('🔐 CRITICAL: /auth/me returned 404 - user not found');
+      clearAuthData();
+      window.AuthStatus.state = 'unauthenticated';
+      
+      updateAuthStatusUI('unauthenticated', 'User account not found');
+      
+      // Redirect to login page
+      setTimeout(() => {
+        window.location.href = 'index.html';
+      }, 1000);
+    } else {
+      // 8. /auth/me failed with other error
+      console.log('🔐 CRITICAL: /auth/me failed with unknown error');
+      
+      // Don't clear token on unknown errors - might be network issue
+      window.AuthStatus.state = 'unknown';
+      
+      const errorMessage = response?.message || 'Session verification failed';
+      updateAuthStatusUI('unknown', errorMessage);
     }
   } catch (error) {
-    // 7. Handle errors during auth check
+    // 9. Handle errors during auth check
     console.error('🔐 CRITICAL: Error during auth check:', error);
     
     // Check error type
     if (error.message.includes('Network') || 
         error.message.includes('fetch') ||
-        error.message.includes('timeout')) {
+        error.message.includes('timeout') ||
+        error.message.includes('Failed to fetch')) {
       // Network error - keep token but mark as unknown
       console.log('🔐 Network error during auth check - keeping token');
       window.AuthStatus.state = 'unknown';
@@ -501,6 +610,22 @@ async function checkAuthOnAppLoad() {
           console.error('Error parsing user from localStorage:', e);
         }
       }
+    } else if (error.message.includes('401') || 
+               error.message.includes('Unauthorized') ||
+               error.message.includes('invalid token') ||
+               error.message.includes('expired')) {
+      // Auth error - clear token
+      console.log('🔐 Auth error during check - clearing token');
+      clearAuthData();
+      window.AuthStatus.state = 'unauthenticated';
+      window.AuthStatus.checking = false;
+      
+      updateAuthStatusUI('unauthenticated', 'Session expired');
+      
+      // Redirect to login page
+      setTimeout(() => {
+        window.location.href = 'index.html';
+      }, 1000);
     } else {
       // Other errors - clear token to be safe
       console.log('🔐 Other error during auth check - clearing token');
@@ -567,7 +692,8 @@ async function verifyTokenForAutoLogin(token) {
     const response = await window.api('/auth/verify', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
     });
     
@@ -649,7 +775,8 @@ async function checkAutoLogin() {
       const response = await window.api('/auth/verify', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${authData.token}`
+          'Authorization': `Bearer ${authData.token}`,
+          'Content-Type': 'application/json'
         }
       });
       
@@ -713,11 +840,82 @@ async function checkAutoLogin() {
 }
 
 // ============================================================================
+// LOGIN FLOW FIX: BACKEND AUTHENTICATION VALIDATION
+// ============================================================================
+
+/**
+ * LOGIN FLOW FIX: Validates authentication with backend before proceeding
+ * Calls /auth/me endpoint to confirm identity after successful login
+ */
+async function validateBackendAuth(token) {
+  console.log('🔐 LOGIN FLOW FIX: Validating authentication with backend...');
+  
+  try {
+    if (!window.api || typeof window.api !== 'function') {
+      throw new Error('API not available for auth validation');
+    }
+    
+    console.log('🔐 LOGIN FLOW FIX: Calling /auth/me for authentication validation...');
+    
+    const response = await window.api('/auth/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('🔐 LOGIN FLOW FIX: /auth/me response for validation:', response);
+    
+    // Handle different response formats
+    if (response && (response.success === true || response.ok === true || response.user || response.data?.user)) {
+      // Extract user data from different possible response formats
+      const user = response.user || response.data?.user || response;
+      
+      if (user && (user.id || user.username || user.email)) {
+        console.log('🔐 LOGIN FLOW FIX: Backend auth validation SUCCESS');
+        return {
+          success: true,
+          user: user,
+          message: 'Authentication validated'
+        };
+      } else {
+        console.log('🔐 LOGIN FLOW FIX: Backend auth validation failed - no valid user data');
+        return {
+          success: false,
+          message: 'Authentication validation failed - no user data'
+        };
+      }
+    } else if (response && (response.status === 401 || response.statusCode === 401)) {
+      console.log('🔐 LOGIN FLOW FIX: Backend auth validation failed - 401 Unauthorized');
+      return {
+        success: false,
+        message: 'Authentication validation failed - unauthorized'
+      };
+    } else {
+      const errorMessage = response?.message || 'Authentication validation failed';
+      console.log('🔐 LOGIN FLOW FIX: Backend auth validation failed -', errorMessage);
+      return {
+        success: false,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    console.error('🔐 LOGIN FLOW FIX: Error during backend auth validation:', error);
+    return {
+      success: false,
+      message: error.message || 'Authentication validation error'
+    };
+  }
+}
+
+// ============================================================================
 // AUTH FORM HANDLERS WITH JWT SUPPORT AND PROGRESSIVE LOGIN LIMITS
 // ============================================================================
 
 /**
  * UNIVERSAL LOGIN HANDLER - Works even if forms are recreated
+ * UPDATED WITH LOGIN FLOW FIX: Waits for backend validation before redirecting
  */
 async function handleLoginSubmit(event) {
   console.log('🔐 LOGIN SUBMIT HANDLER TRIGGERED - UNIVERSAL');
@@ -836,17 +1034,20 @@ async function handleLoginSubmit(event) {
     // Call api.js
     const response = await window.api('/auth/login', {
       method: 'POST',
-      body: loginData
+      body: loginData,
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
     
     console.log('✅ Login API response received:', response ? 'Success' : 'No response');
     
     // Check if response indicates success
     if (response && (response.success === true || response.ok === true || response.status === 'success')) {
-      console.log('🎉 LOGIN SUCCESS');
+      console.log('🎉 LOGIN SUCCESS - Token received');
       
       // Extract token and user from response
-      const token = response.token || response.data?.token;
+      const token = response.token || response.data?.token || response.accessToken;
       const user = response.user || response.data?.user;
       
       if (!token || !user) {
@@ -856,43 +1057,70 @@ async function handleLoginSubmit(event) {
       
       console.log('💾 Saving authentication data...');
       
-      // Save to localStorage
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('currentUser', JSON.stringify(user));
-      window.currentUser = user;
-      
-      // Also save using the existing function for compatibility
+      // Save to localStorage using our function (handles multiple formats)
       saveAuthData(token, user);
       
       // Reset login attempts for this identifier
       LoginAttempts.resetAttempts(identifier);
       
-      // Show success message
-      updateAuthStatusUI('authenticated', 'Login successful!');
+      // LOGIN FLOW FIX: Validate authentication with backend BEFORE proceeding
+      console.log('🔐 LOGIN FLOW FIX: Starting backend authentication validation...');
+      updateAuthStatusUI('authenticated', 'Validating authentication...');
       
-      // Set token in api.js if API_COORDINATION exists
-      if (window.API_COORDINATION) {
-        window.API_COORDINATION.authToken = token;
+      const validationResult = await validateBackendAuth(token);
+      
+      if (validationResult.success) {
+        console.log('🔐 LOGIN FLOW FIX: Backend validation SUCCESS - proceeding with login');
+        
+        // Update with validated user data
+        if (validationResult.user) {
+          saveAuthData(token, validationResult.user);
+        }
+        
+        // Show success message
+        updateAuthStatusUI('authenticated', 'Login successful!');
+        
+        // Set token in api.js if API_COORDINATION exists
+        if (window.API_COORDINATION) {
+          window.API_COORDINATION.authToken = token;
+        }
+        
+        // Set user in AppState if it exists
+        if (window.AppState) {
+          window.AppState.user = validationResult.user || user;
+        }
+        
+        // Dispatch auth:login event
+        document.dispatchEvent(
+          new CustomEvent('auth:login', { detail: validationResult.user || user })
+        );
+        
+        // Trigger UI success flow
+        triggerUISuccessFlow(validationResult.user || user);
+        
+        // LOGIN FLOW FIX: Only redirect AFTER backend validation succeeds
+        console.log('🔄 LOGIN FLOW FIX: Redirecting to chat.html after successful validation...');
+        setTimeout(() => {
+          window.location.href = 'chat.html';
+        }, 1000);
+        
+      } else {
+        // LOGIN FLOW FIX: Backend validation failed
+        console.error('❌ LOGIN FLOW FIX: Backend authentication validation failed:', validationResult.message);
+        
+        // Do NOT clear tokens automatically (as per requirement)
+        // Show specific validation error
+        updateAuthStatusUI('error', `Authentication validation failed: ${validationResult.message}`);
+        
+        // Show error in form
+        showAuthError('Authentication validation failed. Please try again.');
+        
+        // Re-enable form
+        if (submitBtn) {
+          submitBtn.textContent = originalText;
+          submitBtn.disabled = false;
+        }
       }
-      
-      // Set user in AppState if it exists
-      if (window.AppState) {
-        window.AppState.user = user;
-      }
-      
-      // Dispatch auth:login event
-      document.dispatchEvent(
-        new CustomEvent('auth:login', { detail: user })
-      );
-      
-      // Trigger UI success flow
-      triggerUISuccessFlow(user);
-      
-      // REDIRECT AFTER SUCCESS
-      console.log('🔄 Redirecting to chat.html...');
-      setTimeout(() => {
-        window.location.href = 'chat.html';
-      }, 1000);
       
     } else {
       // Login failed
@@ -1061,6 +1289,7 @@ function triggerUISuccessFlow(user) {
 
 /**
  * STRICT API-DRIVEN REGISTRATION HANDLER - FIXED response handling
+ * UPDATED WITH LOGIN FLOW FIX: Waits for backend validation before redirecting
  */
 async function handleRegisterSubmit(event) {
   event.preventDefault();
@@ -1115,7 +1344,10 @@ async function handleRegisterSubmit(event) {
     // Call api.js - it returns parsed JSON
     const response = await window.api('/auth/register', {
       method: 'POST',
-      body: registerData
+      body: registerData,
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
     
     console.log('STRICT API-DRIVEN: Register API response:', response);
@@ -1123,7 +1355,7 @@ async function handleRegisterSubmit(event) {
     // Check if response indicates success
     if (response && (response.success === true || response.ok === true)) {
       // Extract token and user from response
-      const token = response.token || response.data?.token;
+      const token = response.token || response.data?.token || response.accessToken;
       const user = response.user || response.data?.user;
       
       if (!token || !user) {
@@ -1133,26 +1365,57 @@ async function handleRegisterSubmit(event) {
       // Save JWT and user info
       saveAuthData(token, user);
       
-      // STRICT REQUIREMENT: Only show success AFTER API confirms
-      updateAuthStatusUI('authenticated', 'Registration successful!');
+      // LOGIN FLOW FIX: Validate authentication with backend BEFORE proceeding
+      console.log('🔐 LOGIN FLOW FIX: Starting backend authentication validation for registration...');
+      updateAuthStatusUI('authenticated', 'Validating authentication...');
       
-      // Set token in api.js if API_COORDINATION exists
-      if (window.API_COORDINATION) {
-        window.API_COORDINATION.authToken = token;
+      const validationResult = await validateBackendAuth(token);
+      
+      if (validationResult.success) {
+        console.log('🔐 LOGIN FLOW FIX: Backend validation SUCCESS for registration');
+        
+        // Update with validated user data
+        if (validationResult.user) {
+          saveAuthData(token, validationResult.user);
+        }
+        
+        // STRICT REQUIREMENT: Only show success AFTER API confirms
+        updateAuthStatusUI('authenticated', 'Registration successful!');
+        
+        // Set token in api.js if API_COORDINATION exists
+        if (window.API_COORDINATION) {
+          window.API_COORDINATION.authToken = token;
+        }
+        
+        // Set user in AppState if it exists
+        if (window.AppState) {
+          window.AppState.user = validationResult.user || user;
+        }
+        
+        // Trigger UI success flow
+        triggerUISuccessFlow(validationResult.user || user);
+        
+        // LOGIN FLOW FIX: Only redirect AFTER backend validation succeeds
+        console.log('🔄 LOGIN FLOW FIX: Redirecting to chat.html after successful registration validation...');
+        setTimeout(() => {
+          window.location.href = 'chat.html';
+        }, 1000);
+        
+      } else {
+        // LOGIN FLOW FIX: Backend validation failed for registration
+        console.error('❌ LOGIN FLOW FIX: Backend authentication validation failed for registration:', validationResult.message);
+        
+        // Do NOT clear tokens automatically
+        updateAuthStatusUI('error', `Registration validation failed: ${validationResult.message}`);
+        
+        // Show error in form
+        showAuthError('Registration validation failed. Please try logging in.');
+        
+        // Re-enable form
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
       }
       
-      // Set user in AppState if it exists
-      if (window.AppState) {
-        window.AppState.user = user;
-      }
-      
-      // Trigger UI success flow
-      triggerUISuccessFlow(user);
-      
-      // Small delay before redirect
-      setTimeout(() => {
-        window.location.href = 'chat.html';
-      }, 1000);
     } else {
       // Registration failed
       const errorMessage = response?.message || response?.data?.message || 'Registration failed';
@@ -1218,7 +1481,10 @@ async function handleForgotPasswordSubmit(event) {
     // Call api.js - it returns parsed JSON
     const response = await window.api('/auth/forgot-password', {
       method: 'POST',
-      body: { email }
+      body: { email },
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
     
     console.log('Forgot password API response:', response);
@@ -2249,21 +2515,24 @@ async function checkAuthStatus() {
     // If we're on chat page (or other protected page), we should have valid auth
     // But don't clear token on verification failure - just log it
     if (isChatPage && typeof window.api === 'function') {
-      console.log('On protected page, verifying token...');
+      console.log('On protected page, verifying token via /auth/me...');
       try {
         const response = await window.api('/auth/me', {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
           }
         });
         
-        console.log('Auth verification response:', response);
+        console.log('Auth verification response via /auth/me:', response);
         
-        if (response && (response.success || response.user)) {
-          const user = response.user || response.data?.user;
-          if (user) {
-            console.log('Token verification successful');
+        // Handle different response formats from /auth/me
+        if (response && (response.success || response.ok || response.user || response.data?.user)) {
+          const user = response.user || response.data?.user || response;
+          
+          if (user && (user.id || user.username || user.email)) {
+            console.log('Token verification successful via /auth/me');
             window.AuthStatus.state = 'authenticated';
             window.AuthStatus.user = user;
             window.AuthStatus.token = token;
@@ -2277,16 +2546,38 @@ async function checkAuthStatus() {
             
             updateAuthStatusUI('authenticated', 'Session active');
           } else {
-            // Verification returned but no user - token might be invalid
-            console.log('Token verification failed - no user data');
+            // Verification returned but no valid user - token might be invalid
+            console.log('Token verification via /auth/me failed - no valid user data');
             // DON'T clear token here - only mark as unknown
             window.AuthStatus.state = 'unknown';
             updateAuthStatusUI('unknown', 'Verifying session...');
           }
+        } else if (response && (response.status === 401 || response.statusCode === 401)) {
+          // /auth/me returned 401 - token is invalid or expired
+          console.log('Token verification via /auth/me returned 401 - clearing auth data');
+          clearAuthData();
+          updateAuthStatusUI('unauthenticated', 'Session expired. Please log in again.');
+          
+          // Redirect to login if on protected page
+          if (isChatPage) {
+            console.log('Redirecting to login page...');
+            window.location.href = 'index.html';
+          }
+        } else if (response && (response.status === 404 || response.statusCode === 404)) {
+          // /auth/me returned 404 - user not found (after token validation)
+          console.log('Token verification via /auth/me returned 404 - user not found');
+          clearAuthData();
+          updateAuthStatusUI('unauthenticated', 'User account not found');
+          
+          // Redirect to login if on protected page
+          if (isChatPage) {
+            console.log('Redirecting to login page...');
+            window.location.href = 'index.html';
+          }
         } else {
           // Verification failed but don't clear token
           const errorMessage = response?.message || 'Verification failed';
-          console.log('Token verification returned error:', errorMessage);
+          console.log('Token verification via /auth/me returned error:', errorMessage);
           
           // Check for specific token errors that warrant clearing
           if (errorMessage === 'Token expired' || errorMessage === 'Invalid token') {
@@ -2306,7 +2597,7 @@ async function checkAuthStatus() {
           }
         }
       } catch (error) {
-        console.error('Error verifying token:', error.message);
+        console.error('Error verifying token via /auth/me:', error.message);
         
         // Network or server error - DON'T clear token
         // Just mark as unknown and log the error
@@ -2408,8 +2699,8 @@ async function checkSessionOnLoad() {
     // Show login form but keep token for potential auto-login
     updateAuthStatusUI('authenticated', 'Session found');
   } else if (isChatPage) {
-    console.log('On chat page with token, verifying session...');
-    // On protected page, verify token but don't clear on failure
+    console.log('On chat page with token, verifying session via /auth/me...');
+    // On protected page, verify token via /auth/me
     await checkAuthStatus();
   } else {
     // Other pages - just mark as authenticated if we have token
@@ -2582,3 +2873,4 @@ function initialize() {
 initialize();
 
 console.log('app.ui.auth.js - CRITICAL UPDATE: Reliable auth state across refreshes - prevents white screens and auth loops');
+console.log('LOGIN FLOW FIX: Login waits for backend authentication validation before redirecting');
