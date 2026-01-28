@@ -3,6 +3,7 @@
 // FIXED: UI now correctly interprets backend and auth state independently
 // FIXED: Never shows "No network" for auth problems
 // URGENT FIX: Network status only reflects connectivity, auth status handled separately
+// CRITICAL FIX: Reliable auth state across refreshes - prevents white screens and auth loops
 
 // ============================================================================
 // PREVENT DOUBLE INITIALIZATION
@@ -27,15 +28,16 @@ window.NetworkStatus = {
 };
 
 // ============================================================================
-// AUTH STATUS MANAGEMENT (NEW)
+// AUTH STATUS MANAGEMENT (UPDATED - THREE STATES)
 // ============================================================================
 
-// Separate state for authentication status
+// Three auth states: 'unknown', 'authenticated', 'unauthenticated'
 window.AuthStatus = {
-  isAuthenticated: false,
+  state: 'unknown', // 'unknown', 'authenticated', 'unauthenticated'
   lastChecked: null,
   user: null,
-  token: null
+  token: null,
+  checking: false // Flag to prevent multiple simultaneous checks
 };
 
 // ============================================================================
@@ -69,7 +71,7 @@ const LoginAttempts = {
       };
     } else {
       this.attempts[identifier].count++;
-      this.attempts[attempts.identifier].lastAttempt = Date.now();
+      this.attempts[identifier].lastAttempt = Date.now();
       
       // Apply progressive blocking
       if (this.attempts[identifier].count <= this.maxAttempts) {
@@ -149,8 +151,8 @@ function saveAuthData(token, userData) {
   // Assign to window.currentUser for compatibility
   window.currentUser = userData;
   
-  // Update AuthStatus
-  window.AuthStatus.isAuthenticated = true;
+  // Update AuthStatus - move to authenticated state
+  window.AuthStatus.state = 'authenticated';
   window.AuthStatus.user = userData;
   window.AuthStatus.token = token;
   window.AuthStatus.lastChecked = new Date();
@@ -183,6 +185,22 @@ function getAuthData() {
 }
 
 /**
+ * Gets ONLY the token from localStorage
+ */
+function getAuthToken() {
+  try {
+    const authUserStr = localStorage.getItem('authUser');
+    if (!authUserStr) return null;
+    
+    const authUser = JSON.parse(authUserStr);
+    return authUser.token || null;
+  } catch (error) {
+    console.error('Error retrieving auth token:', error);
+    return null;
+  }
+}
+
+/**
  * Validates JWT token (basic validation - checks if token exists)
  */
 function validateToken(token) {
@@ -199,6 +217,7 @@ function validateToken(token) {
 
 /**
  * Clears auth data from localStorage (logout)
+ * ONLY call this when we have explicit reason to clear (invalid token, expired, user logout)
  */
 function clearAuthData() {
   console.log('Clearing auth data from localStorage');
@@ -207,8 +226,8 @@ function clearAuthData() {
   localStorage.removeItem('authToken');
   window.currentUser = null;
   
-  // Update AuthStatus
-  window.AuthStatus.isAuthenticated = false;
+  // Update AuthStatus - move to unauthenticated state
+  window.AuthStatus.state = 'unauthenticated';
   window.AuthStatus.user = null;
   window.AuthStatus.token = null;
   window.AuthStatus.lastChecked = new Date();
@@ -287,6 +306,310 @@ function showLoginAttemptCountdown(blockInfo) {
   };
 }
 
+// ============================================================================
+// CRITICAL: RELIABLE AUTH CHECK ON LOAD - PREVENTS WHITE SCREENS
+// ============================================================================
+
+/**
+ * CRITICAL FIX: Reliable auth check on app load
+ * Prevents white screens and auth loops
+ */
+async function checkAuthOnAppLoad() {
+  console.log('🔐 CRITICAL: Checking authentication on app load...');
+  
+  // Set initial state to unknown
+  window.AuthStatus.state = 'unknown';
+  window.AuthStatus.checking = true;
+  
+  try {
+    // 1. Check for token in localStorage
+    const token = getAuthToken();
+    
+    if (!token) {
+      console.log('🔐 No token found in localStorage');
+      window.AuthStatus.state = 'unauthenticated';
+      window.AuthStatus.token = null;
+      window.AuthStatus.user = null;
+      
+      // Show login UI if on login page
+      const isLoginPage = window.location.pathname.includes('index.html') || 
+                         window.location.pathname === '/' || 
+                         window.location.pathname.endsWith('/');
+      
+      if (isLoginPage) {
+        console.log('🔐 On login page without token - showing login form');
+        updateAuthStatusUI('unauthenticated', 'Please log in');
+        ensureLoginFormVisible();
+      } else {
+        console.log('🔐 On protected page without token - redirecting to login');
+        updateAuthStatusUI('unauthenticated', 'Session expired');
+        // Wait a moment then redirect
+        setTimeout(() => {
+          window.location.href = 'index.html';
+        }, 1000);
+      }
+      
+      window.AuthStatus.checking = false;
+      return;
+    }
+    
+    // 2. Validate token format
+    if (!validateToken(token)) {
+      console.log('🔐 Invalid token format - clearing and redirecting');
+      clearAuthData();
+      window.AuthStatus.state = 'unauthenticated';
+      
+      updateAuthStatusUI('unauthenticated', 'Invalid session');
+      
+      // Redirect to login page
+      setTimeout(() => {
+        window.location.href = 'index.html';
+      }, 1000);
+      
+      window.AuthStatus.checking = false;
+      return;
+    }
+    
+    // 3. Check if API is available
+    if (!window.api || typeof window.api !== 'function') {
+      console.log('🔐 API not available yet - setting state as unknown');
+      window.AuthStatus.state = 'unknown';
+      window.AuthStatus.token = token;
+      
+      // Try to get user from localStorage
+      const userStr = localStorage.getItem('currentUser');
+      if (userStr) {
+        try {
+          window.AuthStatus.user = JSON.parse(userStr);
+          window.currentUser = window.AuthStatus.user;
+        } catch (e) {
+          console.error('Error parsing user from localStorage:', e);
+        }
+      }
+      
+      updateAuthStatusUI('unknown', 'Checking session...');
+      window.AuthStatus.checking = false;
+      return;
+    }
+    
+    // 4. CRITICAL: Call /auth/me to verify token with backend
+    console.log('🔐 CRITICAL: Calling /auth/me to verify token with backend...');
+    
+    const response = await window.api('/auth/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    console.log('🔐 /auth/me response:', response);
+    
+    // 5. Check if /auth/me succeeded
+    if (response && (response.success === true || response.user)) {
+      console.log('🔐 CRITICAL: /auth/me succeeded - user is authenticated');
+      
+      const user = response.user || response.data?.user;
+      if (user) {
+        // Update auth state
+        window.AuthStatus.state = 'authenticated';
+        window.AuthStatus.user = user;
+        window.AuthStatus.token = token;
+        window.currentUser = user;
+        
+        // Update localStorage with fresh user data
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        
+        // Update auth status UI
+        updateAuthStatusUI('authenticated', 'Session active');
+        
+        // Dispatch auth:login event for other components
+        document.dispatchEvent(
+          new CustomEvent('auth:login', { detail: user })
+        );
+        
+        // If on login page, redirect to chat
+        const isLoginPage = window.location.pathname.includes('index.html') || 
+                           window.location.pathname === '/' || 
+                           window.location.pathname.endsWith('/');
+        
+        if (isLoginPage) {
+          console.log('🔐 On login page with valid token - redirecting to chat');
+          setTimeout(() => {
+            window.location.href = 'chat.html';
+          }, 500);
+        } else {
+          console.log('🔐 On protected page with valid token - rendering app normally');
+          // App will render normally
+        }
+      } else {
+        // Response succeeded but no user data
+        console.log('🔐 /auth/me succeeded but no user data - clearing token');
+        clearAuthData();
+        window.AuthStatus.state = 'unauthenticated';
+        
+        updateAuthStatusUI('unauthenticated', 'Session invalid');
+        
+        // Redirect to login page
+        setTimeout(() => {
+          window.location.href = 'index.html';
+        }, 1000);
+      }
+    } else {
+      // 6. /auth/me failed - token is invalid
+      console.log('🔐 CRITICAL: /auth/me failed - clearing invalid token');
+      clearAuthData();
+      window.AuthStatus.state = 'unauthenticated';
+      
+      const errorMessage = response?.message || 'Session expired';
+      updateAuthStatusUI('unauthenticated', errorMessage);
+      
+      // Show login page ONLY
+      const isLoginPage = window.location.pathname.includes('index.html') || 
+                         window.location.pathname === '/' || 
+                         window.location.pathname.endsWith('/');
+      
+      if (isLoginPage) {
+        console.log('🔐 Already on login page - showing login form');
+        ensureLoginFormVisible();
+      } else {
+        console.log('🔐 Redirecting to login page');
+        window.location.href = 'index.html';
+      }
+    }
+  } catch (error) {
+    // 7. Handle errors during auth check
+    console.error('🔐 CRITICAL: Error during auth check:', error);
+    
+    // Check error type
+    if (error.message.includes('Network') || 
+        error.message.includes('fetch') ||
+        error.message.includes('timeout')) {
+      // Network error - keep token but mark as unknown
+      console.log('🔐 Network error during auth check - keeping token');
+      window.AuthStatus.state = 'unknown';
+      window.AuthStatus.checking = false;
+      
+      updateAuthStatusUI('unknown', 'Network issue - session pending');
+      
+      // Try to get user from localStorage
+      const userStr = localStorage.getItem('currentUser');
+      if (userStr) {
+        try {
+          window.AuthStatus.user = JSON.parse(userStr);
+          window.currentUser = window.AuthStatus.user;
+        } catch (e) {
+          console.error('Error parsing user from localStorage:', e);
+        }
+      }
+    } else {
+      // Other errors - clear token to be safe
+      console.log('🔐 Other error during auth check - clearing token');
+      clearAuthData();
+      window.AuthStatus.state = 'unauthenticated';
+      window.AuthStatus.checking = false;
+      
+      updateAuthStatusUI('unauthenticated', 'Session check failed');
+      
+      // Redirect to login page
+      setTimeout(() => {
+        window.location.href = 'index.html';
+      }, 1000);
+    }
+  } finally {
+    if (window.AuthStatus.checking) {
+      window.AuthStatus.checking = false;
+    }
+    window.AuthStatus.lastChecked = new Date();
+  }
+}
+
+/**
+ * Ensures login form is visible (for login page)
+ */
+function ensureLoginFormVisible() {
+  console.log('Ensuring login form is visible...');
+  
+  const loginForm = document.getElementById('login-form');
+  const registerForm = document.getElementById('register-form');
+  const forgotForm = document.getElementById('forgot-form');
+  
+  // Hide other forms
+  if (registerForm) registerForm.style.display = 'none';
+  if (forgotForm) forgotForm.style.display = 'none';
+  
+  // Show login form
+  if (loginForm) {
+    loginForm.style.display = 'block';
+    
+    // Focus on first input
+    const emailInput = loginForm.querySelector('input[type="email"], input[name="email"], input[name="identifier"]');
+    if (emailInput) {
+      setTimeout(() => {
+        emailInput.focus();
+      }, 100);
+    }
+  }
+  
+  updateAuthButtonStates('login');
+}
+
+/**
+ * NEW: Verify token for auto-login (only used on login page)
+ */
+async function verifyTokenForAutoLogin(token) {
+  try {
+    if (!window.api || typeof window.api !== 'function') {
+      console.log('API not available for auto-login verification');
+      return false;
+    }
+    
+    console.log('Verifying token for auto-login...');
+    const response = await window.api('/auth/verify', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    console.log('Auto-login verification response:', response);
+    
+    if (response && response.success === true && response.user) {
+      console.log('Auto-login verification successful');
+      
+      // Update auth state
+      window.AuthStatus.state = 'authenticated';
+      window.AuthStatus.user = response.user;
+      window.AuthStatus.token = token;
+      window.currentUser = response.user;
+      
+      // Save user info
+      localStorage.setItem('currentUser', JSON.stringify(response.user));
+      
+      // Dispatch event
+      document.dispatchEvent(
+        new CustomEvent('auth:login', { detail: response.user })
+      );
+      
+      updateAuthStatusUI('authenticated', 'Auto-login successful!');
+      
+      // Redirect to chat page
+      console.log('Redirecting to chat.html...');
+      setTimeout(() => {
+        window.location.href = 'chat.html';
+      }, 1000);
+      
+      return true;
+    } else {
+      // Verification failed but don't clear token - let checkAuthOnAppLoad handle it
+      console.log('Auto-login verification failed');
+      return false;
+    }
+  } catch (error) {
+    console.error('Auto-login verification error:', error);
+    return false;
+  }
+}
+
 /**
  * Checks if user is already logged in via JWT and validates token
  * Returns true if auto-login succeeds, false otherwise
@@ -298,6 +621,7 @@ async function checkAutoLogin() {
   
   if (!authData || !authData.token) {
     console.log('No auth data found in localStorage');
+    window.AuthStatus.state = 'unauthenticated';
     return false;
   }
   
@@ -343,7 +667,7 @@ async function checkAutoLogin() {
         localStorage.setItem('currentUser', JSON.stringify(result.user));
         
         // Update AuthStatus
-        window.AuthStatus.isAuthenticated = true;
+        window.AuthStatus.state = 'authenticated';
         window.AuthStatus.user = result.user;
         window.AuthStatus.token = authData.token;
         
@@ -1053,21 +1377,24 @@ function updateNetworkStatusUI(status, message) {
 }
 
 // ============================================================================
-// AUTH STATUS UI UPDATES (NEW)
+// AUTH STATUS UI UPDATES (UPDATED - THREE STATES)
 // ============================================================================
 
 /**
  * Updates the AUTH status indicator in the UI
  * Separate from network status
+ * Now supports three states: unknown, authenticated, unauthenticated
  */
 function updateAuthStatusUI(status, message) {
   console.log(`AUTH STATUS UPDATE: ${status} - ${message}`);
   
   // Update AuthStatus state
   if (status === 'authenticated') {
-    window.AuthStatus.isAuthenticated = true;
+    window.AuthStatus.state = 'authenticated';
   } else if (status === 'unauthenticated') {
-    window.AuthStatus.isAuthenticated = false;
+    window.AuthStatus.state = 'unauthenticated';
+  } else if (status === 'unknown') {
+    window.AuthStatus.state = 'unknown';
   }
   
   // Find or create auth status indicator
@@ -1121,11 +1448,22 @@ function updateAuthStatusUI(status, message) {
       indicator.style.display = 'block';
       break;
       
+    case 'unknown':
+      indicator.style.background = '#6b7280'; // Gray
+      indicator.style.color = '#ffffff';
+      indicator.innerHTML = '⏳ ' + (message || 'Checking authentication...');
+      indicator.style.display = 'block';
+      indicator.classList.add('pulse-animation');
+      
+      // Don't auto-hide unknown state
+      break;
+      
     case 'error':
       indicator.style.background = '#ef4444'; // Red
       indicator.style.color = '#ffffff';
       indicator.innerHTML = '⚠️ ' + (message || 'Authentication error');
       indicator.style.display = 'block';
+      indicator.classList.remove('pulse-animation');
       
       // Auto-hide after 5 seconds for errors
       setTimeout(() => {
@@ -1145,6 +1483,7 @@ function updateAuthStatusUI(status, message) {
       indicator.style.color = '#ffffff';
       indicator.innerHTML = '✅ ' + (message || 'Success');
       indicator.style.display = 'block';
+      indicator.classList.remove('pulse-animation');
       
       // Auto-hide after 3 seconds
       setTimeout(() => {
@@ -1166,7 +1505,8 @@ function updateAuthStatusUI(status, message) {
       status: status,
       message: message,
       timestamp: new Date().toISOString(),
-      isAuthenticated: window.AuthStatus.isAuthenticated
+      state: window.AuthStatus.state,
+      isAuthenticated: window.AuthStatus.state === 'authenticated'
     }
   });
   window.dispatchEvent(event);
@@ -1298,15 +1638,10 @@ async function updateNetworkStatusFromApi() {
     // Update NETWORK UI only
     updateNetworkStatusUI(statusInfo.status, statusInfo.message);
     
-    // If backend is reachable but we're not authenticated, update auth status
-    if (statusInfo.backendReachable && !window.AuthStatus.isAuthenticated) {
-      // Check if we have a token but it might be expired
-      const authData = getAuthData();
-      if (authData && authData.token) {
-        updateAuthStatusUI('unauthenticated', 'Session expired. Please log in.');
-      } else {
-        updateAuthStatusUI('unauthenticated', 'Please log in to continue.');
-      }
+    // If backend is reachable, check auth status
+    if (statusInfo.backendReachable) {
+      // Check auth status without clearing token on failure
+      checkAuthStatus();
     }
   } catch (error) {
     console.error('Error updating network status from api.js:', error);
@@ -1733,6 +2068,7 @@ function integrateWithAppState() {
   // Ensure auth state exists in AppState
   if (!window.AppState.auth) {
     window.AppState.auth = {
+      state: 'unknown', // Three states: unknown, authenticated, unauthenticated
       isAuthenticated: false,
       user: null,
       lastChecked: null
@@ -1754,7 +2090,8 @@ function integrateWithAppState() {
     
     // Sync AuthStatus with AppState.auth
     if (window.AppState && window.AppState.auth) {
-      window.AppState.auth.isAuthenticated = window.AuthStatus.isAuthenticated;
+      window.AppState.auth.state = window.AuthStatus.state;
+      window.AppState.auth.isAuthenticated = window.AuthStatus.state === 'authenticated';
       window.AppState.auth.user = window.AuthStatus.user;
       window.AppState.auth.lastChecked = window.AuthStatus.lastChecked;
     }
@@ -1858,20 +2195,205 @@ function showAuthError(message) {
 }
 
 // ============================================================================
-// IMPROVED AUTO-LOGIN FUNCTION FOR SESSION RESTORE
+// IMPROVED SESSION CHECK FUNCTION (LEGACY - KEPT FOR COMPATIBILITY)
 // ============================================================================
 
 /**
- * Improved auto-login function that checks session on app load
+ * NEW: Check authentication status without clearing token on failure
+ * This is used for verification, NOT as a gate
+ */
+async function checkAuthStatus() {
+  // Don't check if already checking
+  if (window.AuthStatus.checking) {
+    console.log('Auth check already in progress, skipping');
+    return;
+  }
+  
+  window.AuthStatus.checking = true;
+  
+  try {
+    const token = getAuthToken();
+    
+    // No token means unauthenticated
+    if (!token) {
+      console.log('No token found, setting auth state to unauthenticated');
+      window.AuthStatus.state = 'unauthenticated';
+      window.AuthStatus.token = null;
+      window.AuthStatus.user = null;
+      updateAuthStatusUI('unauthenticated', 'Please log in');
+      return;
+    }
+    
+    // Validate token format
+    if (!validateToken(token)) {
+      console.log('Invalid token format, clearing auth data');
+      clearAuthData();
+      updateAuthStatusUI('unauthenticated', 'Invalid session. Please log in again.');
+      return;
+    }
+    
+    // Check if we're on a page that needs auth verification
+    const isChatPage = window.location.pathname.includes('chat.html');
+    const isLoginPage = window.location.pathname.includes('index.html') || 
+                        window.location.pathname === '/' || 
+                        window.location.pathname.endsWith('/');
+    
+    // If we're on login page and have a token, try to verify it
+    // This is for auto-login functionality
+    if (isLoginPage && token) {
+      console.log('On login page with token, attempting verification for auto-login');
+      await verifyTokenForAutoLogin(token);
+      return;
+    }
+    
+    // If we're on chat page (or other protected page), we should have valid auth
+    // But don't clear token on verification failure - just log it
+    if (isChatPage && typeof window.api === 'function') {
+      console.log('On protected page, verifying token...');
+      try {
+        const response = await window.api('/auth/me', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        console.log('Auth verification response:', response);
+        
+        if (response && (response.success || response.user)) {
+          const user = response.user || response.data?.user;
+          if (user) {
+            console.log('Token verification successful');
+            window.AuthStatus.state = 'authenticated';
+            window.AuthStatus.user = user;
+            window.AuthStatus.token = token;
+            window.currentUser = user;
+            
+            // Update user in localStorage if different
+            const currentUserStr = localStorage.getItem('currentUser');
+            if (!currentUserStr || JSON.parse(currentUserStr).id !== user.id) {
+              localStorage.setItem('currentUser', JSON.stringify(user));
+            }
+            
+            updateAuthStatusUI('authenticated', 'Session active');
+          } else {
+            // Verification returned but no user - token might be invalid
+            console.log('Token verification failed - no user data');
+            // DON'T clear token here - only mark as unknown
+            window.AuthStatus.state = 'unknown';
+            updateAuthStatusUI('unknown', 'Verifying session...');
+          }
+        } else {
+          // Verification failed but don't clear token
+          const errorMessage = response?.message || 'Verification failed';
+          console.log('Token verification returned error:', errorMessage);
+          
+          // Check for specific token errors that warrant clearing
+          if (errorMessage === 'Token expired' || errorMessage === 'Invalid token') {
+            console.log('Token explicitly invalid or expired, clearing auth data');
+            clearAuthData();
+            updateAuthStatusUI('unauthenticated', 'Session expired. Please log in again.');
+            
+            // Redirect to login if on protected page
+            if (isChatPage) {
+              console.log('Redirecting to login page...');
+              window.location.href = 'index.html';
+            }
+          } else {
+            // Other errors - keep token but mark as unknown
+            window.AuthStatus.state = 'unknown';
+            updateAuthStatusUI('unknown', 'Session verification pending...');
+          }
+        }
+      } catch (error) {
+        console.error('Error verifying token:', error.message);
+        
+        // Network or server error - DON'T clear token
+        // Just mark as unknown and log the error
+        window.AuthStatus.state = 'unknown';
+        updateAuthStatusUI('unknown', 'Cannot verify session (network issue)');
+        
+        // If we're on chat page, we should still show UI
+        // Don't redirect on network errors
+      }
+    } else {
+      // Not on a page that requires immediate verification
+      // Just check if token exists and is valid format
+      if (token && validateToken(token)) {
+        window.AuthStatus.state = 'authenticated';
+        window.AuthStatus.token = token;
+        
+        // Try to get user from localStorage
+        const userStr = localStorage.getItem('currentUser');
+        if (userStr) {
+          try {
+            window.AuthStatus.user = JSON.parse(userStr);
+            window.currentUser = window.AuthStatus.user;
+          } catch (e) {
+            console.error('Error parsing user from localStorage:', e);
+          }
+        }
+        
+        updateAuthStatusUI('authenticated', 'Session restored');
+      } else {
+        window.AuthStatus.state = 'unauthenticated';
+        updateAuthStatusUI('unauthenticated', 'Please log in');
+      }
+    }
+  } catch (error) {
+    console.error('Error checking auth status:', error);
+    // On any error, mark as unknown (not unauthenticated)
+    window.AuthStatus.state = 'unknown';
+    updateAuthStatusUI('unknown', 'Unable to determine auth status');
+  } finally {
+    window.AuthStatus.checking = false;
+    window.AuthStatus.lastChecked = new Date();
+  }
+}
+
+/**
+ * Improved session check that doesn't clear token on /auth/me failure
  */
 async function checkSessionOnLoad() {
   console.log('Checking session on app load...');
   
+  // Start with unknown state
+  window.AuthStatus.state = 'unknown';
+  updateAuthStatusUI('unknown', 'Checking authentication...');
+  
   // Check localStorage for token
-  const token = localStorage.getItem('authToken') || localStorage.getItem('authUser');
+  const token = getAuthToken();
+  
   if (!token) {
     console.log('No token found in localStorage');
+    window.AuthStatus.state = 'unauthenticated';
+    window.AuthStatus.token = null;
+    window.AuthStatus.user = null;
+    updateAuthStatusUI('unauthenticated', 'Please log in');
     return;
+  }
+  
+  // Validate token format
+  if (!validateToken(token)) {
+    console.log('Invalid token format, clearing auth data');
+    clearAuthData();
+    updateAuthStatusUI('unauthenticated', 'Invalid session. Please log in again.');
+    return;
+  }
+  
+  // We have a token, mark as authenticated initially
+  window.AuthStatus.state = 'authenticated';
+  window.AuthStatus.token = token;
+  
+  // Try to get user from localStorage
+  const userStr = localStorage.getItem('currentUser');
+  if (userStr) {
+    try {
+      window.AuthStatus.user = JSON.parse(userStr);
+      window.currentUser = window.AuthStatus.user;
+    } catch (e) {
+      console.error('Error parsing user from localStorage:', e);
+    }
   }
   
   // Check if we're on login page
@@ -1879,102 +2401,44 @@ async function checkSessionOnLoad() {
                       window.location.pathname === '/' || 
                       window.location.pathname.endsWith('/');
   
-  if (isLoginPage) {
-    console.log('On login page, attempting auto-login...');
-    await checkAutoLogin();
-    return;
-  }
+  const isChatPage = window.location.pathname.includes('chat.html');
   
-  // We're on another page (like chat.html), validate the token
-  try {
-    if (typeof window.api === 'function') {
-      console.log('Validating existing token on non-login page...');
-      
-      // Try to get user info
-      const response = await window.api('/auth/me', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      console.log('Session validation response:', response);
-      
-      // Handle both response formats
-      const user = response.user || response.data?.user;
-      
-      if (user) {
-        console.log('Session is valid, user:', user);
-        window.currentUser = user;
-        
-        // Update AuthStatus
-        window.AuthStatus.isAuthenticated = true;
-        window.AuthStatus.user = user;
-        window.AuthStatus.token = token;
-        
-        // Save user info if not already saved
-        if (!localStorage.getItem('currentUser')) {
-          localStorage.setItem('currentUser', JSON.stringify(user));
-        }
-        
-        // Dispatch auth:login event
-        document.dispatchEvent(
-          new CustomEvent('auth:login', { detail: user })
-        );
-        
-        // Update auth status (not network status)
-        updateAuthStatusUI('authenticated', 'Session restored');
-      } else {
-        console.log('Invalid session, clearing auth data');
-        clearAuthData();
-        
-        // Update auth status
-        updateAuthStatusUI('unauthenticated', 'Session expired. Please log in.');
-        
-        // If we're on chat page without valid session, redirect to login
-        if (window.location.pathname.includes('chat.html')) {
-          console.log('Redirecting to login page...');
-          window.location.href = 'index.html';
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Session validation failed:', error);
-    clearAuthData();
-    
-    // Update auth status
-    updateAuthStatusUI('unauthenticated', 'Session validation failed');
-    
-    // If we're on chat page and validation fails, redirect to login
-    if (window.location.pathname.includes('chat.html')) {
-      console.log('Redirecting to login page due to validation error...');
-      window.location.href = 'index.html';
-    }
+  if (isLoginPage) {
+    console.log('On login page with token, showing login form (auto-login will handle verification)');
+    // Show login form but keep token for potential auto-login
+    updateAuthStatusUI('authenticated', 'Session found');
+  } else if (isChatPage) {
+    console.log('On chat page with token, verifying session...');
+    // On protected page, verify token but don't clear on failure
+    await checkAuthStatus();
+  } else {
+    // Other pages - just mark as authenticated if we have token
+    updateAuthStatusUI('authenticated', 'Session active');
   }
 }
 
 // ============================================================================
-// INITIALIZATION - ENHANCED
+// CRITICAL: ENHANCED INITIALIZATION FOR RELIABLE AUTH
 // ============================================================================
 
 /**
  * Initializes network status monitoring and auth forms
  */
 async function initializeAuthUI() {
-  console.log('STRICT API-DRIVEN: Initializing auth UI and network status monitoring...');
+  console.log('🔐 CRITICAL: Initializing auth UI with reliable auth checks...');
   
-  // 1. IMMEDIATELY set up auth forms
+  // 1. CRITICAL: First check authentication state on app load
+  console.log('🔐 CRITICAL: Starting authentication check on app load...');
+  await checkAuthOnAppLoad();
+  
+  // 2. Set up auth forms if we're on login page
   const currentPage = window.location.pathname;
   const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
   
   if (isLoginPage) {
-    console.log('STRICT API-DRIVEN: On login page, setting up forms IMMEDIATELY...');
+    console.log('🔐 On login page, setting up forms...');
     setupAuthFormsImmediately();
   }
-  
-  // 2. Check for session on load (improved auto-login)
-  console.log('STRICT API-DRIVEN: Checking session on load...');
-  await checkSessionOnLoad();
   
   // 3. Set initial NETWORK UI state (connectivity only)
   if (typeof window.api === 'function') {
@@ -2010,7 +2474,7 @@ async function initializeAuthUI() {
     startPeriodicNetworkUpdates();
   }, 1000);
   
-  console.log('STRICT API-DRIVEN: Auth UI and network monitoring initialized');
+  console.log('🔐 CRITICAL: Auth UI initialized with reliable auth checks');
 }
 
 // ============================================================================
@@ -2070,26 +2534,26 @@ window.logoutUser = function() {
 };
 
 // ============================================================================
-// START AUTH UI WHEN DOCUMENT IS READY
+// CRITICAL: MAIN INITIALIZATION - PREVENTS WHITE SCREENS AND AUTH LOOPS
 // ============================================================================
 
 /**
  * Main initialization function
  */
 function initialize() {
-  console.log('Initializing auth system...');
+  console.log('🔐 CRITICAL: Initializing auth system with reliable refresh handling...');
   
   // Setup forms immediately when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      console.log('DOMContentLoaded - Starting auth initialization');
+      console.log('🔐 DOMContentLoaded - Starting CRITICAL auth initialization');
       
-      // First, set up forms immediately
+      // First, set up forms immediately if on login page
       const currentPage = window.location.pathname;
       const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
       
       if (isLoginPage) {
-        console.log('Setting up forms immediately on DOMContentLoaded');
+        console.log('🔐 Setting up forms immediately on DOMContentLoaded');
         setupAuthFormsImmediately();
       }
       
@@ -2097,14 +2561,15 @@ function initialize() {
       initializeAuthUI();
     });
   } else {
-    // DOM already loaded, set up forms immediately
-    console.log('DOM already loaded, setting up forms immediately');
+    // DOM already loaded
+    console.log('🔐 DOM already loaded, starting CRITICAL auth initialization');
     
+    // First, set up forms immediately if on login page
     const currentPage = window.location.pathname;
     const isLoginPage = currentPage.includes('index.html') || currentPage === '/' || currentPage.endsWith('/');
     
     if (isLoginPage) {
-      console.log('Setting up forms immediately (DOM already ready)');
+      console.log('🔐 Setting up forms immediately (DOM already ready)');
       setupAuthFormsImmediately();
     }
     
@@ -2116,4 +2581,4 @@ function initialize() {
 // Start initialization
 initialize();
 
-console.log('app.ui.auth.js - STRICT API-DRIVEN Auth UI with SEPARATED Network/Auth status - LOGIC FIX APPLIED');
+console.log('app.ui.auth.js - CRITICAL UPDATE: Reliable auth state across refreshes - prevents white screens and auth loops');
