@@ -211,18 +211,67 @@ const LOCAL_STORAGE_KEYS = {
 // Flag to track if page is already initialized
 let isPageInitialized = false;
 
-// API readiness tracking
-let apiReady = false;
-let apiReadinessConfirmed = false;
-let apiCheckInterval = null;
-let apiReadyResolvers = [];
-let apiReadyPromise = new Promise((resolve) => {
-    apiReadyResolvers.push(resolve);
-});
-
 // Token management variables
+let accessToken = null;
 let refreshToken = null;
 let isTokenValid = false;
+
+// =============================================
+// BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
+// =============================================
+
+async function bootstrapIframe() {
+    console.log('=== BOOTSTRAP IFRAME START ===');
+    
+    try {
+        // 1. Load tokens from localStorage
+        const hasToken = loadTokensFromStorage();
+        if (!hasToken) {
+            console.log('No authentication token found');
+            redirectToLogin();
+            return false;
+        }
+        
+        // 2. Validate token with /api/auth/me
+        console.log('Validating token with /api/auth/me...');
+        const meResponse = await callApi('GET', '/api/auth/me');
+        
+        if (!meResponse || !meResponse.success) {
+            console.log('Token validation failed:', meResponse?.error);
+            redirectToLogin();
+            return false;
+        }
+        
+        // 3. Set current user from API response
+        currentUser = meResponse.data;
+        userData = {
+            displayName: currentUser.displayName || currentUser.name || 'User',
+            username: currentUser.username || null,
+            email: currentUser.email || null,
+            photoURL: currentUser.photoURL || currentUser.avatar || null
+        };
+        
+        console.log('User authenticated:', currentUser.id || currentUser._id || currentUser.uid);
+        
+        // 4. Save user to localStorage
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+            uid: currentUser.id || currentUser._id || currentUser.uid,
+            displayName: currentUser.displayName || currentUser.name,
+            email: currentUser.email,
+            photoURL: currentUser.photoURL || currentUser.avatar
+        }));
+        
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+        
+        console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
+        return true;
+        
+    } catch (error) {
+        console.error('Bootstrap error:', error);
+        redirectToLogin();
+        return false;
+    }
+}
 
 // =============================================
 // TOKEN MANAGEMENT FUNCTIONS
@@ -278,19 +327,13 @@ async function refreshAccessToken() {
     try {
         console.log('Attempting to refresh access token...');
         
-        const response = await fetch('/api/auth/refresh', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${accessToken}`
-            },
-            body: JSON.stringify({
-                refreshToken: refreshToken
-            })
+        const response = await callApi('POST', '/api/auth/refresh', {
+            refreshToken: refreshToken
         });
         
-        if (response.ok) {
-            const data = await response.json();
+        if (response && response.success && response.data) {
+            const data = response.data;
+            
             if (data.accessToken) {
                 accessToken = data.accessToken;
                 localStorage.setItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
@@ -320,6 +363,12 @@ async function refreshAccessToken() {
 // Redirect to login page
 function redirectToLogin() {
     console.log('Redirecting to login page...');
+    // Clear tokens
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.REFRESH_TOKEN);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+    
     // Redirect to the main app login page
     window.location.href = '/index.html?redirect=' + encodeURIComponent(window.location.pathname);
 }
@@ -343,104 +392,48 @@ async function getCurrentToken() {
     return accessToken;
 }
 
-// Enhanced API access helper with token validation
-function getApi() {
-    if (window.parent && window.parent.api) {
-        return window.parent.api;
-    } else if (window.api) {
-        return window.api;
-    } else {
-        return null;
-    }
-}
+// =============================================
+// API CALL FUNCTION - SINGLE ENTRY POINT
+// =============================================
 
-// Enhanced safe API call with token handling
-async function safeApiCall(method, endpoint, data = null) {
-    // First, ensure we have a valid token
+async function callApi(method, endpoint, data = null, options = {}) {
+    // Get current token
     const token = await getCurrentToken();
     if (!token) {
         console.error('No valid token available for API call');
-        return { success: false, error: 'Authentication required', isOffline: true, requiresAuth: true };
+        return { success: false, error: 'Authentication required', requiresAuth: true };
     }
     
-    // Wait for API to be ready
-    if (!apiReady) {
-        console.log(`Waiting for API to be ready before calling ${method} ${endpoint}`);
-        try {
-            await apiReadyPromise;
-        } catch (error) {
-            console.error('Error waiting for API readiness:', error);
-            return { success: false, error: 'API not ready', isOffline: true };
-        }
-    }
+    const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     
-    // Now proceed with the API call
     try {
-        const api = getApi();
-        if (!api) {
-            console.log(`API not available for ${method} ${endpoint}`);
-            // If API is not available, try direct fetch with token
-            return await directApiCall(method, endpoint, data, token);
-        }
-        
-        // Check if method exists on api object
-        if (typeof api[method] !== 'function') {
-            console.warn(`API method ${method} not available, trying direct fetch`);
-            return await directApiCall(method, endpoint, data, token);
-        }
-        
-        console.log(`API call: ${method} ${endpoint}`);
-        
-        // If the API object supports token injection, use it
-        if (api.setAuthToken && typeof api.setAuthToken === 'function') {
-            api.setAuthToken(token);
-        }
-        
-        const result = await api[method](endpoint, data);
-        return result || { success: false, error: 'No response from API', isOffline: true };
-        
-    } catch (error) {
-        console.error(`API ${method} error:`, error);
-        return { 
-            success: false, 
-            error: error.message || 'Unknown error',
-            isOffline: error.message?.includes('Network') || error.message?.includes('Failed to fetch')
-        };
-    }
-}
-
-// Direct API call with token for when parent API is not available
-async function directApiCall(method, endpoint, data = null, token) {
-    try {
-        const baseUrl = window.location.origin;
-        const url = `${baseUrl}/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-        
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
         };
         
-        const options = {
-            method: method.toUpperCase(),
+        const fetchOptions = {
+            method: method,
             headers: headers,
             credentials: 'include'
         };
         
-        if (data && (method.toLowerCase() === 'post' || method.toLowerCase() === 'put' || method.toLowerCase() === 'patch')) {
-            options.body = JSON.stringify(data);
+        if (data && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+            fetchOptions.body = JSON.stringify(data);
         }
         
-        console.log(`Direct API call: ${method} ${url}`);
+        console.log(`API call: ${method} ${url}`);
         
-        const response = await fetch(url, options);
+        const response = await fetch(url, fetchOptions);
         
+        // Handle 401 Unauthorized
         if (response.status === 401) {
             console.log('Token expired or invalid, attempting refresh...');
             const newToken = await refreshAccessToken();
             if (newToken) {
                 // Retry with new token
                 headers.Authorization = `Bearer ${newToken}`;
-                const retryResponse = await fetch(url, options);
+                const retryResponse = await fetch(url, fetchOptions);
                 return await handleApiResponse(retryResponse);
             } else {
                 redirectToLogin();
@@ -451,10 +444,10 @@ async function directApiCall(method, endpoint, data = null, token) {
         return await handleApiResponse(response);
         
     } catch (error) {
-        console.error(`Direct API ${method} error:`, error);
+        console.error(`API ${method} error:`, error);
         return { 
             success: false, 
-            error: error.message || 'Unknown error',
+            error: error.message || 'Network error',
             isOffline: error.message?.includes('Network') || error.message?.includes('Failed to fetch')
         };
     }
@@ -495,197 +488,53 @@ async function handleApiResponse(response) {
     }
 }
 
-// Background sync safe call with API readiness check
-async function backgroundApiCall(method, endpoint, data = null) {
-    // Don't make background calls if API isn't ready
-    if (!apiReady) {
-        return null;
-    }
-    
-    // Check if we have a valid token for background sync
-    if (!accessToken || isTokenExpired(accessToken)) {
-        // Try to refresh token silently for background sync
-        try {
-            const token = await getCurrentToken();
-            if (!token) {
-                return null; // Silent fail for background sync
-            }
-        } catch (error) {
-            return null; // Silent fail for background sync
-        }
-    }
-    
-    try {
-        const api = getApi();
-        if (!api) {
-            // Try direct call for background sync
-            const token = await getCurrentToken();
-            if (!token) return null;
-            
-            return await directApiCall(method, endpoint, data, token);
-        }
-        
-        // Skip background sync if API method doesn't exist
-        if (typeof api[method] !== 'function') {
-            const token = await getCurrentToken();
-            if (!token) return null;
-            
-            return await directApiCall(method, endpoint, data, token);
-        }
-        
-        return await safeApiCall(method, endpoint, data);
-    } catch (error) {
-        // Silent fail for background sync
-        console.log('Background sync error (silent):', error.message);
-        return null;
-    }
+// Safe API call wrapper for background sync
+async function safeApiCall(method, endpoint, data = null) {
+    return await callApi(method.toUpperCase(), `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, data);
 }
 
-// Main initialization function
-function initGroupPage() {
+// =============================================
+// MAIN INITIALIZATION
+// =============================================
+
+async function initGroupPage() {
     if (isPageInitialized) {
         console.log('Group page already initialized');
         return;
     }
     
     isPageInitialized = true;
-    console.log('=== PASSIVE IFRAME GROUP PAGE INITIALIZATION START ===');
+    console.log('=== GROUP PAGE INITIALIZATION START ===');
     
-    // First, load tokens from storage
-    const hasToken = loadTokensFromStorage();
-    if (!hasToken) {
-        console.log('No authentication token found, user may need to login');
-        // Don't redirect immediately, let the user interact first
-        // The API calls will handle redirect when needed
-    } else {
-        console.log('Token loaded successfully, user is authenticated');
-        isTokenValid = true;
+    // 1. Bootstrap the iframe
+    const isAuthenticated = await bootstrapIframe();
+    if (!isAuthenticated) {
+        console.log('Authentication failed, stopping initialization');
+        return;
     }
     
-    // Set up API ready listener (modified to not wait for token messages)
-    setupApiReadyListener();
+    // 2. Check mobile
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
     
-    // Load cached data instantly (doesn't require API)
+    // 3. Load cached data instantly
     loadCachedDataInstantly();
     
-    // Start API readiness check
-    checkApiReady();
+    // 4. Set up event listeners
+    setupEventListeners();
+    setupGroupInvitesListener();
+    
+    // 5. Initialize app
+    await initializeApp();
+    
+    console.log('=== GROUP PAGE INITIALIZATION COMPLETE ===');
 }
 
-// Set up API ready listener - MODIFIED: Removed token message dependency
-function setupApiReadyListener() {
-    console.log('Setting up API ready listener...');
-    
-    window.addEventListener('message', function(event) {
-        console.log('Received message from parent:', event.data);
-        
-        // Handle API ready messages (not token messages)
-        if (event.data === 'API_READY' || event.data?.type === 'API_READY') {
-            console.log('API_READY message received from parent');
-            markApiAsReady();
-        }
-        
-        // Note: We no longer handle TOKEN_READY or AUTH_READY messages
-        // because we get tokens directly from localStorage
-    });
-    
-    // Check if API is already available
-    setTimeout(() => {
-        if (!apiReadinessConfirmed) {
-            const api = getApi();
-            if (api && typeof api.get === 'function') {
-                console.log('API already available, marking as ready');
-                markApiAsReady();
-            }
-        }
-    }, 500);
-}
-
-// Mark API as ready and resolve all pending promises
-function markApiAsReady() {
-    if (apiReadinessConfirmed) {
-        return;
-    }
-    
-    apiReadinessConfirmed = true;
-    apiReady = true;
-    
-    // Clear the interval if it exists
-    if (apiCheckInterval) {
-        clearInterval(apiCheckInterval);
-        apiCheckInterval = null;
-    }
-    
-    console.log('API marked as ready - stopping retries');
-    
-    // Resolve all API ready promises
-    apiReadyResolvers.forEach(resolve => resolve());
-    apiReadyResolvers = [];
-    
-    // Initialize the app now that API is ready
-    initializeApp();
-}
-
-// Check if API is ready - with guard flag to prevent infinite retries
-function checkApiReady() {
-    // If readiness already confirmed, don't check again
-    if (apiReadinessConfirmed) {
-        console.log('API readiness already confirmed, skipping check');
-        return;
-    }
-    
-    // Check if API is already available
-    const api = getApi();
-    if (api && typeof api.get === 'function') {
-        markApiAsReady();
-    } else {
-        // Only set up interval if not already set and readiness not confirmed
-        if (!apiCheckInterval && !apiReadinessConfirmed) {
-            console.log('API not ready yet, starting interval check (will stop when ready)');
-            apiCheckInterval = setInterval(() => {
-                // Check if we should continue
-                if (apiReadinessConfirmed) {
-                    clearInterval(apiCheckInterval);
-                    apiCheckInterval = null;
-                    return;
-                }
-                
-                const apiCheck = getApi();
-                if (apiCheck && typeof apiCheck.get === 'function') {
-                    markApiAsReady();
-                } else {
-                    console.log('API check interval: still waiting...');
-                }
-            }, 1000);
-        }
-    }
-}
-
-// Load cached data INSTANTLY on page load (doesn't require API)
+// Load cached data INSTANTLY on page load
 function loadCachedDataInstantly() {
     console.log('=== INSTANT CACHE LOAD START (GROUPS) ===');
     
     try {
-        // Load user from cache
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-        if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            console.log('✓ Instant: User loaded from cache');
-        }
-        
-        // Load user profile
-        const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-        if (cachedProfile) {
-            userData = JSON.parse(cachedProfile);
-        }
-        
-        // Load friends
-        const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
-        if (cachedFriends) {
-            friends = JSON.parse(cachedFriends);
-            console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
-        }
-        
         // Load groups
         const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
         if (groupsData) {
@@ -709,6 +558,13 @@ function loadCachedDataInstantly() {
         
         const adminData = localStorage.getItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS);
         if (adminData) adminGroups = JSON.parse(adminData);
+        
+        // Load friends
+        const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+        if (cachedFriends) {
+            friends = JSON.parse(cachedFriends);
+            console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
+        }
         
         // Load unique features data
         loadUniqueFeaturesData();
@@ -883,136 +739,33 @@ function addGroupItemInstant(groupData, container, type) {
     container.appendChild(groupItem);
 }
 
-// Calculate group pulse
-function calculateGroupPulse(groupData) {
-    if (!groupData.lastActivity) return null;
-    
-    const lastActivity = new Date(groupData.lastActivity).getTime();
-    const now = Date.now();
-    const hoursSinceActivity = (now - lastActivity) / (1000 * 60 * 60);
-    
-    if (hoursSinceActivity < 1) {
-        return { text: 'Very Active', class: 'pulse-active' };
-    } else if (hoursSinceActivity < 6) {
-        return { text: 'Active', class: 'pulse-active' };
-    } else if (hoursSinceActivity < 24) {
-        return { text: 'Quiet', class: 'pulse-quiet' };
-    } else if (hoursSinceActivity < 72) {
-        return { text: 'Inactive', class: 'pulse-quiet' };
-    } else {
-        return { text: 'Dormant', class: 'pulse-quiet' };
-    }
-}
-
 async function initializeApp() {
     console.log('=== FULL GROUP APP INITIALIZATION START ===');
     
-    if (!apiReady) {
-        console.log('Waiting for API to be ready...');
-        // This shouldn't happen since we wait for apiReadyPromise, but just in case
-        try {
-            await apiReadyPromise;
-        } catch (error) {
-            console.error('Failed to wait for API readiness:', error);
-        }
-    }
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    
-    await loadUserFromCache();
-    
-    // Only try to load user from API if API is ready
-    if (apiReady) {
-        await tryLoadUserFromAPI();
-    } else {
-        console.log('API not ready, skipping user load from API');
-    }
-    
-    setupEventListeners();
-    setupGroupInvitesListener();
-    
     showNotification('Groups system ready with unique features', 'success');
     
-    // Start background sync after a delay (only if API is ready)
-    if (apiReady) {
-        setTimeout(() => {
-            backgroundSyncWithServer();
-        }, 1000);
-        
-        // Set up periodic sync
-        setInterval(() => {
-            backgroundSyncWithServer();
-        }, 30000); // Sync every 30 seconds
-    } else {
-        console.log('API not ready, skipping background sync setup');
-    }
+    // Load friends from API
+    await loadFriends();
+    
+    // Load groups from API
+    await syncGroupsFromServer();
+    
+    // Load group invites from API
+    await syncGroupInvitesFromServer();
+    
+    // Start background sync after a delay
+    setTimeout(() => {
+        backgroundSyncWithServer();
+    }, 1000);
+    
+    // Set up periodic sync
+    setInterval(() => {
+        backgroundSyncWithServer();
+    }, 30000); // Sync every 30 seconds
     
     processPendingOfflineActions();
     
     console.log('=== FULL GROUP APP INITIALIZATION COMPLETE ===');
-}
-
-// Load user from cache
-async function loadUserFromCache() {
-    try {
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-        if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            console.log('Loaded user from cache:', currentUser?.uid);
-        }
-        
-        const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-        if (cachedProfile) {
-            userData = JSON.parse(cachedProfile);
-        }
-        
-        if (!currentUser) {
-            currentUser = {
-                uid: 'local_user_' + Date.now(),
-                displayName: 'Local User',
-                email: '',
-                photoURL: ''
-            };
-        }
-        
-    } catch (error) {
-        console.error('Error loading user from cache:', error);
-        currentUser = {
-            uid: 'fallback_user_' + Date.now(),
-            displayName: 'User',
-            email: '',
-            photoURL: ''
-        };
-    }
-}
-
-// Try to load user from API
-async function tryLoadUserFromAPI() {
-    try {
-        // Use safeApiCall which now handles tokens automatically
-        const response = await safeApiCall('get', 'auth/me');
-        if (response && response.success && response.data) {
-            currentUser = response.data;
-            console.log('User detected from API:', currentUser.uid);
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                uid: currentUser.uid,
-                displayName: currentUser.displayName,
-                email: currentUser.email,
-                photoURL: currentUser.photoURL
-            }));
-            
-            userData = {
-                displayName: currentUser.displayName || 'User',
-                username: currentUser.username || null
-            };
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-        }
-    } catch (error) {
-        console.log('Could not load user from API:', error.message);
-    }
 }
 
 // Load friends from API
@@ -1020,35 +773,27 @@ async function loadFriends() {
     if (!currentUser) return;
     
     try {
+        const response = await safeApiCall('get', 'friends/list');
+        if (response && response.success && response.data) {
+            friends = response.data;
+            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+            console.log(`Loaded ${friends.length} friends from API`);
+        }
+    } catch (error) {
+        console.error('Error loading friends:', error);
+        // Load from cache as fallback
         const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cachedFriends) {
             friends = JSON.parse(cachedFriends);
             console.log(`Loaded ${friends.length} friends from cache`);
         }
-        
-        // Only try API if it's ready
-        if (apiReady) {
-            const response = await safeApiCall('get', 'friends/list');
-            if (response && response.success && response.data) {
-                friends = response.data;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                console.log(`Loaded ${friends.length} friends from API`);
-            }
-        }
-    } catch (error) {
-        console.error('Error loading friends:', error);
     }
 }
 
-// Background sync with server - Won't crash on missing API methods
+// Background sync with server
 async function backgroundSyncWithServer() {
     if (!currentUser) {
         console.log('Background sync: Skipping - no user');
-        return;
-    }
-    
-    if (!apiReady) {
-        console.log('Background sync: Skipping - API not ready');
         return;
     }
     
@@ -1058,7 +803,6 @@ async function backgroundSyncWithServer() {
         const syncPromises = [
             syncGroupsFromServer(),
             syncGroupInvitesFromServer(),
-            loadFriends(),
             syncUniqueFeaturesData()
         ];
         
@@ -1076,7 +820,7 @@ async function syncUniqueFeaturesData() {
     if (!currentUser) return;
     
     try {
-        const purposesResponse = await backgroundApiCall('get', 'groups/purposes');
+        const purposesResponse = await safeApiCall('get', 'groups/purposes');
         if (purposesResponse && purposesResponse.success && purposesResponse.data) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_PURPOSES, JSON.stringify(purposesResponse.data));
             
@@ -1088,7 +832,7 @@ async function syncUniqueFeaturesData() {
             });
         }
         
-        const moodsResponse = await backgroundApiCall('get', 'groups/moods');
+        const moodsResponse = await safeApiCall('get', 'groups/moods');
         if (moodsResponse && moodsResponse.success && moodsResponse.data) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MOODS, JSON.stringify(moodsResponse.data));
             
@@ -1100,7 +844,7 @@ async function syncUniqueFeaturesData() {
             });
         }
         
-        const notesResponse = await backgroundApiCall('get', 'groups/notes');
+        const notesResponse = await safeApiCall('get', 'groups/notes');
         if (notesResponse && notesResponse.success && notesResponse.data) {
             notesResponse.data.forEach(note => {
                 const key = LOCAL_STORAGE_KEYS.GROUP_NOTES + note.groupId;
@@ -1113,12 +857,12 @@ async function syncUniqueFeaturesData() {
     }
 }
 
-// Sync groups from server - Won't crash on missing API methods
+// Sync groups from server
 async function syncGroupsFromServer() {
     if (!currentUser) return;
     
     try {
-        const response = await backgroundApiCall('get', 'groups/user');
+        const response = await safeApiCall('get', 'groups/user');
         
         if (!response || !response.success || !response.data) {
             console.log('No groups found on server or API not available');
@@ -1137,8 +881,8 @@ async function syncGroupsFromServer() {
                 type: groupData.privacy || 'private',
                 theme: groupData.theme || 'blue',
                 memberCount: groupData.members ? groupData.members.length : 0,
-                isAdmin: groupData.admins && groupData.admins.includes(currentUser.uid),
-                isCreator: groupData.createdBy === currentUser.uid,
+                isAdmin: groupData.admins && groupData.admins.includes(currentUser.uid || currentUser.id),
+                isCreator: groupData.createdBy === (currentUser.uid || currentUser.id),
                 lastActivity: groupData.lastActivity || groupData.createdAt,
                 purpose: groupData.purpose || '',
                 mood: groupData.mood || '',
@@ -1148,9 +892,9 @@ async function syncGroupsFromServer() {
                 participationModes: groupData.participationModes || {}
             };
             
-            if (groupData.createdBy === currentUser.uid) {
+            if (groupData.createdBy === (currentUser.uid || currentUser.id)) {
                 serverMyGroups.push(groupWithMeta);
-            } else if (groupData.admins && groupData.admins.includes(currentUser.uid)) {
+            } else if (groupData.admins && groupData.admins.includes(currentUser.uid || currentUser.id)) {
                 serverAdminGroups.push(groupWithMeta);
             } else {
                 serverJoinedGroups.push(groupWithMeta);
@@ -1184,12 +928,12 @@ async function syncGroupsFromServer() {
     }
 }
 
-// Sync group invites - Won't crash on missing API methods
+// Sync group invites
 async function syncGroupInvitesFromServer() {
     if (!currentUser) return;
     
     try {
-        const response = await backgroundApiCall('get', 'groups/invites');
+        const response = await safeApiCall('get', 'groups/invites');
         
         const serverInvites = [];
         
@@ -1217,6 +961,140 @@ async function syncGroupInvitesFromServer() {
         
     } catch (error) {
         console.log('Group invites sync error:', error.message);
+    }
+}
+
+// =============================================
+// REMAINING FUNCTIONS (UNCHANGED)
+// =============================================
+
+// [All remaining functions from the original file stay exactly the same]
+// This includes:
+// - calculateGroupPulse()
+// - updateGroupCounts()
+// - updateCurrentSection()
+// - renderAllGroups()
+// - addGroupItem()
+// - handleGroupAction()
+// - openGroupChat()
+// - updateChatHeaderUniqueFeatures()
+// - checkPostingRules()
+// - updateParticipationModeButtons()
+// - loadUniqueFeaturesPanels()
+// - loadGroupNotes()
+// - loadGroupEvents()
+// - generateUniqueEventsForUser()
+// - hashCode()
+// - loadTransparencyLog()
+// - generateInitialTransparencyLog()
+// - analyzeGroupEnergy()
+// - generateSimulatedMessages()
+// - closeGroupChatMobile()
+// - hideAllPanels()
+// - loadGroupChatMessages()
+// - addMessageToChat()
+// - addSystemMessage()
+// - saveMessageToCache()
+// - sendGroupMessage()
+// - toggleSilentMode()
+// - toggleAnonymousMode()
+// - window.reactToMessage()
+// - window.replyToMessage()
+// - window.deleteMessage()
+// - setupTypingListener()
+// - stopTypingIndicator()
+// - adjustTextareaHeight()
+// - formatMessageTime()
+// - openAdminManagement()
+// - loadGroupMembersForManagement()
+// - generateSimulatedMembers()
+// - renderMembersList()
+// - handleMemberAction()
+// - logTransparencyAction()
+// - loadGroupSettingsForManagement()
+// - loadUniqueFeaturesForManagement()
+// - updatePostingRulesUI()
+// - saveGroupSettings()
+// - showFriendSelection()
+// - renderFriendSelection()
+// - updateSelectedFriendsList()
+// - window.removeSelectedFriend()
+// - createGroupOnline()
+// - joinGroupOnline()
+// - leaveGroupOnline()
+// - acceptGroupInvite()
+// - declineGroupInvite()
+// - leaveGroupConfirm()
+// - showGroupDetails()
+// - loadGroupDetails()
+// - showGroupOptions()
+// - viewGroupNotes()
+// - viewGroupEvents()
+// - viewGroupAnalytics()
+// - loadGroupAnalytics()
+// - renderAnalyticsChart()
+// - changePurposeMood()
+// - updatePostingRules()
+// - viewChangeHistory()
+// - showOptionsModal()
+// - shareGroup()
+// - muteGroup()
+// - favoriteGroup()
+// - reportGroup()
+// - blockGroup()
+// - showGroupQRCode()
+// - window.downloadQRCode()
+// - copyInviteLink()
+// - inviteMembers()
+// - editGroupInfo()
+// - manageRoles()
+// - createEvent()
+// - window.saveNewEvent()
+// - createPoll()
+// - window.addPollOption()
+// - window.removePollOption()
+// - window.saveNewPoll()
+// - window.voteOnPoll()
+// - showGroupInviteDetails()
+// - matchesFilters()
+// - matchesSearch()
+// - filterGroupsByType()
+// - searchGroups()
+// - saveGroupsToLocalStorage()
+// - formatTimeAgo()
+// - formatDate()
+// - showNotification()
+// - processPendingOfflineActions()
+// - updateCreateGroupPostingRulesUI()
+// - setupEventListeners()
+// - setupGroupInvitesListener()
+// - checkMobile()
+// - showMobileSection()
+// - renderMyGroups()
+// - renderJoinedGroups()
+// - renderGroupInvites()
+// - addGroupInviteItem()
+// - renderAdminGroups()
+// - startGroupCall()
+
+// Calculate group pulse
+function calculateGroupPulse(groupData) {
+    if (!groupData.lastActivity) return null;
+    
+    const lastActivity = new Date(groupData.lastActivity).getTime();
+    const now = Date.now();
+    const hoursSinceActivity = (now - lastActivity) / (1000 * 60 * 60);
+    
+    if (hoursSinceActivity < 1) {
+        return { text: 'Very Active', class: 'pulse-active' };
+    } else if (hoursSinceActivity < 6) {
+        return { text: 'Active', class: 'pulse-active' };
+    } else if (hoursSinceActivity < 24) {
+        return { text: 'Quiet', class: 'pulse-quiet' };
+    } else if (hoursSinceActivity < 72) {
+        return { text: 'Inactive', class: 'pulse-quiet' };
+    } else {
+        return { text: 'Dormant', class: 'pulse-quiet' };
     }
 }
 
@@ -1711,13 +1589,11 @@ async function loadGroupNotes(groupId) {
             }
         }
         
-        if (apiReady) {
-            const response = await backgroundApiCall('get', `groups/${groupId}/notes`);
-            if (response && response.success && response.data && groupNotesContent) {
-                const notes = response.data.notes || '';
-                groupNotesContent.innerHTML = notes || '<p style="margin: 0; color: var(--text-secondary);">No notes yet. Add important information here.</p>';
-                localStorage.setItem(cacheKey, notes);
-            }
+        const response = await safeApiCall('get', `groups/${groupId}/notes`);
+        if (response && response.success && response.data && groupNotesContent) {
+            const notes = response.data.notes || '';
+            groupNotesContent.innerHTML = notes || '<p style="margin: 0; color: var(--text-secondary);">No notes yet. Add important information here.</p>';
+            localStorage.setItem(cacheKey, notes);
         }
         
         const groupNotesPanel = document.getElementById('groupNotesPanel');
@@ -1732,7 +1608,7 @@ async function loadGroupNotes(groupId) {
     }
 }
 
-// Load group events - Now fully functional with real data per user
+// Load group events
 async function loadGroupEvents(groupId) {
     try {
         const cacheKey = LOCAL_STORAGE_KEYS.GROUP_EVENTS + groupId;
@@ -1743,23 +1619,15 @@ async function loadGroupEvents(groupId) {
             events = JSON.parse(cachedEvents);
         }
         
-        // Try to get events from API if ready
-        if (apiReady) {
-            const response = await backgroundApiCall('get', `groups/${groupId}/events`);
-            if (response && response.success && response.data) {
-                events = response.data;
-                localStorage.setItem(cacheKey, JSON.stringify(events));
-            } else {
-                // Generate unique events for this user if none exist
-                if (events.length === 0 && currentUser) {
-                    events = generateUniqueEventsForUser(groupId, currentUser.uid);
-                    localStorage.setItem(cacheKey, JSON.stringify(events));
-                }
-            }
+        // Try to get events from API
+        const response = await safeApiCall('get', `groups/${groupId}/events`);
+        if (response && response.success && response.data) {
+            events = response.data;
+            localStorage.setItem(cacheKey, JSON.stringify(events));
         } else {
             // Generate unique events for this user if none exist
             if (events.length === 0 && currentUser) {
-                events = generateUniqueEventsForUser(groupId, currentUser.uid);
+                events = generateUniqueEventsForUser(groupId, currentUser.uid || currentUser.id);
                 localStorage.setItem(cacheKey, JSON.stringify(events));
             }
         }
@@ -1878,12 +1746,10 @@ async function loadTransparencyLog(groupId) {
             localStorage.setItem(cacheKey, JSON.stringify(log));
         }
         
-        if (apiReady) {
-            const response = await backgroundApiCall('get', `groups/${groupId}/transparency`);
-            if (response && response.success && response.data) {
-                log = response.data;
-                localStorage.setItem(cacheKey, JSON.stringify(log));
-            }
+        const response = await safeApiCall('get', `groups/${groupId}/transparency`);
+        if (response && response.success && response.data) {
+            log = response.data;
+            localStorage.setItem(cacheKey, JSON.stringify(log));
         }
         
         const adminTransparencyLog = document.getElementById('adminTransparencyLog');
@@ -1925,7 +1791,7 @@ function generateInitialTransparencyLog(groupId) {
             id: `log_${groupId}_1`,
             groupId: groupId,
             action: 'Group created',
-            by: currentUser?.uid || 'system',
+            by: currentUser?.uid || currentUser?.id || 'system',
             byName: userData?.displayName || 'System',
             timestamp: new Date(now.getTime() - 86400000 * 2).toISOString(), // 2 days ago
             details: 'Group was created with initial settings'
@@ -1934,7 +1800,7 @@ function generateInitialTransparencyLog(groupId) {
             id: `log_${groupId}_2`,
             groupId: groupId,
             action: 'Welcome message set',
-            by: currentUser?.uid || 'system',
+            by: currentUser?.uid || currentUser?.id || 'system',
             byName: userData?.displayName || 'System',
             timestamp: new Date(now.getTime() - 86400000 * 1).toISOString(), // 1 day ago
             details: 'Welcome message was configured'
@@ -1951,19 +1817,14 @@ function generateInitialTransparencyLog(groupId) {
     ];
 }
 
-// Analyze group energy - Now fully functional
+// Analyze group energy
 async function analyzeGroupEnergy(groupId) {
     try {
         let messages = [];
         
-        if (apiReady) {
-            const response = await backgroundApiCall('get', `groups/${groupId}/messages?limit=50`);
-            if (response && response.success && response.data) {
-                messages = response.data;
-            } else {
-                // Generate simulated message data for demo
-                messages = generateSimulatedMessages(groupId);
-            }
+        const response = await safeApiCall('get', `groups/${groupId}/messages?limit=50`);
+        if (response && response.success && response.data) {
+            messages = response.data;
         } else {
             // Generate simulated message data for demo
             messages = generateSimulatedMessages(groupId);
@@ -2026,7 +1887,7 @@ async function analyzeGroupEnergy(groupId) {
 function generateSimulatedMessages(groupId) {
     const messages = [];
     const now = new Date();
-    const members = ['user1', 'user2', 'user3', currentUser?.uid || 'user4'];
+    const members = ['user1', 'user2', 'user3', currentUser?.uid || currentUser?.id || 'user4'];
     const messageTypes = ['text', 'announcement', 'question'];
     
     // Generate messages for the last 24 hours
@@ -2117,19 +1978,16 @@ async function loadGroupChatMessages(groupId) {
         }
     }, 100);
     
-    // Only load from API if it's ready
-    if (apiReady) {
-        try {
-            const response = await backgroundApiCall('get', `groups/${groupId}/messages`);
-            if (response && response.success && response.data) {
-                response.data.forEach(message => {
-                    addMessageToChat(message, true);
-                    saveMessageToCache(groupId, message);
-                });
-            }
-        } catch (error) {
-            console.error('Error loading messages from API:', error);
+    try {
+        const response = await safeApiCall('get', `groups/${groupId}/messages`);
+        if (response && response.success && response.data) {
+            response.data.forEach(message => {
+                addMessageToChat(message, true);
+                saveMessageToCache(groupId, message);
+            });
         }
+    } catch (error) {
+        console.error('Error loading messages from API:', error);
     }
 }
 
@@ -2142,7 +2000,7 @@ function addMessageToChat(messageData, isNew = true) {
     messageElement.className = 'message';
     
     const isSystem = messageData.type === 'system';
-    const isSent = messageData.senderId === currentUser.uid;
+    const isSent = messageData.senderId === (currentUser.uid || currentUser.id);
     const isAnonymous = messageData.anonymous === true;
     const topic = messageData.topic || '';
     const topicInfo = topic ? groupTopics[topic] : null;
@@ -2235,12 +2093,12 @@ async function sendGroupMessage() {
     
     const message = {
         groupId: currentChatGroup.id,
-        senderId: currentUser.uid,
+        senderId: currentUser.uid || currentUser.id,
         senderName: userData.displayName || 'User',
         content: messageContent,
         timestamp: new Date(),
         type: 'text',
-        readBy: [currentUser.uid],
+        readBy: [currentUser.uid || currentUser.id],
         topic: selectedTopic || undefined,
         anonymous: isAnonymousMode
     };
@@ -2252,35 +2110,28 @@ async function sendGroupMessage() {
     
     addMessageToChat(tempMessage, true);
     
-    // Only try to send via API if it's ready
-    if (apiReady) {
-        try {
-            const response = await safeApiCall('post', `groups/${currentChatGroup.id}/messages`, {
-                content: messageContent,
-                topic: selectedTopic || undefined,
-                anonymous: isAnonymousMode
+    try {
+        const response = await safeApiCall('post', `groups/${currentChatGroup.id}/messages`, {
+            content: messageContent,
+            topic: selectedTopic || undefined,
+            anonymous: isAnonymousMode
+        });
+        
+        if (response && response.success) {
+            saveMessageToCache(currentChatGroup.id, {
+                ...tempMessage,
+                id: response.data?.id || tempMessage.id
             });
             
-            if (response && response.success) {
-                saveMessageToCache(currentChatGroup.id, {
-                    ...tempMessage,
-                    id: response.data?.id || tempMessage.id
-                });
-                
-                if (isAnonymousMode) {
-                    toggleAnonymousMode();
-                }
-            } else {
-                showNotification('Failed to send message', 'error');
+            if (isAnonymousMode) {
+                toggleAnonymousMode();
             }
-        } catch (error) {
-            console.error('Error sending message:', error);
+        } else {
             showNotification('Failed to send message', 'error');
         }
-    } else {
-        // Save to cache even if API isn't ready
-        saveMessageToCache(currentChatGroup.id, tempMessage);
-        showNotification('Message saved locally (offline mode)', 'info');
+    } catch (error) {
+        console.error('Error sending message:', error);
+        showNotification('Failed to send message', 'error');
     }
     
     stopTypingIndicator();
@@ -2366,21 +2217,15 @@ function setupTypingListener(groupId) {
     chatInput.addEventListener('input', () => {
         if (!isTyping) {
             isTyping = true;
-            // Only send typing indicator if API is ready
-            if (apiReady) {
-                backgroundApiCall('post', `groups/${groupId}/typing`, { typing: true })
-                    .catch(() => {});
-            }
+            safeApiCall('post', `groups/${groupId}/typing`, { typing: true })
+                .catch(() => {});
         }
         
         clearTimeout(typingTimeout);
         typingTimeout = setTimeout(() => {
             isTyping = false;
-            // Only send typing indicator if API is ready
-            if (apiReady) {
-                backgroundApiCall('post', `groups/${groupId}/typing`, { typing: false })
-                    .catch(() => {});
-            }
+            safeApiCall('post', `groups/${groupId}/typing`, { typing: false })
+                .catch(() => {});
         }, 1000);
     });
 }
@@ -2438,15 +2283,10 @@ async function loadGroupMembersForManagement(groupData) {
     try {
         let memberDetails = [];
         
-        if (apiReady) {
-            const response = await backgroundApiCall('get', `groups/${groupData.id}/members`);
-            
-            if (response && response.success && response.data) {
-                memberDetails = response.data;
-            } else {
-                // Generate simulated members for demo
-                memberDetails = generateSimulatedMembers(groupData.id);
-            }
+        const response = await safeApiCall('get', `groups/${groupData.id}/members`);
+        
+        if (response && response.success && response.data) {
+            memberDetails = response.data;
         } else {
             // Generate simulated members for demo
             memberDetails = generateSimulatedMembers(groupData.id);
@@ -2487,7 +2327,7 @@ function generateSimulatedMembers(groupId) {
     // Add current user if not already in list
     if (currentUser) {
         members.unshift({
-            id: currentUser.uid,
+            id: currentUser.uid || currentUser.id,
             displayName: userData?.displayName || 'You',
             username: userData?.username || 'you',
             photoURL: currentUser.photoURL || '',
@@ -2541,7 +2381,7 @@ function renderMembersList(memberDetails) {
                             <i class="fas fa-arrow-up"></i> Promote
                         </button>
                     `}
-                    ${member.id !== currentUser.uid ? `
+                    ${member.id !== (currentUser.uid || currentUser.id) ? `
                         <button class="member-action-btn remove" data-member-id="${member.id}" title="Remove from Group">
                             <i class="fas fa-user-times"></i> Remove
                         </button>
@@ -2566,12 +2406,6 @@ function renderMembersList(memberDetails) {
 
 // Handle member action
 async function handleMemberAction(action, memberId, groupData) {
-    // Only process if API is ready
-    if (!apiReady) {
-        showNotification('Cannot perform action - offline mode', 'error');
-        return;
-    }
-    
     try {
         switch(action) {
             case 'promote':
@@ -2608,7 +2442,7 @@ async function logTransparencyAction(groupId, action, targetId = null) {
             groupId,
             action,
             targetId,
-            by: currentUser.uid,
+            by: currentUser.uid || currentUser.id,
             byName: userData.displayName || 'Unknown',
             timestamp: new Date()
         };
@@ -2619,10 +2453,7 @@ async function logTransparencyAction(groupId, action, targetId = null) {
         if (cachedLog.length > 50) cachedLog.pop();
         localStorage.setItem(cacheKey, JSON.stringify(cachedLog));
         
-        // Only send to API if ready
-        if (apiReady) {
-            await backgroundApiCall('post', `groups/${groupId}/transparency`, logEntry);
-        }
+        await safeApiCall('post', `groups/${groupId}/transparency`, logEntry);
         
     } catch (error) {
         console.error('Error logging transparency action:', error);
@@ -2710,12 +2541,6 @@ function updatePostingRulesUI() {
 
 // Save group settings
 async function saveGroupSettings(groupData) {
-    // Only save if API is ready
-    if (!apiReady) {
-        showNotification('Cannot save settings - offline mode', 'error');
-        return;
-    }
-    
     try {
         const adminPublicGroup = document.getElementById('adminPublicGroup');
         const adminApproveMembers = document.getElementById('adminApproveMembers');
@@ -2937,14 +2762,8 @@ window.removeSelectedFriend = function(friendId) {
 
 // Create group online
 async function createGroupOnline(groupData) {
-    // Only create if API is ready
-    if (!apiReady) {
-        showNotification('Cannot create group - offline mode', 'error');
-        return;
-    }
-    
     try {
-        const members = [currentUser.uid, ...selectedFriends];
+        const members = [currentUser.uid || currentUser.id, ...selectedFriends];
         
         const groupDataToSave = {
             name: groupData.name,
@@ -3010,12 +2829,6 @@ async function createGroupOnline(groupData) {
 
 // Join group online
 async function joinGroupOnline(groupId) {
-    // Only join if API is ready
-    if (!apiReady) {
-        showNotification('Cannot join group - offline mode', 'error');
-        return;
-    }
-    
     try {
         const response = await safeApiCall('post', `groups/${groupId}/join`);
         
@@ -3053,12 +2866,6 @@ async function joinGroupOnline(groupId) {
 
 // Leave group online
 async function leaveGroupOnline(groupId) {
-    // Only leave if API is ready
-    if (!apiReady) {
-        showNotification('Cannot leave group - offline mode', 'error');
-        return;
-    }
-    
     try {
         const response = await safeApiCall('post', `groups/${groupId}/leave`);
         
@@ -3091,12 +2898,6 @@ async function leaveGroupOnline(groupId) {
 
 // Accept group invite
 async function acceptGroupInvite(inviteData) {
-    // Only accept if API is ready
-    if (!apiReady) {
-        showNotification('Cannot accept invite - offline mode', 'error');
-        return;
-    }
-    
     try {
         const inviteId = inviteData.id || inviteData.inviteId;
         const groupId = inviteData.groupId || inviteData.id;
@@ -3118,12 +2919,6 @@ async function acceptGroupInvite(inviteData) {
 
 // Decline group invite
 async function declineGroupInvite(inviteData) {
-    // Only decline if API is ready
-    if (!apiReady) {
-        showNotification('Cannot decline invite - offline mode', 'error');
-        return;
-    }
-    
     try {
         const inviteId = inviteData.id || inviteData.inviteId;
         
@@ -3214,13 +3009,9 @@ async function loadGroupDetails(groupData, type) {
         
         let realMembers = [];
         try {
-            if (apiReady) {
-                const response = await backgroundApiCall('get', `groups/${groupData.id}/members`);
-                if (response && response.success && response.data) {
-                    realMembers = response.data.slice(0, 5);
-                } else {
-                    realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
-                }
+            const response = await safeApiCall('get', `groups/${groupData.id}/members`);
+            if (response && response.success && response.data) {
+                realMembers = response.data.slice(0, 5);
             } else {
                 realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
             }
@@ -3346,12 +3137,12 @@ async function loadGroupDetails(groupData, type) {
                                 <div class="member-info">
                                     <div class="member-name">
                                         <span>${member.displayName || 'Unknown User'}</span>
-                                        ${member.uid === currentUser.uid ? `<span class="role-badge ${userRole}"><i class="${roleInfo.icon}"></i> ${roleInfo.name}</span>` : 
+                                        ${member.uid === (currentUser.uid || currentUser.id) ? `<span class="role-badge ${userRole}"><i class="${roleInfo.icon}"></i> ${roleInfo.name}</span>` : 
                                          groupData.admins && groupData.admins.includes(member.uid) ? '<span class="role-badge admin"><i class="fas fa-crown"></i> Admin</span>' : 
                                          '<span class="role-badge member"><i class="fas fa-user"></i> Member</span>'}
                                     </div>
                                     <div style="font-size: 12px; color: var(--text-secondary);">
-                                        ${member.uid === currentUser.uid ? 'You' : (member.online ? 'Online' : 'Offline')}
+                                        ${member.uid === (currentUser.uid || currentUser.id) ? 'You' : (member.online ? 'Online' : 'Offline')}
                                     </div>
                                 </div>
                             </div>
@@ -3543,7 +3334,7 @@ function viewGroupEvents(groupData) {
     }
 }
 
-// View group analytics - Now fully functional
+// View group analytics
 function viewGroupAnalytics(groupData) {
     openAdminManagement(groupData);
     const analyticsTab = document.querySelector('.admin-management-tab[data-tab="analytics"]');
@@ -3804,7 +3595,7 @@ function blockGroup(groupData) {
     }
 }
 
-// Show group QR code - Now fully functional
+// Show group QR code
 function showGroupQRCode(groupData) {
     const modal = document.createElement('div');
     modal.className = 'qr-modal';
@@ -3882,7 +3673,7 @@ function manageRoles(groupData) {
     openAdminManagement(groupData);
 }
 
-// Create event - Now fully functional
+// Create event
 function createEvent(groupData) {
     const modal = document.createElement('div');
     modal.className = 'event-modal';
@@ -3993,8 +3784,8 @@ window.saveNewEvent = function() {
         date: eventDateTime.toISOString(),
         duration: parseFloat(eventDuration),
         type: eventType,
-        createdBy: currentUser?.uid || 'user',
-        attendees: [currentUser?.uid || 'user'],
+        createdBy: currentUser?.uid || currentUser?.id || 'user',
+        attendees: [currentUser?.uid || currentUser?.id || 'user'],
         location: 'Online',
         createdAt: new Date().toISOString()
     };
@@ -4016,7 +3807,7 @@ window.saveNewEvent = function() {
     }
 };
 
-// Create poll - Now fully functional
+// Create poll
 function createPoll(groupData) {
     const modal = document.createElement('div');
     modal.className = 'poll-modal';
@@ -4144,7 +3935,7 @@ window.saveNewPoll = function() {
     // Create poll message
     const pollMessage = {
         groupId: currentChatGroup?.id || 'global',
-        senderId: currentUser?.uid || 'user',
+        senderId: currentUser?.uid || currentUser?.id || 'user',
         senderName: userData?.displayName || 'User',
         content: pollQuestion.value.trim(),
         timestamp: new Date(),
@@ -4815,16 +4606,9 @@ function setupEventListeners() {
             notesEditorActions.style.display = 'none';
             
             if (currentChatGroup) {
-                if (apiReady) {
-                    const response = await backgroundApiCall('post', `groups/${currentChatGroup.id}/notes`, { notes });
-                    if (response && response.success) {
-                        showNotification('Notes saved successfully', 'success');
-                    }
-                } else {
-                    // Save to local storage if API not ready
-                    const cacheKey = LOCAL_STORAGE_KEYS.GROUP_NOTES + currentChatGroup.id;
-                    localStorage.setItem(cacheKey, notes);
-                    showNotification('Notes saved locally', 'success');
+                const response = await safeApiCall('post', `groups/${currentChatGroup.id}/notes`, { notes });
+                if (response && response.success) {
+                    showNotification('Notes saved successfully', 'success');
                 }
             }
         });

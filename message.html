@@ -183,6 +183,61 @@
             text-align: center;
             line-height: 1.4;
         }
+        
+        /* Auth error overlay */
+        .auth-error-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 100000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .auth-error-overlay.hidden {
+            display: none;
+        }
+        
+        .auth-error-icon {
+            font-size: 48px;
+            color: #ff3b30;
+            margin-bottom: 20px;
+        }
+        
+        .auth-error-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #ff3b30;
+        }
+        
+        .auth-error-message {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: #666;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+        
+        .auth-error-btn {
+            padding: 12px 24px;
+            background: #0084ff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -194,6 +249,18 @@
         <div class="api-loading-subtext" style="margin-top: 10px; font-size: 12px; color: #888;" id="apiStatusText">
             Initializing...
         </div>
+    </div>
+    
+    <!-- NEW: Auth Error Overlay -->
+    <div class="auth-error-overlay hidden" id="authErrorOverlay">
+        <div class="auth-error-icon">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <div class="auth-error-title" id="authErrorTitle">Authentication Required</div>
+        <div class="auth-error-message" id="authErrorMessage">Please login to continue using the chat system.</div>
+        <button class="auth-error-btn" id="authErrorLoginBtn">
+            <i class="fas fa-sign-in-alt"></i> Go to Login
+        </button>
     </div>
     
     <!-- Offline Overlay -->
@@ -774,73 +841,140 @@
         const scheduleAttachmentPreview = document.getElementById('scheduleAttachmentPreview');
         const apiLoadingOverlay = document.getElementById('apiLoadingOverlay');
         const apiStatusText = document.getElementById('apiStatusText');
+        const authErrorOverlay = document.getElementById('authErrorOverlay');
+        const authErrorTitle = document.getElementById('authErrorTitle');
+        const authErrorMessage = document.getElementById('authErrorMessage');
+        const authErrorLoginBtn = document.getElementById('authErrorLoginBtn');
         
         // =============================================
-        // TOKEN MANAGEMENT FUNCTIONS
+        // BOOTSTRAP FUNCTION - NO PARENT DEPENDENCY
         // =============================================
         
-        // Load tokens from localStorage
-        function loadTokens() {
+        /**
+         * Bootstrap the iframe - independent authentication
+         * Reads tokens from localStorage, validates via /api/auth/me
+         * Only proceeds after successful authentication
+         */
+        async function bootstrapIframe() {
+            console.log('Starting iframe bootstrap...');
+            updateApiStatus('Checking authentication...');
+            
+            // Show loading overlay
+            apiLoadingOverlay.classList.remove('hidden');
+            authErrorOverlay.classList.add('hidden');
+            
             try {
-                accessToken = localStorage.getItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN);
-                refreshToken = localStorage.getItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN);
+                // Step 1: Load tokens from localStorage
+                const tokensLoaded = loadTokens();
                 
-                console.log('Tokens loaded from localStorage');
-                console.log('Access Token present:', !!accessToken);
-                console.log('Refresh Token present:', !!refreshToken);
-                
-                if (!accessToken) {
-                    console.error('No access token found in localStorage');
+                if (!tokensLoaded || !accessToken) {
+                    console.error('No authentication tokens found in localStorage');
+                    showAuthError('Authentication Required', 'Please login to access the chat system.', true);
                     return false;
                 }
                 
+                // Step 2: Validate token by calling /api/auth/me
+                updateApiStatus('Validating user session...');
+                
+                // Use api.js if available, otherwise fallback to direct fetch
+                let userData;
+                try {
+                    // Try to use window.api if it exists (from api.js)
+                    if (window.api && typeof window.api.getCurrentUser === 'function') {
+                        userData = await window.api.getCurrentUser();
+                    } else {
+                        // Fallback: direct fetch to /api/auth/me
+                        userData = await validateTokenWithApi();
+                    }
+                } catch (apiError) {
+                    console.error('API validation error:', apiError);
+                    
+                    // Try token refresh if available
+                    if (refreshToken) {
+                        updateApiStatus('Session expired, attempting refresh...');
+                        const refreshed = await attemptTokenRefresh();
+                        if (!refreshed) {
+                            showAuthError('Session Expired', 'Your session has expired. Please login again.', true);
+                            return false;
+                        }
+                        // Retry validation with new token
+                        userData = await validateTokenWithApi();
+                    } else {
+                        showAuthError('Authentication Failed', 'Could not validate your session. Please login again.', true);
+                        return false;
+                    }
+                }
+                
+                if (!userData || !userData.user) {
+                    console.error('Invalid user data returned from API');
+                    showAuthError('Authentication Failed', 'Invalid user data received. Please login again.', true);
+                    return false;
+                }
+                
+                // Step 3: Store user data
+                currentUser = userData.user;
+                console.log('User authenticated successfully:', currentUser.uid);
+                
+                // Save to localStorage for consistency
+                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_DATA, JSON.stringify(currentUser));
+                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_ID, currentUser.uid);
+                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_NAME, currentUser.displayName || currentUser.name || 'User');
+                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_EMAIL, currentUser.email || '');
+                
+                // Step 4: Hide loading, show success
+                updateApiStatus('Authentication successful');
+                setTimeout(() => {
+                    apiLoadingOverlay.classList.add('hidden');
+                }, 500);
+                
                 return true;
+                
             } catch (error) {
-                console.error('Error loading tokens:', error);
+                console.error('Bootstrap failed:', error);
+                showAuthError('System Error', 'An error occurred during initialization. Please try again.', true);
                 return false;
             }
         }
         
-        // Check if token is expired
-        function isTokenExpired(token) {
-            if (!token) return true;
+        /**
+         * Validate token by calling /api/auth/me endpoint
+         */
+        async function validateTokenWithApi() {
+            const response = await fetch('/api/auth/me', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
             
-            try {
-                // Decode JWT token to check expiration
-                const payload = JSON.parse(atob(token.split('.')[1]));
-                const exp = payload.exp * 1000; // Convert to milliseconds
-                const now = Date.now();
-                
-                return exp < now;
-            } catch (error) {
-                console.error('Error decoding token:', error);
-                return true;
+            if (response.status === 401) {
+                // Token is invalid or expired
+                throw new Error('Token validation failed: 401 Unauthorized');
             }
+            
+            if (!response.ok) {
+                throw new Error(`Token validation failed: ${response.status}`);
+            }
+            
+            return await response.json();
         }
         
-        // Refresh access token
-        async function refreshAccessToken() {
-            if (tokenRefreshInProgress) {
-                console.log('Token refresh already in progress');
-                return null;
-            }
-            
+        /**
+         * Attempt to refresh the access token
+         */
+        async function attemptTokenRefresh() {
             if (!refreshToken) {
-                console.error('No refresh token available');
-                redirectToLogin();
-                return null;
+                return false;
             }
-            
-            tokenRefreshInProgress = true;
             
             try {
-                updateApiStatus('Refreshing authentication token...');
+                updateApiStatus('Refreshing token...');
                 
                 const response = await fetch('/api/auth/refresh', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${accessToken}`
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         refreshToken: refreshToken
@@ -860,54 +994,124 @@
                         }
                         
                         console.log('Token refreshed successfully');
-                        tokenRefreshInProgress = false;
-                        return accessToken;
+                        return true;
                     }
                 }
                 
-                console.error('Failed to refresh token');
-                tokenRefreshInProgress = false;
-                redirectToLogin();
-                return null;
+                console.error('Token refresh failed');
+                return false;
                 
             } catch (error) {
                 console.error('Error refreshing token:', error);
-                tokenRefreshInProgress = false;
-                redirectToLogin();
-                return null;
+                return false;
             }
         }
         
-        // Ensure valid token before API calls
-        async function ensureValidToken() {
-            if (!accessToken) {
-                const tokensLoaded = loadTokens();
-                if (!tokensLoaded) {
-                    redirectToLogin();
-                    return null;
+        /**
+         * Load tokens from localStorage with fallback logic
+         */
+        function loadTokens() {
+            try {
+                // Try multiple possible storage keys
+                const possibleAccessTokenKeys = [
+                    'accessToken',
+                    'knecta_access_token',
+                    'auth_token',
+                    'token'
+                ];
+                
+                const possibleRefreshTokenKeys = [
+                    'refreshToken',
+                    'knecta_refresh_token',
+                    'refresh_token'
+                ];
+                
+                // Find access token
+                for (const key of possibleAccessTokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token && token.startsWith('eyJ')) { // JWT tokens start with eyJ
+                        accessToken = token;
+                        console.log('Found access token in key:', key);
+                        break;
+                    }
                 }
-            }
-            
-            if (isTokenExpired(accessToken)) {
-                console.log('Token expired, attempting refresh...');
-                const newToken = await refreshAccessToken();
-                if (!newToken) {
-                    return null;
+                
+                // Find refresh token
+                for (const key of possibleRefreshTokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token) {
+                        refreshToken = token;
+                        console.log('Found refresh token in key:', key);
+                        break;
+                    }
                 }
-                accessToken = newToken;
+                
+                // Set in standard keys for consistency
+                if (accessToken) {
+                    localStorage.setItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+                }
+                if (refreshToken) {
+                    localStorage.setItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+                }
+                
+                console.log('Tokens loaded:', {
+                    accessTokenPresent: !!accessToken,
+                    refreshTokenPresent: !!refreshToken
+                });
+                
+                return !!accessToken;
+                
+            } catch (error) {
+                console.error('Error loading tokens:', error);
+                return false;
             }
-            
-            return accessToken;
         }
         
-        // Redirect to login page
+        /**
+         * Show authentication error overlay
+         */
+        function showAuthError(title, message, showLoginButton = true) {
+            console.error('Auth error:', title, '-', message);
+            
+            // Update error overlay
+            authErrorTitle.textContent = title;
+            authErrorMessage.textContent = message;
+            
+            // Show/hide login button
+            if (showLoginButton) {
+                authErrorLoginBtn.style.display = 'block';
+            } else {
+                authErrorLoginBtn.style.display = 'none';
+            }
+            
+            // Switch to error overlay
+            apiLoadingOverlay.classList.add('hidden');
+            authErrorOverlay.classList.remove('hidden');
+        }
+        
+        /**
+         * Redirect to login page
+         */
         function redirectToLogin() {
             console.log('Redirecting to login page');
-            showNotification('Session expired. Please login again.', 'error');
             
-            setTimeout(() => {
-                window.location.href = '../login.html';
-            }, 2000);
+            // Clear auth data
+            localStorage.removeItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN);
+            localStorage.removeItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN);
+            localStorage.removeItem(TOKEN_STORAGE_KEYS.USER_DATA);
+            
+            // Redirect
+            window.location.href = '../login.html';
+        }
+        
+        /**
+         * Update API status text
+         */
+        function updateApiStatus(message) {
+            console.log('API Status:', message);
+            if (apiStatusText) {
+                apiStatusText.textContent = message;
+            }
         }
         
         // =============================================
@@ -917,14 +1121,17 @@
         // Generic API request function with token handling
         async function makeApiRequest(endpoint, options = {}) {
             try {
-                const token = await ensureValidToken();
-                if (!token) {
-                    throw new Error('Authentication required');
+                // Ensure we have a valid token
+                if (!accessToken) {
+                    const tokensLoaded = loadTokens();
+                    if (!tokensLoaded) {
+                        throw new Error('Authentication required');
+                    }
                 }
                 
                 const defaultHeaders = {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${accessToken}`
                 };
                 
                 const headers = { ...defaultHeaders, ...options.headers };
@@ -934,28 +1141,30 @@
                     headers
                 });
                 
+                // Handle 401 - token expired
                 if (response.status === 401) {
-                    // Token might be invalid, try to refresh
-                    console.log('Token invalid, attempting refresh...');
-                    const newToken = await refreshAccessToken();
+                    console.log('Token expired, attempting refresh...');
                     
-                    if (newToken) {
-                        // Retry with new token
-                        headers.Authorization = `Bearer ${newToken}`;
-                        const retryResponse = await fetch(endpoint, {
-                            ...options,
-                            headers
-                        });
-                        
-                        if (!retryResponse.ok) {
-                            throw new Error(`API request failed: ${retryResponse.status}`);
-                        }
-                        
-                        return await retryResponse.json();
-                    } else {
-                        redirectToLogin();
+                    // Try to refresh token
+                    const refreshed = await attemptTokenRefresh();
+                    if (!refreshed) {
+                        // Refresh failed, redirect to login
+                        showAuthError('Session Expired', 'Your session has expired. Please login again.', true);
                         throw new Error('Authentication failed');
                     }
+                    
+                    // Retry with new token
+                    headers.Authorization = `Bearer ${accessToken}`;
+                    const retryResponse = await fetch(endpoint, {
+                        ...options,
+                        headers
+                    });
+                    
+                    if (!retryResponse.ok) {
+                        throw new Error(`API request failed: ${retryResponse.status}`);
+                    }
+                    
+                    return await retryResponse.json();
                 }
                 
                 if (!response.ok) {
@@ -966,6 +1175,12 @@
                 
             } catch (error) {
                 console.error('API request error:', error);
+                
+                // If it's an auth error, show error overlay
+                if (error.message.includes('Authentication') || error.message.includes('401')) {
+                    showAuthError('Authentication Error', 'Please login to continue.', true);
+                }
+                
                 throw error;
             }
         }
@@ -975,23 +1190,10 @@
             // Get current user
             getCurrentUser: async function() {
                 try {
-                    // First check localStorage for user data
-                    const userData = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_DATA);
-                    if (userData) {
-                        const parsed = JSON.parse(userData);
-                        if (parsed && parsed.uid) {
-                            currentUser = parsed;
-                            return currentUser;
-                        }
-                    }
-                    
-                    // If not in localStorage, fetch from API
                     const data = await makeApiRequest('/api/user/me');
                     
                     if (data && data.user) {
-                        currentUser = data.user;
-                        localStorage.setItem(TOKEN_STORAGE_KEYS.USER_DATA, JSON.stringify(currentUser));
-                        return currentUser;
+                        return data;
                     }
                     
                     throw new Error('Failed to get user data');
@@ -1000,18 +1202,12 @@
                     console.error('Error getting current user:', error);
                     
                     // Fallback to localStorage
-                    const userId = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_ID);
-                    const userEmail = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_EMAIL);
-                    const userName = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_NAME);
-                    
-                    if (userId) {
-                        currentUser = {
-                            uid: userId,
-                            email: userEmail || '',
-                            displayName: userName || 'User',
-                            photoURL: ''
-                        };
-                        return currentUser;
+                    const userData = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_DATA);
+                    if (userData) {
+                        const parsed = JSON.parse(userData);
+                        if (parsed && parsed.uid) {
+                            return { user: parsed };
+                        }
                     }
                     
                     throw error;
@@ -1279,79 +1475,6 @@
         };
         
         // =============================================
-        // INITIALIZATION WITH TOKEN CHECK
-        // =============================================
-        
-        // Show loading status
-        function updateApiStatus(message) {
-            console.log('API Status:', message);
-            if (apiStatusText) {
-                apiStatusText.textContent = message;
-            }
-        }
-        
-        // Hide API loading overlay
-        function hideApiLoadingOverlay() {
-            if (apiLoadingOverlay) {
-                apiLoadingOverlay.classList.add('hidden');
-                console.log('API loading overlay hidden');
-            }
-        }
-        
-        // Check authentication and initialize
-        async function checkAuthAndInitialize() {
-            console.log('Checking authentication...');
-            updateApiStatus('Checking authentication...');
-            
-            try {
-                // Load tokens
-                const tokensLoaded = loadTokens();
-                
-                if (!tokensLoaded || !accessToken) {
-                    console.error('No authentication tokens found');
-                    updateApiStatus('Authentication required');
-                    
-                    setTimeout(() => {
-                        redirectToLogin();
-                    }, 1500);
-                    return false;
-                }
-                
-                // Check if token is valid
-                if (isTokenExpired(accessToken)) {
-                    console.log('Token expired, refreshing...');
-                    updateApiStatus('Refreshing session...');
-                    
-                    const newToken = await refreshAccessToken();
-                    if (!newToken) {
-                        redirectToLogin();
-                        return false;
-                    }
-                    
-                    accessToken = newToken;
-                }
-                
-                console.log('Authentication successful');
-                updateApiStatus('Authentication successful');
-                
-                // Hide loading overlay
-                hideApiLoadingOverlay();
-                
-                return true;
-                
-            } catch (error) {
-                console.error('Authentication error:', error);
-                updateApiStatus('Authentication failed');
-                
-                setTimeout(() => {
-                    redirectToLogin();
-                }, 1500);
-                
-                return false;
-            }
-        }
-        
-        // =============================================
         // AUTO-LOAD CHAT FROM URL PARAMETERS
         // =============================================
         
@@ -1469,24 +1592,19 @@
         
         // Initialize the application
         async function initializeApp() {
-            console.log('Initializing complete chat system with direct token access...');
-            updateApiStatus('Initializing chat system...');
+            console.log('Initializing complete chat system with independent authentication...');
             
-            // Show loading overlay
-            if (apiLoadingOverlay) {
-                apiLoadingOverlay.classList.remove('hidden');
-            }
-            
-            // Check authentication first
-            const isAuthenticated = await checkAuthAndInitialize();
+            // Step 1: Bootstrap authentication (NO PARENT DEPENDENCY)
+            const isAuthenticated = await bootstrapIframe();
             
             if (!isAuthenticated) {
                 console.error('Authentication failed, cannot initialize app');
                 return;
             }
             
-            // Load user and data
-            await loadUser();
+            // Step 2: Load user and data (only after successful auth)
+            updateApiStatus('Loading chat data...');
+            
             await loadContacts();
             await loadChats();
             loadChatThemes();
@@ -1537,12 +1655,21 @@
             updateNetworkStatus();
             
             console.log('Complete chat system initialized successfully');
-            updateApiStatus('Chat system initialized');
+            
+            // Hide loading overlay completely
+            setTimeout(() => {
+                apiLoadingOverlay.classList.add('hidden');
+            }, 1000);
         }
         
         // Start initialization when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DOM loaded, starting app initialization...');
+            
+            // Setup auth error login button
+            authErrorLoginBtn.addEventListener('click', redirectToLogin);
+            
+            // Initialize app
             initializeApp();
         });
         
@@ -1556,37 +1683,28 @@
         }
         
         async function loadUser() {
-            try {
-                // Load user from API
-                const user = await api.getCurrentUser();
-                if (user) {
-                    currentUser = user;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                    console.log('User loaded:', currentUser.uid);
+            // Note: User is already loaded in bootstrapIframe()
+            // This function is kept for compatibility
+            if (!currentUser) {
+                // Fallback to localStorage
+                const userData = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_DATA);
+                if (userData) {
+                    currentUser = JSON.parse(userData);
                 }
-                
-                // Load user profile
-                const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-                if (cachedProfile) {
-                    window.userProfile = JSON.parse(cachedProfile);
-                }
-                
-                if (!currentUser) {
-                    // Create minimal user for offline mode
-                    currentUser = {
-                        uid: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: ''
-                    };
-                    console.log('Created minimal user object for offline mode');
-                }
-                
-                // Save to localStorage
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                
-            } catch (error) {
-                console.error('Error loading user:', error);
             }
+            
+            if (!currentUser) {
+                // Create minimal user for offline mode
+                currentUser = {
+                    uid: 'local_user_' + Date.now(),
+                    displayName: 'Local User',
+                    email: ''
+                };
+                console.log('Created minimal user object for offline mode');
+            }
+            
+            // Save to localStorage
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
         }
         
         function loadUserSettings() {
@@ -5119,7 +5237,7 @@ Message ID: ${message.id.substring(0, 8)}...
             window.addEventListener('offline', updateNetworkStatus);
         }
         
-        console.log('Enhanced chat system with direct token access initialized successfully');
+        console.log('Enhanced chat system with independent authentication initialized successfully');
     </script>
     
 </body>

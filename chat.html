@@ -1440,597 +1440,59 @@
         };
     </script>
 
-    <!-- ====== AUTHENTICATION TOKEN MANAGEMENT ====== -->
+    <!-- ====== SIMPLIFIED AUTHENTICATION MANAGEMENT ====== -->
     <script>
-        // Token validation and management system
+        // Simple deterministic auth manager - no race conditions
         const AuthManager = {
-            // Token storage locations
-            tokens: {
-                moodchatToken: null,
-                accessToken: null,
-                refreshToken: null
+            // Single source of truth for token storage
+            TOKEN_KEYS: {
+                ACCESS_TOKEN: 'access_token',
+                USER_DATA: 'kynecta_user'
             },
             
-            // Validation state
-            validationState: {
-                isValidating: false,
-                lastValidation: 0,
-                validationPromise: null,
-                isReady: false,
-                validationAttempted: false
-            },
-            
-            // API endpoints
-            endpoints: {
-                validate: '/auth/validate',
-                refresh: '/auth/refresh',
-                logout: '/auth/logout'
+            // State tracking
+            state: {
+                isAuthenticated: false,
+                user: null,
+                token: null,
+                lastCheck: 0
             },
             
             /**
-             * Main validation function - completes before iframes can make API calls
-             * Token validation sequence:
-             * 1. Check existing tokens in localStorage and window
-             * 2. If tokens exist, validate with server
-             * 3. If validation fails, attempt refresh
-             * 4. If refresh fails, clear tokens and notify iframes
-             * 5. Store refreshed tokens in localStorage and window.accessToken
-             * 6. Notify all child iframes using window.postMessage({ type: "API_READY" })
+             * Get token from localStorage with fallback logic
+             * @returns {string|null} Token or null if not found
              */
-            async validateAuth() {
-                console.log('🔐 [AuthManager] Starting token validation...');
+            getToken() {
+                // Try all possible token locations in order
+                const tokenKeys = [
+                    'access_token',
+                    'moodchat_token', 
+                    'auth_token'
+                ];
                 
-                // Prevent multiple simultaneous validations
-                if (this.validationState.isValidating && this.validationState.validationPromise) {
-                    console.log('🔐 [AuthManager] Validation already in progress, returning existing promise');
-                    return this.validationState.validationPromise;
-                }
-                
-                this.validationState.isValidating = true;
-                this.validationState.validationAttempted = true;
-                
-                // Create validation promise
-                this.validationState.validationPromise = new Promise(async (resolve, reject) => {
-                    try {
-                        // Step 1: Load existing tokens
-                        await this.loadTokens();
-                        
-                        // Step 2: Check if we have tokens
-                        if (!this.tokens.moodchatToken && !this.tokens.accessToken) {
-                            console.log('🔐 [AuthManager] No tokens found, authentication required');
-                            this.validationState.isReady = false;
-                            this.notifyIframes('AUTH_REQUIRED');
-                            reject(new Error('No authentication tokens found'));
-                            return;
-                        }
-                        
-                        // Step 3: Validate tokens with server
-                        const isValid = await this.validateWithServer();
-                        
-                        if (isValid) {
-                            // Step 4: Validation successful
-                            console.log('✅ [AuthManager] Token validation successful');
-                            this.validationState.isReady = true;
-                            this.validationState.lastValidation = Date.now();
-                            
-                            // Step 5: Store tokens in window for API access
-                            this.storeTokensInWindow();
-                            
-                            // Step 6: Notify all iframes that API is ready
-                            this.notifyIframes('API_READY');
-                            
-                            // Step 7: Send token storage information to iframes
-                            this.sendTokenStorageInfoToIframes();
-                            
-                            resolve({
-                                success: true,
-                                tokens: this.tokens,
-                                message: 'Authentication validated successfully'
-                            });
-                        } else {
-                            // Step 7: Validation failed, attempt refresh
-                            console.log('🔄 [AuthManager] Token validation failed, attempting refresh...');
-                            const refreshSuccess = await this.refreshTokens();
-                            
-                            if (refreshSuccess) {
-                                console.log('✅ [AuthManager] Token refresh successful');
-                                this.validationState.isReady = true;
-                                this.validationState.lastValidation = Date.now();
-                                
-                                // Store refreshed tokens
-                                this.storeTokensInWindow();
-                                
-                                // Notify all iframes that API is ready
-                                this.notifyIframes('API_READY');
-                                
-                                // Send token storage information to iframes
-                                this.sendTokenStorageInfoToIframes();
-                                
-                                resolve({
-                                    success: true,
-                                    tokens: this.tokens,
-                                    message: 'Tokens refreshed successfully'
-                                });
-                            } else {
-                                // Step 8: Refresh failed, clear tokens
-                                console.log('❌ [AuthManager] Token refresh failed');
-                                this.clearTokens();
-                                this.validationState.isReady = false;
-                                this.notifyIframes('AUTH_REQUIRED');
-                                reject(new Error('Token validation and refresh failed'));
-                            }
-                        }
-                    } catch (error) {
-                        // Error handling: if validation fails, iframes should not start API calls
-                        console.error('❌ [AuthManager] Validation error:', error);
-                        this.validationState.isReady = false;
-                        this.notifyIframes('AUTH_REQUIRED');
-                        reject(error);
-                    } finally {
-                        this.validationState.isValidating = false;
-                        this.validationState.validationPromise = null;
-                    }
-                });
-                
-                return this.validationState.validationPromise;
-            },
-            
-            /**
-             * Load tokens from localStorage and window
-             */
-            loadTokens() {
-                return new Promise((resolve) => {
-                    console.log('🔐 [AuthManager] Loading tokens from storage...');
-                    
-                    // Load from localStorage
-                    this.tokens.moodchatToken = localStorage.getItem('moodchat_token');
-                    this.tokens.refreshToken = localStorage.getItem('refresh_token');
-                    
-                    // Also check for auth_token (compatibility)
-                    const authToken = localStorage.getItem('auth_token');
-                    if (authToken && !this.tokens.moodchatToken) {
-                        this.tokens.moodchatToken = authToken;
-                    }
-                    
-                    // Load from window
-                    this.tokens.accessToken = window.accessToken || localStorage.getItem('access_token');
-                    
-                    console.log('🔐 [AuthManager] Tokens loaded:', {
-                        hasMoodchatToken: !!this.tokens.moodchatToken,
-                        hasAccessToken: !!this.tokens.accessToken,
-                        hasRefreshToken: !!this.tokens.refreshToken
-                    });
-                    
-                    resolve();
-                });
-            },
-            
-            /**
-             * Validate tokens with server
-             */
-            async validateWithServer() {
-                try {
-                    // Check if we have an API function
-                    if (typeof window.parent.api !== 'function' && typeof window.api !== 'function') {
-                        console.log('🔐 [AuthManager] No API function available, skipping server validation');
-                        
-                        // If we have tokens but no API, assume they're valid for offline mode
-                        if (this.tokens.moodchatToken || this.tokens.accessToken) {
-                            console.log('🔐 [AuthManager] Using stored tokens without server validation');
-                            return true;
-                        }
-                        return false;
-                    }
-                    
-                    // Prepare validation data
-                    const validationData = {};
-                    if (this.tokens.moodchatToken) {
-                        validationData.moodchat_token = this.tokens.moodchatToken;
-                    }
-                    if (this.tokens.accessToken) {
-                        validationData.access_token = this.tokens.accessToken;
-                    }
-                    
-                    // Call validation endpoint
-                    const apiFunction = window.parent.api || window.api;
-                    const result = await apiFunction(this.endpoints.validate, 'POST', validationData);
-                    
-                    console.log('🔐 [AuthManager] Server validation result:', result);
-                    return result && result.valid === true;
-                } catch (error) {
-                    console.error('🔐 [AuthManager] Server validation error:', error);
-                    return false;
-                }
-            },
-            
-            /**
-             * Refresh expired tokens
-             */
-            async refreshTokens() {
-                try {
-                    // Check if we have a refresh token
-                    if (!this.tokens.refreshToken) {
-                        console.log('🔐 [AuthManager] No refresh token available');
-                        return false;
-                    }
-                    
-                    // Check if we have an API function
-                    if (typeof window.parent.api !== 'function' && typeof window.api !== 'function') {
-                        console.log('🔐 [AuthManager] No API function available for refresh');
-                        return false;
-                    }
-                    
-                    // Call refresh endpoint
-                    const apiFunction = window.parent.api || window.api;
-                    const result = await apiFunction(this.endpoints.refresh, 'POST', {
-                        refresh_token: this.tokens.refreshToken
-                    });
-                    
-                    if (result && result.access_token) {
-                        // Update tokens
-                        this.tokens.accessToken = result.access_token;
-                        if (result.moodchat_token) {
-                            this.tokens.moodchatToken = result.moodchat_token;
-                        }
-                        if (result.refresh_token) {
-                            this.tokens.refreshToken = result.refresh_token;
-                        }
-                        
-                        // Save to localStorage
-                        this.saveTokensToStorage();
-                        
-                        console.log('✅ [AuthManager] Tokens refreshed successfully');
-                        return true;
-                    }
-                    
-                    return false;
-                } catch (error) {
-                    console.error('🔐 [AuthManager] Token refresh error:', error);
-                    return false;
-                }
-            },
-            
-            /**
-             * Store tokens in window object for API access
-             */
-            storeTokensInWindow() {
-                console.log('🔐 [AuthManager] Storing tokens in window object...');
-                
-                // Store in window for API access
-                if (this.tokens.accessToken) {
-                    window.accessToken = this.tokens.accessToken;
-                    localStorage.setItem('access_token', this.tokens.accessToken);
-                }
-                
-                // Also store in a more accessible location
-                window.authTokens = {
-                    accessToken: this.tokens.accessToken,
-                    moodchatToken: this.tokens.moodchatToken,
-                    refreshToken: this.tokens.refreshToken,
-                    validatedAt: Date.now(),
-                    storageLocation: 'localStorage'
-                };
-                
-                // Store user info if available
-                const user = localStorage.getItem('kynecta_user');
-                if (user) {
-                    try {
-                        window.currentUser = JSON.parse(user);
-                    } catch (e) {
-                        console.error('Error parsing user data:', e);
+                for (const key of tokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token && token.trim() !== '') {
+                        console.log(`🔐 [AuthManager] Found token in ${key}`);
+                        return token;
                     }
                 }
                 
-                console.log('🔐 [AuthManager] Tokens stored in window object');
+                console.log('🔐 [AuthManager] No token found in localStorage');
+                return null;
             },
             
             /**
-             * Save tokens to localStorage
-             */
-            saveTokensToStorage() {
-                if (this.tokens.moodchatToken) {
-                    localStorage.setItem('moodchat_token', this.tokens.moodchatToken);
-                    localStorage.setItem('auth_token', this.tokens.moodchatToken); // Compatibility
-                }
-                if (this.tokens.accessToken) {
-                    localStorage.setItem('access_token', this.tokens.accessToken);
-                }
-                if (this.tokens.refreshToken) {
-                    localStorage.setItem('refresh_token', this.tokens.refreshToken);
-                }
-                console.log('🔐 [AuthManager] Tokens saved to localStorage');
-            },
-            
-            /**
-             * Clear all tokens
-             */
-            clearTokens() {
-                console.log('🔐 [AuthManager] Clearing all tokens...');
-                
-                // Clear from localStorage
-                localStorage.removeItem('moodchat_token');
-                localStorage.removeItem('auth_token');
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                
-                // Clear from window
-                window.accessToken = null;
-                delete window.authTokens;
-                delete window.currentUser;
-                
-                // Clear internal state
-                this.tokens = {
-                    moodchatToken: null,
-                    accessToken: null,
-                    refreshToken: null
-                };
-                
-                this.validationState.isReady = false;
-                
-                console.log('🔐 [AuthManager] All tokens cleared');
-            },
-            
-            /**
-             * Send token storage information to all child iframes
-             * This tells iframes where to find tokens directly
-             */
-            sendTokenStorageInfoToIframes() {
-                console.log('🔐 [AuthManager] Sending token storage info to iframes...');
-                
-                const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                                  'friendsIframe', 'settingsIframe', 'toolsIframe'];
-                
-                iframeIds.forEach(iframeId => {
-                    const iframe = document.getElementById(iframeId);
-                    if (iframe && iframe.contentWindow) {
-                        try {
-                            const message = {
-                                type: 'TOKEN_STORAGE_INFO',
-                                timestamp: Date.now(),
-                                storageType: 'localStorage',
-                                tokenKeys: {
-                                    accessToken: 'access_token',
-                                    moodchatToken: 'moodchat_token',
-                                    refreshToken: 'refresh_token',
-                                    authToken: 'auth_token', // Compatibility
-                                    userData: 'kynecta_user'
-                                },
-                                currentTokens: {
-                                    hasAccessToken: !!this.tokens.accessToken,
-                                    hasMoodchatToken: !!this.tokens.moodchatToken,
-                                    hasRefreshToken: !!this.tokens.refreshToken
-                                },
-                                message: 'Iframes can now read tokens directly from localStorage'
-                            };
-                            
-                            iframe.contentWindow.postMessage(message, '*');
-                            console.log(`🔐 [AuthManager] Sent TOKEN_STORAGE_INFO to ${iframeId}`);
-                        } catch (e) {
-                            console.error(`🔐 [AuthManager] Error sending message to ${iframeId}:`, e);
-                        }
-                    }
-                });
-            },
-            
-            /**
-             * Notify all child iframes about authentication state
-             */
-            notifyIframes(messageType) {
-                console.log(`🔐 [AuthManager] Notifying iframes: ${messageType}`);
-                
-                const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                                  'friendsIframe', 'settingsIframe', 'toolsIframe'];
-                
-                iframeIds.forEach(iframeId => {
-                    const iframe = document.getElementById(iframeId);
-                    if (iframe && iframe.contentWindow) {
-                        try {
-                            const message = {
-                                type: messageType,
-                                timestamp: Date.now(),
-                                authReady: this.validationState.isReady
-                            };
-                            
-                            // Include tokens in API_READY message
-                            if (messageType === 'API_READY' && this.validationState.isReady) {
-                                message.tokens = {
-                                    accessToken: this.tokens.accessToken,
-                                    moodchatToken: this.tokens.moodchatToken
-                                };
-                                message.windowAccessToken = window.accessToken;
-                                message.storageInfo = {
-                                    localStorageKeys: {
-                                        accessToken: 'access_token',
-                                        moodchatToken: 'moodchat_token',
-                                        authToken: 'auth_token',
-                                        refreshToken: 'refresh_token'
-                                    }
-                                };
-                            }
-                            
-                            iframe.contentWindow.postMessage(message, '*');
-                            console.log(`🔐 [AuthManager] Sent ${messageType} to ${iframeId}`);
-                        } catch (e) {
-                            console.error(`🔐 [AuthManager] Error sending message to ${iframeId}:`, e);
-                        }
-                    }
-                });
-                
-                // Also send to parent if we're in an iframe
-                if (window.parent !== window) {
-                    try {
-                        window.parent.postMessage({
-                            type: messageType,
-                            source: 'AuthManager',
-                            timestamp: Date.now()
-                        }, '*');
-                    } catch (e) {
-                        // Silently ignore
-                    }
-                }
-            },
-            
-            /**
-             * Check if authentication is ready
-             */
-            isReady() {
-                return this.validationState.isReady;
-            },
-            
-            /**
-             * Wait for authentication to be ready
-             */
-            async waitForReady() {
-                if (this.validationState.isReady) {
-                    return true;
-                }
-                
-                if (!this.validationState.validationAttempted) {
-                    await this.validateAuth();
-                }
-                
-                // Poll until ready (with timeout)
-                const startTime = Date.now();
-                const timeout = 30000; // 30 seconds timeout
-                
-                return new Promise((resolve, reject) => {
-                    const checkInterval = setInterval(() => {
-                        if (this.validationState.isReady) {
-                            clearInterval(checkInterval);
-                            resolve(true);
-                        }
-                        
-                        if (Date.now() - startTime > timeout) {
-                            clearInterval(checkInterval);
-                            reject(new Error('Authentication timeout'));
-                        }
-                    }, 100);
-                });
-            },
-            
-            /**
-             * Get current token information for iframes
-             */
-            getTokenInfo() {
-                return {
-                    accessToken: this.tokens.accessToken,
-                    moodchatToken: this.tokens.moodchatToken,
-                    refreshToken: this.tokens.refreshToken,
-                    storageLocation: 'localStorage',
-                    keys: {
-                        accessToken: 'access_token',
-                        moodchatToken: 'moodchat_token',
-                        refreshToken: 'refresh_token',
-                        authToken: 'auth_token'
-                    },
-                    isValid: this.validationState.isReady,
-                    lastValidated: this.validationState.lastValidation
-                };
-            },
-            
-            /**
-             * Initialize the auth manager
-             */
-            initialize() {
-                console.log('🔐 [AuthManager] Initializing...');
-                
-                // Listen for token updates from other parts of the app
-                window.addEventListener('message', (event) => {
-                    if (event.data && event.data.type === 'TOKENS_UPDATED') {
-                        console.log('🔐 [AuthManager] Received token update');
-                        if (event.data.tokens) {
-                            this.tokens = { ...this.tokens, ...event.data.tokens };
-                            this.saveTokensToStorage();
-                            this.storeTokensInWindow();
-                            this.sendTokenStorageInfoToIframes();
-                        }
-                    }
-                    
-                    // Handle requests from iframes for token info
-                    if (event.data && event.data.type === 'REQUEST_TOKEN_INFO') {
-                        console.log('🔐 [AuthManager] Received token info request');
-                        const tokenInfo = this.getTokenInfo();
-                        
-                        // Send response back to source
-                        if (event.source && event.source.postMessage) {
-                            event.source.postMessage({
-                                type: 'TOKEN_INFO_RESPONSE',
-                                tokenInfo: tokenInfo,
-                                requestId: event.data.requestId,
-                                timestamp: Date.now()
-                            }, '*');
-                        }
-                    }
-                });
-                
-                // Set up periodic token validation
-                setInterval(() => {
-                    if (this.validationState.isReady && 
-                        Date.now() - this.validationState.lastValidation > 300000) { // 5 minutes
-                        console.log('🔐 [AuthManager] Periodic token validation');
-                        this.validateAuth().catch(error => {
-                            console.error('🔐 [AuthManager] Periodic validation failed:', error);
-                        });
-                    }
-                }, 60000); // Check every minute
-                
-                console.log('🔐 [AuthManager] Initialized successfully');
-            }
-        };
-        
-        // Initialize AuthManager when DOM is loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('🔐 [AuthManager] DOM loaded, initializing AuthManager...');
-            AuthManager.initialize();
-            
-            // Start validation immediately
-            AuthManager.validateAuth().then(result => {
-                console.log('🔐 [AuthManager] Initial validation completed:', result);
-            }).catch(error => {
-                console.error('🔐 [AuthManager] Initial validation failed:', error);
-            });
-        });
-        
-        // Make AuthManager globally available
-        window.AuthManager = AuthManager;
-        
-        // ====== DIRECT TOKEN ACCESS FUNCTIONS FOR IFRAMES ======
-        
-        /**
-         * Direct token access utility functions that iframes can use
-         * These functions allow iframes to read tokens directly from localStorage
-         * without waiting for parent messages
-         */
-        window.TokenAccess = {
-            /**
-             * Get access token directly from localStorage
-             * @returns {string|null} The access token or null if not found
-             */
-            getAccessToken() {
-                return localStorage.getItem('access_token') || 
-                       localStorage.getItem('auth_token') || 
-                       localStorage.getItem('moodchat_token');
-            },
-            
-            /**
-             * Get refresh token directly from localStorage
-             * @returns {string|null} The refresh token or null if not found
-             */
-            getRefreshToken() {
-                return localStorage.getItem('refresh_token');
-            },
-            
-            /**
-             * Get user data directly from localStorage
-             * @returns {Object|null} The user object or null if not found
+             * Get user data from localStorage
+             * @returns {Object|null} User object or null
              */
             getUserData() {
-                const userData = localStorage.getItem('kynecta_user');
+                const userData = localStorage.getItem(this.TOKEN_KEYS.USER_DATA);
                 if (userData) {
                     try {
                         return JSON.parse(userData);
                     } catch (e) {
-                        console.error('Error parsing user data:', e);
+                        console.error('🔐 [AuthManager] Error parsing user data:', e);
                         return null;
                     }
                 }
@@ -2038,200 +1500,233 @@
             },
             
             /**
-             * Check if user is authenticated
-             * @returns {boolean} True if access token exists
+             * Validate authentication by calling /api/auth/me
+             * @returns {Promise<Object>} User data if valid, throws error if not
              */
-            isAuthenticated() {
-                return !!this.getAccessToken();
-            },
-            
-            /**
-             * Get authorization header for API calls
-             * @returns {Object} Headers object with Authorization header
-             */
-            getAuthHeaders() {
-                const token = this.getAccessToken();
-                if (token) {
-                    return {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    };
-                }
-                return {
-                    'Content-Type': 'application/json'
-                };
-            },
-            
-            /**
-             * Make an authenticated API call
-             * @param {string} url - The API endpoint
-             * @param {string} method - HTTP method (GET, POST, etc.)
-             * @param {Object} data - Request data
-             * @returns {Promise} Promise resolving to the API response
-             */
-            async makeAuthenticatedRequest(url, method = 'GET', data = null) {
-                const token = this.getAccessToken();
+            async validate() {
+                console.log('🔐 [AuthManager] Starting authentication validation...');
+                
+                const token = this.getToken();
                 if (!token) {
-                    throw new Error('No authentication token found. Please log in.');
-                }
-                
-                const headers = this.getAuthHeaders();
-                const options = {
-                    method: method,
-                    headers: headers,
-                    credentials: 'include'
-                };
-                
-                if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-                    options.body = JSON.stringify(data);
+                    throw new Error('No authentication token found');
                 }
                 
                 try {
-                    const response = await fetch(url, options);
-                    
-                    // Check for token expiration
-                    if (response.status === 401) {
-                        // Try to refresh token
-                        const refreshed = await this.refreshAccessToken();
-                        if (refreshed) {
-                            // Retry the request with new token
-                            return this.makeAuthenticatedRequest(url, method, data);
-                        } else {
-                            // Redirect to login
-                            this.redirectToLogin();
-                            throw new Error('Session expired. Please log in again.');
+                    // Check if api.js is available
+                    if (typeof window.api !== 'function' && typeof window.parent.api !== 'function') {
+                        console.log('🔐 [AuthManager] api.js not available, checking localStorage only');
+                        const userData = this.getUserData();
+                        if (userData) {
+                            this.state.isAuthenticated = true;
+                            this.state.user = userData;
+                            this.state.token = token;
+                            this.state.lastCheck = Date.now();
+                            console.log('🔐 [AuthManager] Using cached user data');
+                            return userData;
                         }
+                        throw new Error('api.js not available and no cached user data');
                     }
                     
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
+                    // Call /api/auth/me through api.js
+                    const api = window.api || window.parent.api;
+                    const response = await api('/api/auth/me', 'GET');
                     
-                    return await response.json();
+                    if (response && response.user) {
+                        // Update state
+                        this.state.isAuthenticated = true;
+                        this.state.user = response.user;
+                        this.state.token = token;
+                        this.state.lastCheck = Date.now();
+                        
+                        // Store user data for future use
+                        localStorage.setItem(this.TOKEN_KEYS.USER_DATA, JSON.stringify(response.user));
+                        
+                        console.log('🔐 [AuthManager] Authentication validated successfully:', response.user.name || 'Unknown');
+                        return response.user;
+                    } else {
+                        throw new Error('Invalid response from /api/auth/me');
+                    }
                 } catch (error) {
-                    console.error('API request failed:', error);
+                    console.error('🔐 [AuthManager] Validation failed:', error);
+                    
+                    // Clear invalid auth state
+                    this.clearAuth();
+                    
                     throw error;
                 }
             },
             
             /**
-             * Refresh the access token using refresh token
-             * @returns {Promise<boolean>} True if refresh successful
+             * Clear all authentication data
              */
-            async refreshAccessToken() {
-                const refreshToken = this.getRefreshToken();
-                if (!refreshToken) {
-                    console.error('No refresh token available');
-                    return false;
-                }
+            clearAuth() {
+                console.log('🔐 [AuthManager] Clearing authentication data...');
                 
-                try {
-                    const response = await fetch('/auth/refresh', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ refresh_token: refreshToken })
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.access_token) {
-                            // Store new tokens
-                            localStorage.setItem('access_token', data.access_token);
-                            if (data.moodchat_token) {
-                                localStorage.setItem('moodchat_token', data.moodchat_token);
-                                localStorage.setItem('auth_token', data.moodchat_token);
-                            }
-                            if (data.refresh_token) {
-                                localStorage.setItem('refresh_token', data.refresh_token);
-                            }
-                            console.log('Token refreshed successfully');
-                            return true;
-                        }
-                    }
-                    return false;
-                } catch (error) {
-                    console.error('Token refresh failed:', error);
-                    return false;
-                }
+                // Clear localStorage
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('moodchat_token');
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem(this.TOKEN_KEYS.USER_DATA);
+                
+                // Clear state
+                this.state.isAuthenticated = false;
+                this.state.user = null;
+                this.state.token = null;
+                this.state.lastCheck = 0;
+                
+                // Clear window objects
+                window.accessToken = null;
+                delete window.currentUser;
+                delete window.authTokens;
             },
             
             /**
              * Redirect to login page
              */
             redirectToLogin() {
-                // Clear local storage
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('moodchat_token');
-                localStorage.removeItem('auth_token');
-                localStorage.removeItem('refresh_token');
-                localStorage.removeItem('kynecta_user');
+                console.log('🔐 [AuthManager] Redirecting to login...');
+                this.clearAuth();
                 
-                // Redirect to login
                 if (window.parent !== window) {
+                    // We're in an iframe, notify parent
                     window.parent.postMessage({
                         type: 'AUTH_REQUIRED',
-                        redirect: true
+                        redirect: true,
+                        timestamp: Date.now()
                     }, '*');
                 } else {
+                    // We're the main window
                     window.location.href = '../index.html';
                 }
             },
             
             /**
-             * Initialize token access in iframe
-             * Call this in iframe pages to enable direct token access
+             * Check if user is authenticated (synchronous)
+             * @returns {boolean} True if authenticated
              */
-            initializeInIframe() {
-                console.log('🔐 [TokenAccess] Initializing direct token access in iframe');
+            isAuthenticated() {
+                return this.state.isAuthenticated && this.state.token !== null;
+            },
+            
+            /**
+             * Get current user (synchronous)
+             * @returns {Object|null} User object or null
+             */
+            getCurrentUser() {
+                return this.state.user;
+            },
+            
+            /**
+             * Get current token (synchronous)
+             * @returns {string|null} Token or null
+             */
+            getCurrentToken() {
+                return this.state.token;
+            },
+            
+            /**
+             * Initialize auth manager
+             */
+            initialize() {
+                console.log('🔐 [AuthManager] Initializing...');
                 
-                // Make functions available in iframe
-                if (window !== window.parent) {
-                    window.getAccessToken = this.getAccessToken.bind(this);
-                    window.getRefreshToken = this.getRefreshToken.bind(this);
-                    window.getUserData = this.getUserData.bind(this);
-                    window.isAuthenticated = this.isAuthenticated.bind(this);
-                    window.getAuthHeaders = this.getAuthHeaders.bind(this);
-                    window.makeAuthenticatedRequest = this.makeAuthenticatedRequest.bind(this);
-                    window.refreshAccessToken = this.refreshAccessToken.bind(this);
-                    window.redirectToLogin = this.redirectToLogin.bind(this);
+                // Load initial state from localStorage
+                const token = this.getToken();
+                const userData = this.getUserData();
+                
+                if (token && userData) {
+                    this.state.isAuthenticated = true;
+                    this.state.user = userData;
+                    this.state.token = token;
+                    this.state.lastCheck = Date.now();
+                    console.log('🔐 [AuthManager] Loaded initial state from localStorage');
                 }
                 
-                // Listen for token storage info from parent
-                window.addEventListener('message', (event) => {
-                    if (event.data && event.data.type === 'TOKEN_STORAGE_INFO') {
-                        console.log('🔐 [TokenAccess] Received token storage info:', event.data);
-                        window.tokenStorageInfo = event.data;
+                // Set up periodic validation (every 5 minutes)
+                setInterval(() => {
+                    if (this.state.isAuthenticated) {
+                        this.validate().catch(error => {
+                            console.warn('🔐 [AuthManager] Periodic validation failed:', error);
+                        });
                     }
-                    
-                    if (event.data && event.data.type === 'TOKEN_INFO_RESPONSE') {
-                        console.log('🔐 [TokenAccess] Received token info response:', event.data);
-                        window.tokenInfo = event.data.tokenInfo;
-                    }
-                });
+                }, 300000);
                 
-                // Try to get token info immediately
-                const token = this.getAccessToken();
-                if (token) {
-                    console.log('🔐 [TokenAccess] Found access token in localStorage');
-                    window.hasDirectTokenAccess = true;
-                } else {
-                    console.log('🔐 [TokenAccess] No access token found in localStorage');
-                    window.hasDirectTokenAccess = false;
-                }
+                console.log('🔐 [AuthManager] Initialized successfully');
             }
         };
         
-        // Make TokenAccess globally available
-        window.TokenAccess = TokenAccess;
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            AuthManager.initialize();
+        });
         
-        // If we're in an iframe context, initialize token access immediately
-        if (window !== window.parent) {
-            setTimeout(() => {
-                TokenAccess.initializeInIframe();
-            }, 100);
-        }
+        // Make AuthManager globally available
+        window.AuthManager = AuthManager;
+        
+        // ====== IFRAME BOOTSTRAP FUNCTION ======
+        // This function should be called in EVERY iframe page
+        window.bootstrapIframe = async function() {
+            console.log('🚀 [bootstrapIframe] Starting iframe bootstrap...');
+            
+            try {
+                // Step 1: Check for api.js
+                if (typeof window.api !== 'function') {
+                    console.error('🚀 [bootstrapIframe] api.js not found');
+                    
+                    // Try to load it if not present
+                    if (!window.api) {
+                        console.log('🚀 [bootstrapIframe] Attempting to load api.js...');
+                        try {
+                            // Try to get api from parent
+                            if (typeof window.parent.api === 'function') {
+                                window.api = window.parent.api;
+                            } else {
+                                throw new Error('api.js not available in parent either');
+                            }
+                        } catch (e) {
+                            throw new Error('api.js is required for authentication');
+                        }
+                    }
+                }
+                
+                // Step 2: Get token from localStorage
+                const token = AuthManager.getToken();
+                if (!token) {
+                    console.error('🚀 [bootstrapIframe] No authentication token found');
+                    AuthManager.redirectToLogin();
+                    return false;
+                }
+                
+                console.log('🚀 [bootstrapIframe] Token found, validating...');
+                
+                // Step 3: Validate with server
+                try {
+                    const user = await AuthManager.validate();
+                    console.log('✅ [bootstrapIframe] Authentication successful:', user.name || 'Unknown');
+                    
+                    // Step 4: Store token in window for api.js
+                    window.accessToken = token;
+                    
+                    // Step 5: Store user in window
+                    window.currentUser = user;
+                    
+                    return {
+                        success: true,
+                        user: user,
+                        token: token
+                    };
+                } catch (error) {
+                    console.error('🚀 [bootstrapIframe] Authentication failed:', error);
+                    AuthManager.redirectToLogin();
+                    return false;
+                }
+            } catch (error) {
+                console.error('🚀 [bootstrapIframe] Bootstrap failed:', error);
+                AuthManager.redirectToLogin();
+                return false;
+            }
+        };
     </script>
 
     <!-- Global Notification Container (Shows on all screens) -->
@@ -2523,283 +2018,91 @@
     </div>
 
     <script>
-    // ====== SINGLE SOURCE OF TRUTH ======
+    // ====== SIMPLIFIED APP STATE ======
     const AppState = {
         // Core state
         api: {
             ready: false,
-            reference: null,
-            hasParentApi: false,
-            lastChecked: 0
+            reference: null
         },
         auth: {
             authenticated: false,
             user: null,
-            token: null,
-            lastVerified: 0,
-            verificationAttempted: false
+            token: null
         },
         connectivity: {
-            online: navigator.onLine,
-            fallbackMode: false,
-            fallbackReason: null
+            online: navigator.onLine
         },
         
-        // Derived flags (computed, not stored)
-        get canUseApi() {
-            return this.api.ready && this.auth.authenticated && !this.connectivity.fallbackMode;
-        },
-        
-        get shouldShowFallback() {
-            return this.connectivity.fallbackMode && !this.auth.authenticated;
-        },
-        
-        get userData() {
-            return this.auth.user;
-        },
-        
-        // Update methods
-        setApiReady(apiRef = null) {
-            const wasReady = this.api.ready;
-            this.api.ready = true;
-            this.api.reference = apiRef || this.api.reference;
-            this.api.hasParentApi = typeof window.parent.api !== 'undefined';
-            this.api.lastChecked = Date.now();
+        // Initialize
+        initialize() {
+            console.log('AppState initializing...');
             
-            // Clear fallback mode if API becomes ready
-            if (this.connectivity.fallbackMode && this.connectivity.fallbackReason === 'api_unavailable') {
-                this.connectivity.fallbackMode = false;
-                this.connectivity.fallbackReason = null;
-                console.log('Cleared fallback mode because API is now ready');
-            }
+            // Check online status
+            this.connectivity.online = navigator.onLine;
             
-            if (!wasReady) {
-                console.log('API marked as ready in AppState');
-                this.broadcastStateChange('api_ready');
-                
-                // After API is ready, verify authentication through AuthManager
-                this.verifyAuthenticationWithAuthManager();
-            }
-        },
-        
-        setApiUnavailable() {
-            const wasReady = this.api.ready;
-            this.api.ready = false;
-            this.api.reference = null;
-            this.api.lastChecked = Date.now();
+            // Check if we have auth from localStorage
+            const token = localStorage.getItem('access_token') || 
+                         localStorage.getItem('moodchat_token') || 
+                         localStorage.getItem('auth_token');
+            const userData = localStorage.getItem('kynecta_user');
             
-            if (wasReady) {
-                console.warn('API marked as unavailable in AppState');
-                this.broadcastStateChange('api_unavailable');
-            }
-        },
-        
-        setAuthenticated(user, token) {
-            const wasAuthenticated = this.auth.authenticated;
-            this.auth.authenticated = true;
-            this.auth.user = user;
-            this.auth.token = token;
-            this.auth.lastVerified = Date.now();
-            this.auth.verificationAttempted = true;
-            
-            // Clear fallback mode if user authenticates
-            if (this.connectivity.fallbackMode && this.connectivity.fallbackReason === 'unauthenticated') {
-                this.connectivity.fallbackMode = false;
-                this.connectivity.fallbackReason = null;
-                console.log('Cleared fallback mode because user authenticated');
-            }
-            
-            if (!wasAuthenticated) {
-                console.log('User authenticated in AppState:', user?.name || 'Unknown');
-                this.broadcastStateChange('auth_authenticated');
-            } else {
-                this.broadcastStateChange('auth_updated');
-            }
-        },
-        
-        setUnauthenticated() {
-            const wasAuthenticated = this.auth.authenticated;
-            this.auth.authenticated = false;
-            this.auth.user = null;
-            this.auth.token = null;
-            this.auth.lastVerified = Date.now();
-            this.auth.verificationAttempted = true;
-            
-            if (wasAuthenticated) {
-                console.log('User unauthenticated in AppState');
-                this.broadcastStateChange('auth_unauthenticated');
-            }
-        },
-        
-        async verifyAuthenticationWithAuthManager() {
-            // Use AuthManager for authentication verification
-            try {
-                if (window.AuthManager && typeof window.AuthManager.waitForReady === 'function') {
-                    const isReady = await window.AuthManager.waitForReady();
-                    
-                    if (isReady) {
-                        // Get user from localStorage
-                        const storedUser = localStorage.getItem('kynecta_user');
-                        const authToken = localStorage.getItem('auth_token');
-                        
-                        if (storedUser) {
-                            const user = JSON.parse(storedUser);
-                            this.setAuthenticated(user, authToken);
-                            return true;
-                        }
-                    }
+            if (token && userData) {
+                try {
+                    this.auth.authenticated = true;
+                    this.auth.user = JSON.parse(userData);
+                    this.auth.token = token;
+                    console.log('AppState loaded auth from localStorage');
+                } catch (e) {
+                    console.error('Error parsing user data:', e);
                 }
-                
-                this.setUnauthenticated();
-                return false;
-            } catch (error) {
-                console.error('Error verifying authentication with AuthManager:', error);
-                this.setUnauthenticated();
-                return false;
             }
-        },
-        
-        setFallbackMode(reason) {
-            if (!this.connectivity.fallbackMode && !this.auth.authenticated) {
-                this.connectivity.fallbackMode = true;
-                this.connectivity.fallbackReason = reason;
-                console.warn('Entered fallback mode:', reason);
-                this.broadcastStateChange('fallback_entered');
-            }
-        },
-        
-        clearFallbackMode() {
-            if (this.connectivity.fallbackMode) {
-                this.connectivity.fallbackMode = false;
-                this.connectivity.fallbackReason = null;
-                console.log('Cleared fallback mode');
-                this.broadcastStateChange('fallback_cleared');
-            }
-        },
-        
-        setOnlineStatus(online) {
-            const wasOnline = this.connectivity.online;
-            this.connectivity.online = online;
             
-            if (wasOnline !== online) {
-                console.log('Connectivity changed:', online ? 'Online' : 'Offline');
-                this.broadcastStateChange('connectivity_changed');
-            }
-        },
-        
-        // Broadcast changes to all iframes
-        broadcastStateChange(changeType) {
-            const message = {
-                type: 'APP_STATE_UPDATE',
-                state: this.getStateSnapshot(),
-                changeType: changeType,
-                timestamp: Date.now()
-            };
-            
-            this.broadcastToAllIframes(message);
-        },
-        
-        getStateSnapshot() {
-            return {
-                apiReady: this.api.ready,
-                apiAvailable: this.api.ready && this.api.hasParentApi,
+            console.log('AppState initialized:', {
                 authenticated: this.auth.authenticated,
-                user: this.auth.user,
-                token: this.auth.token,
-                online: this.connectivity.online,
-                fallbackMode: this.connectivity.fallbackMode,
-                canUseApi: this.canUseApi,
-                timestamp: Date.now(),
-                authManagerReady: window.AuthManager ? window.AuthManager.isReady() : false,
-                hasDirectTokenAccess: true, // Always true now
-                tokenStorageLocation: 'localStorage'
-            };
-        },
-        
-        broadcastToAllIframes(message) {
-            const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                              'friendsIframe', 'settingsIframe', 'toolsIframe'];
-            
-            iframeIds.forEach(iframeId => {
-                const iframe = document.getElementById(iframeId);
-                if (iframe && iframe.contentWindow) {
-                    try {
-                        iframe.contentWindow.postMessage(message, '*');
-                    } catch (e) {
-                        // Silently ignore cross-origin errors
-                    }
-                }
+                user: this.auth.user ? this.auth.user.name : null,
+                online: this.connectivity.online
             });
         },
         
-        // Initialize from existing data
-        initialize() {
-            // Do NOT check authentication here - wait for API readiness
-            console.log('AppState initialized - authentication check deferred until API is ready');
+        // Set authentication
+        setAuthenticated(user, token) {
+            this.auth.authenticated = true;
+            this.auth.user = user;
+            this.auth.token = token;
             
-            // Set initial online status
-            this.setOnlineStatus(navigator.onLine);
+            // Store in localStorage
+            localStorage.setItem('kynecta_user', JSON.stringify(user));
+            localStorage.setItem('access_token', token);
+            localStorage.setItem('moodchat_token', token);
+            localStorage.setItem('auth_token', token);
             
-            console.log('AppState initialized:', this.getStateSnapshot());
+            console.log('AppState: User authenticated', user.name);
+        },
+        
+        // Clear authentication
+        clearAuthentication() {
+            this.auth.authenticated = false;
+            this.auth.user = null;
+            this.auth.token = null;
+            
+            // Clear localStorage
+            localStorage.removeItem('kynecta_user');
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('moodchat_token');
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('refresh_token');
+            
+            console.log('AppState: Authentication cleared');
+        },
+        
+        // Set API ready
+        setApiReady(apiRef) {
+            this.api.ready = true;
+            this.api.reference = apiRef;
+            console.log('AppState: API marked as ready');
         }
     };
-    
-    // ====== PARENT COORDINATION FIX - CRITICAL ADDITION ======
-    // Guarded boolean flag to track if API ready message has been sent
-    let apiReadySent = false;
-    
-    // Function to send definitive API ready message once
-    function sendDefinitiveApiReadyMessage() {
-        if (apiReadySent) {
-            console.log('API ready message already sent, skipping duplicate');
-            return;
-        }
-        
-        if (!AppState.api.ready) {
-            console.log('API not ready yet, cannot send definitive ready message');
-            return;
-        }
-        
-        console.log('Sending definitive API_READY message to all iframes');
-        apiReadySent = true;
-        
-        const definitiveMessage = {
-            type: 'API_READY',
-            definitive: true,
-            state: AppState.getStateSnapshot(),
-            timestamp: Date.now(),
-            message: 'API is definitively ready - stop requesting',
-            directTokenAccess: true,
-            tokenStorageInfo: {
-                location: 'localStorage',
-                keys: {
-                    accessToken: 'access_token',
-                    moodchatToken: 'moodchat_token',
-                    authToken: 'auth_token',
-                    refreshToken: 'refresh_token',
-                    userData: 'kynecta_user'
-                }
-            }
-        };
-        
-        // Broadcast to all iframes
-        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                          'friendsIframe', 'settingsIframe', 'toolsIframe'];
-        
-        iframeIds.forEach(iframeId => {
-            const iframe = document.getElementById(iframeId);
-            if (iframe && iframe.contentWindow) {
-                try {
-                    iframe.contentWindow.postMessage(definitiveMessage, '*');
-                } catch (e) {
-                    // Silently ignore cross-origin errors
-                }
-            }
-        });
-        
-        // Also send APP_STATE_UPDATE with api_ready change
-        AppState.broadcastStateChange('api_ready_definitive');
-    }
     
     // ====== NAVIGATION SYSTEM ======
     
@@ -2817,7 +2120,6 @@
     
     let appInitialized = false;
     let apiCheckInterval = null;
-    let authCheckInterval = null;
     
     // ====== HELPER FUNCTIONS ======
     function closeModal(modalId) {
@@ -2827,206 +2129,6 @@
         }
     }
     
-    // ====== API READINESS DETECTION ======
-    function checkApiReadiness() {
-        // Check multiple ways the API might be available
-        let apiReady = false;
-        let apiRef = null;
-        
-        // Method 1: Direct window.parent.api
-        if (typeof window.parent.api !== 'undefined') {
-            apiReady = true;
-            apiRef = window.parent.api;
-        }
-        
-        // Method 2: Global api object
-        if (typeof window.api !== 'undefined') {
-            apiReady = true;
-            apiRef = window.api;
-        }
-        
-        // Method 3: Check for api function
-        if (typeof window.parent.api === 'function') {
-            apiReady = true;
-            apiRef = window.parent.api;
-        }
-        
-        // Update state if changed
-        if (apiReady && !AppState.api.ready) {
-            AppState.setApiReady(apiRef);
-            
-            // Send definitive API ready message
-            setTimeout(() => {
-                sendDefinitiveApiReadyMessage();
-            }, 100);
-            
-            return true;
-        } else if (!apiReady && AppState.api.ready) {
-            AppState.setApiUnavailable();
-            // Reset the sent flag if API becomes unavailable
-            apiReadySent = false;
-        }
-        
-        return apiReady;
-    }
-    
-    // ====== AUTHENTICATION HANDLING INTEGRATION ======
-    // Replace old checkAuthentication with AuthManager integration
-    function checkAuthentication() {
-        // This function uses AuthManager to check authentication state
-        try {
-            if (window.AuthManager && typeof window.AuthManager.isReady === 'function') {
-                const isAuthReady = window.AuthManager.isReady();
-                
-                if (isAuthReady && !AppState.auth.authenticated) {
-                    // Get user data from localStorage
-                    const storedUser = localStorage.getItem('kynecta_user');
-                    const authToken = localStorage.getItem('auth_token');
-                    
-                    if (storedUser && authToken) {
-                        const user = JSON.parse(storedUser);
-                        AppState.setAuthenticated(user, authToken);
-                        return true;
-                    }
-                } else if (!isAuthReady && AppState.auth.authenticated) {
-                    AppState.setUnauthenticated();
-                }
-                return isAuthReady;
-            }
-            
-            // Fallback to old method if AuthManager not available
-            const storedUser = localStorage.getItem('kynecta_user');
-            const authToken = localStorage.getItem('auth_token');
-            
-            if (storedUser && authToken) {
-                const user = JSON.parse(storedUser);
-                if (!AppState.auth.authenticated || AppState.auth.user?.id !== user.id) {
-                    AppState.setAuthenticated(user, authToken);
-                }
-                return true;
-            } else {
-                if (AppState.auth.authenticated) {
-                    AppState.setUnauthenticated();
-                }
-                return false;
-            }
-        } catch (error) {
-            console.error('Error checking authentication:', error);
-            if (AppState.auth.authenticated) {
-                AppState.setUnauthenticated();
-            }
-            return false;
-        }
-    }
-    
-    function initializeApiMonitoring() {
-        // Start checking for API
-        apiCheckInterval = setInterval(() => {
-            checkApiReadiness();
-        }, 2000);
-        
-        // Also check immediately
-        setTimeout(() => {
-            checkApiReadiness();
-        }, 100);
-    }
-    
-    function handleApiReadyEvent() {
-        console.log('API ready event received, checking API...');
-        checkApiReadiness();
-        
-        // If API is ready, clear any fallback mode and verify auth
-        if (AppState.api.ready) {
-            AppState.clearFallbackMode();
-            
-            // Use AuthManager for authentication verification
-            if (window.AuthManager) {
-                window.AuthManager.validateAuth().then(result => {
-                    if (result && result.success) {
-                        // AuthManager validated successfully
-                        checkAuthentication();
-                    }
-                }).catch(error => {
-                    console.error('AuthManager validation failed:', error);
-                });
-            } else {
-                // Fallback to old method
-                AppState.verifyAuthenticationWithApi();
-            }
-            
-            // Send definitive API ready message
-            sendDefinitiveApiReadyMessage();
-            
-            // Show notification
-            showGlobalNotification('API connected successfully', 'success', 3000);
-        }
-    }
-    
-    function handleLoginEvent(user, token) {
-        console.log('Login event received:', user?.name || 'Unknown');
-        
-        // Update AppState immediately
-        AppState.setAuthenticated(user, token);
-        
-        // Store in localStorage
-        localStorage.setItem('kynecta_user', JSON.stringify(user));
-        localStorage.setItem('auth_token', token);
-        
-        // Also update AuthManager tokens if available
-        if (window.AuthManager && token) {
-            // Store token in AuthManager format
-            localStorage.setItem('moodchat_token', token);
-            localStorage.setItem('access_token', token);
-            window.accessToken = token;
-            
-            // Trigger AuthManager validation
-            window.AuthManager.validateAuth().catch(error => {
-                console.error('AuthManager validation after login failed:', error);
-            });
-        }
-        
-        // Clear any fallback mode
-        AppState.clearFallbackMode();
-        
-        // Send token storage info to iframes
-        if (window.AuthManager) {
-            window.AuthManager.sendTokenStorageInfoToIframes();
-        }
-        
-        // Show notification
-        showGlobalNotification(`Welcome ${user.name || 'User'}!`, 'success', 3000);
-    }
-    
-    function handleLogoutEvent() {
-        console.log('Logout event received');
-        
-        // Update AppState
-        AppState.setUnauthenticated();
-        
-        // Clear localStorage
-        localStorage.removeItem('kynecta_user');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('moodchat_token');
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        
-        // Clear window tokens
-        window.accessToken = null;
-        delete window.authTokens;
-        delete window.currentUser;
-        
-        // Reset AuthManager if available
-        if (window.AuthManager) {
-            window.AuthManager.clearTokens();
-        }
-        
-        // Reset API ready sent flag
-        apiReadySent = false;
-        
-        // Show notification
-        showGlobalNotification('Logged out successfully', 'info', 3000);
-    }
-    
     // ====== IFRAME MESSAGE HANDLING ======
     function handleIframeMessage(event) {
         if (event.data && event.data.type) {
@@ -3034,107 +2136,34 @@
             
             switch(event.data.type) {
                 case 'iframe_loaded':
-                    // Send current state to newly loaded iframe
+                    // Send bootstrap message to iframe
                     const iframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
                     if (iframe && iframe.contentWindow) {
-                        sendAppStateToIframe(iframe);
-                        
-                        // Send token storage info
-                        if (window.AuthManager) {
-                            window.AuthManager.sendTokenStorageInfoToIframes();
-                        }
-                        
-                        // If API is already ready, send definitive message
-                        if (AppState.api.ready && apiReadySent) {
-                            iframe.contentWindow.postMessage({
-                                type: 'API_READY',
-                                definitive: true,
-                                state: AppState.getStateSnapshot(),
-                                timestamp: Date.now(),
-                                directTokenAccess: true
-                            }, '*');
-                        }
-                        
-                        // Also send AuthManager status if available
-                        if (window.AuthManager) {
-                            iframe.contentWindow.postMessage({
-                                type: 'AUTH_MANAGER_STATUS',
-                                isReady: window.AuthManager.isReady(),
-                                isValidating: window.AuthManager.validationState.isValidating,
-                                timestamp: Date.now()
-                            }, '*');
-                        }
-                    }
-                    break;
-                    
-                case 'REQUEST_API_READY':
-                case 'REQUEST_API_STATUS':
-                case 'CHECK_API':
-                case 'REQUEST_API':
-                    // Handle API requests from iframes
-                    if (AppState.api.ready && apiReadySent) {
-                        // API is already ready and message sent, respond with definitive state
-                        const targetIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                        if (targetIframe && targetIframe.contentWindow) {
-                            targetIframe.contentWindow.postMessage({
-                                type: 'API_READY',
-                                definitive: true,
-                                state: AppState.getStateSnapshot(),
-                                requestId: event.data.requestId,
-                                timestamp: Date.now(),
-                                directTokenAccess: true
-                            }, '*');
-                        }
-                    } else if (AppState.api.ready && !apiReadySent) {
-                        // API is ready but definitive message not sent yet
-                        sendDefinitiveApiReadyMessage();
-                        
-                        // Also respond to this specific request
-                        const targetIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                        if (targetIframe && targetIframe.contentWindow) {
-                            sendAppStateToIframe(targetIframe, event.data.requestId);
-                        }
-                    } else {
-                        // API not ready, send current state
-                        const targetIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                        if (targetIframe && targetIframe.contentWindow) {
-                            sendAppStateToIframe(targetIframe, event.data.requestId);
-                        }
-                    }
-                    break;
-                    
-                case 'REQUEST_AUTH_STATE':
-                case 'CHECK_AUTH':
-                case 'REQUEST_APP_STATE':
-                    // Handle state requests from iframes
-                    const targetIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                    if (targetIframe && targetIframe.contentWindow) {
-                        sendAppStateToIframe(targetIframe, event.data.requestId);
-                    }
-                    break;
-                    
-                case 'REQUEST_TOKEN_INFO':
-                    // Handle token info requests from iframes
-                    const tokenIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                    if (tokenIframe && tokenIframe.contentWindow && window.AuthManager) {
-                        const tokenInfo = window.AuthManager.getTokenInfo();
-                        tokenIframe.contentWindow.postMessage({
-                            type: 'TOKEN_INFO_RESPONSE',
-                            tokenInfo: tokenInfo,
-                            requestId: event.data.requestId,
-                            timestamp: Date.now(),
-                            directAccessAvailable: true
+                        // Tell iframe to bootstrap
+                        iframe.contentWindow.postMessage({
+                            type: 'BOOTSTRAP_REQUEST',
+                            timestamp: Date.now()
                         }, '*');
                     }
                     break;
                     
-                case 'auth_required':
-                    if (window.parent !== window) {
-                        window.parent.postMessage({
-                            type: 'auth_required',
-                            reason: 'iframe_request'
-                        }, '*');
+                case 'AUTH_REQUIRED':
+                    // Iframe needs authentication
+                    console.log('Iframe reported auth required');
+                    handleLogout();
+                    break;
+                    
+                case 'USER_LOGIN':
+                    // Handle login from iframe
+                    if (event.data.user && event.data.token) {
+                        AppState.setAuthenticated(event.data.user, event.data.token);
+                        showGlobalNotification(`Welcome ${event.data.user.name || 'User'}!`, 'success', 3000);
                     }
+                    break;
+                    
+                case 'USER_LOGOUT':
+                    // Handle logout from iframe
+                    handleLogout();
                     break;
                     
                 case 'navigate_to':
@@ -3144,20 +2173,6 @@
                         if (isInGroupView) setIsInGroupView(false);
                         if (isInFullscreenView) setIsInFullscreenView(false);
                         switchPage(event.data.page);
-                    }
-                    break;
-                    
-                case 'user_logout':
-                    handleLogout();
-                    break;
-                    
-                case 'global_notification':
-                    if (event.data.message) {
-                        showGlobalNotification(
-                            event.data.message, 
-                            event.data.notificationType || 'info', 
-                            event.data.duration || 5000
-                        );
                     }
                     break;
                     
@@ -3199,269 +2214,23 @@
                     setIsInFullscreenView(false);
                     break;
                     
-                case 'fullscreen_status':
-                    if (window.innerWidth < 768) {
-                        if (event.data.isFullscreen) {
-                            hideBottomNavigation();
-                        } else {
-                            showBottomNavigation();
-                        }
-                    }
-                    break;
-                    
-                case 'hide_bottom_nav':
-                    if (window.innerWidth < 768) {
-                        hideBottomNavigation();
-                    }
-                    break;
-                    
-                case 'show_bottom_nav':
-                    if (window.innerWidth < 768) {
-                        showBottomNavigation();
-                    }
-                    break;
-                    
                 case 'back_button_clicked':
                     window.goBack();
                     break;
                     
-                case 'user_data_updated':
-                    if (event.data.user) {
-                        // Update AppState with new user data
-                        const token = localStorage.getItem('auth_token');
-                        AppState.setAuthenticated(event.data.user, token);
+                case 'global_notification':
+                    if (event.data.message) {
+                        showGlobalNotification(
+                            event.data.message, 
+                            event.data.notificationType || 'info', 
+                            event.data.duration || 5000
+                        );
                     }
                     break;
                     
-                case 'api_request':
-                    // Forward API requests if we can
-                    if (event.data.endpoint && event.data.method) {
-                        forwardApiRequestToParent(event.data);
-                    }
+                default:
+                    // Ignore other messages
                     break;
-                    
-                case 'test_api_connection':
-                    // Respond to API test requests
-                    const testIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                    if (testIframe && testIframe.contentWindow) {
-                        if (AppState.api.ready && apiReadySent) {
-                            testIframe.contentWindow.postMessage({
-                                type: 'API_READY',
-                                definitive: true,
-                                state: AppState.getStateSnapshot(),
-                                timestamp: Date.now(),
-                                directTokenAccess: true
-                            }, '*');
-                        } else {
-                            sendAppStateToIframe(testIframe);
-                        }
-                    }
-                    break;
-                    
-                case 'API_LATE_READY':
-                    // If an iframe reports API might be ready, check again
-                    console.log('Iframe reported API might be ready, checking...');
-                    checkApiReadiness();
-                    break;
-                    
-                case 'AUTHENTICATION_CHANGED':
-                    // If an iframe reports auth changed, check again
-                    console.log('Iframe reported auth changed, checking...');
-                    checkAuthentication();
-                    break;
-                    
-                case 'USER_LOGIN':
-                    // Handle login events from iframes
-                    if (event.data.user && event.data.token) {
-                        handleLoginEvent(event.data.user, event.data.token);
-                    }
-                    break;
-                    
-                case 'USER_LOGOUT':
-                    // Handle logout events from iframes
-                    handleLogoutEvent();
-                    break;
-                    
-                case 'LOGIN_SUCCESS':
-                    // Another login event type
-                    if (event.data.user && event.data.token) {
-                        handleLoginEvent(event.data.user, event.data.token);
-                    }
-                    break;
-                    
-                case 'ACKNOWLEDGE_API_READY':
-                    // Child acknowledges API ready, stop retrying
-                    console.log('Iframe acknowledged API ready state:', event.data.iframeId);
-                    break;
-                    
-                // Handle AuthManager messages
-                case 'REQUEST_AUTH_MANAGER_STATUS':
-                    const authIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                    if (authIframe && authIframe.contentWindow && window.AuthManager) {
-                        authIframe.contentWindow.postMessage({
-                            type: 'AUTH_MANAGER_STATUS',
-                            isReady: window.AuthManager.isReady(),
-                            isValidating: window.AuthManager.validationState.isValidating,
-                            timestamp: Date.now()
-                        }, '*');
-                    }
-                    break;
-                    
-                case 'WAIT_FOR_AUTH_READY':
-                    // Iframe is waiting for authentication to be ready
-                    if (window.AuthManager) {
-                        window.AuthManager.waitForReady().then(() => {
-                            const waitingIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                            if (waitingIframe && waitingIframe.contentWindow) {
-                                waitingIframe.contentWindow.postMessage({
-                                    type: 'AUTH_READY',
-                                    timestamp: Date.now(),
-                                    requestId: event.data.requestId,
-                                    directTokenAccess: true
-                                }, '*');
-                            }
-                        }).catch(error => {
-                            const waitingIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                            if (waitingIframe && waitingIframe.contentWindow) {
-                                waitingIframe.contentWindow.postMessage({
-                                    type: 'AUTH_FAILED',
-                                    error: error.message,
-                                    timestamp: Date.now(),
-                                    requestId: event.data.requestId
-                                }, '*');
-                            }
-                        });
-                    }
-                    break;
-                    
-                case 'DIRECT_TOKEN_ACCESS_REQUEST':
-                    // Iframe requests direct token access info
-                    const directAccessIframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                    if (directAccessIframe && directAccessIframe.contentWindow) {
-                        directAccessIframe.contentWindow.postMessage({
-                            type: 'DIRECT_TOKEN_ACCESS_INFO',
-                            available: true,
-                            storageLocation: 'localStorage',
-                            tokenKeys: {
-                                accessToken: 'access_token',
-                                moodchatToken: 'moodchat_token',
-                                authToken: 'auth_token',
-                                refreshToken: 'refresh_token',
-                                userData: 'kynecta_user'
-                            },
-                            timestamp: Date.now(),
-                            requestId: event.data.requestId
-                        }, '*');
-                    }
-                    break;
-            }
-        }
-    }
-    
-    function sendAppStateToIframe(iframe, requestId = null) {
-        if (!iframe || !iframe.contentWindow) return;
-        
-        try {
-            const state = AppState.getStateSnapshot();
-            iframe.contentWindow.postMessage({
-                type: 'APP_STATE_RESPONSE',
-                state: state,
-                requestId: requestId,
-                timestamp: Date.now(),
-                apiReadyDefinitive: apiReadySent,
-                authManagerReady: window.AuthManager ? window.AuthManager.isReady() : false,
-                directTokenAccess: true,
-                tokenStorageInfo: {
-                    location: 'localStorage',
-                    keys: {
-                        accessToken: 'access_token',
-                        moodchatToken: 'moodchat_token',
-                        authToken: 'auth_token',
-                        refreshToken: 'refresh_token',
-                        userData: 'kynecta_user'
-                    }
-                }
-            }, '*');
-        } catch (e) {
-            // Silently ignore cross-origin errors
-        }
-    }
-    
-    async function forwardApiRequestToParent(requestData) {
-        // Check if AuthManager is ready first
-        if (window.AuthManager && !window.AuthManager.isReady()) {
-            try {
-                console.log('🔐 [API Forward] Waiting for AuthManager to be ready...');
-                await window.AuthManager.waitForReady();
-            } catch (error) {
-                // Send immediate response about auth failure
-                const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                if (activeIframe && activeIframe.contentWindow) {
-                    activeIframe.contentWindow.postMessage({
-                        type: 'api_response',
-                        requestId: requestData.requestId,
-                        success: false,
-                        error: 'Authentication not ready: ' + error.message,
-                        state: AppState.getStateSnapshot(),
-                        apiReadyDefinitive: apiReadySent
-                    }, '*');
-                }
-                return;
-            }
-        }
-        
-        if (!AppState.canUseApi) {
-            // Send immediate response about state
-            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (activeIframe && activeIframe.contentWindow) {
-                activeIframe.contentWindow.postMessage({
-                    type: 'api_response',
-                    requestId: requestData.requestId,
-                    success: false,
-                    error: 'API not available - Current state: ' + 
-                           `API Ready: ${AppState.api.ready}, ` +
-                           `Authenticated: ${AppState.auth.authenticated}, ` +
-                           `Fallback: ${AppState.connectivity.fallbackMode}, ` +
-                           `AuthManager Ready: ${window.AuthManager ? window.AuthManager.isReady() : false}`,
-                    state: AppState.getStateSnapshot(),
-                    apiReadyDefinitive: apiReadySent
-                }, '*');
-            }
-            return;
-        }
-        
-        try {
-            // Use parent's api function
-            const result = await window.parent.api(
-                requestData.endpoint,
-                requestData.method,
-                requestData.data
-            );
-            
-            // Send result back to iframe
-            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (activeIframe && activeIframe.contentWindow) {
-                activeIframe.contentWindow.postMessage({
-                    type: 'api_response',
-                    requestId: requestData.requestId,
-                    success: true,
-                    data: result,
-                    state: AppState.getStateSnapshot(),
-                    apiReadyDefinitive: apiReadySent
-                }, '*');
-            }
-        } catch (error) {
-            // Send error back to iframe
-            const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-            if (activeIframe && activeIframe.contentWindow) {
-                activeIframe.contentWindow.postMessage({
-                    type: 'api_response',
-                    requestId: requestData.requestId,
-                    success: false,
-                    error: error.message,
-                    state: AppState.getStateSnapshot(),
-                    apiReadyDefinitive: apiReadySent
-                }, '*');
             }
         }
     }
@@ -3471,73 +2240,38 @@
         
         showLoading();
         
-        // Initialize AppState first
+        // Initialize AppState
         AppState.initialize();
-        
-        // Setup API monitoring
-        initializeApiMonitoring();
-        
-        // Setup event listeners for API readiness
-        window.addEventListener('api-ready', handleApiReadyEvent);
-        window.addEventListener('apiready', handleApiReadyEvent);
-        window.addEventListener('apiReady', handleApiReadyEvent);
-        
-        // Listen for messages from parent about API
-        window.addEventListener('message', function(event) {
-            if (event.data && (event.data.type === 'API_READY' || event.data.type === 'api-ready')) {
-                console.log('Received API message from parent');
-                handleApiReadyEvent();
-            }
-            
-            // Handle definitive API ready messages from parent
-            if (event.data && event.data.type === 'API_READY' && event.data.definitive) {
-                console.log('Received definitive API_READY from parent');
-                if (!apiReadySent) {
-                    apiReadySent = true;
-                    AppState.setApiReady(window.parent.api || window.api);
-                }
-            }
-            
-            // Handle auth messages
-            if (event.data && event.data.type === 'AUTH_CHANGED') {
-                console.log('Received auth change message from parent');
-                checkAuthentication();
-            }
-            
-            // Handle login/logout messages
-            if (event.data && event.data.type === 'USER_LOGIN') {
-                if (event.data.user && event.data.token) {
-                    handleLoginEvent(event.data.user, event.data.token);
-                }
-            }
-            
-            if (event.data && event.data.type === 'USER_LOGOUT') {
-                handleLogoutEvent();
-            }
-            
-            // Handle AuthManager messages
-            if (event.data && event.data.type === 'AUTH_MANAGER_READY') {
-                console.log('🔐 Received AUTH_MANAGER_READY message');
-                // AuthManager is ready, update AppState
-                checkAuthentication();
-            }
-        });
         
         // Setup basic navigation
         setupNavigation();
         
         // Initialize the app immediately
-        console.log('Initializing app with current state:', AppState.getStateSnapshot());
+        console.log('Initializing app with current state');
         initializeChatApp();
         
-        // Set a timeout to enter fallback mode if needed (only if not authenticated)
-        setTimeout(() => {
-            if (!AppState.api.ready && !AppState.auth.authenticated) {
-                AppState.setFallbackMode('api_unavailable');
-                showGlobalNotification('Running in limited mode - API not available', 'warning', 5000);
-            }
-        }, 8000);
+        // Check for API
+        checkApiReadiness();
     });
+    
+    function checkApiReadiness() {
+        // Check if api.js is available
+        if (typeof window.parent.api !== 'undefined') {
+            AppState.setApiReady(window.parent.api);
+            window.api = window.parent.api;
+            console.log('API ready (from parent)');
+            return true;
+        }
+        
+        if (typeof window.api !== 'undefined') {
+            AppState.setApiReady(window.api);
+            console.log('API ready (direct)');
+            return true;
+        }
+        
+        console.log('API not ready yet');
+        return false;
+    }
     
     function initializeChatApp() {
         if (appInitialized) {
@@ -3548,7 +2282,7 @@
         console.log('Initializing chat app...');
         appInitialized = true;
         
-        // Hide loading screen immediately
+        // Hide loading screen
         hideLoading();
         
         // Show sidebar and mobile nav
@@ -3563,14 +2297,10 @@
         // Setup fullscreen page detection
         setupFullscreenPageDetection();
         
-        // Switch to messages page immediately
+        // Switch to messages page
         switchPage('messages');
         
         console.log('Chat app initialization complete');
-        console.log('Current AppState:', AppState.getStateSnapshot());
-        console.log('API Ready Sent Flag:', apiReadySent);
-        console.log('AuthManager Ready:', window.AuthManager ? window.AuthManager.isReady() : 'Not available');
-        console.log('Direct Token Access Available: true');
     }
     
     function setupBackButton() {
@@ -3821,66 +2551,13 @@
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
                     
-                    // Send initialization message to iframe
+                    // Send bootstrap message to iframe
                     try {
                         this.contentWindow.postMessage({ 
-                            type: 'kynecta_init',
+                            type: 'BOOTSTRAP_REQUEST',
                             page: iframe.id.replace('Iframe', ''),
-                            state: AppState.getStateSnapshot(),
-                            apiReadyDefinitive: apiReadySent,
-                            authManagerReady: window.AuthManager ? window.AuthManager.isReady() : false,
-                            directTokenAccess: true,
-                            tokenStorageInfo: {
-                                location: 'localStorage',
-                                keys: {
-                                    accessToken: 'access_token',
-                                    moodchatToken: 'moodchat_token',
-                                    authToken: 'auth_token',
-                                    refreshToken: 'refresh_token',
-                                    userData: 'kynecta_user'
-                                }
-                            }
+                            timestamp: Date.now()
                         }, '*');
-                        
-                        // Send current app state
-                        sendAppStateToIframe(this);
-                        
-                        // If API is already ready, send definitive message
-                        if (AppState.api.ready && apiReadySent) {
-                            this.contentWindow.postMessage({
-                                type: 'API_READY',
-                                definitive: true,
-                                state: AppState.getStateSnapshot(),
-                                timestamp: Date.now(),
-                                directTokenAccess: true
-                            }, '*');
-                        }
-                        
-                        // If AuthManager is ready, send status
-                        if (window.AuthManager && window.AuthManager.isReady()) {
-                            this.contentWindow.postMessage({
-                                type: 'AUTH_MANAGER_STATUS',
-                                isReady: true,
-                                timestamp: Date.now(),
-                                directTokenAccess: true
-                            }, '*');
-                        }
-                        
-                        // Send token storage info
-                        if (window.AuthManager) {
-                            this.contentWindow.postMessage({
-                                type: 'TOKEN_STORAGE_INFO',
-                                storageType: 'localStorage',
-                                tokenKeys: {
-                                    accessToken: 'access_token',
-                                    moodchatToken: 'moodchat_token',
-                                    authToken: 'auth_token',
-                                    refreshToken: 'refresh_token',
-                                    userData: 'kynecta_user'
-                                },
-                                timestamp: Date.now()
-                            }, '*');
-                        }
                     } catch (e) {
                         // Silently ignore cross-origin errors
                     }
@@ -3929,25 +2606,12 @@
                 if (iframesLoaded[`${pageName}Iframe`]) {
                     iframe.classList.add('loaded');
                     
-                    // Send page switch message with current state
+                    // Send bootstrap message
                     try {
                         iframe.contentWindow.postMessage({
-                            type: 'page_switch',
+                            type: 'BOOTSTRAP_REQUEST',
                             page: pageName,
-                            state: AppState.getStateSnapshot(),
-                            apiReadyDefinitive: apiReadySent,
-                            authManagerReady: window.AuthManager ? window.AuthManager.isReady() : false,
-                            directTokenAccess: true,
-                            tokenStorageInfo: {
-                                location: 'localStorage',
-                                keys: {
-                                    accessToken: 'access_token',
-                                    moodchatToken: 'moodchat_token',
-                                    authToken: 'auth_token',
-                                    refreshToken: 'refresh_token',
-                                    userData: 'kynecta_user'
-                                }
-                            }
+                            timestamp: Date.now()
                         }, '*');
                     } catch (e) {
                         // Silently ignore
@@ -3958,21 +2622,6 @@
                         hideLoading();
                         iframe.classList.add('loaded');
                     }, 300);
-                }
-                
-                // Send current state
-                try {
-                    iframe.contentWindow.postMessage({
-                        type: 'APP_STATE_UPDATE',
-                        state: AppState.getStateSnapshot(),
-                        changeType: 'page_switch',
-                        timestamp: Date.now(),
-                        apiReadyDefinitive: apiReadySent,
-                        authManagerReady: window.AuthManager ? window.AuthManager.isReady() : false,
-                        directTokenAccess: true
-                    }, '*');
-                } catch (e) {
-                    // Silently ignore
                 }
             }
         }
@@ -3985,49 +2634,17 @@
     function handleLogout() {
         console.log('Logging out user');
         
-        // Update AppState
-        AppState.setUnauthenticated();
+        // Clear AppState
+        AppState.clearAuthentication();
         
-        // Clear localStorage
-        localStorage.removeItem('kynecta_user');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('moodchat_token');
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        
-        // Clear window tokens
+        // Clear window objects
         window.accessToken = null;
-        delete window.authTokens;
+        delete window.currentUser;
         
-        // Reset AuthManager if available
+        // Reset AuthManager
         if (window.AuthManager) {
-            window.AuthManager.clearTokens();
+            window.AuthManager.clearAuth();
         }
-        
-        // Reset API ready sent flag
-        apiReadySent = false;
-        
-        // Broadcast logout to all iframes
-        AppState.broadcastStateChange('auth_unauthenticated');
-        
-        // Send AUTH_REQUIRED message to all iframes
-        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'callsIframe', 
-                          'friendsIframe', 'settingsIframe', 'toolsIframe'];
-        
-        iframeIds.forEach(iframeId => {
-            const iframe = document.getElementById(iframeId);
-            if (iframe && iframe.contentWindow) {
-                try {
-                    iframe.contentWindow.postMessage({
-                        type: 'AUTH_REQUIRED',
-                        timestamp: Date.now(),
-                        message: 'User logged out'
-                    }, '*');
-                } catch (e) {
-                    // Silently ignore
-                }
-            }
-        });
         
         // Redirect to login
         window.location.href = '../index.html';
@@ -4135,12 +2752,12 @@
     
     // Handle online/offline events
     window.addEventListener('online', function() {
-        AppState.setOnlineStatus(true);
+        AppState.connectivity.online = true;
         showGlobalNotification('Back online', 'success', 3000);
     });
     
     window.addEventListener('offline', function() {
-        AppState.setOnlineStatus(false);
+        AppState.connectivity.online = false;
         showGlobalNotification('You are offline', 'warning', 5000);
     });
     
@@ -4155,27 +2772,18 @@
     window.setIsInStatusView = setIsInStatusView;
     window.setIsInGroupView = setIsInGroupView;
     window.setIsInFullscreenView = setIsInFullscreenView;
-    window.checkApiReadiness = checkApiReadiness;
-    window.checkAuthentication = checkAuthentication;
     window.closeModal = closeModal;
     window.AppState = AppState;
     window.AuthManager = AuthManager;
-    window.TokenAccess = TokenAccess;
-    window.handleLoginEvent = handleLoginEvent;
-    window.handleLogoutEvent = handleLogoutEvent;
-    window.sendDefinitiveApiReadyMessage = sendDefinitiveApiReadyMessage;
-    window.apiReadySent = apiReadySent;
+    window.bootstrapIframe = window.bootstrapIframe;
     
     console.log('Iframe controller loaded successfully');
-    console.log('Initial AppState:', AppState.getStateSnapshot());
-    console.log('API Ready Sent Flag:', apiReadySent);
-    console.log('AuthManager Status:', window.AuthManager ? {
-        isReady: window.AuthManager.isReady(),
-        isValidating: window.AuthManager.validationState.isValidating,
-        validationAttempted: window.AuthManager.validationState.validationAttempted
-    } : 'Not available');
-    console.log('Direct Token Access Available: true');
-    console.log('TokenAccess Utility Available:', !!window.TokenAccess);
+    console.log('Initial AppState:', {
+        authenticated: AppState.auth.authenticated,
+        user: AppState.auth.user,
+        apiReady: AppState.api.ready,
+        online: AppState.connectivity.online
+    });
     </script>
 </body>
 </html>

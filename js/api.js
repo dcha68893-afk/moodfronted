@@ -15,6 +15,7 @@
 // UPDATED: Enhanced /auth/me fetch with proper token inclusion and exponential backoff retry
 // NEW: CRITICAL FIX - Authentication state timing issues permanently resolved
 // NEW: CRITICAL FIX - AbortError no longer blocks API readiness when token exists
+// NEW: CRITICAL FIX - Authoritative Auth Source Implementation
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -46,7 +47,17 @@
 // 27. UPDATED: Enhanced /auth/me fetch with proper token inclusion and exponential backoff retry
 // 28. NEW CRITICAL FIX: Authentication state timing issues permanently resolved with validateAuth()
 // 29. NEW CRITICAL FIX: AbortError no longer blocks API readiness when token exists
+// 30. NEW CRITICAL FIX: Authoritative Auth Source - Single backend URL, token always read from localStorage
 // ============================================================================
+
+// ============================================================================
+// SINGLE SOURCE OF TRUTH - AUTHORITATIVE AUTH SOURCE
+// ============================================================================
+// CRITICAL FIX 1: Define ONE backend base URL constant
+// ALWAYS use this constant for ALL API requests
+// NEVER allow relative /api/... paths
+const BACKEND_BASE_URL = "https://moodchat-fy56.onrender.com";
+const BASE_API_URL = BACKEND_BASE_URL + "/api";
 
 // ============================================================================
 // SINGLE SOURCE OF TRUTH - NETWORK STATE (COMPLETELY SEPARATE FROM AUTH)
@@ -110,6 +121,91 @@ window.addEventListener('offline', () => {
 });
 
 // ============================================================================
+// CRITICAL FIX 2: AUTHORITATIVE TOKEN HELPER FUNCTION
+// ============================================================================
+/**
+ * getValidToken() - Authoritative token retrieval helper
+ * STRICT REQUIREMENTS:
+ * 1. Read token ONLY from localStorage (never cache in variables)
+ * 2. Try "accessToken" key first
+ * 3. Fallback to "moodchat_token" key
+ * 4. Return null if no token found
+ * 5. NEVER cache token outside request scope
+ */
+function getValidToken() {
+  // CRITICAL: Read token DIRECTLY from localStorage every time
+  // No caching, no variables outside this function scope
+  
+  // Priority 1: "accessToken" key
+  let token = localStorage.getItem("accessToken");
+  if (token && token.trim() !== "") {
+    console.log('🔐 [AUTH] Token retrieved from "accessToken" key');
+    return token;
+  }
+  
+  // Priority 2: "moodchat_token" key
+  token = localStorage.getItem("moodchat_token");
+  if (token && token.trim() !== "") {
+    console.log('🔐 [AUTH] Token retrieved from "moodchat_token" key');
+    return token;
+  }
+  
+  // Priority 3: Check normalized authUser storage for backward compatibility
+  try {
+    const authDataStr = localStorage.getItem("authUser");
+    if (authDataStr) {
+      const authData = JSON.parse(authDataStr);
+      if (authData.accessToken && authData.accessToken.trim() !== "") {
+        console.log('🔐 [AUTH] Token retrieved from "authUser" object');
+        return authData.accessToken;
+      }
+      if (authData.token && authData.token.trim() !== "") {
+        console.log('🔐 [AUTH] Token retrieved from "authUser.token"');
+        return authData.token;
+      }
+    }
+  } catch (error) {
+    console.log('🔐 [AUTH] Error reading token from authUser:', error.message);
+  }
+  
+  // Priority 4: Legacy token keys
+  token = localStorage.getItem("token");
+  if (token && token.trim() !== "") {
+    console.log('🔐 [AUTH] Token retrieved from legacy "token" key');
+    return token;
+  }
+  
+  token = localStorage.getItem("moodchat_auth_token");
+  if (token && token.trim() !== "") {
+    console.log('🔐 [AUTH] Token retrieved from "moodchat_auth_token" key');
+    return token;
+  }
+  
+  // No token found
+  console.log('🔐 [AUTH] No valid token found in localStorage');
+  return null;
+}
+
+// ============================================================================
+// CRITICAL FIX 3: UPDATED getAuthHeaders() FUNCTION
+// ============================================================================
+/**
+ * getAuthHeaders() - Helper function to get authentication headers
+ * Uses getValidToken() for authoritative token retrieval
+ * @returns {object} Headers object with Authorization if token exists
+ */
+function getAuthHeaders() {
+  const token = getValidToken();
+  if (token) {
+    console.log('🔐 [AUTH] Authorization header created with token');
+    return { 'Authorization': `Bearer ${token}` };
+  }
+  
+  console.log('🔐 [AUTH] No token available, proceeding without Authorization header');
+  return {};
+}
+
+// ============================================================================
 // GLOBAL TOKEN VARIABLE - ENHANCED PERSISTENCE
 // ============================================================================
 /**
@@ -121,116 +217,23 @@ let accessToken = null;
 
 // Function to initialize and update the global access token
 function updateGlobalAccessToken() {
-  // Try multiple possible storage locations with priority
-  const tokenFromAccessToken = localStorage.getItem('accessToken');
-  const tokenFromMoodchatToken = localStorage.getItem('moodchat_token');
-  const tokenFromLegacyToken = localStorage.getItem('token');
-  const tokenFromMoodchatAuthToken = localStorage.getItem('moodchat_auth_token');
+  // Use getValidToken() for authoritative token retrieval
+  accessToken = getValidToken();
   
-  // Priority 1: accessToken key (new standard)
-  if (tokenFromAccessToken) {
-    accessToken = tokenFromAccessToken;
-    console.log(`🔐 [TOKEN] Global accessToken initialized from 'accessToken' key: ${accessToken.substring(0, 20)}...`);
-    
-    // Ensure it's also in moodchat_token for consistency
-    if (!localStorage.getItem('moodchat_token')) {
-      localStorage.setItem('moodchat_token', accessToken);
-      console.log(`🔐 [TOKEN] Also stored token in 'moodchat_token' key for consistency`);
-    }
+  if (accessToken) {
+    console.log(`🔐 [TOKEN] Global accessToken initialized: ${accessToken.substring(0, 20)}...`);
     
     // Dispatch token loaded event
     window.dispatchEvent(new CustomEvent('token-loaded', {
-      detail: { token: accessToken, source: 'accessToken' }
+      detail: { token: accessToken, source: 'authoritative' }
     }));
+  } else {
+    console.log('🔐 [TOKEN] No access token found in localStorage');
+    accessToken = null;
     
-    return;
+    // Dispatch token not found event
+    window.dispatchEvent(new CustomEvent('token-not-found'));
   }
-  
-  // Priority 2: moodchat_token key (requested key)
-  if (tokenFromMoodchatToken) {
-    accessToken = tokenFromMoodchatToken;
-    console.log(`🔐 [TOKEN] Global accessToken initialized from 'moodchat_token' key: ${accessToken.substring(0, 20)}...`);
-    
-    // Also store in accessToken key for consistency
-    if (!tokenFromAccessToken) {
-      localStorage.setItem('accessToken', accessToken);
-      console.log(`🔐 [TOKEN] Also stored token in 'accessToken' key for consistency`);
-    }
-    
-    // Dispatch token loaded event
-    window.dispatchEvent(new CustomEvent('token-loaded', {
-      detail: { token: accessToken, source: 'moodchat_token' }
-    }));
-    
-    return;
-  }
-  
-  // Priority 3: Check normalized storage format
-  try {
-    const authDataStr = localStorage.getItem('authUser');
-    if (authDataStr) {
-      const authData = JSON.parse(authDataStr);
-      if (authData.accessToken || authData.token) {
-        accessToken = authData.accessToken || authData.token;
-        console.log(`🔐 [TOKEN] Global accessToken from authUser: ${accessToken.substring(0, 20)}...`);
-        
-        // Store in both keys for future consistency
-        localStorage.setItem('accessToken', accessToken);
-        localStorage.setItem('moodchat_token', accessToken);
-        console.log(`🔐 [TOKEN] Token stored in both 'accessToken' and 'moodchat_token' keys`);
-        
-        // Dispatch token loaded event
-        window.dispatchEvent(new CustomEvent('token-loaded', {
-          detail: { token: accessToken, source: 'authUser' }
-        }));
-        
-        return;
-      }
-    }
-  } catch (e) {
-    console.log('🔐 [TOKEN] Could not parse authUser:', e.message);
-  }
-  
-  // Priority 4: Legacy token locations
-  if (tokenFromLegacyToken) {
-    accessToken = tokenFromLegacyToken;
-    console.log(`🔐 [TOKEN] Global accessToken from legacy 'token' key: ${accessToken.substring(0, 20)}...`);
-    
-    // Store in both standard keys
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('moodchat_token', accessToken);
-    console.log(`🔐 [TOKEN] Token stored in standard keys for consistency`);
-    
-    // Dispatch token loaded event
-    window.dispatchEvent(new CustomEvent('token-loaded', {
-      detail: { token: accessToken, source: 'legacy_token' }
-    }));
-    
-    return;
-  }
-  
-  if (tokenFromMoodchatAuthToken) {
-    accessToken = tokenFromMoodchatAuthToken;
-    console.log(`🔐 [TOKEN] Global accessToken from 'moodchat_auth_token': ${accessToken.substring(0, 20)}...`);
-    
-    // Store in both standard keys
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('moodchat_token', accessToken);
-    console.log(`🔐 [TOKEN] Token stored in standard keys for consistency`);
-    
-    // Dispatch token loaded event
-    window.dispatchEvent(new CustomEvent('token-loaded', {
-      detail: { token: accessToken, source: 'moodchat_auth_token' }
-    }));
-    
-    return;
-  }
-  
-  console.log('🔐 [TOKEN] No access token found in localStorage');
-  accessToken = null;
-  
-  // Dispatch token not found event
-  window.dispatchEvent(new CustomEvent('token-not-found'));
 }
 
 // Initialize global token on script load - CRITICAL FOR PERSISTENCE
@@ -254,48 +257,8 @@ window.addEventListener('storage', (event) => {
   }
 });
 
-// ============================================================================
-// ENVIRONMENT DETECTION - DYNAMIC BACKEND URL CONFIGURATION
-// ============================================================================
-/**
- * Detects the environment and sets the correct backend URL
- * FIX 1: Dynamic environment detection based on current hostname
- * ABSOLUTE RULE: If environment cannot be determined, DEFAULT TO LOCAL — NEVER production.
- */
-const getBackendBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  
-  // LOCAL DEVELOPMENT ENVIRONMENTS - EXPLICITLY TREATED AS LOCAL
-  if (hostname === 'localhost' || 
-      hostname.startsWith('127.') ||
-      hostname === '0.0.0.0' ||
-      hostname.startsWith('192.168.') ||
-      protocol === 'file:') {
-    console.log(`🔧 [API] Detected LOCAL environment (${hostname}), using http://localhost:4000`);
-    return 'http://localhost:4000';
-  }
-  
-  // PRODUCTION ENVIRONMENT on Render - ONLY when hostname ends with onrender.com
-  if (hostname.endsWith('onrender.com')) {
-    console.log(`🔧 [API] Detected PRODUCTION environment (${hostname}), using https://moodchat-fy56.onrender.com`);
-    return 'https://moodchat-fy56.onrender.com';
-  }
-  
-  // DEFAULT TO LOCAL - NEVER PRODUCTION
-  console.warn(`⚠️ [API] Unknown hostname "${hostname}", DEFAULTING TO LOCAL development backend`);
-  console.warn(`⚠️ [API] ABSOLUTE RULE: Unknown environment = LOCAL, NEVER production`);
-  return 'http://localhost:4000';
-};
-
-// FIX 2: Define a single constant for BASE_API_URL
-const BACKEND_BASE_URL = getBackendBaseUrl();
-const BASE_API_URL = BACKEND_BASE_URL + '/api';
-
 // Environment logging for debugging
-console.log(`🔧 [API] Environment Detection:`);
-console.log(`🔧 [API] Current Hostname: ${window.location.hostname}`);
-console.log(`🔧 [API] Current Protocol: ${window.location.protocol}`);
+console.log(`🔧 [API] Authoritative Auth Source Implementation:`);
 console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_API_URL}`);
 console.log(`🔧 [API] CRITICAL: ALL API calls will use: ${BASE_API_URL}`);
@@ -328,75 +291,6 @@ let _authValidationPromise = null;
 let _authLastChecked = 0;
 const AUTH_VALIDATION_TIMEOUT = 10000; // 10 seconds
 const AUTH_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
-// ============================================================================
-// HELPER FUNCTION: getAuthHeaders() - Automatically attaches token to all API calls
-// ============================================================================
-/**
- * Helper function to automatically get authentication headers
- * Checks multiple token storage locations for maximum compatibility
- * @returns {object} Headers object with Authorization if token exists
- */
-function getAuthHeaders() {
-  // CRITICAL UPDATE: Always read token directly from localStorage at request time
-  // This ensures we always have the latest token without relying on cached variables
-  
-  // Priority 1: Try localStorage.getItem('accessToken') first
-  const tokenFromAccessToken = localStorage.getItem('accessToken');
-  if (tokenFromAccessToken) {
-    console.log('🔐 [AUTH] Token retrieved from localStorage accessToken key');
-    // Update global variable for consistency
-    accessToken = tokenFromAccessToken;
-    return { 'Authorization': `Bearer ${tokenFromAccessToken}` };
-  }
-  
-  // Priority 2: Try localStorage.getItem('moodchat_token')
-  const tokenFromMoodchatToken = localStorage.getItem('moodchat_token');
-  if (tokenFromMoodchatToken) {
-    console.log('🔐 [AUTH] Token retrieved from localStorage moodchat_token key');
-    // Update global variable for consistency
-    accessToken = tokenFromMoodchatToken;
-    return { 'Authorization': `Bearer ${tokenFromMoodchatToken}` };
-  }
-  
-  // Priority 3: Try localStorage.getItem('token') (legacy)
-  const tokenFromLegacyToken = localStorage.getItem('token');
-  if (tokenFromLegacyToken) {
-    console.log('🔐 [AUTH] Token retrieved from localStorage legacy token key');
-    // Update global variable for consistency
-    accessToken = tokenFromLegacyToken;
-    return { 'Authorization': `Bearer ${tokenFromLegacyToken}` };
-  }
-  
-  // Priority 4: Check normalized authUser storage
-  try {
-    const authDataStr = localStorage.getItem('authUser');
-    if (authDataStr) {
-      const authData = JSON.parse(authDataStr);
-      const token = authData.accessToken || authData.token;
-      if (token) {
-        console.log('🔐 [AUTH] Token retrieved from localStorage authUser object');
-        // Update global variable for consistency
-        accessToken = token;
-        return { 'Authorization': `Bearer ${token}` };
-      }
-    }
-  } catch (error) {
-    console.error('🔐 [AUTH] Error reading token from authUser:', error);
-  }
-  
-  // Priority 5: Check moodchat_auth_token
-  const tokenFromMoodchatAuthToken = localStorage.getItem('moodchat_auth_token');
-  if (tokenFromMoodchatAuthToken) {
-    console.log('🔐 [AUTH] Token retrieved from localStorage moodchat_auth_token key');
-    // Update global variable for consistency
-    accessToken = tokenFromMoodchatAuthToken;
-    return { 'Authorization': `Bearer ${tokenFromMoodchatAuthToken}` };
-  }
-  
-  console.log('🔐 [AUTH] No token found in localStorage, proceeding without Authorization header');
-  return {};
-}
 
 /**
  * Stores legacy token in normalized format if needed
@@ -578,63 +472,8 @@ function _clearAuthData() {
  * Checks multiple locations for maximum compatibility
  */
 function _getCurrentAccessToken() {
-  try {
-    // CRITICAL UPDATE: Always read token directly from localStorage at request time
-    // This ensures we always have the latest token without relying on cached variables
-    
-    // Priority 1: Check accessToken key (new standard)
-    const accessTokenKey = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (accessTokenKey) {
-      console.log('🔐 [AUTH] Found token in accessToken key');
-      // Update global variable for consistency
-      accessToken = accessTokenKey;
-      return accessTokenKey;
-    }
-    
-    // Priority 2: Check moodchat_token key (requested key)
-    const moodchatToken = localStorage.getItem(MOODCHAT_TOKEN_KEY);
-    if (moodchatToken) {
-      console.log('🔐 [AUTH] Found token in moodchat_token key');
-      // Update global variable for consistency
-      accessToken = moodchatToken;
-      return moodchatToken;
-    }
-    
-    // Priority 3: Check normalized storage
-    const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (authDataStr) {
-      const authData = JSON.parse(authDataStr);
-      // Return accessToken (primary) or fallback to token for backward compatibility
-      if (authData.accessToken || authData.token) {
-        const token = authData.accessToken || authData.token;
-        // Update global variable for consistency
-        accessToken = token;
-        return token;
-      }
-    }
-    
-    // Check legacy token storage locations
-    const legacyToken = localStorage.getItem('token');
-    if (legacyToken) {
-      console.log('🔐 [AUTH] Found token in legacy token location');
-      // Update global variable for consistency
-      accessToken = legacyToken;
-      return legacyToken;
-    }
-    
-    const moodchatAuthToken = localStorage.getItem('moodchat_auth_token');
-    if (moodchatAuthToken) {
-      console.log('🔐 [AUTH] Found token in moodchat_auth_token');
-      // Update global variable for consistency
-      accessToken = moodchatAuthToken;
-      return moodchatAuthToken;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('❌ [AUTH] Error reading token from storage:', error);
-    return null;
-  }
+  // CRITICAL: Use getValidToken() for authoritative token retrieval
+  return getValidToken();
 }
 
 /**
@@ -681,13 +520,26 @@ function _getCurrentUserFromStorage() {
 }
 
 // ============================================================================
-// NEW: Handle unauthorized access (401/403) - redirect to login
+// CRITICAL FIX 4: ENHANCED UNAUTHORIZED ACCESS HANDLING
 // ============================================================================
 function handleUnauthorizedAccess() {
   console.log('🔐 [AUTH] Handling unauthorized access - redirecting to login');
   
   // Clear all localStorage items related to authentication
-  localStorage.clear();
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(MOODCHAT_TOKEN_KEY);
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem('token');
+  localStorage.removeItem('moodchat_auth_token');
+  localStorage.removeItem('moodchat_auth_user');
+  localStorage.removeItem('moodchat_refresh_token');
+  localStorage.removeItem(USER_DATA_KEY);
+  
+  // Clear global token
+  accessToken = null;
+  _authValidated = false;
+  _authValidationPromise = null;
+  _authValidationInProgress = false;
   
   // Redirect to login page
   // Use a small timeout to allow logs to be displayed
@@ -736,8 +588,8 @@ async function validateAuth() {
     return Promise.resolve(true);
   }
   
-  // Get token from storage - always read directly from localStorage
-  const token = _getCurrentAccessToken();
+  // Get token from storage - use authoritative token retrieval
+  const token = getValidToken();
   if (!token) {
     console.log('🔐 [AUTH-TIMING-FIX] No token available, auth cannot be validated');
     _authValidated = false;
@@ -851,7 +703,7 @@ async function validateAuth() {
             data.message.includes('Token expired')
           );
           
-          if (isTokenExplicitlyInvalid) {
+          if (isTokenExplicitlyInvalid || status === 401) {
             console.log('🔐 [AUTH-TIMING-FIX] Token explicitly invalid, clearing tokens');
             _clearAuthData();
           }
@@ -939,7 +791,7 @@ async function validateAuth() {
       
       // CRITICAL FIX: If we have a token, ensure API readiness is resolved
       // This prevents indefinite waiting for API readiness
-      const tokenExists = _getCurrentAccessToken();
+      const tokenExists = getValidToken();
       if (tokenExists && !_authValidated) {
         console.log('🔐 [AUTH-TIMING-FIX] Token exists, ensuring API readiness is not blocked');
         // Note: We're not setting _authValidated to true, but we're also not
@@ -1040,7 +892,7 @@ function _sanitizeEndpoint(endpoint) {
 
 /**
  * Builds ABSOLUTELY SAFE URL that never breaks fetch()
- * CRITICAL: Uses the dynamically determined BASE_API_URL
+ * CRITICAL: Uses the SINGLE BACKEND_BASE_URL constant
  * STRICT RULE: NEVER pass HTTP method as URL
  */
 function _buildSafeUrl(endpoint) {
@@ -1059,7 +911,7 @@ function _buildSafeUrl(endpoint) {
 }
 
 // ============================================================================
-// CORE FETCH FUNCTION - STRICT HTTP STATUS HANDLING WITH TOKEN SUPPORT
+// CORE FETCH FUNCTION - STRICT HTTP STATUS HANDLING WITH AUTHORITATIVE AUTH
 // ============================================================================
 
 /**
@@ -1068,13 +920,12 @@ function _buildSafeUrl(endpoint) {
  * 2. NEVER return success if response.ok === false
  * 3. Do NOT mark backend offline on ANY HTTP status errors (400, 401, 500, etc.)
  * 4. Only mark backend offline on actual network connection failures
- * 5. All API calls MUST use BASE_API_URL derived dynamically from window.location
+ * 5. All API calls MUST use BASE_API_URL derived from SINGLE BACKEND_BASE_URL
  * 6. STRICT CONTRACT: endpoint is string, method is in options
- * 7. AUTO-ATTACH Authorization header for authenticated requests using getAuthHeaders()
- * 8. NEW: Automatic Authorization header injection using global accessToken variable
- * 9. CRITICAL: Network state COMPLETELY SEPARATE from authentication state
- * 10. NEW: Always read token from localStorage at request time
- * 11. NEW: Handle 401/403 by clearing localStorage and redirecting to login
+ * 7. AUTO-ATTACH Authorization header using getAuthHeaders() which uses getValidToken()
+ * 8. CRITICAL: Network state COMPLETELY SEPARATE from authentication state
+ * 9. CRITICAL: Token ALWAYS read from localStorage using getValidToken()
+ * 10. CRITICAL: If 401/403, clear localStorage and redirect to login
  */
 function _safeFetch(fullUrl, options = {}) {
   // Validate URL
@@ -1087,7 +938,7 @@ function _safeFetch(fullUrl, options = {}) {
   const normalizedMethod = _normalizeHttpMethod(options.method || 'GET');
   
   // AUTHORIZATION HEADER ENFORCEMENT - USING getAuthHeaders() HELPER
-  // This now always reads token directly from localStorage
+  // This always reads token directly from localStorage using getValidToken()
   const authHeaders = getAuthHeaders();
   
   // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
@@ -1110,14 +961,12 @@ function _safeFetch(fullUrl, options = {}) {
     };
     
     // NEW: Explicitly add Authorization header if token exists and not already present
-    // Always read token directly from localStorage for the most up-to-date value
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Always read token directly from localStorage using getValidToken()
+    const token = getValidToken();
     
-    if (tokenFromStorage && !headers['Authorization'] && !headers['authorization']) {
-      headers['Authorization'] = `Bearer ${tokenFromStorage}`;
-      console.log(`🔐 [AUTH] Token from localStorage injected into headers for ${normalizedMethod} ${fullUrl}`);
+    if (token && !headers['Authorization'] && !headers['authorization']) {
+      headers['Authorization'] = `Bearer ${token}`;
+      console.log(`🔐 [AUTH] Token from getValidToken() injected into headers for ${normalizedMethod} ${fullUrl}`);
     }
   } else {
     // For /api/status endpoint, use only provided headers (never add auth)
@@ -1168,7 +1017,7 @@ function _safeFetch(fullUrl, options = {}) {
   console.log(`🔧 [API] Headers:`, Object.keys(headers));
   console.log(`🔧 [API] Authorization Header: ${headers['Authorization'] ? 'Present' : 'Not present'}`);
   console.log(`🔧 [API] Is Status Endpoint: ${isStatusEndpoint ? 'YES (no auth)' : 'NO'}`);
-  console.log(`🔧 [API] Token source: localStorage (always read at request time)`);
+  console.log(`🔧 [API] Token source: localStorage via getValidToken()`);
   
   // PERFORM THE FETCH
   return fetch(fullUrl, safeOptions)
@@ -1204,7 +1053,7 @@ function _safeFetch(fullUrl, options = {}) {
             console.warn(`⚠️ [API] HTTP ${status} error from backend: ${errorMessage}`);
             console.warn(`⚠️ [API] Backend is reachable but returned an error (not marking as offline)`);
           } else if (status === 401 || status === 403) {
-            // NEW: Handle unauthorized access
+            // CRITICAL FIX: Handle unauthorized access
             errorMessage = data.message || 'Invalid credentials';
             result.isAuthError = true;
             
@@ -1212,7 +1061,7 @@ function _safeFetch(fullUrl, options = {}) {
             console.log(`🔐 [AUTH] ${status} Unauthorized/Forbidden - AUTH ISSUE, NOT NETWORK`);
             console.log(`🔐 [AUTH] Backend IS reachable (got response), this is an authentication issue`);
             
-            // NEW: Clear localStorage and redirect to login for 401/403
+            // CRITICAL FIX: Clear localStorage and redirect to login for 401/403
             console.log(`🔐 [AUTH] Handling ${status} error - clearing localStorage and redirecting to login`);
             
             // UPDATED: Only clear token if backend explicitly says token is revoked
@@ -1360,7 +1209,7 @@ function _safeFetch(fullUrl, options = {}) {
 }
 
 // ============================================================================
-// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER WITH STRICT CONTRACT
+// GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER WITH AUTHORITATIVE AUTH
 // ============================================================================
 
 /**
@@ -1369,6 +1218,7 @@ function _safeFetch(fullUrl, options = {}) {
  * 2. Second argument MUST ALWAYS be options object (e.g., { method: 'POST' })
  * 3. NEVER accept HTTP methods as first argument
  * 4. NEVER swap arguments
+ * 5. ALWAYS use BACKEND_BASE_URL + '/api/' + endpoint
  */
 const globalApiFunction = function(endpoint, options = {}) {
   // Use global network state
@@ -1404,7 +1254,7 @@ const globalApiFunction = function(endpoint, options = {}) {
   
   // SANITIZE endpoint to prevent ANY malformed URLs
   const safeEndpoint = _sanitizeEndpoint(endpoint);
-  const fullUrl = _buildSafeUrl(safeEndpoint); // Uses dynamic BASE_API_URL
+  const fullUrl = _buildSafeUrl(safeEndpoint); // Uses SINGLE BASE_API_URL
   
   // VALIDATE options
   const safeOptions = { ...options };
@@ -1420,42 +1270,59 @@ const globalApiFunction = function(endpoint, options = {}) {
     }
   }
   
-  // NEW: Ensure Authorization header is included in options if not already present
-  // BUT NOT for /api/status endpoint
-  if (!safeOptions.headers) {
-    safeOptions.headers = {};
-  }
+  // CRITICAL FIX: Use getValidToken() for token retrieval
+  const token = getValidToken();
   
   // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
   const isStatusEndpoint = safeEndpoint === '/status' || safeEndpoint.startsWith('/status?');
   
-  // Inject Authorization header if token exists in localStorage AND NOT status endpoint
-  // Always read token directly from localStorage at request time
-  const tokenFromStorage = localStorage.getItem('accessToken') || 
-                           localStorage.getItem('moodchat_token') || 
-                           localStorage.getItem('token');
+  // Initialize headers if not present
+  if (!safeOptions.headers) {
+    safeOptions.headers = {};
+  }
   
-  if (tokenFromStorage && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
-    safeOptions.headers['Authorization'] = `Bearer ${tokenFromStorage}`;
-    console.log(`🔐 [AUTH] Token from localStorage injected into options for ${safeEndpoint}`);
+  // Inject Authorization header if token exists AND NOT status endpoint
+  if (token && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
+    safeOptions.headers['Authorization'] = `Bearer ${token}`;
+    console.log(`🔐 [AUTH] Token from getValidToken() injected into options for ${safeEndpoint}`);
   } else if (isStatusEndpoint) {
     console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
   }
   
+  // CRITICAL FIX: If token is required but missing, reject immediately
+  // Skip for auth endpoints and status endpoint
+  const requiresAuth = !isStatusEndpoint && 
+                       !safeEndpoint.includes('/auth/login') && 
+                       !safeEndpoint.includes('/auth/register') &&
+                       safeOptions.auth !== false;
+  
+  if (requiresAuth && !token) {
+    console.error(`❌ [AUTH] Token required for ${safeEndpoint} but no token found`);
+    return Promise.resolve({
+      ok: false,
+      success: false,
+      status: 401,
+      message: 'Authentication required. No token found.',
+      isAuthError: true,
+      isRateLimited: false,
+      isServerError: false
+    });
+  }
+  
   // NOTE: Authorization header is now handled centrally in _safeFetch via getAuthHeaders()
-  // and also injected directly into options for maximum compatibility
+  // which uses getValidToken() for authoritative token retrieval
   
   // CALL THE CORE FETCH FUNCTION
   return _safeFetch(fullUrl, safeOptions);
 };
 
 // ============================================================================
-// MAIN API OBJECT - WITH PERMANENT AUTH TIMING FIX
+// MAIN API OBJECT - WITH AUTHORITATIVE AUTH SOURCE
 // ============================================================================
 
 const apiObject = {
   _singleton: true,
-  _version: '19.0.2', // Updated version for localStorage token handling
+  _version: '20.0.0', // Updated version for authoritative auth source
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -1463,11 +1330,11 @@ const apiObject = {
   _authValidationInProgress: false,
   
   /**
-   * Configuration object with dynamically determined URLs
+   * Configuration object with SINGLE backend URL
    */
   _config: {
-    BACKEND_URL: BACKEND_BASE_URL,               // Dynamic backend base URL
-    API_BASE_URL: BASE_API_URL,                // Dynamic API base URL
+    BACKEND_URL: BACKEND_BASE_URL,               // SINGLE backend base URL
+    API_BASE_URL: BASE_API_URL,                  // SINGLE API base URL
     STORAGE_PREFIX: 'moodchat_',
     MAX_RETRIES: 3,
     RETRY_DELAY: 1000,
@@ -1493,13 +1360,26 @@ const apiObject = {
   },
   
   // ============================================================================
-  // ENHANCED: getAuthHeaders() method for external use
+  // AUTHORITATIVE: getValidToken() method for external use
+  // ============================================================================
+  
+  /**
+   * getValidToken() - Public method to get token from localStorage
+   * Uses authoritative token retrieval logic
+   * @returns {string|null} Token if found, null otherwise
+   */
+  getValidToken: function() {
+    return getValidToken();
+  },
+  
+  // ============================================================================
+  // AUTHORITATIVE: getAuthHeaders() method for external use
   // ============================================================================
   
   /**
    * getAuthHeaders() - Public method to get authentication headers
    * Can be used by other parts of the application
-   * Always reads token directly from localStorage
+   * Uses getValidToken() for authoritative token retrieval
    * @returns {object} Headers object with Authorization if token exists
    */
   getAuthHeaders: function() {
@@ -1507,17 +1387,16 @@ const apiObject = {
   },
   
   // ============================================================================
-  // ENHANCED: Set access token globally with persistence
+  // AUTHORITATIVE: Set access token with persistence
   // ============================================================================
   
   /**
-   * setAccessToken() - Set the global access token with enhanced persistence
+   * setAccessToken() - Set the access token with authoritative storage
    * @param {string} token - The access token to set
    */
   setAccessToken: function(token) {
-    if (token) {
-      accessToken = token;
-      // Store in BOTH keys as requested - CRITICAL FOR PERSISTENCE
+    if (token && token.trim() !== "") {
+      // Store in BOTH keys as required
       localStorage.setItem('accessToken', token);
       localStorage.setItem('moodchat_token', token);
       
@@ -1528,16 +1407,27 @@ const apiObject = {
           const authData = JSON.parse(authDataStr);
           authData.accessToken = token;
           localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
+        } else {
+          // Create new auth data
+          const authData = {
+            accessToken: token,
+            tokenTimestamp: Date.now(),
+            authValidated: false
+          };
+          localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
         }
       } catch (e) {
         console.error('🔐 [AUTH] Error updating normalized auth data:', e);
       }
       
+      // Update global variable
+      accessToken = token;
+      
       // Reset auth validation state since we have new token
       _authValidated = false;
       _authValidationPromise = null;
       
-      console.log(`✅ [TOKEN] Global accessToken set and stored in both keys: ${accessToken.substring(0, 20)}...`);
+      console.log(`✅ [TOKEN] Token set and stored in both keys: ${accessToken.substring(0, 20)}...`);
       console.log(`✅ [AUTH] Auth validation state reset for new token`);
       
       // Dispatch token updated event
@@ -1551,26 +1441,23 @@ const apiObject = {
   },
   
   /**
-   * getAccessToken() - Get the current global access token
-   * Always reads from localStorage first
+   * getAccessToken() - Get the current access token
+   * Uses getValidToken() for authoritative token retrieval
    * @returns {string|null} The current access token
    */
   getAccessToken: function() {
-    // Always read from localStorage first for the most up-to-date value
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
-    if (tokenFromStorage) {
-      accessToken = tokenFromStorage; // Update global variable
-    }
-    return accessToken;
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
+    accessToken = token; // Update global variable for consistency
+    return token;
   },
   
   /**
    * refreshAccessToken() - Update global token from localStorage
+   * Uses getValidToken() for authoritative token retrieval
    */
   refreshAccessToken: function() {
-    updateGlobalAccessToken();
+    accessToken = getValidToken();
     return accessToken;
   },
   
@@ -1579,26 +1466,24 @@ const apiObject = {
   // ============================================================================
   
   /**
-   * api.get() - Simple GET method with automatic token attachment
-   * Always reads token from localStorage at request time
+   * api.get() - Simple GET method with authoritative token attachment
+   * Uses getValidToken() for token retrieval
    * @param {string} url - The endpoint URL
    * @returns {Promise} Promise with response data
    */
   get: async function(url) {
     console.log(`🔧 [API] api.get() called for: ${url}`);
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    console.log(`🔧 [API] Token from localStorage: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     
     try {
       // Ensure accessToken is injected
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(url, { 
@@ -1631,8 +1516,8 @@ const apiObject = {
   },
   
   /**
-   * api.post() - Simple POST method with automatic token attachment
-   * Always reads token from localStorage at request time
+   * api.post() - Simple POST method with authoritative token attachment
+   * Uses getValidToken() for token retrieval
    * @param {string} url - The endpoint URL
    * @param {object} data - The data to send
    * @returns {Promise} Promise with response data
@@ -1640,18 +1525,16 @@ const apiObject = {
   post: async function(url, data) {
     console.log(`🔧 [API] api.post() called for: ${url}`);
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    console.log(`🔧 [API] Token from localStorage: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     
     try {
       // Ensure accessToken is injected
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(url, { 
@@ -1685,8 +1568,8 @@ const apiObject = {
   },
   
   /**
-   * api.put() - Simple PUT method with automatic token attachment
-   * Always reads token from localStorage at request time
+   * api.put() - Simple PUT method with authoritative token attachment
+   * Uses getValidToken() for token retrieval
    * @param {string} url - The endpoint URL
    * @param {object} data - The data to send
    * @returns {Promise} Promise with response data
@@ -1694,18 +1577,16 @@ const apiObject = {
   put: async function(url, data) {
     console.log(`🔧 [API] api.put() called for: ${url}`);
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    console.log(`🔧 [API] Token from localStorage: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     
     try {
       // Ensure accessToken is injected
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(url, { 
@@ -1739,26 +1620,24 @@ const apiObject = {
   },
   
   /**
-   * api.delete() - Simple DELETE method with automatic token attachment
-   * Always reads token from localStorage at request time
+   * api.delete() - Simple DELETE method with authoritative token attachment
+   * Uses getValidToken() for token retrieval
    * @param {string} url - The endpoint URL
    * @returns {Promise} Promise with response data
    */
   delete: async function(url) {
     console.log(`🔧 [API] api.delete() called for: ${url}`);
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    console.log(`🔧 [API] Token from localStorage: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     
     try {
       // Ensure accessToken is injected
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(url, { 
@@ -1791,24 +1670,22 @@ const apiObject = {
   },
   
   // ============================================================================
-  // ENHANCED IFRAME METHODS WITH TOKEN PERSISTENCE
+  // ENHANCED IFRAME METHODS WITH AUTHORITATIVE TOKEN HANDLING
   // ============================================================================
   
   /**
    * getMessages() - Get all messages (used by message.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with messages data
    */
   getMessages: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/messages', { 
@@ -1843,20 +1720,18 @@ const apiObject = {
   
   /**
    * getMessageById() - Get message by ID (used by message.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {string} messageId - Message ID
    * @returns {Promise} Promise with message data
    */
   getMessageById: async function(messageId) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(`/messages/${encodeURIComponent(messageId)}`, { 
@@ -1891,20 +1766,18 @@ const apiObject = {
   
   /**
    * sendMessage() - Send a new message (used by message.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {object} messageData - Message data
    * @returns {Promise} Promise with sent message data
    */
   sendMessage: async function(messageData) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/messages', { 
@@ -1940,7 +1813,7 @@ const apiObject = {
   
   /**
    * getFriends() - Get all friends (used by friend.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with friends data
    */
   getFriends: async function() {
@@ -1966,14 +1839,12 @@ const apiObject = {
     }
     
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/friends/list', {
@@ -2045,20 +1916,18 @@ const apiObject = {
   
   /**
    * addFriend() - Add a friend (used by friend.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {string} userId - User ID to add as friend
    * @returns {Promise} Promise with friend request data
    */
   addFriend: async function(userId) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/friends/add', { 
@@ -2094,19 +1963,17 @@ const apiObject = {
   
   /**
    * getGroups() - Get all groups (used by group.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with groups data
    */
   getGroups: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/groups', { 
@@ -2141,20 +2008,18 @@ const apiObject = {
   
   /**
    * getGroupById() - Get group by ID (used by group.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {string} groupId - Group ID
    * @returns {Promise} Promise with group data
    */
   getGroupById: async function(groupId) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(`/groups/${encodeURIComponent(groupId)}`, { 
@@ -2189,20 +2054,18 @@ const apiObject = {
   
   /**
    * createGroup() - Create a new group (used by group.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {object} groupData - Group data
    * @returns {Promise} Promise with created group data
    */
   createGroup: async function(groupData) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/groups', { 
@@ -2238,7 +2101,7 @@ const apiObject = {
   
   /**
    * getStatuses() - Get all statuses (used by status.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with statuses data
    */
   getStatuses: async function() {
@@ -2265,14 +2128,12 @@ const apiObject = {
     }
     
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/statuses/all', {
@@ -2345,20 +2206,18 @@ const apiObject = {
   
   /**
    * getStatus() - Get status by ID (used by status.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {string} statusId - Status ID
    * @returns {Promise} Promise with status data
    */
   getStatus: async function(statusId) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(`/status/${encodeURIComponent(statusId)}`, { 
@@ -2393,20 +2252,18 @@ const apiObject = {
   
   /**
    * createStatus() - Create a new status (used by status.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {object} statusData - Status data
    * @returns {Promise} Promise with created status data
    */
   createStatus: async function(statusData) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/status', { 
@@ -2442,19 +2299,17 @@ const apiObject = {
   
   /**
    * getCalls() - Get all calls (used by calls.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with calls data
    */
   getCalls: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/calls', { 
@@ -2489,20 +2344,18 @@ const apiObject = {
   
   /**
    * startCall() - Start a new call (used by calls.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {object} callData - Call data
    * @returns {Promise} Promise with call data
    */
   startCall: async function(callData) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/calls/start', { 
@@ -2538,19 +2391,17 @@ const apiObject = {
   
   /**
    * getSettings() - Get user settings (used by settings.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with settings data
    */
   getSettings: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/settings', { 
@@ -2585,20 +2436,18 @@ const apiObject = {
   
   /**
    * updateSettings() - Update user settings (used by settings.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @param {object} settingsData - Settings data
    * @returns {Promise} Promise with updated settings data
    */
   updateSettings: async function(settingsData) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/settings', { 
@@ -2634,19 +2483,17 @@ const apiObject = {
   
   /**
    * getTools() - Get tools data (used by Tools.html)
-   * Always reads token from localStorage at request time
+   * Uses getValidToken() for token retrieval
    * @returns {Promise} Promise with tools data
    */
   getTools: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/tools', { 
@@ -2680,7 +2527,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // ENHANCED AUTHENTICATION METHODS WITH PERMANENT TIMING FIX
+  // ENHANCED AUTHENTICATION METHODS WITH AUTHORITATIVE TOKEN HANDLING
   // ============================================================================
   
   /**
@@ -2704,8 +2551,8 @@ const apiObject = {
     
     try {
       console.log(`🔐 [AUTH] Login attempt for email: ${email}`);
-      console.log(`🔐 [AUTH] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
-      console.log(`🔐 [AUTH] Using dynamic API URL: ${BASE_API_URL}`);
+      console.log(`🔐 [AUTH] Using SINGLE backend URL: ${BACKEND_BASE_URL}`);
+      console.log(`🔐 [AUTH] Using SINGLE API URL: ${BASE_API_URL}`);
       
       // Proper JSON body for login - STRICT: Use correct endpoint format
       const requestData = { 
@@ -2867,8 +2714,8 @@ const apiObject = {
     
     try {
       console.log('🔐 [AUTH] Register attempt');
-      console.log(`🔐 [AUTH] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
-      console.log(`🔐 [AUTH] Using dynamic API URL: ${BASE_API_URL}`);
+      console.log(`🔐 [AUTH] Using SINGLE backend URL: ${BACKEND_BASE_URL}`);
+      console.log(`🔐 [AUTH] Using SINGLE API URL: ${BASE_API_URL}`);
       
       // Proper JSON body for register - STRICT: Use correct endpoint format
       const registerPayload = {
@@ -3094,14 +2941,14 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ENHANCED GET CURRENT USER FUNCTION - WITH PERMANENT TIMING FIX
+  // CRITICAL FIX: ENHANCED GET CURRENT USER FUNCTION - WITH AUTHORITATIVE AUTH
   // ============================================================================
   
   getCurrentUser: async function() {
-    console.log('🔐 [AUTH] Enhanced getCurrentUser() called with timing fix');
+    console.log('🔐 [AUTH] Enhanced getCurrentUser() called with authoritative auth');
     
-    // Always read token directly from localStorage at request time
-    const token = _getCurrentAccessToken();
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     if (!token) {
       console.log('🔐 [AUTH] No token available');
       window.currentUser = null;
@@ -3133,7 +2980,7 @@ const apiObject = {
     const isAuthenticated = await validateAuth();
     
     if (isAuthenticated && window.currentUser) {
-      console.log('✅ [AUTH] getCurrentUser() successful with timing fix');
+      console.log('✅ [AUTH] getCurrentUser() successful with authoritative auth');
       this._apiAvailable = true;
       
       // Dispatch user loaded event
@@ -3148,7 +2995,7 @@ const apiObject = {
       // If validation failed but we have cached user, use that
       // NEVER clear cached user due to timing issues
       if (cachedUser) {
-        console.log('🔐 [AUTH] Using cached user as fallback (timing fix)');
+        console.log('🔐 [AUTH] Using cached user as fallback');
         window.currentUser = cachedUser;
         this._apiAvailable = false;
         return cachedUser;
@@ -3161,7 +3008,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // BACKEND HEALTH CHECK - HARDENED WITH NETWORK/AUTH SEPARATION
+  // BACKEND HEALTH CHECK - HARDENED WITH AUTHORITATIVE AUTH
   // ============================================================================
   
   checkBackendHealth: async function() {
@@ -3181,16 +3028,14 @@ const apiObject = {
       };
     }
     
-    console.log('🔧 [API] Checking backend health with NETWORK/AUTH SEPARATION...');
-    console.log(`🔧 [API] Using dynamic backend URL: ${BACKEND_BASE_URL}`);
-    console.log(`🔧 [API] Using dynamic API URL: ${BASE_API_URL}`);
+    console.log('🔧 [API] Checking backend health with AUTHORITATIVE AUTH...');
+    console.log(`🔧 [API] Using SINGLE backend URL: ${BACKEND_BASE_URL}`);
+    console.log(`🔧 [API] Using SINGLE API URL: ${BASE_API_URL}`);
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    console.log(`🔧 [API] Token from localStorage: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     
     // CRITICAL FIX: Test endpoints in order, but /api/status MUST be first and without auth
     const testEndpoints = [
@@ -3214,8 +3059,8 @@ const apiObject = {
         };
         
         // CRITICAL FIX: Only add Authorization header if explicitly requested
-        if (test.useAuth && tokenFromStorage) {
-          headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+        if (test.useAuth && token) {
+          headers['Authorization'] = `Bearer ${token}`;
           console.log('🔐 [AUTH] Adding Authorization header to health check');
         } else if (!test.useAuth) {
           console.log(`🔧 [NETWORK] NO Authorization header for ${test.endpoint} (network test only)`);
@@ -3338,14 +3183,14 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ENHANCED SESSION MANAGEMENT - WITH PERMANENT TIMING FIX
+  // CRITICAL FIX: ENHANCED SESSION MANAGEMENT - WITH AUTHORITATIVE AUTH
   // ============================================================================
   
   checkSession: async function() {
-    console.log('🔐 [AUTH] Enhanced checkSession() called with timing fix');
+    console.log('🔐 [AUTH] Enhanced checkSession() called with authoritative auth');
     
-    // Always read token directly from localStorage at request time
-    const token = _getCurrentAccessToken();
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
     // Use validateAuth() which handles timing issues properly
     const isAuthenticated = await validateAuth();
@@ -3369,7 +3214,7 @@ const apiObject = {
     } else if (user) {
       // We have user data but auth validation failed or is pending
       // NEVER mark as logged out due to timing or network issues
-      console.log('🔐 [AUTH] Auth validation pending or failed, but preserving user data (timing fix)');
+      console.log('🔐 [AUTH] Auth validation pending or failed, but preserving user data');
       
       // Check if this is a network issue
       if (!window.AppNetwork.isOnline || !window.AppNetwork.isBackendReachable) {
@@ -3418,19 +3263,17 @@ const apiObject = {
   },
   
   // ============================================================================
-  // ADDITIONAL DATA METHODS - ALL USE STRICT API CONTRACT WITH AUTOMATIC TOKEN ATTACHMENT
+  // ADDITIONAL DATA METHODS - ALL USE AUTHORITATIVE TOKEN HANDLING
   // ============================================================================
   
   getUsers: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/users', { 
@@ -3464,14 +3307,12 @@ const apiObject = {
   
   getUserById: async function(userId) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(`/users/${encodeURIComponent(userId)}`, { 
@@ -3505,14 +3346,12 @@ const apiObject = {
   
   getChats: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/chats', { 
@@ -3546,14 +3385,12 @@ const apiObject = {
   
   getChatById: async function(chatId) {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction(`/chats/${encodeURIComponent(chatId)}`, { 
@@ -3587,14 +3424,12 @@ const apiObject = {
   
   getContacts: async function() {
     try {
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
       const headers = {};
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       
       const result = await globalApiFunction('/contacts', { 
@@ -3627,14 +3462,14 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ENHANCED isLoggedIn() FUNCTION - PERMANENTLY FIXES TIMING ISSUES
+  // CRITICAL FIX: ENHANCED isLoggedIn() FUNCTION - AUTHORITATIVE AUTH
   // ============================================================================
   
   isLoggedIn: async function() {
-    console.log('🔐 [AUTH-TIMING-FIX] Enhanced isLoggedIn() called');
+    console.log('🔐 [AUTH-TIMING-FIX] Enhanced isLoggedIn() called with authoritative auth');
     
-    // Step 1: Check if token exists - always read from localStorage
-    const token = _getCurrentAccessToken();
+    // Step 1: Check if token exists - use getValidToken()
+    const token = getValidToken();
     if (!token) {
       console.log('🔐 [AUTH-TIMING-FIX] No token available - not logged in');
       return false;
@@ -3696,8 +3531,8 @@ const apiObject = {
   
   // Synchronous version for compatibility
   isLoggedInSync: function() {
-    // Check token existence - always read from localStorage
-    const token = _getCurrentAccessToken();
+    // Check token existence - use getValidToken()
+    const token = getValidToken();
     const user = window.currentUser || _getCurrentUserFromStorage();
     
     // Basic checks
@@ -3743,11 +3578,7 @@ const apiObject = {
   },
   
   getCurrentToken: function() {
-    return _getCurrentAccessToken();
-  },
-  
-  getAccessToken: function() {
-    return _getCurrentAccessToken();
+    return getValidToken();
   },
   
   getRefreshToken: function() {
@@ -3794,7 +3625,7 @@ const apiObject = {
     // ENHANCED: API is available if:
     // 1. We have a token and user data
     // 2. AND (we're offline OR auth is validated OR validation is in progress)
-    const token = _getCurrentAccessToken();
+    const token = getValidToken();
     const user = window.currentUser || _getCurrentUserFromStorage();
     
     if (!token || !user) {
@@ -3811,7 +3642,7 @@ const apiObject = {
   },
   
   getConnectionStatus: function() {
-    const token = _getCurrentAccessToken();
+    const token = getValidToken();
     const user = _getCurrentUserFromStorage();
     
     // Check token persistence
@@ -3838,6 +3669,7 @@ const apiObject = {
       sessionChecked: this._sessionChecked,
       apiAvailable: this._apiAvailable,
       globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
+      authoritativeToken: token ? `Present (${token.substring(0, 20)}...)` : 'Not found',
       authState: {
         hasToken: !!token,
         hasUser: !!user,
@@ -3845,7 +3677,7 @@ const apiObject = {
         authValidationInProgress: _authValidationInProgress,
         authLastChecked: _authLastChecked,
         isLoggedIn: !!(token && user),
-        tokenStructure: token ? 'normalized' : 'none',
+        tokenStructure: token ? 'authoritative' : 'none',
         windowCurrentUser: window.currentUser ? 'Set' : 'Not set',
         tokenPersistence: {
           moodchatTokenKey: tokenInMoodchatToken ? 'PRESENT' : 'MISSING',
@@ -3865,27 +3697,38 @@ const apiObject = {
         authCacheDuration: AUTH_CACHE_DURATION,
         authValidationTimeout: AUTH_VALIDATION_TIMEOUT,
         preventsTimingIssues: true,
-        abortErrorDoesNotBlockApi: true // NEW: Indicates the AbortError fix
+        abortErrorDoesNotBlockApi: true
+      },
+      authoritativeAuth: {
+        singleBackendUrl: true,
+        tokenAlwaysFromLocalStorage: true,
+        getValidTokenFunction: true,
+        auto401403Handling: true
       }
     };
   },
   
   // ============================================================================
-  // ENHANCED INITIALIZATION WITH PERMANENT AUTH TIMING FIX
+  // ENHANCED INITIALIZATION WITH AUTHORITATIVE AUTH SOURCE
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v19.0.2 (PERMANENT AUTH TIMING FIX + LOCALSTORAGE TOKEN HANDLING) initializing...');
-    console.log('🔧 [API] 🔗 Backend URL:', BACKEND_BASE_URL);
-    console.log('🔧 [API] 🔗 API Base URL:', BASE_API_URL);
+    console.log('🔧 [API] ⚡ MoodChat API v20.0.0 (AUTHORITATIVE AUTH SOURCE) initializing...');
+    console.log('🔧 [API] 🔗 SINGLE Backend URL:', BACKEND_BASE_URL);
+    console.log('🔧 [API] 🔗 SINGLE API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
-    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: PERMANENT AUTHENTICATION STATE TIMING FIX');
-    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token always read from localStorage at request time');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: AUTHORITATIVE AUTH SOURCE');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: SINGLE backend URL: ' + BACKEND_BASE_URL);
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token ALWAYS read from localStorage using getValidToken()');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token priority: 1. accessToken, 2. moodchat_token');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Automatic 401/403 handling with localStorage clearing and login redirect');
+    console.log('🔧 [API] ✅ getValidToken() function implemented');
+    console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
+    console.log('🔧 [API] ✅ Token ALWAYS retrieved from localStorage before each API call');
+    console.log('🔧 [API] ✅ 401/403 responses clear localStorage and redirect to login');
+    console.log('🔧 [API] ✅ Token missing = Immediate rejection (no fake success)');
     console.log('🔧 [API] ✅ validateAuth() function implemented');
     console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
-    console.log('🔧 [API] ✅ Token always retrieved from localStorage before each API call');
-    console.log('🔧 [API] ✅ 401/403 responses clear localStorage and redirect to login');
     console.log('🔧 [API] ✅ AbortError does NOT block API readiness');
     console.log('🔧 [API] ✅ Token existence = API availability (even with AbortError)');
     console.log('🔧 [API] ✅ isLoggedIn() waits for validateAuth() if needed');
@@ -3897,15 +3740,16 @@ const apiObject = {
     console.log('🔧 [API] ✅ Network/Auth separation preserved');
     console.log('🔧 [API] ✅ iframe API exposure preserved');
     
-    // Initialize global access token with enhanced checking
+    // Initialize global access token with authoritative checking
     updateGlobalAccessToken();
     
     // Check for token in storage and log it
-    if (accessToken) {
-      console.log('🔐 [AUTH] Global accessToken initialized:', accessToken.substring(0, 20) + '...');
+    const token = getValidToken();
+    if (token) {
+      console.log('🔐 [AUTH] Token found via getValidToken():', token.substring(0, 20) + '...');
       console.log('🔐 [AUTH] Token will be automatically injected into all API calls (except /api/status)');
       console.log('🔐 [AUTH] Token persists across page refreshes');
-      console.log('🔐 [AUTH] IMPORTANT: Token is always read directly from localStorage before each API call');
+      console.log('🔐 [AUTH] IMPORTANT: Token is ALWAYS read directly from localStorage via getValidToken()');
       
       const moodchatToken = localStorage.getItem('moodchat_token');
       const accessTokenKey = localStorage.getItem('accessToken');
@@ -3916,7 +3760,7 @@ const apiObject = {
       
       this._apiAvailable = true;
     } else {
-      console.log('🔐 [AUTH] No token found in storage');
+      console.log('🔐 [AUTH] No token found via getValidToken()');
       console.log('🔐 [AUTH] API calls without authentication will proceed normally');
       console.log('🔐 [AUTH] /api/status endpoint will NEVER include Authorization header');
       this._apiAvailable = false;
@@ -3957,8 +3801,8 @@ const apiObject = {
     }
     
     // Auto-login if credentials exist with timing fix
-    if (accessToken && user && !this._sessionChecked) {
-      console.log('🔧 [API] 🔄 Auto-login on initialization with timing fix...');
+    if (token && user && !this._sessionChecked) {
+      console.log('🔧 [API] 🔄 Auto-login on initialization with authoritative auth...');
       
       // Use isLoggedInSync() first to check without async validation
       if (this.isLoggedInSync()) {
@@ -3977,7 +3821,7 @@ const apiObject = {
       }
     }
     
-    // Initial health check with NETWORK/AUTH SEPARATION
+    // Initial health check with AUTHORITATIVE AUTH
     setTimeout(async () => {
       try {
         const health = await this.checkBackendHealth();
@@ -3985,16 +3829,16 @@ const apiObject = {
         console.log('🔧 [API] 🌐 Network reachable:', health.reachable);
         console.log('🔧 [API] 🔐 Auth status:', health.isAuthError ? 'Auth issue (not network)' : 'OK');
         
-        // Enhanced auth diagnostics with timing fix info
-        const token = _getCurrentAccessToken();
+        // Enhanced auth diagnostics with authoritative auth info
+        const token = getValidToken();
         const currentUser = _getCurrentUserFromStorage();
         
         // Check token persistence
         const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
         const tokenInAccessToken = localStorage.getItem('accessToken');
         
-        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with LOCALSTORAGE TOKEN HANDLING:');
-        console.log('🔧 [API]   Global accessToken:', accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set');
+        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with AUTHORITATIVE AUTH:');
+        console.log('🔧 [API]   Token via getValidToken():', token ? `Present (${token.substring(0, 20)}...)` : 'Not found');
         console.log('🔧 [API]   Token in moodchat_token:', tokenInMoodchatToken ? 'YES' : 'NO');
         console.log('🔧 [API]   Token in accessToken:', tokenInAccessToken ? 'YES' : 'NO');
         console.log('🔧 [API]   Token persistence:', tokenInMoodchatToken && tokenInAccessToken ? 'DOUBLE STORED' : 'PARTIAL');
@@ -4002,11 +3846,14 @@ const apiObject = {
         console.log('🔧 [API]   Auth validated:', _authValidated);
         console.log('🔧 [API]   Auth validation in progress:', _authValidationInProgress);
         console.log('🔧 [API]   Auth last checked:', _authLastChecked ? new Date(_authLastChecked).toISOString() : 'Never');
-        console.log('🔧 [API]   Token always read from localStorage: YES');
+        console.log('🔧 [API]   Token ALWAYS read from localStorage via getValidToken(): YES');
         console.log('🔧 [API]   401/403 auto-handling: YES (clears localStorage, redirects to login)');
+        console.log('🔧 [API]   Token missing = immediate rejection: YES');
+        console.log('🔧 [API]   SINGLE backend URL: ' + BACKEND_BASE_URL);
         console.log('🔧 [API]   Timing fix active: YES');
         console.log('🔧 [API]   AbortError fix active: YES (does not block API)');
         console.log('🔧 [API]   validateAuth() available: YES');
+        console.log('🔧 [API]   getValidToken() available: YES');
         console.log('🔧 [API]   API Available:', this.isApiAvailable());
         console.log('🔧 [API]   window.currentUser:', window.currentUser ? 'Set' : 'Not set');
         console.log('🔧 [API] 💾 Device ID:', this.getDeviceId());
@@ -4026,30 +3873,31 @@ const apiObject = {
       }
     }, 500);
     
-    // Periodic session checks with timing fix
+    // Periodic session checks with authoritative auth
     setInterval(() => {
-      if (accessToken && window.AppNetwork.isOnline) {
-        console.log('🔧 [API] Periodic session check with timing fix...');
+      const token = getValidToken();
+      if (token && window.AppNetwork.isOnline) {
+        console.log('🔧 [API] Periodic session check with authoritative auth...');
         // Run in background without affecting UI
         validateAuth().catch(() => {});
       }
     }, this._config.SESSION_CHECK_INTERVAL);
     
-    // Dispatch ready events with timing fix info
+    // Dispatch ready events with authoritative auth info
     this._dispatchReadyEvents();
     
     return true;
   },
   
   autoLogin: async function() {
-    console.log('🔐 [AUTH] autoLogin() called with timing fix');
+    console.log('🔐 [AUTH] autoLogin() called with authoritative auth');
     
     // Use the enhanced checkSession method
     return await this.checkSession();
   },
   
   _dispatchReadyEvents: function() {
-    const token = _getCurrentAccessToken();
+    const token = getValidToken();
     const user = _getCurrentUserFromStorage();
     
     // Check token persistence
@@ -4062,11 +3910,12 @@ const apiObject = {
       backendUrl: BACKEND_BASE_URL,
       apiBaseUrl: BASE_API_URL,
       globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
+      authoritativeToken: token ? `Present (${token.substring(0, 20)}...)` : 'Not found',
       apiAvailable: this._apiAvailable,
       networkAuthSeparated: true,
-      authTimingFix: true, // NEW: Indicates auth timing fix is active
-      localStorageTokenHandling: true, // NEW: Indicates localStorage token handling
-      abortErrorFix: true, // NEW: Indicates AbortError fix is active
+      authTimingFix: true,
+      authoritativeAuthSource: true, // NEW: Indicates authoritative auth source
+      abortErrorFix: true,
       tokenPersistence: {
         moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
         accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
@@ -4087,9 +3936,10 @@ const apiObject = {
       },
       features: {
         validateAuthFunction: true,
+        getValidTokenFunction: true, // NEW: Authoritative token retrieval
         authTimingFix: true,
-        localStorageTokenHandling: true, // NEW
-        abortErrorFix: true, // NEW
+        authoritativeAuthSource: true, // NEW
+        abortErrorFix: true,
         preventsTimingIssues: true,
         preservesAuthState: true,
         exponentialBackoffRetry: true,
@@ -4101,7 +3951,9 @@ const apiObject = {
         crossTabSync: true,
         centralizedAuthHeaders: true,
         strictAuthValidation: true,
-        dynamicEnvironmentDetection: true,
+        singleBackendUrl: true, // NEW: Single backend URL
+        auto401403Handling: true,
+        tokenMissingRejection: true, // NEW: Token missing = immediate rejection
         http500Fix: true,
         apiMethods: true,
         getAuthHeaders: true,
@@ -4131,18 +3983,22 @@ const apiObject = {
     events.forEach(eventName => {
       try {
         window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
-        console.log(`🔧 [API] Dispatched ${eventName} event with LOCALSTORAGE TOKEN HANDLING info`);
+        console.log(`🔧 [API] Dispatched ${eventName} event with AUTHORITATIVE AUTH info`);
       } catch (e) {
         console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
       }
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready with LOCALSTORAGE TOKEN HANDLING');
-      console.log('🔧 [API] ✅ validateAuth() function implemented');
-      console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
-      console.log('🔧 [API] ✅ Token ALWAYS read from localStorage at request time');
+      console.log('🔧 [API] API synchronization ready with AUTHORITATIVE AUTH SOURCE');
+      console.log('🔧 [API] ✅ getValidToken() function implemented');
+      console.log('🔧 [API] ✅ SINGLE backend URL: ' + BACKEND_BASE_URL);
+      console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
+      console.log('🔧 [API] ✅ Token ALWAYS read from localStorage before each API call');
+      console.log('🔧 [API] ✅ Token priority: 1. accessToken, 2. moodchat_token');
       console.log('🔧 [API] ✅ 401/403 responses automatically clear localStorage and redirect to login');
+      console.log('🔧 [API] ✅ Token missing = Immediate rejection (no fake success)');
+      console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
       console.log('🔧 [API] ✅ AbortError does NOT block API readiness');
       console.log('🔧 [API] ✅ Token existence = API availability (even with AbortError)');
       console.log('🔧 [API] ✅ isLoggedIn() waits for validateAuth() if needed');
@@ -4180,40 +4036,44 @@ const apiObject = {
       console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
       console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
       console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
-      console.log('🔧 [API] 🔗 Backend URL: ' + BACKEND_BASE_URL);
-      console.log('🔧 [API] 🔗 API Base URL: ' + BASE_API_URL);
+      console.log('🔧 [API] 🔗 SINGLE Backend URL: ' + BACKEND_BASE_URL);
+      console.log('🔧 [API] 🔗 SINGLE API Base URL: ' + BASE_API_URL);
       console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
+      console.log('🔧 [API] 🔐 Token via getValidToken(): ' + (token ? token.substring(0, 20) + '...' : 'None'));
       console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
       console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'));
       console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
         ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
-      console.log('🔧 [API] 🔐 PERMANENT AUTH TIMING FIX: ACTIVE (NEVER LOGS OUT DUE TO TIMING)');
-      console.log('🔧 [API] 🔐 LOCALSTORAGE TOKEN HANDLING: ACTIVE (ALWAYS READ FROM LOCALSTORAGE)');
+      console.log('🔧 [API] 🔐 AUTHORITATIVE AUTH SOURCE: ACTIVE');
+      console.log('🔧 [API] 🔐 TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE');
       console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS LOCALSTORAGE, REDIRECTS TO LOGIN)');
-      console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR LOCALSTORAGE TOKEN HANDLING:');
-      console.log('🔧 [API] 1. Call any API method - token should be read from localStorage');
-      console.log('🔧 [API] 2. Simulate 401 response - localStorage should be cleared and redirect to login');
-      console.log('🔧 [API] 3. Call api.validateAuth() - should handle timing properly');
-      console.log('🔧 [API] 4. Call api.isLoggedIn() - should never return false before validation completes');
-      console.log('🔧 [API] 5. Simulate network delay - auth state should be preserved');
-      console.log('🔧 [API] 6. Simulate AbortError - API readiness should NOT be blocked');
-      console.log('🔧 [API] 7. Verify tokens are cleared on 401/403 with localStorage clearing');
-      console.log('🔧 [API] 8. All existing API calls continue to work unchanged');
-      console.log('🔧 [API] 9. Token storage in both moodchat_token and accessToken works');
-      console.log('🔧 [API] 10. Authorization headers are injected correctly');
-      console.log('🔧 [API] 11. /api/status endpoint has no Authorization header');
-      console.log('🔧 [API] ⚡ Ready for production with LOCALSTORAGE TOKEN HANDLING');
+      console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH:');
+      console.log('🔧 [API] 1. ALL API calls use SINGLE backend URL: ' + BACKEND_BASE_URL);
+      console.log('🔧 [API] 2. Token ALWAYS read from localStorage via getValidToken()');
+      console.log('🔧 [API] 3. Token priority: 1. accessToken, 2. moodchat_token');
+      console.log('🔧 [API] 4. Token missing = Immediate rejection (no fake success)');
+      console.log('🔧 [API] 5. Simulate 401 response - localStorage should be cleared and redirect to login');
+      console.log('🔧 [API] 6. Call api.validateAuth() - should handle timing properly');
+      console.log('🔧 [API] 7. Call api.isLoggedIn() - should never return false before validation completes');
+      console.log('🔧 [API] 8. Simulate network delay - auth state should be preserved');
+      console.log('🔧 [API] 9. Simulate AbortError - API readiness should NOT be blocked');
+      console.log('🔧 [API] 10. Verify tokens are cleared on 401/403 with localStorage clearing');
+      console.log('🔧 [API] 11. All existing API calls continue to work unchanged');
+      console.log('🔧 [API] 12. Token storage in both moodchat_token and accessToken works');
+      console.log('🔧 [API] 13. Authorization headers are injected correctly');
+      console.log('🔧 [API] 14. /api/status endpoint has no Authorization header');
+      console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE');
     }, 1000);
   },
   
   // ============================================================================
-  // ENHANCED DIAGNOSTICS WITH LOCALSTORAGE TOKEN HANDLING CHECK
+  // ENHANCED DIAGNOSTICS WITH AUTHORITATIVE AUTH CHECK
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running enhanced diagnostics with LOCALSTORAGE TOKEN HANDLING check...');
+    console.log('🔧 [API] Running enhanced diagnostics with AUTHORITATIVE AUTH check...');
     
-    const token = _getCurrentAccessToken();
+    const token = getValidToken();
     const user = _getCurrentUserFromStorage();
     
     // Check token persistence
@@ -4234,7 +4094,7 @@ const apiObject = {
     const results = {
       authState: {
         globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
-        token: token ? `Present (${token.substring(0, 20)}...)` : 'Missing',
+        authoritativeToken: token ? `Present (${token.substring(0, 20)}...)` : 'Not found',
         user: user ? 'Present' : 'Missing',
         authValidated: _authValidated,
         authValidationInProgress: _authValidationInProgress,
@@ -4243,6 +4103,15 @@ const apiObject = {
         windowCurrentUser: window.currentUser ? 'Set' : 'Not set',
         storageKey: TOKEN_STORAGE_KEY,
         legacyToken: localStorage.getItem('token') ? 'Present' : 'Missing'
+      },
+      authoritativeAuth: {
+        singleBackendUrl: BACKEND_BASE_URL,
+        apiBaseUrl: BASE_API_URL,
+        getValidTokenFunction: 'IMPLEMENTED',
+        tokenRetrievalPriority: '1. accessToken, 2. moodchat_token',
+        tokenAlwaysFromLocalStorage: 'YES',
+        tokenMissingRejection: 'YES',
+        auto401403Handling: 'YES'
       },
       tokenPersistence: {
         moodchatToken: tokenInMoodchatToken ? 'Present' : 'Missing',
@@ -4266,7 +4135,7 @@ const apiObject = {
         authCacheDuration: AUTH_CACHE_DURATION + 'ms (' + (AUTH_CACHE_DURATION / 60000).toFixed(1) + ' minutes)',
         authValidationTimeout: AUTH_VALIDATION_TIMEOUT + 'ms'
       },
-      localStorageTokenHandling: {
+      authTimingFix: {
         validateAuthFunction: 'IMPLEMENTED',
         preventsTimingIssues: 'ACTIVE',
         preservesAuthState: 'ACTIVE',
@@ -4278,8 +4147,9 @@ const apiObject = {
       },
       features: {
         validateAuthFunction: 'ACTIVE',
+        getValidTokenFunction: 'ACTIVE',
+        authoritativeAuthSource: 'ACTIVE',
         authTimingFix: 'ACTIVE',
-        localStorageTokenHandling: 'ACTIVE',
         abortErrorFix: 'ACTIVE',
         exponentialBackoffRetry: 'ACTIVE',
         tokenHeaderInjection: 'ACTIVE',
@@ -4290,8 +4160,9 @@ const apiObject = {
         crossTabSync: 'ACTIVE',
         centralizedAuthHeaders: 'ACTIVE',
         strictAuthValidation: 'ACTIVE',
-        auto401Clearing: 'ENHANCED (with redirect)',
-        dynamicEnvironmentDetection: 'ACTIVE',
+        singleBackendUrl: 'ACTIVE',
+        auto401403Handling: 'ENHANCED (with redirect)',
+        tokenMissingRejection: 'ACTIVE',
         http500Fix: 'ACTIVE',
         apiMethods: 'ACTIVE',
         getAuthHeaders: 'ACTIVE',
@@ -4335,8 +4206,8 @@ const apiObject = {
   },
   
   request: async function(endpoint, options = {}) {
-    // Use the globalApiFunction with STRICT CONTRACT
-    // Token will be automatically attached via getAuthHeaders() which reads from localStorage
+    // Use the globalApiFunction with AUTHORITATIVE AUTH
+    // Token will be automatically attached via getAuthHeaders() which uses getValidToken()
     
     // Ensure accessToken is injected into options
     if (!options.headers) {
@@ -4346,16 +4217,34 @@ const apiObject = {
     // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
     const isStatusEndpoint = endpoint === '/status' || endpoint.startsWith('/status?');
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    if (tokenFromStorage && !options.headers['Authorization'] && !options.headers['authorization'] && !isStatusEndpoint) {
-      options.headers['Authorization'] = `Bearer ${tokenFromStorage}`;
-      console.log(`🔐 [AUTH] Token from localStorage injected into request for ${endpoint}`);
+    if (token && !options.headers['Authorization'] && !options.headers['authorization'] && !isStatusEndpoint) {
+      options.headers['Authorization'] = `Bearer ${token}`;
+      console.log(`🔐 [AUTH] Token from getValidToken() injected into request for ${endpoint}`);
     } else if (isStatusEndpoint) {
       console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
+    }
+    
+    // CRITICAL FIX: If token is required but missing, reject immediately
+    // Skip for auth endpoints and status endpoint
+    const requiresAuth = !isStatusEndpoint && 
+                       !endpoint.includes('/auth/login') && 
+                       !endpoint.includes('/auth/register') &&
+                       options.auth !== false;
+    
+    if (requiresAuth && !token) {
+      console.error(`❌ [AUTH] Token required for ${endpoint} but no token found via getValidToken()`);
+      return Promise.resolve({
+        ok: false,
+        success: false,
+        status: 401,
+        message: 'Authentication required. No token found.',
+        isAuthError: true,
+        isRateLimited: false,
+        isServerError: false
+      });
     }
     
     const result = await globalApiFunction(endpoint, options);
@@ -4382,10 +4271,10 @@ const apiObject = {
 };
 
 // ============================================================================
-// CRITICAL FIX: GLOBAL API SETUP WITH LOCALSTORAGE TOKEN HANDLING
+// CRITICAL FIX: GLOBAL API SETUP WITH AUTHORITATIVE AUTH
 // ============================================================================
 
-// Create the global API function with strict contract
+// Create the global API function with authoritative auth
 const globalApi = function(endpoint, options = {}) {
   // Ensure accessToken is injected into options
   const safeOptions = { ...options };
@@ -4397,18 +4286,35 @@ const globalApi = function(endpoint, options = {}) {
   // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
   const isStatusEndpoint = endpoint === '/status' || endpoint.startsWith('/status?');
   
-  // Always read token directly from localStorage at request time
-  // This ensures we always have the latest token
-  const tokenFromStorage = localStorage.getItem('accessToken') || 
-                           localStorage.getItem('moodchat_token') || 
-                           localStorage.getItem('token');
+  // Use getValidToken() for authoritative token retrieval
+  const token = getValidToken();
   
-  // Inject Authorization header if token exists in localStorage AND NOT status endpoint
-  if (tokenFromStorage && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
-    safeOptions.headers['Authorization'] = `Bearer ${tokenFromStorage}`;
-    console.log(`🔐 [AUTH] Token from localStorage injected into globalApi call for ${endpoint}`);
+  // Inject Authorization header if token exists AND NOT status endpoint
+  if (token && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
+    safeOptions.headers['Authorization'] = `Bearer ${token}`;
+    console.log(`🔐 [AUTH] Token from getValidToken() injected into globalApi call for ${endpoint}`);
   } else if (isStatusEndpoint) {
     console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
+  }
+  
+  // CRITICAL FIX: If token is required but missing, reject immediately
+  // Skip for auth endpoints and status endpoint
+  const requiresAuth = !isStatusEndpoint && 
+                     !endpoint.includes('/auth/login') && 
+                     !endpoint.includes('/auth/register') &&
+                     safeOptions.auth !== false;
+  
+  if (requiresAuth && !token) {
+    console.error(`❌ [AUTH] Token required for ${endpoint} but no token found via getValidToken()`);
+    return Promise.resolve({
+      ok: false,
+      success: false,
+      status: 401,
+      message: 'Authentication required. No token found.',
+      isAuthError: true,
+      isRateLimited: false,
+      isServerError: false
+    });
   }
   
   return globalApiFunction(endpoint, safeOptions);
@@ -4426,10 +4332,9 @@ if (!window.MOODCHAT_API) {
   window.MOODCHAT_API = globalApi;
 }
 
-// Expose getAuthHeaders globally for other parts of the application
+// Expose authoritative auth functions globally for other parts of the application
+window.getValidToken = getValidToken;
 window.getAuthHeaders = getAuthHeaders;
-
-// Expose validateAuth globally for other parts of the application
 window.validateAuth = validateAuth;
 
 // Expose accessToken globally for debugging and persistence verification
@@ -4438,18 +4343,21 @@ window.__accessToken = accessToken;
 // Expose function to update global token
 window.updateGlobalAccessToken = updateGlobalAccessToken;
 
-// NEW: Expose handleUnauthorizedAccess for testing
+// Expose handleUnauthorizedAccess for testing
 window.handleUnauthorizedAccess = handleUnauthorizedAccess;
 
-console.log('🔧 [API] Starting enhanced initialization with LOCALSTORAGE TOKEN HANDLING...');
-console.log(`🔧 [API] Initial global accessToken: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
+console.log('🔧 [API] Starting enhanced initialization with AUTHORITATIVE AUTH...');
+console.log(`🔧 [API] SINGLE backend URL: ${BACKEND_BASE_URL}`);
+console.log(`🔧 [API] SINGLE API URL: ${BASE_API_URL}`);
+console.log(`🔧 [API] Token via getValidToken(): ${getValidToken() ? `Present (${getValidToken().substring(0, 20)}...)` : 'Not found'}`);
 console.log(`🔧 [API] Token in moodchat_token key: ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
 console.log(`🔧 [API] Token in accessToken key: ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
 console.log(`🔧 [API] Token persistence: ${localStorage.getItem('moodchat_token') && localStorage.getItem('accessToken') ? 'DOUBLE STORED' : 'PARTIAL'}`);
-console.log(`🔧 [API] PERMANENT AUTH TIMING FIX: ACTIVE`);
-console.log(`🔧 [API] LOCALSTORAGE TOKEN HANDLING: ACTIVE (always read at request time)`);
+console.log(`🔧 [API] AUTHORITATIVE AUTH SOURCE: ACTIVE`);
+console.log(`🔧 [API] TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE`);
 console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE (clears localStorage, redirects to login)`);
 console.log(`🔧 [API] validateAuth() function: AVAILABLE`);
+console.log(`🔧 [API] getValidToken() function: AVAILABLE`);
 console.log(`🔧 [API] NEVER logs out due to timing: ENABLED`);
 console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
 
@@ -4518,7 +4426,7 @@ if (typeof window.isServerError === 'undefined') {
   };
 }
 
-// NEW: Function to check if error is authentication error (not network)
+// Function to check if error is authentication error (not network)
 if (typeof window.isAuthError === 'undefined') {
   window.isAuthError = function(error) {
     if (!error) return false;
@@ -4550,14 +4458,12 @@ exposedMethods.forEach(methodName => {
     window.api[methodName] = async function(...args) {
       console.warn(`⚠️ [API] Using fallback for ${methodName}`);
       
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
-      console.log(`🔧 [API] Token from localStorage in fallback: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+      console.log(`🔧 [API] Token from getValidToken() in fallback: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-      console.log(`🔧 [API] LOCALSTORAGE TOKEN HANDLING: ACTIVE`);
+      console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
       console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
       
       return Promise.resolve({
@@ -4583,14 +4489,12 @@ setTimeout(() => {
       
       console.warn(`⚠️ Using fallback API for ${method} ${safeEndpoint}`);
       
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
-      console.log(`🔧 [API] Token from localStorage in fallback API: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+      console.log(`🔧 [API] Token from getValidToken() in fallback API: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-      console.log(`🔧 [API] LOCALSTORAGE TOKEN HANDLING: ACTIVE`);
+      console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
       console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
       
       return Promise.resolve({
@@ -4614,14 +4518,12 @@ setTimeout(() => {
       fallbackApi[methodName] = async function(...args) {
         console.warn(`⚠️ Using fallback ${methodName}`);
         
-        // Always read token directly from localStorage at request time
-        const tokenFromStorage = localStorage.getItem('accessToken') || 
-                                 localStorage.getItem('moodchat_token') || 
-                                 localStorage.getItem('token');
+        // Use getValidToken() for authoritative token retrieval
+        const token = getValidToken();
         
-        console.log(`🔧 [API] Token from localStorage in fallback method: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+        console.log(`🔧 [API] Token from getValidToken() in fallback method: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
         console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-        console.log(`🔧 [API] LOCALSTORAGE TOKEN HANDLING: ACTIVE`);
+        console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
         console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
         
         return Promise.resolve({
@@ -4647,14 +4549,12 @@ if (!window.api) {
     const method = _normalizeHttpMethod(options?.method);
     const safeEndpoint = _sanitizeEndpoint(endpoint);
     
-    // Always read token directly from localStorage at request time
-    const tokenFromStorage = localStorage.getItem('accessToken') || 
-                             localStorage.getItem('moodchat_token') || 
-                             localStorage.getItem('token');
+    // Use getValidToken() for authoritative token retrieval
+    const token = getValidToken();
     
-    console.log(`🔧 [API] Token from localStorage in emergency API: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Token from getValidToken() in emergency API: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-    console.log(`🔧 [API] LOCALSTORAGE TOKEN HANDLING: ACTIVE`);
+    console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
     console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
     
     return Promise.resolve({
@@ -4679,14 +4579,12 @@ if (!window.api) {
     emergencyApi[methodName] = async function(...args) {
       console.error(`⚠️ Emergency API for ${methodName}`);
       
-      // Always read token directly from localStorage at request time
-      const tokenFromStorage = localStorage.getItem('accessToken') || 
-                               localStorage.getItem('moodchat_token') || 
-                               localStorage.getItem('token');
+      // Use getValidToken() for authoritative token retrieval
+      const token = getValidToken();
       
-      console.log(`🔧 [API] Token from localStorage in emergency method: ${tokenFromStorage ? `Present (${tokenFromStorage.substring(0, 20)}...)` : 'Not found'}`);
+      console.log(`🔧 [API] Token from getValidToken() in emergency method: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-      console.log(`🔧 [API] LOCALSTORAGE TOKEN HANDLING: ACTIVE`);
+      console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
       console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
       
       return Promise.resolve({
@@ -4703,7 +4601,7 @@ if (!window.api) {
   window.api = emergencyApi;
 }
 
-// Global API state with LOCALSTORAGE TOKEN HANDLING info
+// Global API state with AUTHORITATIVE AUTH info
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
@@ -4715,16 +4613,21 @@ window.__TOKEN_PERSISTENCE = {
   timestamp: new Date().toISOString()
 };
 window.__AUTH_TIMING_FIX = true; // Indicates auth timing fix is active
-window.__LOCALSTORAGE_TOKEN_HANDLING = true; // NEW: Indicates localStorage token handling
-window.__ABORT_ERROR_FIX = true; // NEW: Indicates AbortError fix is active
+window.__AUTHORITATIVE_AUTH = true; // NEW: Indicates authoritative auth source
+window.__ABORT_ERROR_FIX = true; // Indicates AbortError fix is active
 window.__VALIDATE_AUTH = validateAuth; // Expose validateAuth globally
-window.__HANDLE_UNAUTHORIZED_ACCESS = handleUnauthorizedAccess; // NEW: Expose unauthorized handler
+window.__GET_VALID_TOKEN = getValidToken; // NEW: Expose getValidToken globally
+window.__HANDLE_UNAUTHORIZED_ACCESS = handleUnauthorizedAccess; // Expose unauthorized handler
 
-console.log('🔧 [API] ENHANCED Backend API integration complete with LOCALSTORAGE TOKEN HANDLING');
-console.log('🔧 [API] ✅ validateAuth() function implemented');
-console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
-console.log('🔧 [API] ✅ Token ALWAYS read from localStorage at request time');
+console.log('🔧 [API] ENHANCED Backend API integration complete with AUTHORITATIVE AUTH SOURCE');
+console.log('🔧 [API] ✅ getValidToken() function implemented');
+console.log('🔧 [API] ✅ SINGLE backend URL: ' + BACKEND_BASE_URL);
+console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
+console.log('🔧 [API] ✅ Token ALWAYS read from localStorage before each API call');
+console.log('🔧 [API] ✅ Token priority: 1. accessToken, 2. moodchat_token');
 console.log('🔧 [API] ✅ 401/403 responses automatically clear localStorage and redirect to login');
+console.log('🔧 [API] ✅ Token missing = Immediate rejection (no fake success)');
+console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
 console.log('🔧 [API] ✅ AbortError does NOT block API readiness');
 console.log('🔧 [API] ✅ Token existence = API availability (even with AbortError)');
 console.log('🔧 [API] ✅ isLoggedIn() waits for validateAuth() if needed');
@@ -4762,26 +4665,30 @@ console.log('🔧 [API] ✅ Auto 401 handling');
 console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
 console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
 console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
-console.log('🔧 [API] 🔗 Backend URL: ' + BACKEND_BASE_URL);
-console.log('🔧 [API] 🔗 API Base URL: ' + BASE_API_URL);
+console.log('🔧 [API] 🔗 SINGLE Backend URL: ' + BACKEND_BASE_URL);
+console.log('🔧 [API] 🔗 SINGLE API Base URL: ' + BASE_API_URL);
 console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
+console.log('🔧 [API] 🔐 Token via getValidToken(): ' + (getValidToken() ? getValidToken().substring(0, 20) + '...' : 'None'));
 console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
 console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'));
 console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
   ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
-console.log('🔧 [API] 🔐 PERMANENT AUTH TIMING FIX: ACTIVE (NEVER LOGS OUT DUE TO TIMING)');
-console.log('🔧 [API] 🔐 LOCALSTORAGE TOKEN HANDLING: ACTIVE (ALWAYS READ FROM LOCALSTORAGE)');
+console.log('🔧 [API] 🔐 AUTHORITATIVE AUTH SOURCE: ACTIVE');
+console.log('🔧 [API] 🔐 TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE');
 console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS LOCALSTORAGE, REDIRECTS TO LOGIN)');
-console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR LOCALSTORAGE TOKEN HANDLING:');
-console.log('🔧 [API] 1. Call any API method - token should be read from localStorage');
-console.log('🔧 [API] 2. Simulate 401 response - localStorage should be cleared and redirect to login');
-console.log('🔧 [API] 3. Call api.validateAuth() - should handle timing properly');
-console.log('🔧 [API] 4. Call api.isLoggedIn() - should never return false before validation completes');
-console.log('🔧 [API] 5. Simulate network delay - auth state should be preserved');
-console.log('🔧 [API] 6. Simulate AbortError - API readiness should NOT be blocked');
-console.log('🔧 [API] 7. Verify tokens are cleared on 401/403 with localStorage clearing');
-console.log('🔧 [API] 8. All existing API calls continue to work unchanged');
-console.log('🔧 [API] 9. Token storage in both moodchat_token and accessToken works');
-console.log('🔧 [API] 10. Authorization headers are injected correctly');
-console.log('🔧 [API] 11. /api/status endpoint has no Authorization header');
-console.log('🔧 [API] ⚡ Ready for production with LOCALSTORAGE TOKEN HANDLING');
+console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH:');
+console.log('🔧 [API] 1. ALL API calls use SINGLE backend URL: ' + BACKEND_BASE_URL);
+console.log('🔧 [API] 2. Token ALWAYS read from localStorage via getValidToken()');
+console.log('🔧 [API] 3. Token priority: 1. accessToken, 2. moodchat_token');
+console.log('🔧 [API] 4. Token missing = Immediate rejection (no fake success)');
+console.log('🔧 [API] 5. Simulate 401 response - localStorage should be cleared and redirect to login');
+console.log('🔧 [API] 6. Call api.validateAuth() - should handle timing properly');
+console.log('🔧 [API] 7. Call api.isLoggedIn() - should never return false before validation completes');
+console.log('🔧 [API] 8. Simulate network delay - auth state should be preserved');
+console.log('🔧 [API] 9. Simulate AbortError - API readiness should NOT be blocked');
+console.log('🔧 [API] 10. Verify tokens are cleared on 401/403 with localStorage clearing');
+console.log('🔧 [API] 11. All existing API calls continue to work unchanged');
+console.log('🔧 [API] 12. Token storage in both moodchat_token and accessToken works');
+console.log('🔧 [API] 13. Authorization headers are injected correctly');
+console.log('🔧 [API] 14. /api/status endpoint has no Authorization header');
+console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE');

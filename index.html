@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Inline CSS for performance (already present) -->
     <style>
+        /* ALL CSS REMAINS EXACTLY THE SAME AS BEFORE */
         /* ============================================= */
         /* ROOT VARIABLES & THEME SYSTEM */
         /* ============================================= */
@@ -2187,9 +2188,8 @@
     <!-- 4. Core app script FOURTH - App initialization and token validation -->
     <script src="js/app.core.js"></script>
     
-    <!-- 5. Inline auth JavaScript - Must load after api.js -->
+    <!-- 5. Inline auth JavaScript - IMMEDIATE INITIALIZATION -->
     <script>
-        // All your existing auth JavaScript code remains here
         // =============================================
         // CONFIGURATION
         // =============================================
@@ -2309,9 +2309,9 @@
             }
         }
         
-        // ============================================= */
+        // =============================================
         // UTILITY FUNCTIONS
-        // ============================================= */
+        // =============================================
         function showNotification(type, title, message) {
             console.log(`${type}: ${title} - ${message}`);
             
@@ -2433,9 +2433,9 @@
             sessionStorage.removeItem(USER_DATA_KEY);
         }
         
-        // ============================================= */
+        // =============================================
         // OFFLINE MODE FUNCTIONS
-        // ============================================= */
+        // =============================================
         function attemptOfflineLogin(identifier, password) {
             const cachedUser = getUserData();
             
@@ -2453,132 +2453,191 @@
             throw new Error('Cannot login offline. No cached credentials found.');
         }
         
-        // ============================================= */
-        // IMMEDIATE FORM TOGGLING SCRIPT
-        // ============================================= */
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Form Toggler: Initializing immediate form switching...');
-            console.log('API available?', typeof window.api);
-            if (window.api) {
-                console.log('API methods:', Object.keys(window.api).filter(k => typeof window.api[k] === 'function'));
-            }
-            
-            // Initialize login attempt tracking
-            updateLoginButtonState();
-            
-            const signupButton = document.getElementById('signup-button');
-            const forgotPasswordButton = document.getElementById('forgot-password-button');
-            const backToLoginFromRegister = document.getElementById('back-to-login-from-register');
-            const backToLoginFromForgot = document.getElementById('back-to-login-from-forgot');
+        // =============================================
+        // FORM TOGGLING FUNCTIONS - IMMEDIATELY AVAILABLE
+        // =============================================
+        function showForm(formName) {
+            console.log('Showing form:', formName);
             
             const loginForm = document.getElementById('login-form');
             const registerForm = document.getElementById('register-form');
             const forgotForm = document.getElementById('forgot-form');
             const dashboardPanel = document.getElementById('dashboardPanel');
-            
             const panelTitle = document.getElementById('panelTitle');
             const panelSubtitle = document.getElementById('panelSubtitle');
             
-            function showForm(formName) {
-                console.log('Form Toggler: Showing form:', formName);
+            [loginForm, registerForm, forgotForm, dashboardPanel].forEach(form => {
+                if (form) {
+                    form.classList.remove('active');
+                    form.classList.remove('fade-in');
+                }
+            });
+            
+            setTimeout(() => {
+                let activeForm = null;
                 
-                [loginForm, registerForm, forgotForm, dashboardPanel].forEach(form => {
-                    if (form) {
-                        form.classList.remove('active');
-                        form.classList.remove('fade-in');
+                switch(formName) {
+                    case 'login':
+                        if (loginForm) {
+                            loginForm.classList.add('active');
+                            activeForm = loginForm;
+                        }
+                        if (panelTitle) panelTitle.textContent = 'Welcome to MoodChat';
+                        if (panelSubtitle) panelSubtitle.textContent = 'Login to continue';
+                        break;
+                    case 'register':
+                        if (registerForm) {
+                            registerForm.classList.add('active');
+                            activeForm = registerForm;
+                        }
+                        if (panelTitle) panelTitle.textContent = 'Join MoodChat';
+                        if (panelSubtitle) panelSubtitle.textContent = 'Create your free account';
+                        break;
+                    case 'forgot':
+                        if (forgotForm) {
+                            forgotForm.classList.add('active');
+                            activeForm = forgotForm;
+                        }
+                        if (panelTitle) panelTitle.textContent = 'Reset Password';
+                        if (panelSubtitle) panelSubtitle.textContent = 'Enter your email to reset';
+                        break;
+                    case 'dashboard':
+                        if (dashboardPanel) {
+                            dashboardPanel.classList.add('active');
+                            activeForm = dashboardPanel;
+                        }
+                        if (panelTitle) panelTitle.textContent = 'MoodChat Dashboard';
+                        if (panelSubtitle) panelSubtitle.textContent = 'Welcome back!';
+                        
+                        const userData = getUserData();
+                        if (userData) {
+                            const dashboardGreeting = document.getElementById('dashboardGreeting');
+                            const dashboardEmail = document.getElementById('dashboardEmail');
+                            const dashboardAvatar = document.getElementById('dashboardAvatar');
+                            
+                            if (dashboardGreeting) {
+                                dashboardGreeting.textContent = `Welcome, ${userData.displayName || userData.username}!`;
+                            }
+                            if (dashboardEmail && userData.email) {
+                                dashboardEmail.textContent = userData.email;
+                            }
+                            if (dashboardAvatar && (userData.displayName || userData.username)) {
+                                dashboardAvatar.textContent = (userData.displayName || userData.username).charAt(0).toUpperCase();
+                            }
+                        }
+                        break;
+                }
+                
+                if (activeForm) {
+                    setTimeout(() => {
+                        activeForm.classList.add('fade-in');
+                        setTimeout(() => {
+                            activeForm.classList.remove('fade-in');
+                        }, 300);
+                    }, 10);
+                }
+            }, 10);
+        }
+        
+        // =============================================
+        // REDIRECT FUNCTIONALITY TO CHAT.HTML
+        // =============================================
+        function redirectToChat() {
+            console.log('Redirecting to chat.html...');
+            
+            const loginButton = document.getElementById('login-button');
+            const loginSpinner = document.getElementById('loginSpinner');
+            const registerSpinner = document.getElementById('registerSpinner');
+            
+            if (loginSpinner) loginSpinner.classList.remove('hidden');
+            if (registerSpinner) registerSpinner.classList.remove('hidden');
+            if (loginButton) loginButton.disabled = true;
+            
+            showNotification('info', 'Redirecting', 'Taking you to the chat...');
+            
+            setTimeout(() => {
+                window.location.href = 'chat.html';
+            }, 1500);
+        }
+        
+        // =============================================
+        // SETUP FORM EVENT LISTENERS - IMMEDIATELY
+        // =============================================
+        function setupFormEventListeners() {
+            console.log('Setting up form event listeners...');
+            
+            // Initialize login attempt tracking
+            updateLoginButtonState();
+            
+            // Form toggling buttons
+            const signupButton = document.getElementById('signup-button');
+            const forgotPasswordButton = document.getElementById('forgot-password-button');
+            const backToLoginFromRegister = document.getElementById('back-to-login-from-register');
+            const backToLoginFromForgot = document.getElementById('back-to-login-from-forgot');
+            
+            if (signupButton) {
+                signupButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Sign up button clicked');
+                    showForm('register');
+                });
+            }
+            
+            if (forgotPasswordButton) {
+                forgotPasswordButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Forgot password button clicked');
+                    showForm('forgot');
+                });
+            }
+            
+            if (backToLoginFromRegister) {
+                backToLoginFromRegister.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForm('login');
+                });
+            }
+            
+            if (backToLoginFromForgot) {
+                backToLoginFromForgot.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForm('login');
+                });
+            }
+            
+            // Quick Login
+            const quickLoginBtn = document.getElementById('quickLoginBtn');
+            if (quickLoginBtn) {
+                quickLoginBtn.addEventListener('click', function() {
+                    console.log('Quick login initiated');
+                    
+                    // Reset login attempts for quick login
+                    resetLoginAttempts();
+                    updateLoginButtonState();
+                    
+                    const cachedToken = getAuthToken();
+                    const cachedUser = getUserData();
+                    
+                    if (cachedToken && cachedUser) {
+                        showNotification('info', 'Quick Login', 'Logging in with cached credentials...');
+                        showForm('dashboard');
+                        setTimeout(redirectToChat, 1000);
+                    } else {
+                        showNotification('warning', 'Quick Login Unavailable', 'No cached credentials found');
+                        showForm('login');
                     }
                 });
-                
-                setTimeout(() => {
-                    let activeForm = null;
-                    
-                    switch(formName) {
-                        case 'login':
-                            if (loginForm) {
-                                loginForm.classList.add('active');
-                                activeForm = loginForm;
-                            }
-                            if (panelTitle) panelTitle.textContent = 'Welcome to MoodChat';
-                            if (panelSubtitle) panelSubtitle.textContent = 'Login to continue';
-                            break;
-                        case 'register':
-                            if (registerForm) {
-                                registerForm.classList.add('active');
-                                activeForm = registerForm;
-                            }
-                            if (panelTitle) panelTitle.textContent = 'Join MoodChat';
-                            if (panelSubtitle) panelSubtitle.textContent = 'Create your free account';
-                            break;
-                        case 'forgot':
-                            if (forgotForm) {
-                                forgotForm.classList.add('active');
-                                activeForm = forgotForm;
-                            }
-                            if (panelTitle) panelTitle.textContent = 'Reset Password';
-                            if (panelSubtitle) panelSubtitle.textContent = 'Enter your email to reset';
-                            break;
-                        case 'dashboard':
-                            if (dashboardPanel) {
-                                dashboardPanel.classList.add('active');
-                                activeForm = dashboardPanel;
-                            }
-                            if (panelTitle) panelTitle.textContent = 'MoodChat Dashboard';
-                            if (panelSubtitle) panelSubtitle.textContent = 'Welcome back!';
-                            
-                            const userData = getUserData();
-                            if (userData) {
-                                const dashboardGreeting = document.getElementById('dashboardGreeting');
-                                const dashboardEmail = document.getElementById('dashboardEmail');
-                                const dashboardAvatar = document.getElementById('dashboardAvatar');
-                                
-                                if (dashboardGreeting) {
-                                    dashboardGreeting.textContent = `Welcome, ${userData.displayName || userData.username}!`;
-                                }
-                                if (dashboardEmail && userData.email) {
-                                    dashboardEmail.textContent = userData.email;
-                                }
-                                if (dashboardAvatar && (userData.displayName || userData.username)) {
-                                    dashboardAvatar.textContent = (userData.displayName || userData.username).charAt(0).toUpperCase();
-                                }
-                            }
-                            break;
-                    }
-                    
-                    if (activeForm) {
-                        setTimeout(() => {
-                            activeForm.classList.add('fade-in');
-                            setTimeout(() => {
-                                activeForm.classList.remove('fade-in');
-                            }, 300);
-                        }, 10);
-                    }
-                }, 10);
             }
             
-            // ============================================= */
-            // REDIRECT FUNCTIONALITY TO CHAT.HTML
-            // ============================================= */
-            function redirectToChat() {
-                console.log('Redirecting to chat.html...');
-                
-                const loginButton = document.getElementById('login-button');
-                const loginSpinner = document.getElementById('loginSpinner');
-                const registerSpinner = document.getElementById('registerSpinner');
-                
-                if (loginSpinner) loginSpinner.classList.remove('hidden');
-                if (registerSpinner) registerSpinner.classList.remove('hidden');
-                if (loginButton) loginButton.disabled = true;
-                
-                showNotification('info', 'Redirecting', 'Taking you to the chat...');
-                
-                setTimeout(() => {
-                    window.location.href = 'chat.html';
-                }, 1500);
+            // Enter Chat Button
+            const enterChatBtn = document.getElementById('enterChatBtn');
+            if (enterChatBtn) {
+                enterChatBtn.addEventListener('click', function() {
+                    redirectToChat();
+                });
             }
             
-            // ============================================= */
-            // LOGIN FORM SUBMISSION HANDLER - UPDATED TO USE WINDOW.API
-            // ============================================= */
+            // Login Form Submission
             const loginFormElement = document.getElementById('login-form');
             if (loginFormElement) {
                 loginFormElement.addEventListener('submit', async function(e) {
@@ -2676,9 +2735,7 @@
                 });
             }
             
-            // ============================================= */
-            // REGISTER FORM SUBMISSION HANDLER - UPDATED TO USE WINDOW.API
-            // ============================================= */
+            // Register Form Submission
             const registerFormElement = document.getElementById('register-form');
             if (registerFormElement) {
                 registerFormElement.addEventListener('submit', async function(e) {
@@ -2777,146 +2834,76 @@
                 });
             }
             
-            // ============================================= */
-            // QUICK LOGIN HANDLER
-            // ============================================= */
-            const quickLoginBtn = document.getElementById('quickLoginBtn');
-            if (quickLoginBtn) {
-                quickLoginBtn.addEventListener('click', function() {
-                    console.log('Quick login initiated');
+            // Forgot Password Form
+            const forgotFormElement = document.getElementById('forgot-form');
+            if (forgotFormElement) {
+                forgotFormElement.addEventListener('submit', function(e) {
+                    e.preventDefault();
                     
-                    // Reset login attempts for quick login
-                    resetLoginAttempts();
+                    const email = document.getElementById('forgotPasswordEmail').value.trim();
+                    const forgotPasswordError = document.getElementById('forgotPasswordError');
+                    const forgotPasswordSuccess = document.getElementById('forgotPasswordSuccess');
+                    const forgotPasswordSpinner = document.getElementById('forgotPasswordSpinner');
+                    const forgotPasswordBtn = this.querySelector('button[type="submit"]');
+                    
+                    if (!email || !email.includes('@')) {
+                        if (forgotPasswordError) {
+                            forgotPasswordError.classList.remove('hidden');
+                            showFormError('forgotPasswordError', 'Please enter a valid email');
+                        }
+                        if (forgotPasswordSuccess) forgotPasswordSuccess.classList.add('hidden');
+                        return;
+                    }
+                    
+                    if (forgotPasswordSpinner) forgotPasswordSpinner.classList.remove('hidden');
+                    if (forgotPasswordBtn) forgotPasswordBtn.disabled = true;
+                    
+                    setTimeout(() => {
+                        if (forgotPasswordSpinner) forgotPasswordSpinner.classList.add('hidden');
+                        if (forgotPasswordError) forgotPasswordError.classList.add('hidden');
+                        if (forgotPasswordSuccess) forgotPasswordSuccess.classList.remove('hidden');
+                        if (forgotPasswordBtn) forgotPasswordBtn.disabled = false;
+                        showNotification('info', 'Reset Email Sent', 'Check your email for password reset instructions');
+                    }, 1500);
+                });
+            }
+            
+            // Quick Login Card
+            const removeQuickLogin = document.getElementById('removeQuickLogin');
+            if (removeQuickLogin) {
+                removeQuickLogin.addEventListener('click', function() {
+                    const quickLoginCard = document.getElementById('quickLoginCard');
+                    if (quickLoginCard) quickLoginCard.classList.add('hidden');
+                    clearAuthData();
+                    resetLoginAttempts(); // Also reset attempts when removing quick login
                     updateLoginButtonState();
-                    
-                    const cachedToken = getAuthToken();
-                    const cachedUser = getUserData();
-                    
-                    if (cachedToken && cachedUser) {
-                        showNotification('info', 'Quick Login', 'Logging in with cached credentials...');
-                        showForm('dashboard');
-                        setTimeout(redirectToChat, 1000);
-                    } else {
-                        showNotification('warning', 'Quick Login Unavailable', 'No cached credentials found');
-                        showForm('login');
-                    }
+                    showNotification('info', 'Quick Login Removed', 'Your cached login has been removed');
                 });
             }
             
-            // ============================================= */
-            // ENTER CHAT BUTTON HANDLER
-            // ============================================= */
-            const enterChatBtn = document.getElementById('enterChatBtn');
-            if (enterChatBtn) {
-                enterChatBtn.addEventListener('click', function() {
-                    redirectToChat();
-                });
-            }
-            
-            // ============================================= */
-            // EXISTING FORM TOGGLING LOGIC
-            // ============================================= */
-            if (signupButton) {
-                signupButton.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    showForm('register');
-                });
-            }
-            
-            if (forgotPasswordButton) {
-                forgotPasswordButton.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    showForm('forgot');
-                });
-            }
-            
-            if (backToLoginFromRegister) {
-                backToLoginFromRegister.addEventListener('click', function(e) {
-                    e.preventDefault();
+            const useDifferentAccountBtn = document.getElementById('useDifferentAccountBtn');
+            if (useDifferentAccountBtn) {
+                useDifferentAccountBtn.addEventListener('click', function() {
+                    const quickLoginCard = document.getElementById('quickLoginCard');
+                    if (quickLoginCard) quickLoginCard.classList.add('hidden');
                     showForm('login');
                 });
             }
             
-            if (backToLoginFromForgot) {
-                backToLoginFromForgot.addEventListener('click', function(e) {
-                    e.preventDefault();
+            // Logout Button
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', function() {
+                    console.log('User logged out');
+                    clearAuthData();
+                    resetLoginAttempts(); // Reset attempts on logout
+                    updateLoginButtonState();
+                    showNotification('info', 'Logged Out', 'You have been successfully logged out');
                     showForm('login');
                 });
             }
             
-            console.log('Form Toggler: Immediate form switching initialized.');
-            
-            // ============================================= */
-            // EXISTING MOBILE MENU FUNCTIONALITY
-            // ============================================= */
-            const menuToggle = document.getElementById('mobileMenuToggle');
-            const mobileSidebar = document.getElementById('mobileSidebar');
-            const overlay = document.getElementById('mobileSidebarOverlay');
-            const authPanel = document.getElementById('authPanel');
-            
-            if (menuToggle && mobileSidebar && overlay && authPanel) {
-                menuToggle.addEventListener('click', function() {
-                    mobileSidebar.classList.toggle('active');
-                    overlay.classList.toggle('active');
-                    authPanel.classList.toggle('mobile-active');
-                });
-                
-                overlay.addEventListener('click', function() {
-                    mobileSidebar.classList.remove('active');
-                    overlay.classList.remove('active');
-                    authPanel.classList.remove('mobile-active');
-                });
-            }
-            
-            // ============================================= */
-            // EXISTING PASSWORD TOGGLE FUNCTIONALITY
-            // ============================================= */
-            const passwordToggles = document.querySelectorAll('.password-toggle');
-            passwordToggles.forEach(toggle => {
-                toggle.addEventListener('click', function() {
-                    const input = this.parentElement.querySelector('.form-input');
-                    const icon = this.querySelector('i');
-                    if (input.type === 'password') {
-                        input.type = 'text';
-                        icon.classList.remove('fa-eye');
-                        icon.classList.add('fa-eye-slash');
-                    } else {
-                        input.type = 'password';
-                        icon.classList.remove('fa-eye-slash');
-                        icon.classList.add('fa-eye');
-                    }
-                });
-            });
-            
-            // ============================================= */
-            // EXISTING FEATURE TAGS FUNCTIONALITY
-            // ============================================= */
-            const featureTags = document.querySelectorAll('.feature-tag');
-            const selectedInterests = [];
-            
-            featureTags.forEach(tag => {
-                tag.addEventListener('click', function() {
-                    this.classList.toggle('selected');
-                    const interest = this.dataset.interest;
-                    
-                    if (this.classList.contains('selected')) {
-                        if (!selectedInterests.includes(interest)) {
-                            selectedInterests.push(interest);
-                        }
-                    } else {
-                        const index = selectedInterests.indexOf(interest);
-                        if (index > -1) {
-                            selectedInterests.splice(index, 1);
-                        }
-                    }
-                    
-                    console.log('Selected interests:', selectedInterests);
-                });
-            });
-            
-            // ============================================= */
-            // EXISTING AUTH TABS FUNCTIONALITY
-            // ============================================= */
+            // Auth Tabs
             const authTabs = document.querySelectorAll('.auth-tab');
             authTabs.forEach(tab => {
                 tab.addEventListener('click', function() {
@@ -2958,84 +2945,81 @@
                 });
             });
             
-            // ============================================= */
-            // EXISTING FORGOT PASSWORD FORM HANDLER
-            // ============================================= */
-            const forgotFormElement = document.getElementById('forgot-form');
-            if (forgotFormElement) {
-                forgotFormElement.addEventListener('submit', function(e) {
-                    e.preventDefault();
+            // Password Toggles
+            const passwordToggles = document.querySelectorAll('.password-toggle');
+            passwordToggles.forEach(toggle => {
+                toggle.addEventListener('click', function() {
+                    const input = this.parentElement.querySelector('.form-input');
+                    const icon = this.querySelector('i');
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        icon.classList.remove('fa-eye');
+                        icon.classList.add('fa-eye-slash');
+                    } else {
+                        input.type = 'password';
+                        icon.classList.remove('fa-eye-slash');
+                        icon.classList.add('fa-eye');
+                    }
+                });
+            });
+            
+            // Feature Tags
+            const featureTags = document.querySelectorAll('.feature-tag');
+            const selectedInterests = [];
+            
+            featureTags.forEach(tag => {
+                tag.addEventListener('click', function() {
+                    this.classList.toggle('selected');
+                    const interest = this.dataset.interest;
                     
-                    const email = document.getElementById('forgotPasswordEmail').value.trim();
-                    const forgotPasswordError = document.getElementById('forgotPasswordError');
-                    const forgotPasswordSuccess = document.getElementById('forgotPasswordSuccess');
-                    const forgotPasswordSpinner = document.getElementById('forgotPasswordSpinner');
-                    const forgotPasswordBtn = this.querySelector('button[type="submit"]');
-                    
-                    if (!email || !email.includes('@')) {
-                        if (forgotPasswordError) {
-                            forgotPasswordError.classList.remove('hidden');
-                            showFormError('forgotPasswordError', 'Please enter a valid email');
+                    if (this.classList.contains('selected')) {
+                        if (!selectedInterests.includes(interest)) {
+                            selectedInterests.push(interest);
                         }
-                        if (forgotPasswordSuccess) forgotPasswordSuccess.classList.add('hidden');
-                        return;
+                    } else {
+                        const index = selectedInterests.indexOf(interest);
+                        if (index > -1) {
+                            selectedInterests.splice(index, 1);
+                        }
                     }
                     
-                    if (forgotPasswordSpinner) forgotPasswordSpinner.classList.remove('hidden');
-                    if (forgotPasswordBtn) forgotPasswordBtn.disabled = true;
-                    
-                    setTimeout(() => {
-                        if (forgotPasswordSpinner) forgotPasswordSpinner.classList.add('hidden');
-                        if (forgotPasswordError) forgotPasswordError.classList.add('hidden');
-                        if (forgotPasswordSuccess) forgotPasswordSuccess.classList.remove('hidden');
-                        if (forgotPasswordBtn) forgotPasswordBtn.disabled = false;
-                        showNotification('info', 'Reset Email Sent', 'Check your email for password reset instructions');
-                    }, 1500);
+                    console.log('Selected interests:', selectedInterests);
+                });
+            });
+            
+            // Mobile Menu
+            const menuToggle = document.getElementById('mobileMenuToggle');
+            const mobileSidebar = document.getElementById('mobileSidebar');
+            const overlay = document.getElementById('mobileSidebarOverlay');
+            const authPanel = document.getElementById('authPanel');
+            
+            if (menuToggle && mobileSidebar && overlay && authPanel) {
+                menuToggle.addEventListener('click', function() {
+                    mobileSidebar.classList.toggle('active');
+                    overlay.classList.toggle('active');
+                    authPanel.classList.toggle('mobile-active');
+                });
+                
+                overlay.addEventListener('click', function() {
+                    mobileSidebar.classList.remove('active');
+                    overlay.classList.remove('active');
+                    authPanel.classList.remove('mobile-active');
                 });
             }
             
-            // ============================================= */
-            // EXISTING QUICK LOGIN CARD FUNCTIONALITY
-            // ============================================= */
-            const removeQuickLogin = document.getElementById('removeQuickLogin');
-            if (removeQuickLogin) {
-                removeQuickLogin.addEventListener('click', function() {
-                    const quickLoginCard = document.getElementById('quickLoginCard');
-                    if (quickLoginCard) quickLoginCard.classList.add('hidden');
-                    clearAuthData();
-                    resetLoginAttempts(); // Also reset attempts when removing quick login
-                    updateLoginButtonState();
-                    showNotification('info', 'Quick Login Removed', 'Your cached login has been removed');
-                });
-            }
+            console.log('Form event listeners setup complete.');
+        }
+        
+        // =============================================
+        // INITIALIZATION - RUN IMMEDIATELY
+        // =============================================
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing auth UI...');
             
-            const useDifferentAccountBtn = document.getElementById('useDifferentAccountBtn');
-            if (useDifferentAccountBtn) {
-                useDifferentAccountBtn.addEventListener('click', function() {
-                    const quickLoginCard = document.getElementById('quickLoginCard');
-                    if (quickLoginCard) quickLoginCard.classList.add('hidden');
-                    showForm('login');
-                });
-            }
+            // Setup form event listeners immediately
+            setupFormEventListeners();
             
-            // ============================================= */
-            // EXISTING LOGOUT FUNCTIONALITY
-            // ============================================= */
-            const logoutBtn = document.getElementById('logoutBtn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', function() {
-                    console.log('User logged out');
-                    clearAuthData();
-                    resetLoginAttempts(); // Reset attempts on logout
-                    updateLoginButtonState();
-                    showNotification('info', 'Logged Out', 'You have been successfully logged out');
-                    showForm('login');
-                });
-            }
-            
-            // ============================================= */
-            // CHECK FOR EXISTING AUTH ON PAGE LOAD
-            // ============================================= */
+            // Check for existing auth on page load
             const authToken = getAuthToken();
             const userData = getUserData();
             
@@ -3053,9 +3037,16 @@
                 }
             }
             
-            // ============================================= */
-            // AUTO-FOCUS ON FIRST INPUT
-            // ============================================= */
+            // Auto-focus on first input
+            const activeForm = document.querySelector('.auth-form.active');
+            if (activeForm) {
+                const firstInput = activeForm.querySelector('input:not([type="hidden"]):not([type="checkbox"])');
+                if (firstInput) {
+                    setTimeout(() => firstInput.focus(), 300);
+                }
+            }
+            
+            // Mutation observer for auto-focus
             const observer = new MutationObserver(function(mutations) {
                 mutations.forEach(function(mutation) {
                     if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
@@ -3074,17 +3065,7 @@
                 observer.observe(form, { attributes: true });
             });
             
-            const activeForm = document.querySelector('.auth-form.active');
-            if (activeForm) {
-                const firstInput = activeForm.querySelector('input:not([type="hidden"]):not([type="checkbox"])');
-                if (firstInput) {
-                    setTimeout(() => firstInput.focus(), 300);
-                }
-            }
-            
-            // ============================================= */
-            // ENTER KEY SUBMISSION
-            // ============================================= */
+            // Enter key submission
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     const activeForm = document.querySelector('.auth-form.active');
@@ -3097,9 +3078,7 @@
                 }
             });
             
-            // ============================================= */
-            // INPUT VALIDATION ON BLUR
-            // ============================================= */
+            // Input validation on blur
             document.querySelectorAll('.form-input').forEach(input => {
                 input.addEventListener('blur', function() {
                     if (this.value.trim() === '') {
@@ -3109,7 +3088,7 @@
                 });
             });
             
-            console.log('All initialization complete.');
+            console.log('Auth UI initialization complete.');
         });
     </script>
     

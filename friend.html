@@ -738,9 +738,9 @@
 
     <script>
         // =============================================
-        // FRIENDS SYSTEM - DIRECT TOKEN ACCESS
+        // BOOTSTRAP FUNCTION - SINGLE ENTRY POINT
         // =============================================
-
+        
         // Global variables
         let currentUser = null;
         let userData = null;
@@ -865,25 +865,115 @@
         };
         
         // =============================================
-        // TOKEN MANAGEMENT FUNCTIONS
+        // SINGLE BOOTSTRAP FUNCTION
+        // =============================================
+        
+        async function bootstrapIframe() {
+            console.log('=== BOOTSTRAPPING FRIENDS PAGE ===');
+            
+            try {
+                // 1. Get token from localStorage
+                const tokens = getTokensFromStorage();
+                accessToken = tokens.accessToken;
+                refreshToken = tokens.refreshToken;
+                
+                if (!accessToken) {
+                    console.error('No access token found');
+                    redirectToLogin('Please login to continue');
+                    return false;
+                }
+                
+                // 2. Verify token by calling /api/auth/me
+                console.log('Verifying authentication...');
+                const userResponse = await callApi('/api/auth/me');
+                
+                if (!userResponse || !userResponse.user) {
+                    console.error('Authentication failed');
+                    redirectToLogin('Session expired. Please login again.');
+                    return false;
+                }
+                
+                // 3. Store user data
+                currentUser = userResponse.user;
+                userData = currentUser;
+                console.log('User authenticated:', currentUser.id, currentUser.username);
+                
+                // Save to cache
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                    uid: currentUser.id,
+                    id: currentUser.id,
+                    displayName: currentUser.displayName,
+                    email: currentUser.email,
+                    photoURL: currentUser.photoURL,
+                    username: currentUser.username
+                }));
+                
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                
+                // 4. Generate QR code
+                generateUniqueQRCode();
+                
+                // 5. Setup UI
+                setupEventListeners();
+                
+                // 6. Load cached data instantly for offline display
+                loadCachedDataInstantly();
+                
+                // 7. Load real data from API
+                await loadInitialData();
+                
+                // 8. Load all users in background
+                setTimeout(() => {
+                    fetchAllUsersFromBackend();
+                }, 1000);
+                
+                apiReady = true;
+                showNotification('Connected to server', 'success');
+                console.log('=== FRIENDS PAGE BOOTSTRAPPED SUCCESSFULLY ===');
+                
+                return true;
+                
+            } catch (error) {
+                console.error('Bootstrap error:', error);
+                
+                if (error.status === 401 || error.status === 403) {
+                    redirectToLogin('Session expired. Please login again.');
+                } else {
+                    showNotification('Connection error. Using offline mode.', 'warning');
+                    loadCachedDataInstantly();
+                    setupEventListeners();
+                    apiReady = false;
+                }
+                
+                return false;
+            }
+        }
+        
+        // =============================================
+        // API HELPER FUNCTIONS
         // =============================================
         
         // Get tokens from localStorage
         function getTokensFromStorage() {
             try {
-                // Try to get from moodchat_token (from parent app)
-                accessToken = localStorage.getItem('moodchat_token');
+                // Try multiple possible storage locations
+                const possibleTokenKeys = [
+                    'moodchat_token',
+                    'accessToken',
+                    'token',
+                    'knecta_token'
+                ];
                 
-                // If not found, try other possible storage locations
-                if (!accessToken) {
-                    accessToken = localStorage.getItem('accessToken') || 
-                                 localStorage.getItem('token') || 
-                                 sessionStorage.getItem('accessToken');
+                for (const key of possibleTokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token) {
+                        accessToken = token;
+                        break;
+                    }
                 }
                 
                 refreshToken = localStorage.getItem('refreshToken') || 
-                              localStorage.getItem('refresh_token') || 
-                              sessionStorage.getItem('refreshToken');
+                              localStorage.getItem('refresh_token');
                 
                 return { accessToken, refreshToken };
             } catch (error) {
@@ -892,149 +982,43 @@
             }
         }
         
-        // Check if token is expired
-        function isTokenExpired(token) {
-            if (!token) return true;
-            
+        // API call wrapper that uses api.js
+        async function callApi(endpoint, options = {}) {
             try {
-                // Decode JWT token to check expiration
-                const payload = JSON.parse(atob(token.split('.')[1]));
-                const currentTime = Math.floor(Date.now() / 1000);
-                return payload.exp < currentTime;
-            } catch (error) {
-                console.error('Error checking token expiration:', error);
-                return true;
-            }
-        }
-        
-        // Refresh access token
-        async function refreshAccessToken() {
-            if (isRefreshingToken) {
-                console.log('Token refresh already in progress');
-                return null;
-            }
-            
-            isRefreshingToken = true;
-            
-            try {
-                const { refreshToken: storedRefreshToken } = getTokensFromStorage();
-                if (!storedRefreshToken) {
-                    throw new Error('No refresh token available');
+                // Ensure api.js is loaded
+                if (typeof window.apiCall === 'function') {
+                    return await window.apiCall(endpoint, options);
                 }
                 
-                console.log('Refreshing access token...');
+                // Fallback to direct fetch if api.js not available
+                const tokens = getTokensFromStorage();
+                if (!tokens.accessToken) {
+                    throw { status: 401, message: 'No access token' };
+                }
                 
-                const response = await fetch('/api/auth/refresh', {
-                    method: 'POST',
+                const defaultHeaders = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${tokens.accessToken}`
+                };
+                
+                const response = await fetch(endpoint, {
+                    ...options,
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${accessToken}`
-                    },
-                    body: JSON.stringify({ refreshToken: storedRefreshToken })
+                        ...defaultHeaders,
+                        ...(options.headers || {})
+                    }
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`Refresh failed: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                if (data.accessToken) {
-                    accessToken = data.accessToken;
-                    localStorage.setItem('moodchat_token', data.accessToken);
-                    
-                    if (data.refreshToken) {
-                        refreshToken = data.refreshToken;
-                        localStorage.setItem('refreshToken', data.refreshToken);
+                    if (response.status === 401 || response.status === 403) {
+                        // Clear tokens and redirect
+                        clearAuthTokens();
+                        throw { status: response.status, message: 'Authentication failed' };
                     }
-                    
-                    console.log('Access token refreshed successfully');
-                    return accessToken;
-                } else {
-                    throw new Error('No access token in response');
+                    throw new Error(`API Error: ${response.status}`);
                 }
                 
-            } catch (error) {
-                console.error('Error refreshing access token:', error);
-                
-                // Clear tokens and redirect to login
-                localStorage.removeItem('moodchat_token');
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                
-                showNotification('Session expired. Please login again.', 'error');
-                setTimeout(() => {
-                    window.location.href = '../login.html';
-                }, 2000);
-                
-                return null;
-            } finally {
-                isRefreshingToken = false;
-            }
-        }
-        
-        // API call function with token management
-        async function apiCall(url, options = {}) {
-            // Get tokens first
-            const tokens = getTokensFromStorage();
-            accessToken = tokens.accessToken;
-            
-            // Check if we have a token
-            if (!accessToken) {
-                showNotification('Not authenticated. Please login.', 'error');
-                setTimeout(() => {
-                    window.location.href = '../login.html';
-                }, 1500);
-                throw new Error('No access token available');
-            }
-            
-            // Check if token is expired
-            if (isTokenExpired(accessToken)) {
-                console.log('Access token expired, attempting refresh...');
-                const newToken = await refreshAccessToken();
-                if (!newToken) {
-                    throw new Error('Failed to refresh token');
-                }
-                accessToken = newToken;
-            }
-            
-            // Set default headers
-            const defaultHeaders = {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${accessToken}`
-            };
-            
-            // Merge headers
-            const headers = {
-                ...defaultHeaders,
-                ...(options.headers || {})
-            };
-            
-            // Create fetch options
-            const fetchOptions = {
-                ...options,
-                headers
-            };
-            
-            try {
-                console.log(`API Call: ${url}`);
-                const response = await fetch(url, fetchOptions);
-                
-                // Check for unauthorized response
-                if (response.status === 401) {
-                    console.log('Unauthorized, attempting token refresh...');
-                    const newToken = await refreshAccessToken();
-                    if (newToken) {
-                        // Retry the request with new token
-                        headers.Authorization = `Bearer ${newToken}`;
-                        const retryResponse = await fetch(url, fetchOptions);
-                        return await handleApiResponse(retryResponse);
-                    } else {
-                        throw new Error('Authentication failed');
-                    }
-                }
-                
-                return await handleApiResponse(response);
+                return await response.json();
                 
             } catch (error) {
                 console.error('API call error:', error);
@@ -1042,19 +1026,29 @@
             }
         }
         
-        // Handle API response
-        async function handleApiResponse(response) {
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`API Error (${response.status}): ${errorText}`);
-            }
+        // Clear authentication tokens
+        function clearAuthTokens() {
+            const tokenKeys = [
+                'moodchat_token',
+                'accessToken',
+                'token',
+                'knecta_token',
+                'refreshToken',
+                'refresh_token'
+            ];
             
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                return await response.json();
-            }
-            
-            return await response.text();
+            tokenKeys.forEach(key => {
+                localStorage.removeItem(key);
+                sessionStorage.removeItem(key);
+            });
+        }
+        
+        // Redirect to login page
+        function redirectToLogin(message = 'Please login to continue') {
+            showNotification(message, 'error');
+            setTimeout(() => {
+                window.location.href = '../login.html';
+            }, 1500);
         }
         
         // =============================================
@@ -1062,95 +1056,28 @@
         // =============================================
         
         document.addEventListener('DOMContentLoaded', async function() {
-            console.log('Friends page loaded - Initializing with direct token access');
+            console.log('Friends page loaded - Starting bootstrap');
             
-            // Initialize tokens
-            const tokens = getTokensFromStorage();
-            accessToken = tokens.accessToken;
+            // Show loading state
+            allFriendsList.innerHTML = `
+                <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i>
+                    <p>Loading friends...</p>
+                </div>
+            `;
             
-            if (!accessToken) {
-                showNotification('Not authenticated. Redirecting to login...', 'error');
-                setTimeout(() => {
-                    window.location.href = '../login.html';
-                }, 1500);
-                return;
-            }
-            
-            // Load cached data instantly for offline display
-            loadCachedDataInstantly();
-            setupEventListeners();
-            
-            // Initialize with API
-            await initializeWithAPI();
-            
-            console.log('Friends system initialized with direct token access');
+            // Start bootstrap process
+            await bootstrapIframe();
         });
         
-        // Initialize with API - Direct token access
-        async function initializeWithAPI() {
-            console.log('=== INITIALIZING FRIENDS SYSTEM WITH DIRECT TOKEN ACCESS ===');
-            
-            try {
-                // Get current user from backend using direct API call
-                try {
-                    const userResponse = await apiCall('/api/auth/user');
-                    
-                    if (userResponse && userResponse.user) {
-                        currentUser = userResponse.user;
-                        userData = currentUser;
-                        console.log('Current user loaded from backend:', currentUser.id);
-                        
-                        // Save to cache
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                            uid: currentUser.id,
-                            id: currentUser.id,
-                            displayName: currentUser.displayName,
-                            email: currentUser.email,
-                            photoURL: currentUser.photoURL,
-                            username: currentUser.username
-                        }));
-                        
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                        
-                        // Generate unique QR code for this user
-                        generateUniqueQRCode();
-                    }
-                } catch (userError) {
-                    console.log('Could not load user from API, using cache:', userError.message);
-                    await loadUserFromCache();
-                    generateUniqueQRCode();
-                }
-                
-                // Load all data from backend
-                await loadInitialData();
-                
-                // Load all users in background
-                setTimeout(() => {
-                    fetchAllUsersFromBackend();
-                }, 1000);
-                
-                apiReady = true;
-                showNotification('Connected to server', 'success');
-                console.log('=== FRIENDS SYSTEM INITIALIZED WITH BACKEND SUCCESSFULLY ===');
-                
-            } catch (error) {
-                console.error('Error initializing with API:', error);
-                showNotification('Could not connect to server', 'error');
-                
-                // Fallback to cached data
-                loadCachedDataInstantly();
-                updateCurrentSection();
-            }
-        }
-        
-        // Load initial data from API - Direct token access
+        // Load initial data from API
         async function loadInitialData() {
             try {
                 console.log('Loading initial data from API...');
                 
                 // Load friends
                 try {
-                    const friendsResponse = await apiCall('/api/friends');
+                    const friendsResponse = await callApi('/api/friends');
                     
                     if (friendsResponse && friendsResponse.friends) {
                         friends = friendsResponse.friends;
@@ -1175,7 +1102,7 @@
                 
                 // Load friend requests
                 try {
-                    const requestsResponse = await apiCall('/api/friend-requests/incoming');
+                    const requestsResponse = await callApi('/api/friend-requests/incoming');
                     
                     if (requestsResponse && requestsResponse.requests) {
                         friendRequests = requestsResponse.requests;
@@ -1190,7 +1117,7 @@
                 
                 // Load sent requests
                 try {
-                    const sentResponse = await apiCall('/api/friend-requests/sent');
+                    const sentResponse = await callApi('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -1204,7 +1131,7 @@
                 
                 // Load pinned friends
                 try {
-                    const pinnedResponse = await apiCall('/api/friends/pinned');
+                    const pinnedResponse = await callApi('/api/friends/pinned');
                     
                     if (pinnedResponse && pinnedResponse.friends) {
                         pinnedFriends = pinnedResponse.friends;
@@ -1219,7 +1146,7 @@
                 
                 // Load muted friends
                 try {
-                    const mutedResponse = await apiCall('/api/friends/muted');
+                    const mutedResponse = await callApi('/api/friends/muted');
                     
                     if (mutedResponse && mutedResponse.friends) {
                         mutedFriends = mutedResponse.friends;
@@ -1233,7 +1160,7 @@
                 
                 // Load contacts
                 try {
-                    const contactsResponse = await apiCall('/api/contacts/synced');
+                    const contactsResponse = await callApi('/api/contacts/synced');
                     
                     if (contactsResponse && contactsResponse.contacts) {
                         contacts = contactsResponse.contacts;
@@ -1247,7 +1174,7 @@
                 
                 // Load groups
                 try {
-                    const groupsResponse = await apiCall('/api/groups/user');
+                    const groupsResponse = await callApi('/api/groups/user');
                     
                     if (groupsResponse && groupsResponse.groups) {
                         groups = groupsResponse.groups;
@@ -1371,36 +1298,6 @@
                 
             } catch (error) {
                 console.error('Error loading cached data:', error);
-            }
-        }
-        
-        // Load user from cache
-        async function loadUserFromCache() {
-            try {
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.id);
-                } else {
-                    currentUser = {
-                        id: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: '',
-                        photoURL: '',
-                        username: 'user_' + Math.random().toString(36).substr(2, 9)
-                    };
-                }
-                userData = currentUser;
-            } catch (error) {
-                console.error('Error loading user from cache:', error);
-                currentUser = {
-                    id: 'fallback_user_' + Date.now(),
-                    displayName: 'User',
-                    email: '',
-                    photoURL: '',
-                    username: 'user_' + Math.random().toString(36).substr(2, 9)
-                };
-                userData = currentUser;
             }
         }
         
@@ -1541,7 +1438,7 @@
             container.appendChild(friendItem);
         }
         
-        // Fetch all users from backend - Direct token access
+        // Fetch all users from backend
         async function fetchAllUsersFromBackend() {
             try {
                 console.log('Fetching all users from backend...');
@@ -1559,8 +1456,8 @@
                     return;
                 }
                 
-                // Fetch from backend API using direct token access
-                const response = await apiCall('/api/users/all?limit=100');
+                // Fetch from backend API
+                const response = await callApi('/api/users/all?limit=100');
                 
                 if (response && response.users) {
                     // Filter out current user from the list
@@ -1911,7 +1808,7 @@
         }
         
         function showFriendRequestFromQRReal(qrData) {
-            // Try to get user info from backend using direct API call
+            // Try to get user info from backend
             fetchUserInfoFromQR(qrData.userId).then(userInfo => {
                 document.getElementById('requestAvatar').innerHTML = `
                     <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
@@ -1950,10 +1847,10 @@
             });
         }
         
-        // fetchUserInfoFromQR using direct API call
+        // fetchUserInfoFromQR
         async function fetchUserInfoFromQR(userId) {
             try {
-                const response = await apiCall(`/api/users/${userId}`);
+                const response = await callApi(`/api/users/${userId}`);
                 
                 if (response && response.user) {
                     return response.user;
@@ -2494,10 +2391,10 @@
             }
         }
         
-        // Show mutual friends using direct API call
+        // Show mutual friends
         async function showMutualFriends(userId, userName) {
             try {
-                const response = await apiCall(`/api/friends/mutual/${userId}`);
+                const response = await callApi(`/api/friends/mutual/${userId}`);
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -2564,7 +2461,7 @@
             mutualFriendsModal.classList.add('active');
         }
         
-        // Send friend request using direct API call
+        // Send friend request
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             try {
                 const requestData = {
@@ -2576,14 +2473,14 @@
                     isBusiness: isBusiness
                 };
                 
-                const response = await apiCall('/api/friend-requests/send', {
+                const response = await callApi('/api/friend-requests/send', {
                     method: 'POST',
                     body: JSON.stringify(requestData)
                 });
                 
                 if (response && response.success) {
                     // Refresh sent requests
-                    const sentResponse = await apiCall('/api/friend-requests/sent');
+                    const sentResponse = await callApi('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -2609,10 +2506,10 @@
             }
         }
         
-        // Accept friend request using direct API call
+        // Accept friend request
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
-                const response = await apiCall(`/api/friend-requests/${requestId}/accept`, {
+                const response = await callApi(`/api/friend-requests/${requestId}/accept`, {
                     method: 'POST'
                 });
                 
@@ -2633,16 +2530,16 @@
             }
         }
         
-        // Decline friend request using direct API call
+        // Decline friend request
         async function declineFriendRequest(requestData) {
             try {
-                const response = await apiCall(`/api/friend-requests/${requestData.id}/decline`, {
+                const response = await callApi(`/api/friend-requests/${requestData.id}/decline`, {
                     method: 'POST'
                 });
                 
                 if (response && response.success) {
                     // Refresh friend requests
-                    const requestsResponse = await apiCall('/api/friend-requests/incoming');
+                    const requestsResponse = await callApi('/api/friend-requests/incoming');
                     
                     if (requestsResponse && requestsResponse.requests) {
                         friendRequests = requestsResponse.requests;
@@ -2669,16 +2566,16 @@
             }
         }
         
-        // Cancel friend request using direct API call
+        // Cancel friend request
         async function cancelFriendRequest(requestData) {
             try {
-                const response = await apiCall(`/api/friend-requests/${requestData.id}`, {
+                const response = await callApi(`/api/friend-requests/${requestData.id}`, {
                     method: 'DELETE'
                 });
                 
                 if (response && response.success) {
                     // Refresh sent requests
-                    const sentResponse = await apiCall('/api/friend-requests/sent');
+                    const sentResponse = await callApi('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -2845,7 +2742,7 @@
             }
         }
         
-        // Load friend details using direct API call
+        // Load friend details
         async function loadFriendDetails(friendData, type) {
             const detailsContent = document.getElementById('friendDetailsContent');
             detailsContent.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friend details...</p></div>';
@@ -2856,7 +2753,7 @@
                 if (type === 'friend' || type === 'contact' || type === 'user') {
                     try {
                         const friendId = friendData.id;
-                        const response = await apiCall(`/api/users/${friendId}`);
+                        const response = await callApi(`/api/users/${friendId}`);
                         if (response && response.user) {
                             detailedData = { ...detailedData, ...response.user };
                         }
@@ -3290,14 +3187,14 @@
             });
         }
         
-        // Toggle pin friend using direct API call
+        // Toggle pin friend
         async function togglePinFriend(friendData) {
             try {
                 const friendId = friendData.id;
                 const isPinned = pinnedFriends.some(f => f.id === friendId);
                 
                 if (isPinned) {
-                    const response = await apiCall(`/api/friends/${friendId}/pin`, {
+                    const response = await callApi(`/api/friends/${friendId}/pin`, {
                         method: 'DELETE'
                     });
                     if (response && response.success) {
@@ -3305,7 +3202,7 @@
                         showNotification('Friend unpinned', 'success');
                     }
                 } else {
-                    const response = await apiCall(`/api/friends/${friendId}/pin`, {
+                    const response = await callApi(`/api/friends/${friendId}/pin`, {
                         method: 'POST'
                     });
                     if (response && response.success) {
@@ -3326,14 +3223,14 @@
             }
         }
         
-        // Toggle mute friend using direct API call
+        // Toggle mute friend
         async function toggleMuteFriend(friendData) {
             try {
                 const friendId = friendData.id;
                 const isMuted = mutedFriends.some(f => f.id === friendId);
                 
                 if (isMuted) {
-                    const response = await apiCall(`/api/friends/${friendId}/mute`, {
+                    const response = await callApi(`/api/friends/${friendId}/mute`, {
                         method: 'DELETE'
                     });
                     if (response && response.success) {
@@ -3341,7 +3238,7 @@
                         showNotification('Friend unmuted', 'success');
                     }
                 } else {
-                    const response = await apiCall(`/api/friends/${friendId}/mute`, {
+                    const response = await callApi(`/api/friends/${friendId}/mute`, {
                         method: 'POST'
                     });
                     if (response && response.success) {
@@ -3803,7 +3700,7 @@
                     }
                     
                     try {
-                        const response = await apiCall(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        const response = await callApi(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
                         
                         if (!response || !response.user) {
                             showNotification('User not found', 'error');
@@ -3923,12 +3820,12 @@
             }
         }
         
-        // Simulate contact sync using direct API call
+        // Simulate contact sync
         async function simulateContactSync() {
             showNotification('Syncing contacts...', 'info');
             
             try {
-                const response = await apiCall('/api/contacts/sync');
+                const response = await callApi('/api/contacts/sync');
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -4004,7 +3901,7 @@
                 const newCategory = modal.querySelector('#newCategorySelect').value;
                 
                 try {
-                    const response = await apiCall(`/api/friends/${friendData.id}/category`, {
+                    const response = await callApi(`/api/friends/${friendData.id}/category`, {
                         method: 'PUT',
                         body: JSON.stringify({ category: newCategory })
                     });
@@ -4037,14 +3934,14 @@
             navigateToCall(friendData.id, friendData.displayName || 'User');
         }
         
-        // Remove friend using direct API call
+        // Remove friend
         async function removeFriend(friendData) {
             if (!confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
                 return;
             }
             
             try {
-                const response = await apiCall(`/api/friends/${friendData.id}`, {
+                const response = await callApi(`/api/friends/${friendData.id}`, {
                     method: 'DELETE'
                 });
                 
@@ -4074,14 +3971,14 @@
             }
         }
         
-        // Block user using direct API call
+        // Block user
         async function blockUser(friendData) {
             if (!confirm(`Are you sure you want to block ${friendData.displayName}? This will remove them from your friends and prevent them from contacting you.`)) {
                 return;
             }
             
             try {
-                const response = await apiCall(`/api/users/${friendData.id}/block`, {
+                const response = await callApi(`/api/users/${friendData.id}/block`, {
                     method: 'POST'
                 });
                 
@@ -4155,7 +4052,7 @@
             });
         }
         
-        console.log('Friends system initialized successfully with direct token access');
+        console.log('Friends system initialized with bootstrap pattern');
     </script>
 </body>
 </html>

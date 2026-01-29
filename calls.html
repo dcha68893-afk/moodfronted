@@ -1330,290 +1330,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
     
     <script>
-        // NEW: Authentication token management - Direct access from localStorage
-        const AuthManager = {
-            // Read tokens directly from localStorage
-            getTokens() {
-                const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_token');
-                const refreshToken = localStorage.getItem('refreshToken');
-                
-                console.log('Tokens retrieved from localStorage:', {
-                    accessToken: accessToken ? 'Available' : 'Missing',
-                    refreshToken: refreshToken ? 'Available' : 'Missing'
-                });
-                
-                return { accessToken, refreshToken };
-            },
-            
-            // Check if user is authenticated
-            isAuthenticated() {
-                const { accessToken } = this.getTokens();
-                if (!accessToken) return false;
-                
-                // Check if token is expired
-                try {
-                    const payload = JSON.parse(atob(accessToken.split('.')[1]));
-                    const isExpired = payload.exp * 1000 < Date.now();
-                    return !isExpired;
-                } catch (error) {
-                    console.error('Error parsing token:', error);
-                    return false;
-                }
-            },
-            
-            // Refresh token if expired
-            async refreshToken() {
-                const { refreshToken } = this.getTokens();
-                if (!refreshToken) {
-                    throw new Error('No refresh token available');
-                }
-                
-                try {
-                    const response = await fetch('/api/auth/refresh', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${refreshToken}`
-                        }
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error('Token refresh failed');
-                    }
-                    
-                    const data = await response.json();
-                    
-                    // Store new tokens
-                    if (data.accessToken) {
-                        localStorage.setItem('accessToken', data.accessToken);
-                    }
-                    if (data.refreshToken) {
-                        localStorage.setItem('refreshToken', data.refreshToken);
-                    }
-                    
-                    console.log('Token refreshed successfully');
-                    return data.accessToken;
-                } catch (error) {
-                    console.error('Token refresh error:', error);
-                    this.handleAuthError();
-                    throw error;
-                }
-            },
-            
-            // Handle authentication errors
-            handleAuthError() {
-                console.error('Authentication failed');
-                
-                // Clear tokens
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                localStorage.removeItem('moodchat_token');
-                
-                // Redirect to login page
-                window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
-            },
-            
-            // Get authorization header for API calls
-            async getAuthHeader() {
-                let { accessToken } = this.getTokens();
-                
-                if (!accessToken) {
-                    this.handleAuthError();
-                    throw new Error('No access token available');
-                }
-                
-                // Check if token is expired
-                try {
-                    const payload = JSON.parse(atob(accessToken.split('.')[1]));
-                    const isExpired = payload.exp * 1000 < Date.now();
-                    
-                    if (isExpired) {
-                        console.log('Access token expired, attempting refresh...');
-                        accessToken = await this.refreshToken();
-                    }
-                } catch (error) {
-                    console.error('Token validation error:', error);
-                    // Continue with current token
-                }
-                
-                return {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                };
-            },
-            
-            // Make authenticated API request
-            async makeAuthenticatedRequest(url, options = {}) {
-                try {
-                    const headers = await this.getAuthHeader();
-                    
-                    const requestOptions = {
-                        ...options,
-                        headers: {
-                            ...headers,
-                            ...options.headers
-                        }
-                    };
-                    
-                    const response = await fetch(url, requestOptions);
-                    
-                    // Handle 401 Unauthorized
-                    if (response.status === 401) {
-                        console.log('Received 401, attempting token refresh...');
-                        const newAccessToken = await this.refreshToken();
-                        
-                        // Retry request with new token
-                        requestOptions.headers['Authorization'] = `Bearer ${newAccessToken}`;
-                        const retryResponse = await fetch(url, requestOptions);
-                        
-                        if (!retryResponse.ok) {
-                            this.handleAuthError();
-                            throw new Error('Authentication failed after refresh');
-                        }
-                        
-                        return retryResponse;
-                    }
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    
-                    return response;
-                } catch (error) {
-                    console.error('Authenticated request failed:', error);
-                    
-                    // If it's an auth error, handle it
-                    if (error.message.includes('Authentication') || 
-                        error.message.includes('token') ||
-                        error.message.includes('401')) {
-                        this.handleAuthError();
-                    }
-                    
-                    throw error;
-                }
-            }
-        };
-        
-        // NEW: API wrapper that uses AuthManager
-        const AuthenticatedAPI = {
-            // Check if API is available
-            isApiAvailable() {
-                return typeof window.api !== 'undefined' && window.api !== null;
-            },
-            
-            // Get user info with authentication
-            async getUserInfo() {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/user/info');
-                return response.json();
-            },
-            
-            // Get call permissions with authentication
-            async getCallPermissions() {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/permissions');
-                return response.json();
-            },
-            
-            // Get contacts with authentication
-            async getContacts() {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/contacts');
-                return response.json();
-            },
-            
-            // Get call history with authentication
-            async getCallHistory() {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/history');
-                return response.json();
-            },
-            
-            // Get premium status with authentication
-            async getPremiumStatus() {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/user/premium');
-                return response.json();
-            },
-            
-            // Start a call with authentication
-            async startCall(callData) {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/start', {
-                    method: 'POST',
-                    body: JSON.stringify(callData)
-                });
-                return response.json();
-            },
-            
-            // Join a call with authentication
-            async joinCall(callData) {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/join', {
-                    method: 'POST',
-                    body: JSON.stringify(callData)
-                });
-                return response.json();
-            },
-            
-            // End a call with authentication
-            async endCall(callData) {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/end', {
-                    method: 'POST',
-                    body: JSON.stringify(callData)
-                });
-                return response.json();
-            },
-            
-            // Send peer ID with authentication
-            async sendPeerId(peerData) {
-                if (!this.isApiAvailable()) {
-                    throw new Error('API not available');
-                }
-                
-                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/peer', {
-                    method: 'POST',
-                    body: JSON.stringify(peerData)
-                });
-                return response.json();
-            }
-        };
-        
         // Global state object
         const AppState = {
             // Authentication state
             isAuthenticated: false,
             authChecked: false,
+            user: null,
             
             // API state
             apiReady: false,
             apiCheckInterval: null,
-            apiConfirmed: false,
             
             // User state
             currentUser: null,
@@ -1703,21 +1429,222 @@
         // DOM Elements
         const elements = {};
         
-        // Initialize function - now checks authentication first
-        function initializeApp() {
-            console.log('Initializing call app with direct token access...');
+        // ==================== BOOTSTRAP FUNCTION ====================
+        async function bootstrapIframe() {
+            console.log('Bootstrapping calls iframe...');
             
-            // Check authentication first
-            checkAuthentication();
+            // Show connecting status
+            elements.apiStatusIndicator.style.display = 'block';
+            elements.apiStatusIndicator.className = 'api-status-indicator connecting';
+            elements.apiStatusText.textContent = 'Authenticating...';
+            
+            try {
+                // Read token from localStorage using fallback logic
+                const token = localStorage.getItem('accessToken') || 
+                              localStorage.getItem('moodchat_token') || 
+                              localStorage.getItem('token');
+                
+                if (!token) {
+                    console.error('No authentication token found');
+                    redirectToLogin();
+                    return;
+                }
+                
+                console.log('Token found, calling /api/auth/me...');
+                
+                // Call api.js /api/auth/me endpoint
+                const response = await fetch('/api/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401 || response.status === 403) {
+                        console.error('Authentication failed with status:', response.status);
+                        handleAuthError();
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const userData = await response.json();
+                
+                // Store user data
+                AppState.user = userData;
+                AppState.currentUser = userData;
+                AppState.isAuthenticated = true;
+                AppState.authChecked = true;
+                
+                console.log('User authenticated successfully:', userData);
+                
+                // Update API status
+                elements.apiStatusIndicator.className = 'api-status-indicator connected';
+                elements.apiStatusText.textContent = 'Authenticated';
+                AppState.apiReady = true;
+                
+                // Hide API status after successful auth
+                setTimeout(() => {
+                    elements.apiStatusIndicator.style.display = 'none';
+                }, 2000);
+                
+                // Now initialize the app
+                initializeApp();
+                
+            } catch (error) {
+                console.error('Bootstrap error:', error);
+                showApiError('Authentication failed: ' + error.message);
+                handleAuthError();
+            }
+        }
+        
+        function redirectToLogin() {
+            console.log('Redirecting to login...');
+            const currentPath = window.location.pathname;
+            window.location.href = `/login.html?redirect=${encodeURIComponent(currentPath)}`;
+        }
+        
+        function handleAuthError() {
+            console.error('Authentication error detected');
+            
+            // Clear all auth-related storage
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('moodchat_token');
+            localStorage.removeItem('token');
+            
+            // Show error status
+            elements.apiStatusIndicator.className = 'api-status-indicator disconnected';
+            elements.apiStatusText.textContent = 'Authentication failed';
+            
+            // Redirect after delay
+            setTimeout(() => {
+                redirectToLogin();
+            }, 2000);
+        }
+        
+        function showApiError(message) {
+            elements.apiStatusIndicator.className = 'api-status-indicator disconnected';
+            elements.apiStatusText.textContent = message;
+            
+            // Show error in UI
+            showNotification(message, 'error');
+        }
+        
+        // ==================== API WRAPPER ====================
+        const ApiClient = {
+            async request(endpoint, options = {}) {
+                // Get token
+                const token = localStorage.getItem('accessToken') || 
+                              localStorage.getItem('moodchat_token') || 
+                              localStorage.getItem('token');
+                
+                if (!token) {
+                    handleAuthError();
+                    throw new Error('No authentication token available');
+                }
+                
+                // Prepare headers
+                const headers = {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                };
+                
+                // Make request
+                const response = await fetch(`/api${endpoint}`, {
+                    ...options,
+                    headers
+                });
+                
+                // Handle auth errors
+                if (response.status === 401 || response.status === 403) {
+                    console.log('Auth error detected in API call, redirecting...');
+                    handleAuthError();
+                    throw new Error('Authentication required');
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                return response;
+            },
+            
+            async get(endpoint) {
+                return this.request(endpoint, { method: 'GET' });
+            },
+            
+            async post(endpoint, data) {
+                return this.request(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+            },
+            
+            async put(endpoint, data) {
+                return this.request(endpoint, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+            },
+            
+            async delete(endpoint) {
+                return this.request(endpoint, { method: 'DELETE' });
+            },
+            
+            // Specific API methods
+            async getUserInfo() {
+                const response = await this.get('/user/info');
+                return response.json();
+            },
+            
+            async getCallPermissions() {
+                const response = await this.get('/calls/permissions');
+                return response.json();
+            },
+            
+            async getContacts() {
+                const response = await this.get('/contacts');
+                return response.json();
+            },
+            
+            async getCallHistory() {
+                const response = await this.get('/calls/history');
+                return response.json();
+            },
+            
+            async getPremiumStatus() {
+                const response = await this.get('/user/premium');
+                return response.json();
+            },
+            
+            async startCall(callData) {
+                const response = await this.post('/calls/start', callData);
+                return response.json();
+            },
+            
+            async endCall(callData) {
+                const response = await this.post('/calls/end', callData);
+                return response.json();
+            },
+            
+            async sendPeerId(peerData) {
+                const response = await this.post('/calls/peer', peerData);
+                return response.json();
+            }
+        };
+        
+        // Initialize function - wrapped in bootstrap
+        function initializeApp() {
+            console.log('Initializing call app...');
             
             // Cache all DOM elements
             cacheElements();
             
             // Set up event listeners
             setupEventListeners();
-            
-            // Check for API availability (now uses authenticated API)
-            checkApiAvailability();
             
             // Initialize offline detection
             initializeOfflineDetection();
@@ -1728,22 +1655,10 @@
             // Check URL parameters for call links
             checkUrlParameters();
             
+            // Load initial data
+            loadInitialData();
+            
             console.log('Call app initialization complete');
-        }
-        
-        // NEW: Check authentication status
-        function checkAuthentication() {
-            console.log('Checking authentication status...');
-            
-            if (!AuthManager.isAuthenticated()) {
-                console.error('User is not authenticated');
-                AuthManager.handleAuthError();
-                return;
-            }
-            
-            AppState.isAuthenticated = true;
-            AppState.authChecked = true;
-            console.log('User is authenticated');
         }
         
         function cacheElements() {
@@ -2165,140 +2080,38 @@
             makeDraggable(elements.pipContainer);
         }
         
-        function toggleMenuDots() {
-            elements.menuDotsDropdown.classList.toggle('active');
-        }
-        
-        function closeMenuDots() {
-            elements.menuDotsDropdown.classList.remove('active');
-        }
-        
-        function checkApiAvailability() {
-            console.log('Checking API availability with direct token access...');
-            
-            // Show connecting status
-            elements.apiStatusIndicator.style.display = 'block';
-            elements.apiStatusIndicator.className = 'api-status-indicator connecting';
-            elements.apiStatusText.textContent = 'Connecting to API...';
-            
-            // Check authentication first
-            if (!AppState.isAuthenticated) {
-                console.error('Cannot check API - user not authenticated');
-                showApiError('Authentication required. Please login.');
-                return;
-            }
-            
-            // Start API initialization
-            startApiInitialization();
-        }
-        
-        function startApiInitialization() {
-            console.log('Starting API initialization with authenticated API...');
-            
-            clearInterval(AppState.apiCheckInterval);
-            
-            // Check if API is available
-            if (AuthenticatedAPI.isApiAvailable()) {
-                initializeWithApi();
-            } else {
-                // Try to initialize directly
-                initializeWithApi();
-            }
-        }
-        
-        function initializeWithApi() {
-            console.log('Initializing with authenticated API...');
-            
-            AppState.apiReady = true;
-            AppState.apiConfirmed = true;
-            
-            // Update API status indicator
-            elements.apiStatusIndicator.className = 'api-status-indicator connected';
-            elements.apiStatusText.textContent = 'API Connected';
-            
-            // Get user info using authenticated API
-            console.log('Making authenticated API call: getUserInfo()');
-            AuthenticatedAPI.getUserInfo()
-                .then(user => {
-                    AppState.currentUser = user;
-                    console.log('User loaded:', user);
-                    
-                    // Get call permissions
-                    console.log('Making authenticated API call: getCallPermissions()');
-                    return AuthenticatedAPI.getCallPermissions();
-                })
-                .then(permissions => {
-                    AppState.callPermissions = permissions;
-                    console.log('Call permissions:', permissions);
-                    
-                    // Get user settings
-                    return loadSettings();
-                })
-                .then(() => {
-                    // Get premium status
-                    console.log('Making authenticated API call: getPremiumStatus()');
-                    return checkPremiumStatus();
-                })
-                .then(() => {
-                    // Load initial data
-                    console.log('Loading initial data with authenticated API...');
-                    return loadInitialData();
-                })
-                .then(() => {
-                    // Hide API status after successful load
-                    setTimeout(() => {
-                        elements.apiStatusIndicator.style.display = 'none';
-                    }, 2000);
-                    
-                    // Enable UI
-                    enableUI();
-                    
-                    console.log('API initialization complete');
-                })
-                .catch(error => {
-                    console.error('Error during API initialization:', error);
-                    
-                    // Check if it's an authentication error
-                    if (error.message.includes('Authentication') || 
-                        error.message.includes('token') ||
-                        error.message.includes('401') ||
-                        error.message.includes('403')) {
-                        console.error('Authentication failed. Token may be invalid.');
-                        showApiError('Authentication failed. Please refresh the page.');
-                    } else {
-                        showApiError('Error loading user data. Please refresh.');
-                    }
-                });
-        }
-        
-        function showApiError(message) {
-            elements.apiStatusIndicator.className = 'api-status-indicator disconnected';
-            elements.apiStatusText.textContent = message;
-            
-            // Show error in UI
-            showNotification(message, 'error');
-        }
-        
         function loadInitialData() {
-            console.log('Starting to load initial data with authenticated API...');
+            console.log('Starting to load initial data...');
             
             // Check if we can safely make API calls
             if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
-                console.log('Conditions not met for API calls:', {
-                    apiReady: AppState.apiReady,
-                    isOnline: AppState.isOnline,
-                    isAuthenticated: AppState.isAuthenticated
-                });
-                console.log('Loading from cache instead');
-                return Promise.resolve();
+                console.log('Conditions not met for API calls, loading from cache');
+                loadCachedData();
+                return;
             }
             
-            console.log('Making authenticated API calls for initial data...');
-            return Promise.all([
+            console.log('Making API calls for initial data...');
+            Promise.all([
                 loadContacts(),
                 loadCallHistory(),
-                loadCachedData()
-            ]);
+                loadSettings(),
+                checkPremiumStatus()
+            ])
+            .then(() => {
+                enableUI();
+                
+                // Schedule incoming call simulation
+                setTimeout(() => {
+                    if (AppState.isAuthenticated && !AppState.isInCall && AppState.contacts.length > 0) {
+                        simulateIncomingCall();
+                    }
+                }, 10000);
+            })
+            .catch(error => {
+                console.error('Error loading initial data:', error);
+                loadCachedData();
+                enableUI();
+            });
         }
         
         function loadContacts() {
@@ -2312,8 +2125,8 @@
                 return Promise.resolve();
             }
             
-            console.log('Making authenticated API call: getContacts()');
-            return AuthenticatedAPI.getContacts()
+            console.log('Loading contacts via API...');
+            return ApiClient.getContacts()
                 .then(contacts => {
                     AppState.contacts = contacts;
                     console.log('Contacts loaded:', contacts.length);
@@ -2355,8 +2168,8 @@
                 return Promise.resolve();
             }
             
-            console.log('Making authenticated API call: getCallHistory()');
-            return AuthenticatedAPI.getCallHistory()
+            console.log('Loading call history via API...');
+            return ApiClient.getCallHistory()
                 .then(history => {
                     AppState.callHistory = history;
                     console.log('Call history loaded:', history.length);
@@ -2409,6 +2222,17 @@
                 const savedInsights = localStorage.getItem('relationshipInsights');
                 if (savedInsights) AppState.relationshipInsights = JSON.parse(savedInsights);
                 
+                // Load contacts and calls from cache
+                if (AppState.cachedData.contacts && AppState.cachedData.contacts.length > 0) {
+                    AppState.contacts = AppState.cachedData.contacts;
+                    renderContacts();
+                }
+                
+                if (AppState.cachedData.calls && AppState.cachedData.calls.length > 0) {
+                    AppState.callHistory = AppState.cachedData.calls;
+                    renderCallHistory();
+                }
+                
                 return Promise.resolve();
             } catch (error) {
                 console.error('Error loading cached data:', error);
@@ -2450,7 +2274,7 @@
                 return Promise.resolve();
             }
             
-            console.log('Syncing data with authenticated API...');
+            console.log('Syncing data...');
             
             return Promise.all([
                 loadContacts(),
@@ -2476,6 +2300,7 @@
                 if (savedSettings) {
                     try {
                         AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
+                        applySettingsToUI();
                     } catch (error) {
                         console.error('Error loading settings:', error);
                     }
@@ -2573,8 +2398,8 @@
                 return Promise.resolve();
             }
             
-            console.log('Making authenticated API call: getPremiumStatus()');
-            return AuthenticatedAPI.getPremiumStatus()
+            console.log('Checking premium status via API...');
+            return ApiClient.getPremiumStatus()
                 .then(premiumData => {
                     AppState.isPremium = premiumData.isPremium;
                     AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
@@ -2922,9 +2747,9 @@
                     AppState.callType = type;
                     AppState.callParticipants = participants;
                     
-                    // Use authenticated API
-                    console.log('Making authenticated API call: startCall()');
-                    return AuthenticatedAPI.startCall({
+                    // Use API client
+                    console.log('Starting call via API...');
+                    return ApiClient.startCall({
                         type: type,
                         participants: participants.map(p => p.id),
                         mood: AppState.currentMood,
@@ -3001,8 +2826,8 @@
             AppState.peer.on('open', (id) => {
                 console.log('Peer connected with ID:', id);
                 
-                if (AuthenticatedAPI.isApiAvailable() && AppState.isAuthenticated) {
-                    AuthenticatedAPI.sendPeerId({
+                if (AppState.isAuthenticated) {
+                    ApiClient.sendPeerId({
                         callId: AppState.activeCallId,
                         peerId: id
                     }).catch(error => {
@@ -3557,10 +3382,10 @@
                 const callDuration = AppState.callStartTime ? 
                     Math.floor((Date.now() - AppState.callStartTime) / 1000) : 0;
                 
-                // Use authenticated API
-                if (AuthenticatedAPI.isApiAvailable() && AppState.isAuthenticated) {
-                    console.log('Making authenticated API call: endCall()');
-                    AuthenticatedAPI.endCall({
+                // Use API client
+                if (AppState.isAuthenticated) {
+                    console.log('Ending call via API...');
+                    ApiClient.endCall({
                         callId: AppState.activeCallId,
                         duration: callDuration
                     }).catch(error => {
@@ -5038,23 +4863,13 @@
             return div.innerHTML;
         }
         
-        document.addEventListener('DOMContentLoaded', initializeApp);
-        
-        setTimeout(() => {
-            if (AppState.apiReady && AppState.isAuthenticated && !AppState.isInCall) {
-                simulateIncomingCall();
-            } else {
-                console.log('Skipping simulated incoming call - not authenticated or API not ready');
-            }
-        }, 10000);
-        
-        setTimeout(() => {
-            if (AppState.apiReady && AppState.isAuthenticated && !AppState.isInCall) {
-                simulateIncomingCall();
-            } else {
-                console.log('Skipping simulated incoming call - not authenticated or API not ready');
-            }
-        }, 30000);
+        // Start the bootstrap process when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            bootstrapIframe().catch(error => {
+                console.error('Failed to bootstrap iframe:', error);
+                showApiError('Failed to initialize app');
+            });
+        });
         
         window.CallApp = {
             simulateIncomingCall,
@@ -5071,14 +4886,17 @@
                     isAuthenticated: AppState.isAuthenticated,
                     authChecked: AppState.authChecked,
                     apiReady: AppState.apiReady,
-                    apiConfirmed: AppState.apiConfirmed,
+                    user: AppState.user,
                     tokens: {
                         accessToken: localStorage.getItem('accessToken') ? 'Available' : 'Missing',
                         refreshToken: localStorage.getItem('refreshToken') ? 'Available' : 'Missing',
-                        moodchat_token: localStorage.getItem('moodchat_token') ? 'Available' : 'Missing'
+                        moodchat_token: localStorage.getItem('moodchat_token') ? 'Available' : 'Missing',
+                        token: localStorage.getItem('token') ? 'Available' : 'Missing'
                     }
                 };
-            }
+            },
+            // Expose bootstrap for testing
+            bootstrapIframe
         };
     </script>
 </body>

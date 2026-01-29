@@ -396,89 +396,210 @@ const TOKEN_KEYS = {
     TOKEN_EXPIRY: 'knecta_token_expiry'
 };
 
+// API base URL
+const API_BASE_URL = window.API_BASE_URL || '';
+
+// =============================================
+// BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
+// =============================================
+
+async function bootstrapIframe() {
+    console.log('=== BOOTSTRAP IFRAME START ===');
+    
+    try {
+        // Check if jQuery is available for spectrum.min.js dependencies
+        if (typeof jQuery === 'undefined') {
+            console.error('jQuery is not loaded. Status system cannot initialize.');
+            errorUI.classList.add('active');
+            document.getElementById('errorTitle').textContent = 'jQuery Error';
+            document.getElementById('errorMessage').textContent = 'Required library (jQuery) is not loaded. Please refresh the page.';
+            return false;
+        }
+        
+        // Read tokens from localStorage
+        const tokenData = readTokensFromStorage();
+        
+        if (!tokenData.accessToken) {
+            console.error('No access token found');
+            handleAuthError('Please log in to access status features');
+            return false;
+        }
+        
+        // Validate token with /api/auth/me endpoint
+        const userData = await validateTokenWithAPI(tokenData.accessToken);
+        
+        if (!userData || !userData.user) {
+            console.error('Token validation failed');
+            handleAuthError('Session expired. Please log in again.');
+            return false;
+        }
+        
+        // Set current user
+        currentUser = userData.user;
+        userData = currentUser;
+        accessToken = tokenData.accessToken;
+        refreshToken = tokenData.refreshToken;
+        authValidated = true;
+        
+        console.log('User authenticated:', currentUser.id);
+        
+        // Save user to cache
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+            uid: currentUser.id,
+            id: currentUser.id,
+            displayName: currentUser.displayName,
+            email: currentUser.email,
+            photoURL: currentUser.photoURL
+        }));
+        
+        // Setup event listeners
+        setupEventListeners();
+        
+        // Initialize UI components
+        initializeUIComponents();
+        
+        // Show loading state
+        showNotification('Connecting to server...', 'info');
+        
+        // Initialize status system
+        await initializeStatusSystem();
+        
+        console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
+        return true;
+        
+    } catch (error) {
+        console.error('Bootstrap error:', error);
+        handleAuthError('Failed to initialize. Please try again.');
+        return false;
+    }
+}
+
+// Read tokens from localStorage with fallback logic
+function readTokensFromStorage() {
+    const tokenData = {
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiry: null
+    };
+    
+    // Try multiple possible token locations
+    const possibleAccessTokenKeys = [
+        'knecta_access_token',
+        'access_token',
+        'token',
+        'auth_token'
+    ];
+    
+    const possibleRefreshTokenKeys = [
+        'knecta_refresh_token',
+        'refresh_token',
+        'refreshToken'
+    ];
+    
+    // Find access token
+    for (const key of possibleAccessTokenKeys) {
+        const token = localStorage.getItem(key);
+        if (token && token.length > 10) {
+            tokenData.accessToken = token;
+            break;
+        }
+    }
+    
+    // Find refresh token
+    for (const key of possibleRefreshTokenKeys) {
+        const token = localStorage.getItem(key);
+        if (token && token.length > 10) {
+            tokenData.refreshToken = token;
+            break;
+        }
+    }
+    
+    // Check token expiry
+    const expiryKey = 'knecta_token_expiry';
+    const expiry = localStorage.getItem(expiryKey);
+    if (expiry) {
+        tokenData.tokenExpiry = new Date(expiry);
+    }
+    
+    console.log('Tokens read from storage:', {
+        hasAccessToken: !!tokenData.accessToken,
+        hasRefreshToken: !!tokenData.refreshToken,
+        tokenExpiry: tokenData.tokenExpiry
+    });
+    
+    return tokenData;
+}
+
+// Validate token with API /auth/me endpoint
+async function validateTokenWithAPI(token) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.status === 401) {
+            // Token expired, try to refresh
+            console.log('Token expired, attempting refresh...');
+            const refreshed = await attemptTokenRefresh();
+            if (refreshed) {
+                // Retry with new token
+                return await validateTokenWithAPI(accessToken);
+            }
+            return null;
+        }
+        
+        if (!response.ok) {
+            console.error('Token validation failed with status:', response.status);
+            return null;
+        }
+        
+        const data = await response.json();
+        return data;
+        
+    } catch (error) {
+        console.error('Error validating token:', error);
+        return null;
+    }
+}
+
 // Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     console.log('Status page loaded');
     
-    // First, check if jQuery is available for spectrum.min.js dependencies
-    if (typeof jQuery === 'undefined') {
-        console.error('jQuery is not loaded. Status system cannot initialize.');
-        errorUI.classList.add('active');
-        document.getElementById('errorTitle').textContent = 'jQuery Error';
-        document.getElementById('errorMessage').textContent = 'Required library (jQuery) is not loaded. Please refresh the page.';
+    // Bootstrap the iframe
+    const success = await bootstrapIframe();
+    
+    if (!success) {
+        console.error('Bootstrap failed');
         return;
     }
     
-    // Setup event listeners immediately
-    setupEventListeners();
-    
-    // Initialize UI components
-    initializeUIComponents();
-    
-    // Show loading state
-    showNotification('Connecting to server...', 'info');
-    
-    // Load tokens and check authentication
-    loadTokensAndCheckAuth();
+    // Clear any error UI
+    errorUI.classList.remove('active');
 });
 
-// Load tokens from localStorage and check authentication
-function loadTokensAndCheckAuth() {
-    try {
-        // Load tokens directly from localStorage
-        accessToken = localStorage.getItem(TOKEN_KEYS.ACCESS_TOKEN);
-        refreshToken = localStorage.getItem(TOKEN_KEYS.REFRESH_TOKEN);
-        const tokenExpiry = localStorage.getItem(TOKEN_KEYS.TOKEN_EXPIRY);
-        
-        console.log('Tokens loaded from localStorage:', {
-            hasAccessToken: !!accessToken,
-            hasRefreshToken: !!refreshToken,
-            tokenExpiry: tokenExpiry
-        });
-        
-        // Check if token is expired
-        const now = new Date();
-        const expiryDate = tokenExpiry ? new Date(tokenExpiry) : null;
-        
-        if (!accessToken) {
-            console.error('No access token found');
-            handleAuthError('Please log in to access status features');
-            return;
-        }
-        
-        if (expiryDate && expiryDate < now) {
-            console.log('Token expired, attempting refresh...');
-            attemptTokenRefresh();
-        } else {
-            // Token is valid, initialize system
-            console.log('Token is valid, initializing status system...');
-            authValidated = true;
-            initializeStatusSystem();
-        }
-        
-    } catch (error) {
-        console.error('Error loading tokens:', error);
-        handleAuthError('Authentication error');
-    }
-}
+// =============================================
+// AUTHENTICATION FUNCTIONS
+// =============================================
 
 // Attempt to refresh the access token
 async function attemptTokenRefresh() {
     try {
         if (!refreshToken) {
             console.error('No refresh token available');
-            handleAuthError('Session expired. Please log in again.');
-            return;
+            return false;
         }
         
         console.log('Refreshing token...');
         
-        // Call refresh token endpoint
-        const response = await fetch('/api/auth/refresh', {
+        const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${refreshToken}`
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ refreshToken })
         });
@@ -503,17 +624,16 @@ async function attemptTokenRefresh() {
                 }
                 
                 console.log('Token refreshed successfully');
-                authValidated = true;
-                initializeStatusSystem();
-            } else {
-                throw new Error('No access token in response');
+                return true;
             }
-        } else {
-            throw new Error(`Refresh failed with status: ${response.status}`);
         }
+        
+        console.error('Refresh failed with status:', response.status);
+        return false;
+        
     } catch (error) {
         console.error('Error refreshing token:', error);
-        handleAuthError('Session expired. Please log in again.');
+        return false;
     }
 }
 
@@ -529,13 +649,24 @@ function handleAuthError(message) {
     if (retryBtn) {
         retryBtn.textContent = 'Go to Login';
         retryBtn.onclick = function() {
-            window.location.href = '/index.html';
+            // Clear all auth data
+            localStorage.removeItem(TOKEN_KEYS.ACCESS_TOKEN);
+            localStorage.removeItem(TOKEN_KEYS.REFRESH_TOKEN);
+            localStorage.removeItem(TOKEN_KEYS.TOKEN_EXPIRY);
+            localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+            
+            // Redirect to main page
+            if (window.top !== window.self) {
+                window.top.location.href = '/index.html';
+            } else {
+                window.location.href = '/index.html';
+            }
         };
     }
 }
 
 // Make authenticated API call
-async function makeAuthenticatedRequest(url, options = {}) {
+async function makeAuthenticatedRequest(endpoint, options = {}) {
     // Ensure we have a valid token
     if (!accessToken) {
         console.error('No access token available for API call');
@@ -555,9 +686,9 @@ async function makeAuthenticatedRequest(url, options = {}) {
     };
     
     try {
-        console.log('Making authenticated API call to:', url);
+        console.log('Making authenticated API call to:', endpoint);
         
-        const response = await fetch(url, {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             ...options,
             headers
         });
@@ -565,22 +696,28 @@ async function makeAuthenticatedRequest(url, options = {}) {
         // Check for unauthorized response
         if (response.status === 401) {
             console.log('Token expired or invalid, attempting refresh...');
-            await attemptTokenRefresh();
+            const refreshed = await attemptTokenRefresh();
             
-            // Retry the request with new token
-            if (accessToken) {
+            if (refreshed && accessToken) {
+                // Retry the request with new token
                 headers.Authorization = `Bearer ${accessToken}`;
-                const retryResponse = await fetch(url, {
+                const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
                     ...options,
                     headers
                 });
                 
                 if (!retryResponse.ok) {
+                    // If still failing, clear auth and redirect
+                    if (retryResponse.status === 401 || retryResponse.status === 403) {
+                        handleAuthError('Session expired. Please log in again.');
+                        throw new Error('Authentication failed');
+                    }
                     throw new Error(`API request failed after refresh: ${retryResponse.status}`);
                 }
                 
                 return await retryResponse.json();
             } else {
+                handleAuthError('Session expired. Please log in again.');
                 throw new Error('Failed to refresh token');
             }
         }
@@ -593,42 +730,23 @@ async function makeAuthenticatedRequest(url, options = {}) {
         
     } catch (error) {
         console.error('API request error:', error);
+        
+        // If it's an auth error, handle it
+        if (error.message.includes('Authentication') || error.message.includes('Session')) {
+            throw error;
+        }
+        
+        // For other errors, show notification but don't redirect
+        showNotification('Network error. Please check your connection.', 'error');
         throw error;
     }
 }
 
-// Initialize status system - NO LONGER WAITS FOR API_READY
+// Initialize status system
 async function initializeStatusSystem() {
-    console.log('=== INITIALIZING STATUS SYSTEM (DIRECT TOKEN ACCESS) ===');
+    console.log('=== INITIALIZING STATUS SYSTEM ===');
     
     try {
-        // First, get current user using authenticated request
-        try {
-            console.log('Fetching current user...');
-            const userResponse = await makeAuthenticatedRequest('/api/auth/user');
-            
-            if (userResponse && userResponse.user) {
-                currentUser = userResponse.user;
-                userData = currentUser;
-                console.log('Current user loaded:', currentUser.id);
-                
-                // Save to cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                    uid: currentUser.id,
-                    id: currentUser.id,
-                    displayName: currentUser.displayName,
-                    email: currentUser.email,
-                    photoURL: currentUser.photoURL
-                }));
-                
-                // Show welcome message
-                showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
-            }
-        } catch (userError) {
-            console.log('Could not load user from API:', userError.message);
-            await loadUserFromCache();
-        }
-        
         // Load initial data from API
         await loadInitialData();
         
@@ -637,11 +755,11 @@ async function initializeStatusSystem() {
         updateStreakCounter();
         updateMoodChart();
         
-        showNotification('Status system ready', 'success');
-        console.log('=== STATUS SYSTEM INITIALIZED SUCCESSFULLY ===');
+        // Render initial status list
+        renderStatusListInstantly();
         
-        // Clear any error UI
-        errorUI.classList.remove('active');
+        showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
+        console.log('=== STATUS SYSTEM INITIALIZED SUCCESSFULLY ===');
         
     } catch (error) {
         console.error('Error initializing status system:', error);
@@ -649,56 +767,6 @@ async function initializeStatusSystem() {
         
         // Fallback to cached data
         loadCachedDataInstantly();
-        errorUI.classList.add('active');
-    }
-}
-
-// Load user from cache
-async function loadUserFromCache() {
-    try {
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-        if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            console.log('Loaded user from cache:', currentUser.id);
-        } else {
-            // Try to get user info from token
-            if (accessToken) {
-                // Parse JWT payload to get user info
-                try {
-                    const payload = JSON.parse(atob(accessToken.split('.')[1]));
-                    currentUser = {
-                        id: payload.userId || payload.sub || 'local_user_' + Date.now(),
-                        displayName: payload.name || payload.displayName || 'User',
-                        email: payload.email || '',
-                        photoURL: ''
-                    };
-                    console.log('Loaded user from token payload');
-                } catch (tokenError) {
-                    console.error('Error parsing token:', tokenError);
-                    currentUser = {
-                        id: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: '',
-                        photoURL: ''
-                    };
-                }
-            } else {
-                currentUser = {
-                    id: 'local_user_' + Date.now(),
-                    displayName: 'Local User',
-                    email: '',
-                    photoURL: ''
-                };
-            }
-        }
-    } catch (error) {
-        console.error('Error loading user from cache:', error);
-        currentUser = {
-            id: 'fallback_user_' + Date.now(),
-            displayName: 'User',
-            email: '',
-            photoURL: ''
-        };
     }
 }
 
@@ -2258,11 +2326,7 @@ function handleActionButtonClick(actionKey, statusData) {
     switch(actionKey) {
         case 'message':
             // Navigate to chat with user
-            if (window.parent && window.parent.navigateToChat) {
-                window.parent.navigateToChat(statusData.userId, statusData.user?.displayName || 'User');
-            } else {
-                showNotification('Would navigate to chat with ' + (statusData.user?.displayName || 'user'), 'info');
-            }
+            showNotification('Would navigate to chat with ' + (statusData.user?.displayName || 'user'), 'info');
             break;
         case 'join':
             // Join discussion (would navigate to group chat)
@@ -2278,11 +2342,7 @@ function handleActionButtonClick(actionKey, statusData) {
             break;
         case 'book':
             // Book a call
-            if (window.parent && window.parent.navigateToCall) {
-                window.parent.navigateToCall(statusData.userId, statusData.user?.displayName || 'User');
-            } else {
-                showNotification('Would book a call with ' + (statusData.user?.displayName || 'user'), 'info');
-            }
+            showNotification('Would book a call with ' + (statusData.user?.displayName || 'user'), 'info');
             break;
         case 'learn':
             // Learn more (open URL)
@@ -4098,7 +4158,10 @@ function setupEventListeners() {
         
         try {
             // Reload tokens and reinitialize
-            loadTokensAndCheckAuth();
+            const success = await bootstrapIframe();
+            if (!success) {
+                errorUI.classList.add('active');
+            }
         } catch (error) {
             errorUI.classList.add('active');
         }
@@ -4192,4 +4255,4 @@ function stopAutoAdvance() {
     }
 }
 
-console.log('Status system initialized successfully with direct token access');
+console.log('Status system initialized successfully with bootstrap iframe pattern');

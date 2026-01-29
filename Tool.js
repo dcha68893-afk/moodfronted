@@ -154,113 +154,154 @@ const spotlightListings = document.getElementById('spotlightListings');
 const premiumStatusBadge = document.getElementById('premiumStatusBadge');
 const listingStreak = document.getElementById('listingStreak');
 
-// API state with enhanced readiness checking
-let apiReady = false;
-let apiInitialized = false;
-let apiReadyRequestSent = false;
-let parentValidationComplete = false; // NEW: Track if parent validation is complete
-let waitingForParentValidation = true; // NEW: Flag to wait for parent validation
-
-// Authentication token management
+// Authentication state
 let accessToken = null;
 let refreshToken = null;
 let tokenRefreshInProgress = false;
+let isBootstrapped = false;
 
 // Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     console.log('=== TOOLS.HTML INITIALIZATION STARTED ===');
     
-    // Load tokens directly from storage
-    loadTokensFromStorage();
-    
-    // Handle iframe token passing
-    if (window.self !== window.top) {
-        handleIframeAuth();
+    try {
+        // Bootstrap the iframe with proper authentication
+        await bootstrapIframe();
+        
+        // Setup event listeners
+        setupEnhancedEventListeners();
+        
+        // Load cached data for instant display
+        loadCachedDataInstantly();
+        
+        // Initialize marketplace
+        await initializeEnhancedMarketplace();
+        
+        console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
+        
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        showNotification('Failed to load marketplace. Please try again.', 'error');
     }
-    
-    // Setup message listener for API ready and parent validation
-    window.addEventListener('message', function(event) {
-        console.log('Message received from parent:', event.data);
-        
-        // Handle API_READY message from parent
-        if (event.data === 'API_READY') {
-            apiReady = true;
-            parentValidationComplete = true; // Parent validation is complete
-            waitingForParentValidation = false;
-            console.log('API marked as ready via message from parent - Parent validation complete');
-            
-            if (!apiInitialized) {
-                initializeEnhancedMarketplace();
-            }
-            
-            // Notify that we can now make API calls
-            console.log('Parent validation complete - API calls can now proceed');
-        }
-        
-        // Handle AUTH_TOKEN message (keep for backward compatibility)
-        if (event.data.type === 'AUTH_TOKEN') {
-            localStorage.setItem('knecta_auth_token', event.data.token);
-            console.log('Auth token received via message');
-            loadTokensFromStorage(); // Reload tokens
-        }
-        
-        // Handle parent validation status
-        if (event.data.type === 'PARENT_VALIDATION_COMPLETE') {
-            parentValidationComplete = true;
-            waitingForParentValidation = false;
-            console.log('Parent validation complete received via message');
-            
-            // Check if we have all tokens
-            checkAndUpdateTokens();
-        }
-    });
-    
-    // Check for existing API in parent
-    checkParentAPI();
-    
-    // Load cached data immediately for instant display
-    loadCachedDataInstantly();
-    
-    // Setup event listeners
-    setupEnhancedEventListeners();
-    
-    // Request parent validation status
-    requestParentValidationStatus();
-    
-    // Try to initialize with retry logic
-    initializeWithRetry();
 });
 
-// Load tokens directly from storage
-function loadTokensFromStorage() {
-    console.log('Loading tokens from storage...');
+// SINGLE BOOTSTRAP FUNCTION - Removes parent dependency and race conditions
+async function bootstrapIframe() {
+    console.log('=== BOOTSTRAPPING MARKETPLACE IFRAME ===');
     
-    // Try multiple token sources
-    accessToken = localStorage.getItem('accessToken') || 
-                  localStorage.getItem('knecta_auth_token') || 
-                  localStorage.getItem('moodchat_token') ||
-                  sessionStorage.getItem('accessToken');
-    
-    refreshToken = localStorage.getItem('refreshToken') || 
-                   localStorage.getItem('knecta_refresh_token') ||
-                   sessionStorage.getItem('refreshToken');
-    
-    // Check if we have a token
-    if (accessToken) {
-        console.log('Access token loaded from storage');
-        apiReady = true; // We can make authenticated API calls
-        
-        // Validate token expiration
-        if (isTokenExpired(accessToken)) {
-            console.log('Access token expired, attempting refresh...');
-            attemptTokenRefresh();
-        } else {
-            console.log('Access token is valid');
-        }
-    } else {
-        console.warn('No access token found in storage');
-        showNotification('Please login to access marketplace features', 'warning');
+    if (isBootstrapped) {
+        console.log('Already bootstrapped');
+        return;
     }
+    
+    // 1. Read token from localStorage using fallback logic
+    accessToken = getTokenFromStorage();
+    
+    if (!accessToken) {
+        console.log('No access token found, redirecting to login');
+        redirectToLogin();
+        throw new Error('Authentication required');
+    }
+    
+    // 2. Validate token expiration
+    if (isTokenExpired(accessToken)) {
+        console.log('Access token expired, attempting refresh');
+        await attemptTokenRefresh();
+        
+        // Get fresh token after refresh
+        accessToken = getTokenFromStorage();
+        if (!accessToken) {
+            redirectToLogin();
+            throw new Error('Token refresh failed');
+        }
+    }
+    
+    // 3. Call /api/auth/me to verify user
+    console.log('Verifying user with /api/auth/me');
+    try {
+        const userResponse = await makeApiCall('GET', '/api/auth/me');
+        
+        if (!userResponse || !userResponse.user) {
+            console.error('Invalid user response:', userResponse);
+            clearAuthStorage();
+            redirectToLogin();
+            throw new Error('Invalid user data');
+        }
+        
+        currentUser = userResponse.user;
+        userData = userResponse.user;
+        
+        // Save user to localStorage
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+        
+        console.log('User verified:', currentUser.displayName || currentUser.email);
+        
+    } catch (error) {
+        console.error('Failed to verify user:', error);
+        
+        // Handle 401/403 by clearing storage and redirecting
+        if (error.status === 401 || error.status === 403) {
+            clearAuthStorage();
+            redirectToLogin();
+        }
+        
+        throw error;
+    }
+    
+    // 4. Mark as bootstrapped
+    isBootstrapped = true;
+    console.log('Marketplace iframe bootstrapped successfully');
+}
+
+// Helper function to get token from storage with fallback logic
+function getTokenFromStorage() {
+    console.log('Getting token from storage...');
+    
+    // Try multiple token sources in order of priority
+    const tokenSources = [
+        localStorage.getItem('accessToken'),
+        localStorage.getItem('knecta_auth_token'),
+        localStorage.getItem('moodchat_token'),
+        sessionStorage.getItem('accessToken')
+    ];
+    
+    for (const token of tokenSources) {
+        if (token && token.trim() !== '') {
+            console.log('Found token in storage');
+            return token;
+        }
+    }
+    
+    console.warn('No valid token found in storage');
+    return null;
+}
+
+// Helper function to clear authentication storage
+function clearAuthStorage() {
+    console.log('Clearing authentication storage...');
+    
+    const tokensToRemove = [
+        'accessToken',
+        'knecta_auth_token',
+        'moodchat_token',
+        'refreshToken',
+        'knecta_refresh_token'
+    ];
+    
+    tokensToRemove.forEach(token => {
+        localStorage.removeItem(token);
+        sessionStorage.removeItem(token);
+    });
+    
+    // Clear user data
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+    
+    accessToken = null;
+    refreshToken = null;
+    currentUser = null;
+    userData = null;
 }
 
 // Check if token is expired
@@ -269,12 +310,25 @@ function isTokenExpired(token) {
     
     try {
         // Decode JWT token to check expiration
-        const payload = JSON.parse(atob(token.split('.')[1]));
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+            console.warn('Invalid JWT token format');
+            return true;
+        }
+        
+        const payload = JSON.parse(atob(parts[1]));
         const expirationTime = payload.exp * 1000; // Convert to milliseconds
         const currentTime = Date.now();
         
         // Add 60 second buffer
-        return expirationTime < (currentTime + 60000);
+        const isExpired = expirationTime < (currentTime + 60000);
+        
+        if (isExpired) {
+            console.log('Token expired:', new Date(expirationTime), 'Current:', new Date(currentTime));
+        }
+        
+        return isExpired;
+        
     } catch (error) {
         console.error('Error parsing token:', error);
         return true; // If we can't parse it, assume expired
@@ -288,63 +342,145 @@ async function attemptTokenRefresh() {
         return;
     }
     
-    if (!refreshToken) {
-        console.log('No refresh token available');
-        redirectToLogin();
-        return;
-    }
-    
     tokenRefreshInProgress = true;
     
     try {
         console.log('Refreshing access token...');
         
-        const response = await fetch('/api/auth/refresh', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                refreshToken: refreshToken
-            })
+        // Get refresh token from storage
+        refreshToken = localStorage.getItem('refreshToken') || 
+                       localStorage.getItem('knecta_refresh_token');
+        
+        if (!refreshToken) {
+            console.log('No refresh token available');
+            clearAuthStorage();
+            redirectToLogin();
+            return;
+        }
+        
+        const response = await makeApiCall('POST', '/api/auth/refresh', {
+            refreshToken: refreshToken
         });
         
-        if (response.ok) {
-            const data = await response.json();
-            
-            if (data.accessToken) {
-                // Save new tokens
-                accessToken = data.accessToken;
-                if (data.refreshToken) {
-                    refreshToken = data.refreshToken;
-                }
-                
-                // Store tokens
-                localStorage.setItem('accessToken', accessToken);
-                localStorage.setItem('knecta_auth_token', accessToken);
-                if (refreshToken) {
-                    localStorage.setItem('refreshToken', refreshToken);
-                    localStorage.setItem('knecta_refresh_token', refreshToken);
-                }
-                
-                console.log('Access token refreshed successfully');
-                showNotification('Session refreshed', 'success');
-                
-                // Retry any pending API calls
-                retryFailedApiCalls();
-            } else {
-                throw new Error('No access token in response');
+        if (response && response.accessToken) {
+            // Save new tokens
+            accessToken = response.accessToken;
+            if (response.refreshToken) {
+                refreshToken = response.refreshToken;
             }
+            
+            // Store tokens
+            localStorage.setItem('accessToken', accessToken);
+            localStorage.setItem('knecta_auth_token', accessToken);
+            if (refreshToken) {
+                localStorage.setItem('refreshToken', refreshToken);
+                localStorage.setItem('knecta_refresh_token', refreshToken);
+            }
+            
+            console.log('Access token refreshed successfully');
+            showNotification('Session refreshed', 'success');
+            
         } else {
-            throw new Error(`Refresh failed: ${response.status}`);
+            throw new Error('No access token in response');
         }
+        
     } catch (error) {
         console.error('Token refresh failed:', error);
         showNotification('Session expired. Please login again.', 'error');
+        clearAuthStorage();
         redirectToLogin();
+        throw error;
+        
     } finally {
         tokenRefreshInProgress = false;
     }
+}
+
+// Unified API call function
+async function makeApiCall(method, endpoint, data = null) {
+    console.log(`Making API call: ${method} ${endpoint}`);
+    
+    // Ensure we have a token
+    if (!accessToken) {
+        accessToken = getTokenFromStorage();
+        if (!accessToken) {
+            throw { status: 401, message: 'Authentication required' };
+        }
+    }
+    
+    // Check token expiration
+    if (isTokenExpired(accessToken)) {
+        console.log('Token expired before API call, refreshing...');
+        await attemptTokenRefresh();
+        accessToken = getTokenFromStorage();
+    }
+    
+    const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+    };
+    
+    const options = {
+        method: method,
+        headers: headers,
+        credentials: 'include'
+    };
+    
+    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+        options.body = JSON.stringify(data);
+    }
+    
+    try {
+        const response = await fetch(endpoint, options);
+        
+        // Handle 401 Unauthorized
+        if (response.status === 401) {
+            console.log('API returned 401, attempting token refresh');
+            await attemptTokenRefresh();
+            
+            // Retry with new token
+            accessToken = getTokenFromStorage();
+            headers.Authorization = `Bearer ${accessToken}`;
+            const retryResponse = await fetch(endpoint, options);
+            
+            if (!retryResponse.ok) {
+                throw { status: retryResponse.status, message: `API error after refresh: ${retryResponse.status}` };
+            }
+            
+            return await retryResponse.json();
+        }
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw { 
+                status: response.status, 
+                message: errorData.message || `API error: ${response.status}` 
+            };
+        }
+        
+        return await response.json();
+        
+    } catch (error) {
+        console.error(`API call failed: ${method} ${endpoint}`, error);
+        
+        // If it's an auth error, clear storage and redirect
+        if (error.status === 401 || error.status === 403) {
+            clearAuthStorage();
+            redirectToLogin();
+        }
+        
+        throw error;
+    }
+}
+
+// Authenticated API call wrapper for backward compatibility
+async function authenticatedApiCall(method, endpoint, data = null) {
+    return await makeApiCall(method, endpoint, data);
+}
+
+// Safe API call wrapper for backward compatibility
+async function safeApiCall(method, endpoint, data = null) {
+    return await makeApiCall(method, endpoint, data);
 }
 
 // Redirect to login page
@@ -352,176 +488,17 @@ function redirectToLogin() {
     console.log('Redirecting to login...');
     
     // Store current location for redirect back after login
-    localStorage.setItem('login_redirect', window.location.href);
+    const currentPath = window.location.pathname + window.location.search;
+    localStorage.setItem('login_redirect', currentPath);
+    
+    // Clear any existing tokens
+    clearAuthStorage();
     
     // Redirect to login page
-    if (window.self !== window.top) {
-        // If in iframe, notify parent
-        window.parent.postMessage({ type: 'REDIRECT_TO_LOGIN' }, '*');
-    } else {
-        window.location.href = '/login.html';
-    }
+    window.location.href = '/login.html';
 }
 
-// Retry failed API calls after token refresh
-function retryFailedApiCalls() {
-    console.log('Retrying failed API calls...');
-    // Implement retry logic for any queued API calls
-    // This would depend on your specific queuing system
-}
-
-// NEW: Request parent validation status
-function requestParentValidationStatus() {
-    try {
-        if (window.parent) {
-            console.log('Requesting parent validation status...');
-            window.parent.postMessage({ type: 'REQUEST_VALIDATION_STATUS' }, '*');
-            
-            // Also request API access
-            if (!apiReadyRequestSent) {
-                apiReadyRequestSent = true;
-                window.parent.postMessage('REQUEST_API_ACCESS', '*');
-                console.log('API readiness request sent to parent');
-            }
-        }
-    } catch (e) {
-        console.log('Cannot send message to parent:', e);
-    }
-}
-
-// NEW: Check and update tokens from localStorage
-function checkAndUpdateTokens() {
-    // Check for moodchat_token in localStorage
-    const moodchatToken = localStorage.getItem('moodchat_token');
-    if (moodchatToken) {
-        console.log('Found moodchat_token in localStorage');
-        // Use this token for API calls
-        localStorage.setItem('knecta_auth_token', moodchatToken);
-    }
-    
-    // Check for window.accessToken
-    if (window.accessToken) {
-        console.log('Found accessToken in window');
-        localStorage.setItem('knecta_auth_token', window.accessToken);
-    }
-    
-    // Verify we have a token
-    const currentToken = localStorage.getItem('knecta_auth_token');
-    if (currentToken) {
-        console.log('Current auth token available for API calls');
-    } else {
-        console.warn('No auth token found for API calls');
-    }
-}
-
-function handleIframeAuth() {
-    try {
-        const urlParams = new URLSearchParams(window.location.search);
-        const tokenFromUrl = urlParams.get('token');
-        if (tokenFromUrl) {
-            localStorage.setItem('knecta_auth_token', tokenFromUrl);
-            console.log('Auth token loaded from URL');
-            loadTokensFromStorage(); // Reload tokens
-        }
-    } catch (error) {
-        console.log('Iframe auth handling:', error);
-    }
-}
-
-function checkParentAPI() {
-    // Try to access parent API
-    try {
-        if (window.parent && window.parent.api) {
-            apiReady = true;
-            parentValidationComplete = true; // Assume parent is ready if API exists
-            waitingForParentValidation = false;
-            console.log('Parent API found - assuming validation complete');
-            return true;
-        }
-        
-        // Try to access window.api directly (if loaded in same window)
-        if (window.api) {
-            apiReady = true;
-            parentValidationComplete = true;
-            waitingForParentValidation = false;
-            console.log('Window API found - assuming validation complete');
-            return true;
-        }
-    } catch (error) {
-        console.log('Cannot access parent API:', error);
-    }
-    return false;
-}
-
-function initializeWithRetry() {
-    let retryCount = 0;
-    const maxRetries = 10;
-    
-    const tryInitialize = () => {
-        // Check if parent validation is complete before proceeding
-        if (!parentValidationComplete && waitingForParentValidation) {
-            console.log(`Waiting for parent validation (attempt ${retryCount + 1}/${maxRetries})...`);
-            
-            retryCount++;
-            if (retryCount <= maxRetries) {
-                // Request parent validation status again
-                setTimeout(() => {
-                    requestParentValidationStatus();
-                    tryInitialize();
-                }, 1000);
-            } else {
-                console.log('Parent validation not received after max retries, proceeding cautiously');
-                waitingForParentValidation = false;
-                if (!apiInitialized) {
-                    initializeEnhancedMarketplace();
-                }
-            }
-            return;
-        }
-        
-        if (apiReady) {
-            if (!apiInitialized) {
-                initializeEnhancedMarketplace();
-            }
-            return;
-        }
-        
-        retryCount++;
-        if (retryCount <= maxRetries) {
-            console.log(`Checking for API (attempt ${retryCount}/${maxRetries})...`);
-            
-            // Check parent API again
-            if (checkParentAPI()) {
-                if (!apiInitialized) {
-                    initializeEnhancedMarketplace();
-                }
-                return;
-            }
-            
-            // Request API from parent - Only send request once
-            try {
-                if (window.parent && !apiReadyRequestSent) {
-                    apiReadyRequestSent = true;
-                    window.parent.postMessage('REQUEST_API_ACCESS', '*');
-                    console.log('API readiness request sent to parent (first time)');
-                }
-            } catch (e) {
-                console.log('Cannot send message to parent');
-            }
-            
-            // Retry after delay
-            setTimeout(tryInitialize, 1000);
-        } else {
-            console.log('API not available after max retries, using offline mode');
-            if (!apiInitialized) {
-                initializeEnhancedMarketplace();
-            }
-        }
-    };
-    
-    tryInitialize();
-}
-
+// Load cached data for instant display
 function loadCachedDataInstantly() {
     console.log('=== INSTANT MARKETPLACE CACHE LOAD START ===');
     
@@ -726,51 +703,16 @@ function loadCachedDataInstantly() {
 }
 
 async function initializeEnhancedMarketplace() {
-    if (apiInitialized) {
-        console.log('Marketplace already initialized');
-        return;
-    }
-    
     console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION START ===');
-    console.log('Parent validation status:', parentValidationComplete ? 'Complete' : 'Pending');
-    console.log('API Ready status:', apiReady ? 'Ready' : 'Not Ready');
-    console.log('Access token available:', !!accessToken);
-    
-    apiInitialized = true;
     
     // Check for dark mode preference
     checkDarkMode();
     
-    // Load user from cache first
-    await loadUserFromCache();
-    
     // Check premium status
     await checkUserPremiumStatus();
     
-    // Load initial data from backend in background if we have a token
-    if (accessToken) {
-        console.log('Access token available - Loading enhanced marketplace data');
-        loadEnhancedMarketplaceData();
-    } else if (apiReady && parentValidationComplete) {
-        console.log('Parent validation complete - Loading enhanced marketplace data');
-        loadEnhancedMarketplaceData();
-    } else if (!parentValidationComplete) {
-        console.warn('Parent validation not complete - Delaying API calls');
-        // Wait a bit more for parent validation
-        setTimeout(() => {
-            if (parentValidationComplete) {
-                console.log('Parent validation now complete - Loading data');
-                loadEnhancedMarketplaceData();
-            } else {
-                console.warn('Parent validation still not complete - Using offline mode');
-                generateSampleMarketplaceData();
-            }
-        }, 2000);
-    } else {
-        // Generate sample data for offline/demo mode
-        console.log('Using offline/demo mode');
-        generateSampleMarketplaceData();
-    }
+    // Load enhanced marketplace data
+    await loadEnhancedMarketplaceData();
     
     // Load service categories
     loadServiceCategories();
@@ -796,270 +738,6 @@ async function initializeEnhancedMarketplace() {
     showNotification('Marketplace loaded successfully', 'success');
 }
 
-function generateSampleMarketplaceData() {
-    // Generate sample users for marketplace
-    const sampleUsers = [
-        { id: 'user_1', displayName: 'Alex Johnson', photoURL: '', trustLevel: 'reliable', isPremium: true },
-        { id: 'user_2', displayName: 'Maria Garcia', photoURL: '', trustLevel: 'verified', isPremium: true },
-        { id: 'user_3', displayName: 'David Smith', photoURL: '', trustLevel: 'responsive' },
-        { id: 'user_4', displayName: 'Sarah Wilson', photoURL: '', trustLevel: 'pro', isPremium: true },
-        { id: 'user_5', displayName: 'James Brown', photoURL: '', trustLevel: 'new' },
-        { id: 'user_6', displayName: 'Emma Davis', photoURL: '', trustLevel: 'reliable' },
-        { id: 'user_7', displayName: 'Michael Lee', photoURL: '', trustLevel: 'responsive', isPremium: true },
-        { id: 'user_8', displayName: 'Sophia Taylor', photoURL: '', trustLevel: 'verified', isPremium: true }
-    ];
-    
-    // Save sample users
-    localStorage.setItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS, JSON.stringify(sampleUsers));
-    
-    // Generate sample listings if none exist
-    if (allListings.length === 0) {
-        const sampleListings = [
-            {
-                id: 'listing_1',
-                userId: 'user_1',
-                user: sampleUsers[0],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Professional Graphic Design',
-                description: 'Creating stunning logos, banners, and social media graphics. Fast delivery and unlimited revisions.',
-                price: '$50',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.PUBLIC,
-                moodContext: MOOD_CONTEXTS.CREATIVE,
-                template: TEMPLATE_TYPES.CREATIVE,
-                featured: true,
-                boosted: true,
-                verified: true,
-                premium: true,
-                createdAt: new Date(Date.now() - 3600000).toISOString(),
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_2',
-                userId: 'user_2',
-                user: sampleUsers[1],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Math Tutoring - All Levels',
-                description: 'Experienced math tutor specializing in algebra, calculus, and statistics. Online sessions available.',
-                price: '$30/hour',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.FRIENDS,
-                moodContext: MOOD_CONTEXTS.LEARN,
-                template: TEMPLATE_TYPES.COACHING,
-                premium: true,
-                createdAt: new Date(Date.now() - 7200000).toISOString(),
-                expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_3',
-                userId: 'user_3',
-                user: sampleUsers[2],
-                type: LISTING_TYPES.DIGITAL,
-                title: 'Resume Template Pack',
-                description: '10 professionally designed resume templates in Word and PDF format. ATS-friendly and customizable.',
-                price: '$15',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.PUBLIC,
-                moodContext: MOOD_CONTEXTS.BUSINESS,
-                template: TEMPLATE_TYPES.BUSINESS,
-                fileUrl: '#',
-                fileName: 'resume_templates.zip',
-                fileSize: '2.5 MB',
-                fileType: 'application/zip',
-                createdAt: new Date(Date.now() - 10800000).toISOString(),
-                expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_4',
-                userId: 'user_4',
-                user: sampleUsers[3],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Website Development',
-                description: 'Full-stack web development with React, Node.js, and MongoDB. Responsive design and SEO optimized.',
-                price: '$500+',
-                availability: AVAILABILITY.BUSY,
-                visibility: TRUST_CIRCLES.PREMIUM,
-                moodContext: MOOD_CONTEXTS.BUSINESS,
-                template: TEMPLATE_TYPES.BUSINESS,
-                featured: true,
-                premium: true,
-                createdAt: new Date(Date.now() - 14400000).toISOString(),
-                expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_5',
-                userId: 'user_5',
-                user: sampleUsers[4],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Phone Repair Services',
-                description: 'Screen replacement, battery change, and software issues for all major smartphone brands.',
-                price: 'Starting at $40',
-                availability: AVAILABILITY.URGENT,
-                visibility: TRUST_CIRCLES.PUBLIC,
-                moodContext: MOOD_CONTEXTS.HELP,
-                template: TEMPLATE_TYPES.BASIC,
-                createdAt: new Date(Date.now() - 18000000).toISOString(),
-                expiresAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_6',
-                userId: 'user_6',
-                user: sampleUsers[5],
-                type: LISTING_TYPES.DIGITAL,
-                title: 'Study Notes - Organic Chemistry',
-                description: 'Comprehensive notes covering all major topics in organic chemistry. Perfect for exam preparation.',
-                price: 'Free',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.GROUPS,
-                moodContext: MOOD_CONTEXTS.LEARN,
-                template: TEMPLATE_TYPES.DIGITAL,
-                fileUrl: '#',
-                fileName: 'organic_chemistry_notes.pdf',
-                fileSize: '3.2 MB',
-                fileType: 'application/pdf',
-                createdAt: new Date(Date.now() - 21600000).toISOString(),
-                expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
-            }
-        ];
-        
-        allListings = sampleListings;
-        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-        
-        // Generate sample spotlight listings
-        const spotlightListings = sampleListings.filter(l => l.featured);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, JSON.stringify(spotlightListings));
-        renderSpotlightListings(spotlightListings);
-        
-        // Generate sample friends
-        if (userFriends.length === 0) {
-            userFriends = sampleUsers.slice(0, 4);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_FRIENDS, JSON.stringify(userFriends));
-        }
-        
-        // Generate sample groups
-        if (userGroups.length === 0) {
-            userGroups = [
-                { id: 'group_1', name: 'Students Union', memberCount: 45 },
-                { id: 'group_2', name: 'Freelancers Network', memberCount: 23 },
-                { id: 'group_3', name: 'Tech Enthusiasts', memberCount: 67 }
-            ];
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(userGroups));
-        }
-        
-        // Generate sample analytics
-        if (Object.keys(analyticsData).length === 0) {
-            analyticsData = {
-                views: 245,
-                saves: 42,
-                shares: 18,
-                messages: 56,
-                conversionRate: 12.5,
-                avgEngagement: 45,
-                viewsChange: 15,
-                savesChange: 8,
-                sharesChange: 22,
-                messagesChange: 5,
-                conversionChange: 3,
-                engagementChange: 10
-            };
-            localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
-        }
-        
-        // Generate sample leaderboard
-        if (leaderboardData.length === 0) {
-            leaderboardData = sampleUsers.map((user, index) => ({
-                ...user,
-                listingsCount: Math.floor(Math.random() * 20) + 5,
-                rating: (Math.random() * 2 + 3).toFixed(1),
-                successfulTransactions: Math.floor(Math.random() * 100) + 20,
-                points: Math.floor(Math.random() * 1000) + 500
-            })).sort((a, b) => b.points - a.points);
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
-        }
-        
-        renderMarketplaceList();
-        updateAvailableListingsCount();
-        updateListingCounts();
-        
-        console.log('Sample marketplace data generated for demo');
-    }
-}
-
-async function loadUserFromCache() {
-    try {
-        // Try to get user from localStorage first
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-        if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-        }
-        
-        // Load user profile from cache
-        const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-        if (cachedProfile) {
-            userData = JSON.parse(cachedProfile);
-        }
-        
-        // If no user found and we have an access token, try to fetch from backend
-        if ((!currentUser || !currentUser.id) && accessToken) {
-            try {
-                console.log('Attempting to fetch user from backend using direct token access');
-                const response = await authenticatedApiCall('GET', '/api/auth/me');
-                if (response && response.user) {
-                    currentUser = response.user;
-                    userData = response.user;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                }
-            } catch (error) {
-                console.log('No authenticated user found, will use offline mode');
-                currentUser = {
-                    id: 'offline_user_' + Date.now(),
-                    displayName: 'Guest User',
-                    photoURL: '',
-                    isOffline: true,
-                    trustLevel: 'new'
-                };
-                userData = currentUser;
-            }
-        } else if (!currentUser || !currentUser.id) {
-            // Use offline user
-            currentUser = {
-                id: 'offline_user_' + Date.now(),
-                displayName: 'Guest User',
-                photoURL: '',
-                isOffline: true,
-                trustLevel: 'new'
-            };
-            userData = currentUser;
-        }
-        
-        // Add current user to marketplace users if not exists
-        let allMarketplaceUsers = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS) || '[]');
-        if (!allMarketplaceUsers.find(u => u.id === currentUser.id)) {
-            allMarketplaceUsers.push({
-                id: currentUser.id,
-                displayName: currentUser.displayName,
-                photoURL: currentUser.photoURL,
-                trustLevel: currentUser.trustLevel || 'new',
-                isPremium: currentUser.isPremium || false
-            });
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS, JSON.stringify(allMarketplaceUsers));
-        }
-        
-    } catch (error) {
-        console.error('Error loading user:', error);
-        currentUser = {
-            id: 'offline_user_' + Date.now(),
-            displayName: 'Guest User',
-            photoURL: '',
-            isOffline: true,
-            trustLevel: 'new'
-        };
-        userData = currentUser;
-    }
-}
-
 async function checkUserPremiumStatus() {
     try {
         // Check local storage first
@@ -1077,70 +755,54 @@ async function checkUserPremiumStatus() {
             }
         }
         
-        // Check with backend if we have an access token
-        if (accessToken) {
-            console.log('Checking premium status with backend using direct token access');
-            const response = await authenticatedApiCall('GET', '/api/user/subscription');
-            if (response && response.subscription) {
-                userSubscription = response.subscription;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
-                updatePremiumStatusUI();
-            }
+        // Check with backend
+        console.log('Checking premium status with backend');
+        const response = await makeApiCall('GET', '/api/user/subscription');
+        if (response && response.subscription) {
+            userSubscription = response.subscription;
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
+            updatePremiumStatusUI();
         }
         
     } catch (error) {
         console.error('Error checking premium status:', error);
+        // Don't throw, allow marketplace to work without premium status
     }
 }
 
 async function loadEnhancedMarketplaceData() {
-    // Load data from backend in background
-    setTimeout(async () => {
-        try {
-            if (accessToken) {
-                console.log('Loading enhanced marketplace data using direct token access');
-                await loadListingsFromBackend();
-                await loadUserGroups();
-                await loadUserFriends();
-                await loadTeamMembers();
-                await loadLeaderboard();
-                await loadAnalyticsData();
-                await loadPremiumFeatures();
-                await loadSpotlightListingsFromBackend();
-                
-                updateListingCounts();
-                showNotification('Marketplace data refreshed', 'success');
-            } else if (apiReady && parentValidationComplete) {
-                console.log('Loading enhanced marketplace data via parent API');
-                await loadListingsFromBackend();
-                await loadUserGroups();
-                await loadUserFriends();
-                await loadTeamMembers();
-                await loadLeaderboard();
-                await loadAnalyticsData();
-                await loadPremiumFeatures();
-                await loadSpotlightListingsFromBackend();
-                
-                updateListingCounts();
-                showNotification('Marketplace data refreshed', 'success');
-            } else if (!parentValidationComplete) {
-                console.warn('Parent validation not complete - Skipping API calls');
-            }
-        } catch (error) {
-            console.error('Error loading marketplace data:', error);
-        }
-    }, 500);
+    try {
+        console.log('Loading enhanced marketplace data');
+        
+        // Load data in parallel where possible
+        const promises = [
+            loadListingsFromBackend(),
+            loadUserGroups(),
+            loadUserFriends(),
+            loadTeamMembers(),
+            loadLeaderboard(),
+            loadAnalyticsData(),
+            loadPremiumFeatures(),
+            loadSpotlightListingsFromBackend()
+        ];
+        
+        // Wait for all promises to settle (not necessarily all successful)
+        await Promise.allSettled(promises);
+        
+        updateListingCounts();
+        showNotification('Marketplace data refreshed', 'success');
+        
+    } catch (error) {
+        console.error('Error loading marketplace data:', error);
+        // Generate sample data for demo/offline mode
+        generateSampleMarketplaceData();
+    }
 }
 
 async function loadListingsFromBackend() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            console.warn('Cannot load listings: No access token and API not ready or parent validation not complete');
-            throw new Error('No access token and API not available or parent validation pending');
-        }
-        
-        console.log('Loading listings from backend using authenticated API call');
-        const response = await authenticatedApiCall('GET', '/api/marketplace/listings');
+        console.log('Loading listings from backend');
+        const response = await makeApiCall('GET', '/api/marketplace/listings');
         
         if (response && response.listings) {
             allListings = response.listings;
@@ -1160,15 +822,14 @@ async function loadListingsFromBackend() {
         
     } catch (error) {
         console.error('Error loading listings from backend:', error);
+        throw error;
     }
 }
 
 async function loadUserGroups() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) return;
-        
         console.log('Loading user groups from backend');
-        const response = await authenticatedApiCall('GET', '/api/user/groups');
+        const response = await makeApiCall('GET', '/api/user/groups');
         
         if (response && response.groups) {
             userGroups = response.groups;
@@ -1182,10 +843,8 @@ async function loadUserGroups() {
 
 async function loadUserFriends() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) return;
-        
         console.log('Loading user friends from backend');
-        const response = await authenticatedApiCall('GET', '/api/user/friends');
+        const response = await makeApiCall('GET', '/api/user/friends');
         
         if (response && response.friends) {
             userFriends = response.friends;
@@ -1199,10 +858,10 @@ async function loadUserFriends() {
 
 async function loadTeamMembers() {
     try {
-        // Only load if user has team subscription and we have access
-        if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && (accessToken || (apiReady && parentValidationComplete))) {
+        // Only load if user has team subscription
+        if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team')) {
             console.log('Loading team members from backend');
-            const response = await authenticatedApiCall('GET', '/api/team/members');
+            const response = await makeApiCall('GET', '/api/team/members');
             
             if (response && response.members) {
                 teamMembers = response.members;
@@ -1217,10 +876,8 @@ async function loadTeamMembers() {
 
 async function loadLeaderboard() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) return;
-        
         console.log('Loading leaderboard from backend');
-        const response = await authenticatedApiCall('GET', '/api/marketplace/leaderboard');
+        const response = await makeApiCall('GET', '/api/marketplace/leaderboard');
         
         if (response && response.leaderboard) {
             leaderboardData = response.leaderboard;
@@ -1234,9 +891,9 @@ async function loadLeaderboard() {
 
 async function loadAnalyticsData() {
     try {
-        if (isUserPremium() && (accessToken || (apiReady && parentValidationComplete))) {
+        if (isUserPremium()) {
             console.log('Loading analytics data from backend');
-            const response = await authenticatedApiCall('GET', '/api/marketplace/analytics');
+            const response = await makeApiCall('GET', '/api/marketplace/analytics');
             
             if (response && response.analytics) {
                 analyticsData = response.analytics;
@@ -1252,10 +909,8 @@ async function loadAnalyticsData() {
 
 async function loadPremiumFeatures() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) return;
-        
         console.log('Loading premium features from backend');
-        const response = await authenticatedApiCall('GET', '/api/premium/features');
+        const response = await makeApiCall('GET', '/api/premium/features');
         
         if (response && response.features) {
             premiumFeatures = response.features;
@@ -1269,10 +924,8 @@ async function loadPremiumFeatures() {
 
 async function loadSpotlightListingsFromBackend() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) return;
-        
         console.log('Loading spotlight listings from backend');
-        const response = await authenticatedApiCall('GET', '/api/marketplace/spotlight');
+        const response = await makeApiCall('GET', '/api/marketplace/spotlight');
         
         if (response && response.spotlightListings) {
             renderSpotlightListings(response.spotlightListings);
@@ -1283,6 +936,9 @@ async function loadSpotlightListingsFromBackend() {
         console.error('Error loading spotlight listings:', error);
     }
 }
+
+// The rest of the functions remain exactly the same as in the original file
+// Only the authentication and initialization logic has been updated
 
 function updatePremiumStatusUI() {
     if (userSubscription && userSubscription.status === 'active') {
@@ -1832,11 +1488,9 @@ function loadListingDetail(listingData, container) {
 
 async function downloadDigitalFile(listingId, fileUrl, fileName) {
     try {
-        // Track download if we have access
-        if (accessToken || (apiReady && parentValidationComplete)) {
-            console.log('Tracking download using authenticated API');
-            await authenticatedApiCall('POST', `/api/marketplace/listings/${listingId}/download`);
-        }
+        // Track download
+        console.log('Tracking download');
+        await makeApiCall('POST', `/api/marketplace/listings/${listingId}/download`);
         
         // Create download link
         const link = document.createElement('a');
@@ -1924,20 +1578,15 @@ async function createPremiumServiceListing(title, description, premiumOptions = 
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
     // Send to backend using authenticated API if available
-    if (accessToken || (apiReady && parentValidationComplete)) {
-        try {
-            console.log('Posting premium service listing to backend using authenticated API');
-            const response = await authenticatedApiCall('POST', '/api/marketplace/listings/premium', listing);
-            if (response && response.listing) {
-                listing.id = response.listing.id || listingId;
-                console.log('Premium service listing posted to backend');
-            }
-        } catch (error) {
-            console.log('Offline: Premium listing saved locally');
-            queueForSync(listing, 'premium_listing');
+    try {
+        console.log('Posting premium service listing to backend');
+        const response = await makeApiCall('POST', '/api/marketplace/listings/premium', listing);
+        if (response && response.listing) {
+            listing.id = response.listing.id || listingId;
+            console.log('Premium service listing posted to backend');
         }
-    } else {
-        console.log('No access available: Premium listing saved locally');
+    } catch (error) {
+        console.log('Offline: Premium listing saved locally');
         queueForSync(listing, 'premium_listing');
     }
     
@@ -2029,20 +1678,15 @@ async function createPremiumDigitalListing(title, description, fileData, premium
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
     // Send to backend using authenticated API if available
-    if (accessToken || (apiReady && parentValidationComplete)) {
-        try {
-            console.log('Posting premium digital listing to backend using authenticated API');
-            const response = await authenticatedApiCall('POST', '/api/marketplace/listings/premium', listing);
-            if (response && response.listing) {
-                listing.id = response.listing.id || listingId;
-                console.log('Premium digital listing posted to backend');
-            }
-        } catch (error) {
-            console.log('Offline: Premium listing saved locally');
-            queueForSync(listing, 'premium_listing');
+    try {
+        console.log('Posting premium digital listing to backend');
+        const response = await makeApiCall('POST', '/api/marketplace/listings/premium', listing);
+        if (response && response.listing) {
+            listing.id = response.listing.id || listingId;
+            console.log('Premium digital listing posted to backend');
         }
-    } else {
-        console.log('No access available: Premium listing saved locally');
+    } catch (error) {
+        console.log('Offline: Premium listing saved locally');
         queueForSync(listing, 'premium_listing');
     }
     
@@ -2077,11 +1721,9 @@ async function processFeaturedListing(listing) {
         // Update UI
         renderSpotlightListings(spotlightListings);
         
-        // Send to backend if we have access
-        if (accessToken || (apiReady && parentValidationComplete)) {
-            console.log('Processing featured listing using authenticated API');
-            await authenticatedApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
-        }
+        // Send to backend
+        console.log('Processing featured listing');
+        await makeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
         
     } catch (error) {
         console.error('Error processing featured listing:', error);
@@ -2090,14 +1732,12 @@ async function processFeaturedListing(listing) {
 
 async function processBoostedListing(listing) {
     try {
-        // Send boost request to backend if we have access
-        if (accessToken || (apiReady && parentValidationComplete)) {
-            console.log('Processing boosted listing using authenticated API');
-            await authenticatedApiCall('POST', '/api/marketplace/boost', { 
-                listingId: listing.id,
-                duration: '24h'
-            });
-        }
+        // Send boost request to backend
+        console.log('Processing boosted listing');
+        await makeApiCall('POST', '/api/marketplace/boost', { 
+            listingId: listing.id,
+            duration: '24h'
+        });
         
     } catch (error) {
         console.error('Error processing boosted listing:', error);
@@ -2108,12 +1748,7 @@ async function processPremiumPayment(listing, options) {
     const paymentAmount = calculatePremiumCost(options);
     
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            showNotification('Payment processing requires authentication', 'error');
-            return false;
-        }
-        
-        console.log('Processing premium payment using authenticated API');
+        console.log('Processing premium payment');
         const paymentData = {
             amount: paymentAmount,
             currency: 'USD',
@@ -2126,7 +1761,7 @@ async function processPremiumPayment(listing, options) {
             }
         };
         
-        const response = await authenticatedApiCall('POST', '/api/payments/process', paymentData);
+        const response = await makeApiCall('POST', '/api/payments/process', paymentData);
         
         if (response && response.success) {
             showNotification('Premium features activated successfully', 'success');
@@ -2157,26 +1792,7 @@ async function sendTip(listingId, amount, customAmount = null) {
     const finalAmount = customAmount || amount;
     
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate offline tipping
-            showNotification(`Tip of $${finalAmount} recorded offline`, 'success');
-            
-            // Update analytics
-            updateAnalyticsData('tipReceived', finalAmount);
-            
-            // Store tip locally for sync
-            const offlineTips = JSON.parse(localStorage.getItem('knecta_offline_tips') || '[]');
-            offlineTips.push({
-                listingId: listingId,
-                amount: finalAmount,
-                timestamp: new Date().toISOString()
-            });
-            localStorage.setItem('knecta_offline_tips', JSON.stringify(offlineTips));
-            
-            return true;
-        }
-        
-        console.log('Sending tip using authenticated API');
+        console.log('Sending tip');
         const tipData = {
             listingId: listingId,
             amount: finalAmount,
@@ -2184,7 +1800,7 @@ async function sendTip(listingId, amount, customAmount = null) {
             message: 'Thanks for your great listing!'
         };
         
-        const response = await authenticatedApiCall('POST', '/api/marketplace/tips', tipData);
+        const response = await makeApiCall('POST', '/api/marketplace/tips', tipData);
         
         if (response && response.success) {
             showNotification(`Tip of $${finalAmount} sent successfully!`, 'success');
@@ -2484,32 +2100,13 @@ async function uploadBulkListings(listings) {
         bulkUploadList.appendChild(item);
         
         try {
-            // Upload listing if we have access
-            if (accessToken || (apiReady && parentValidationComplete)) {
-                console.log('Uploading bulk listing using authenticated API');
-                const response = await authenticatedApiCall('POST', '/api/marketplace/listings/bulk', listing);
-                
-                if (response && response.success) {
-                    item.querySelector('.loading-spinner').style.display = 'none';
-                    item.innerHTML += '<i class="fas fa-check" style="color: var(--success-color);"></i>';
-                }
-            } else {
+            // Upload listing
+            console.log('Uploading bulk listing');
+            const response = await makeApiCall('POST', '/api/marketplace/listings/bulk', listing);
+            
+            if (response && response.success) {
                 item.querySelector('.loading-spinner').style.display = 'none';
                 item.innerHTML += '<i class="fas fa-check" style="color: var(--success-color);"></i>';
-                console.log('Bulk upload saved locally (offline mode)');
-                
-                // Add to local listings
-                const newListing = {
-                    ...listing,
-                    id: 'bulk_' + Date.now() + '_' + i,
-                    userId: currentUser.id,
-                    user: userData,
-                    createdAt: new Date().toISOString(),
-                    expiresAt: new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString()
-                };
-                
-                allListings.unshift(newListing);
-                myListings.unshift(newListing);
             }
         } catch (error) {
             item.querySelector('.loading-spinner').style.display = 'none';
@@ -2645,28 +2242,8 @@ function renderLeaderboard() {
 // Export Functions
 async function exportAnalytics(format) {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate offline export
-            showNotification(`Analytics exported as ${format.toUpperCase()} (offline)`, 'success');
-            
-            // Create fake download
-            const analyticsDataStr = JSON.stringify(analyticsData, null, 2);
-            const blob = new Blob([analyticsDataStr], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `analytics_${new Date().toISOString().split('T')[0]}.${format}`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            URL.revokeObjectURL(url);
-            return;
-        }
-        
-        console.log('Exporting analytics using authenticated API');
-        const response = await authenticatedApiCall('GET', `/api/analytics/export?format=${format}`);
+        console.log('Exporting analytics');
+        const response = await makeApiCall('GET', `/api/analytics/export?format=${format}`);
         
         if (response && response.downloadUrl) {
             // Create download link
@@ -2992,14 +2569,12 @@ function trackListingView(listingId) {
     analyticsData.views++;
     saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
     
-    // Send to backend if we have access
-    if (accessToken || (apiReady && parentValidationComplete)) {
-        try {
-            console.log('Tracking listing view using authenticated API');
-            authenticatedApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
-        } catch (error) {
-            console.error('Error tracking view:', error);
-        }
+    // Send to backend
+    try {
+        console.log('Tracking listing view');
+        makeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
+    } catch (error) {
+        console.error('Error tracking view:', error);
     }
 }
 
@@ -3044,25 +2619,20 @@ function createServiceListing(title, description, options = {}) {
     allListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
-    // Send to backend using authenticated API if available
-    if (accessToken || (apiReady && parentValidationComplete)) {
-        try {
-            console.log('Posting service listing to backend using authenticated API');
-            authenticatedApiCall('POST', '/api/marketplace/listings', listing).then(response => {
-                if (response && response.listing) {
-                    listing.id = response.listing.id || listingId;
-                    console.log('Service listing posted to backend');
-                }
-            }).catch(error => {
-                console.log('Offline: Listing saved locally');
-                queueForSync(listing, 'listing');
-            });
-        } catch (error) {
+    // Send to backend
+    try {
+        console.log('Posting service listing to backend');
+        makeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
+            if (response && response.listing) {
+                listing.id = response.listing.id || listingId;
+                console.log('Service listing posted to backend');
+            }
+        }).catch(error => {
             console.log('Offline: Listing saved locally');
             queueForSync(listing, 'listing');
-        }
-    } else {
-        console.log('No access available: Listing saved locally');
+        });
+    } catch (error) {
+        console.log('Offline: Listing saved locally');
         queueForSync(listing, 'listing');
     }
     
@@ -3121,25 +2691,20 @@ function createDigitalListing(title, description, fileData, options = {}) {
     allListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
-    // Send to backend using authenticated API if available
-    if (accessToken || (apiReady && parentValidationComplete)) {
-        try {
-            console.log('Posting digital listing to backend using authenticated API');
-            authenticatedApiCall('POST', '/api/marketplace/listings', listing).then(response => {
-                if (response && response.listing) {
-                    listing.id = response.listing.id || listingId;
-                    console.log('Digital listing posted to backend');
-                }
-            }).catch(error => {
-                console.log('Offline: Listing saved locally');
-                queueForSync(listing, 'listing');
-            });
-        } catch (error) {
+    // Send to backend
+    try {
+        console.log('Posting digital listing to backend');
+        makeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
+            if (response && response.listing) {
+                listing.id = response.listing.id || listingId;
+                console.log('Digital listing posted to backend');
+            }
+        }).catch(error => {
             console.log('Offline: Listing saved locally');
             queueForSync(listing, 'listing');
-        }
-    } else {
-        console.log('No access available: Listing saved locally');
+        });
+    } catch (error) {
+        console.log('Offline: Listing saved locally');
         queueForSync(listing, 'listing');
     }
     
@@ -3159,121 +2724,194 @@ function createDigitalListing(title, description, fileData, options = {}) {
     return listing;
 }
 
-// Authenticated API call function with direct token access
-async function authenticatedApiCall(method, endpoint, data = null) {
-    // Check if token is expired and needs refresh
-    if (accessToken && isTokenExpired(accessToken)) {
-        console.log('Access token expired, attempting refresh before API call');
-        await attemptTokenRefresh();
-    }
+// Sample data generation for demo/offline mode
+function generateSampleMarketplaceData() {
+    // Generate sample users for marketplace
+    const sampleUsers = [
+        { id: 'user_1', displayName: 'Alex Johnson', photoURL: '', trustLevel: 'reliable', isPremium: true },
+        { id: 'user_2', displayName: 'Maria Garcia', photoURL: '', trustLevel: 'verified', isPremium: true },
+        { id: 'user_3', displayName: 'David Smith', photoURL: '', trustLevel: 'responsive' },
+        { id: 'user_4', displayName: 'Sarah Wilson', photoURL: '', trustLevel: 'pro', isPremium: true },
+        { id: 'user_5', displayName: 'James Brown', photoURL: '', trustLevel: 'new' },
+        { id: 'user_6', displayName: 'Emma Davis', photoURL: '', trustLevel: 'reliable' },
+        { id: 'user_7', displayName: 'Michael Lee', photoURL: '', trustLevel: 'responsive', isPremium: true },
+        { id: 'user_8', displayName: 'Sophia Taylor', photoURL: '', trustLevel: 'verified', isPremium: true }
+    ];
     
-    // If still no valid token, throw error
-    if (!accessToken || isTokenExpired(accessToken)) {
-        console.error(`No valid access token for API call: ${method} ${endpoint}`);
-        throw new Error('Authentication required');
-    }
+    // Save sample users
+    localStorage.setItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS, JSON.stringify(sampleUsers));
     
-    console.log(`Making authenticated API call: ${method} ${endpoint}`);
-    
-    try {
-        // Try to use parent API first (for backward compatibility)
-        if (window.parent && window.parent.api) {
-            return await window.parent.api(method, endpoint, data);
-        }
-        
-        // Try to use window API
-        if (window.api) {
-            return await window.api(method, endpoint, data);
-        }
-        
-        // Make direct fetch request with authorization header
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-        };
-        
-        const options = {
-            method: method,
-            headers: headers
-        };
-        
-        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-            options.body = JSON.stringify(data);
-        }
-        
-        const response = await fetch(endpoint, options);
-        
-        // Handle 401 Unauthorized - token might be invalid
-        if (response.status === 401) {
-            console.log('API returned 401, attempting token refresh');
-            await attemptTokenRefresh();
-            
-            // Retry with new token
-            headers.Authorization = `Bearer ${accessToken}`;
-            const retryResponse = await fetch(endpoint, options);
-            
-            if (!retryResponse.ok) {
-                throw new Error(`API error after refresh: ${retryResponse.status}`);
+    // Generate sample listings if none exist
+    if (allListings.length === 0) {
+        const sampleListings = [
+            {
+                id: 'listing_1',
+                userId: 'user_1',
+                user: sampleUsers[0],
+                type: LISTING_TYPES.SERVICE,
+                title: 'Professional Graphic Design',
+                description: 'Creating stunning logos, banners, and social media graphics. Fast delivery and unlimited revisions.',
+                price: '$50',
+                availability: AVAILABILITY.FREE,
+                visibility: TRUST_CIRCLES.PUBLIC,
+                moodContext: MOOD_CONTEXTS.CREATIVE,
+                template: TEMPLATE_TYPES.CREATIVE,
+                featured: true,
+                boosted: true,
+                verified: true,
+                premium: true,
+                createdAt: new Date(Date.now() - 3600000).toISOString(),
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+            },
+            {
+                id: 'listing_2',
+                userId: 'user_2',
+                user: sampleUsers[1],
+                type: LISTING_TYPES.SERVICE,
+                title: 'Math Tutoring - All Levels',
+                description: 'Experienced math tutor specializing in algebra, calculus, and statistics. Online sessions available.',
+                price: '$30/hour',
+                availability: AVAILABILITY.FREE,
+                visibility: TRUST_CIRCLES.FRIENDS,
+                moodContext: MOOD_CONTEXTS.LEARN,
+                template: TEMPLATE_TYPES.COACHING,
+                premium: true,
+                createdAt: new Date(Date.now() - 7200000).toISOString(),
+                expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+            },
+            {
+                id: 'listing_3',
+                userId: 'user_3',
+                user: sampleUsers[2],
+                type: LISTING_TYPES.DIGITAL,
+                title: 'Resume Template Pack',
+                description: '10 professionally designed resume templates in Word and PDF format. ATS-friendly and customizable.',
+                price: '$15',
+                availability: AVAILABILITY.FREE,
+                visibility: TRUST_CIRCLES.PUBLIC,
+                moodContext: MOOD_CONTEXTS.BUSINESS,
+                template: TEMPLATE_TYPES.BUSINESS,
+                fileUrl: '#',
+                fileName: 'resume_templates.zip',
+                fileSize: '2.5 MB',
+                fileType: 'application/zip',
+                createdAt: new Date(Date.now() - 10800000).toISOString(),
+                expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+            },
+            {
+                id: 'listing_4',
+                userId: 'user_4',
+                user: sampleUsers[3],
+                type: LISTING_TYPES.SERVICE,
+                title: 'Website Development',
+                description: 'Full-stack web development with React, Node.js, and MongoDB. Responsive design and SEO optimized.',
+                price: '$500+',
+                availability: AVAILABILITY.BUSY,
+                visibility: TRUST_CIRCLES.PREMIUM,
+                moodContext: MOOD_CONTEXTS.BUSINESS,
+                template: TEMPLATE_TYPES.BUSINESS,
+                featured: true,
+                premium: true,
+                createdAt: new Date(Date.now() - 14400000).toISOString(),
+                expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+            },
+            {
+                id: 'listing_5',
+                userId: 'user_5',
+                user: sampleUsers[4],
+                type: LISTING_TYPES.SERVICE,
+                title: 'Phone Repair Services',
+                description: 'Screen replacement, battery change, and software issues for all major smartphone brands.',
+                price: 'Starting at $40',
+                availability: AVAILABILITY.URGENT,
+                visibility: TRUST_CIRCLES.PUBLIC,
+                moodContext: MOOD_CONTEXTS.HELP,
+                template: TEMPLATE_TYPES.BASIC,
+                createdAt: new Date(Date.now() - 18000000).toISOString(),
+                expiresAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString()
+            },
+            {
+                id: 'listing_6',
+                userId: 'user_6',
+                user: sampleUsers[5],
+                type: LISTING_TYPES.DIGITAL,
+                title: 'Study Notes - Organic Chemistry',
+                description: 'Comprehensive notes covering all major topics in organic chemistry. Perfect for exam preparation.',
+                price: 'Free',
+                availability: AVAILABILITY.FREE,
+                visibility: TRUST_CIRCLES.GROUPS,
+                moodContext: MOOD_CONTEXTS.LEARN,
+                template: TEMPLATE_TYPES.DIGITAL,
+                fileUrl: '#',
+                fileName: 'organic_chemistry_notes.pdf',
+                fileSize: '3.2 MB',
+                fileType: 'application/pdf',
+                createdAt: new Date(Date.now() - 21600000).toISOString(),
+                expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
             }
+        ];
+        
+        allListings = sampleListings;
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+        
+        // Generate sample spotlight listings
+        const spotlightListings = sampleListings.filter(l => l.featured);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, JSON.stringify(spotlightListings));
+        renderSpotlightListings(spotlightListings);
+        
+        // Generate sample friends
+        if (userFriends.length === 0) {
+            userFriends = sampleUsers.slice(0, 4);
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_FRIENDS, JSON.stringify(userFriends));
+        }
+        
+        // Generate sample groups
+        if (userGroups.length === 0) {
+            userGroups = [
+                { id: 'group_1', name: 'Students Union', memberCount: 45 },
+                { id: 'group_2', name: 'Freelancers Network', memberCount: 23 },
+                { id: 'group_3', name: 'Tech Enthusiasts', memberCount: 67 }
+            ];
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(userGroups));
+        }
+        
+        // Generate sample analytics
+        if (Object.keys(analyticsData).length === 0) {
+            analyticsData = {
+                views: 245,
+                saves: 42,
+                shares: 18,
+                messages: 56,
+                conversionRate: 12.5,
+                avgEngagement: 45,
+                viewsChange: 15,
+                savesChange: 8,
+                sharesChange: 22,
+                messagesChange: 5,
+                conversionChange: 3,
+                engagementChange: 10
+            };
+            localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
+        }
+        
+        // Generate sample leaderboard
+        if (leaderboardData.length === 0) {
+            leaderboardData = sampleUsers.map((user, index) => ({
+                ...user,
+                listingsCount: Math.floor(Math.random() * 20) + 5,
+                rating: (Math.random() * 2 + 3).toFixed(1),
+                successfulTransactions: Math.floor(Math.random() * 100) + 20,
+                points: Math.floor(Math.random() * 1000) + 500
+            })).sort((a, b) => b.points - a.points);
             
-            return await retryResponse.json();
+            localStorage.setItem(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
         }
         
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
+        renderMarketplaceList();
+        updateAvailableListingsCount();
+        updateListingCounts();
         
-        return await response.json();
-        
-    } catch (error) {
-        console.error(`Authenticated API call failed: ${method} ${endpoint}`, error);
-        
-        // If it's an auth error, redirect to login
-        if (error.message.includes('Authentication') || error.message.includes('401')) {
-            showNotification('Session expired. Please login again.', 'error');
-            redirectToLogin();
-        }
-        
-        throw error;
-    }
-}
-
-// Safe API call function with parent validation check (for backward compatibility)
-async function safeApiCall(method, endpoint, data = null) {
-    // First try authenticated API call with direct token
-    if (accessToken) {
-        return await authenticatedApiCall(method, endpoint, data);
-    }
-    
-    // Fall back to parent API if no direct token
-    if (!apiReady) {
-        throw new Error('API not available');
-    }
-    
-    // Check if parent validation is complete
-    if (!parentValidationComplete) {
-        console.warn(`API call blocked: Parent validation not complete for ${method} ${endpoint}`);
-        throw new Error('Parent validation not complete');
-    }
-    
-    console.log(`Making API call via parent: ${method} ${endpoint} - Parent validation complete`);
-    
-    try {
-        // Try to use parent API first
-        if (window.parent && window.parent.api) {
-            return await window.parent.api(method, endpoint, data);
-        }
-        
-        // Try to use window API
-        if (window.api) {
-            return await window.api(method, endpoint, data);
-        }
-        
-        throw new Error('No API available');
-        
-    } catch (error) {
-        console.error(`API call failed: ${method} ${endpoint}`, error);
-        throw error;
+        console.log('Sample marketplace data generated for demo');
     }
 }
 
@@ -4641,27 +4279,7 @@ async function processSubscriptionPayment() {
     }
     
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate offline payment for demo
-            showNotification('Subscription activated (demo mode)', 'success');
-            
-            userSubscription = {
-                status: 'active',
-                plan: window.selectedPlan,
-                expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                features: ['featured_listings', 'advanced_analytics', 'priority_messaging']
-            };
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
-            
-            updatePremiumStatusUI();
-            if (premiumOptionsModal) premiumOptionsModal.classList.remove('active');
-            
-            showNotification('Premium subscription activated successfully!', 'success');
-            return;
-        }
-        
-        console.log('Processing subscription payment using authenticated API');
+        console.log('Processing subscription payment');
         const paymentData = {
             plan: window.selectedPlan,
             paymentMethod: selectedMethod,
@@ -4677,7 +4295,7 @@ async function processSubscriptionPayment() {
             };
         }
         
-        const response = await authenticatedApiCall('POST', '/api/subscriptions/purchase', paymentData);
+        const response = await makeApiCall('POST', '/api/subscriptions/purchase', paymentData);
         
         if (response && response.success) {
             userSubscription = response.subscription;
@@ -4697,28 +4315,8 @@ async function processSubscriptionPayment() {
 
 async function startFreeTrial() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate free trial for demo
-            showNotification('7-day free trial started (demo mode)', 'success');
-            
-            userSubscription = {
-                status: 'active',
-                plan: 'trial',
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-                features: ['featured_listings', 'advanced_analytics', 'priority_messaging']
-            };
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
-            
-            updatePremiumStatusUI();
-            if (premiumOptionsModal) premiumOptionsModal.classList.remove('active');
-            
-            showNotification('7-day free trial started!', 'success');
-            return;
-        }
-        
-        console.log('Starting free trial using authenticated API');
-        const response = await authenticatedApiCall('POST', '/api/subscriptions/trial');
+        console.log('Starting free trial');
+        const response = await makeApiCall('POST', '/api/subscriptions/trial');
         
         if (response && response.success) {
             userSubscription = response.subscription;
@@ -4738,20 +4336,8 @@ async function startFreeTrial() {
 
 async function restorePurchase() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate restore for demo
-            if (localStorage.getItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION)) {
-                userSubscription = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION));
-                updatePremiumStatusUI();
-                showNotification('Purchase restored successfully!', 'success');
-            } else {
-                showNotification('No previous purchase found', 'info');
-            }
-            return;
-        }
-        
-        console.log('Restoring purchase using authenticated API');
-        const response = await authenticatedApiCall('POST', '/api/subscriptions/restore');
+        console.log('Restoring purchase');
+        const response = await makeApiCall('POST', '/api/subscriptions/restore');
         
         if (response && response.success) {
             userSubscription = response.subscription;
@@ -4776,26 +4362,8 @@ async function inviteTeamMember() {
     if (!email) return;
     
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate invitation for demo
-            const newMember = {
-                id: 'team_' + Date.now(),
-                displayName: email.split('@')[0],
-                email: email,
-                role: 'member',
-                invitedAt: new Date().toISOString()
-            };
-            
-            teamMembers.push(newMember);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.TEAM_MEMBERS, JSON.stringify(teamMembers));
-            
-            renderTeamMembers();
-            showNotification('Invitation sent successfully (demo)', 'success');
-            return;
-        }
-        
-        console.log('Inviting team member using authenticated API');
-        const response = await authenticatedApiCall('POST', '/api/team/invite', { email });
+        console.log('Inviting team member');
+        const response = await makeApiCall('POST', '/api/team/invite', { email });
         
         if (response && response.success) {
             showNotification('Invitation sent successfully', 'success');
@@ -4809,14 +4377,7 @@ async function inviteTeamMember() {
 
 async function saveTeamChanges() {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate team update for demo
-            showNotification('Team updated successfully (demo)', 'success');
-            if (teamManagementModal) teamManagementModal.classList.remove('active');
-            return;
-        }
-        
-        console.log('Saving team changes using authenticated API');
+        console.log('Saving team changes');
         // Collect role changes
         const roleChanges = [];
         document.querySelectorAll('select[data-member-id]').forEach(select => {
@@ -4826,7 +4387,7 @@ async function saveTeamChanges() {
             });
         });
         
-        const response = await authenticatedApiCall('POST', '/api/team/update', { roleChanges });
+        const response = await makeApiCall('POST', '/api/team/update', { roleChanges });
         
         if (response && response.success) {
             showNotification('Team updated successfully', 'success');
@@ -4841,36 +4402,8 @@ async function saveTeamChanges() {
 
 async function addReaction(listingId, reaction) {
     try {
-        if (!accessToken && (!apiReady || !parentValidationComplete)) {
-            // Simulate reaction for demo
-            showNotification('Reaction added!', 'success');
-            if (reactionPickerModal) reactionPickerModal.classList.remove('active');
-            
-            // Update the current listing with reaction
-            const listingIndex = allListings.findIndex(l => l.id === listingId);
-            if (listingIndex !== -1) {
-                if (!allListings[listingIndex].reactions) {
-                    allListings[listingIndex].reactions = [];
-                }
-                
-                allListings[listingIndex].reactions.push({
-                    emoji: reaction,
-                    count: 1,
-                    premium: reaction.length > 2
-                });
-                
-                saveToLocalStorage(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-                
-                // Refresh detail view if open
-                if (window.currentListingId === listingId) {
-                    viewListingDetail(allListings[listingIndex]);
-                }
-            }
-            return;
-        }
-        
-        console.log('Adding reaction using authenticated API');
-        const response = await authenticatedApiCall('POST', `/api/marketplace/listings/${listingId}/reactions`, {
+        console.log('Adding reaction');
+        const response = await makeApiCall('POST', `/api/marketplace/listings/${listingId}/reactions`, {
             reaction: reaction,
             premium: reaction.length > 2 // Premium reactions are usually longer emoji sequences
         });
@@ -5010,23 +4543,18 @@ async function syncOfflineMarketplaceData() {
     
     if (marketplaceItems.length === 0) return;
     
-    if (!accessToken && (!apiReady || !parentValidationComplete)) {
-        showNotification('Sync requires authentication', 'info');
-        return;
-    }
-    
     showNotification(`Syncing ${marketplaceItems.length} marketplace items...`, 'info');
     
     for (let i = 0; i < marketplaceItems.length; i++) {
         const item = marketplaceItems[i];
         try {
             if (item.type === 'marketplace_listing') {
-                console.log('Syncing marketplace listing using authenticated API');
-                await authenticatedApiCall('POST', '/api/marketplace/listings', item.data);
+                console.log('Syncing marketplace listing');
+                await makeApiCall('POST', '/api/marketplace/listings', item.data);
                 syncQueue.splice(syncQueue.indexOf(item), 1);
             } else if (item.type === 'marketplace_premium_listing') {
-                console.log('Syncing premium marketplace listing using authenticated API');
-                await authenticatedApiCall('POST', '/api/marketplace/listings/premium', item.data);
+                console.log('Syncing premium marketplace listing');
+                await makeApiCall('POST', '/api/marketplace/listings/premium', item.data);
                 syncQueue.splice(syncQueue.indexOf(item), 1);
             }
         } catch (error) {
@@ -5244,6 +4772,4 @@ function showMyNotesModal() {
 console.log('Enhanced marketplace system initialized successfully');
 console.log('Premium features enabled: Featured Listings, Advanced Analytics, Team Tools, AR Previews, Bulk Uploads, Backup & Restore');
 console.log('Direct token access enabled: Yes');
-console.log('API Ready:', apiReady);
-console.log('Access Token Available:', !!accessToken);
-console.log('Parent Validation Complete:', parentValidationComplete);
+console.log('Bootstrapped:', isBootstrapped);
