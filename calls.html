@@ -14,6 +14,74 @@
     <style>
         
         
+        /* Three dots menu styles */
+        .menu-dots-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: var(--shadow);
+        }
+        
+        .menu-dots-dropdown {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            background: var(--bg-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+            width: 250px;
+            z-index: 1001;
+            display: none;
+            overflow: hidden;
+        }
+        
+        .menu-dots-dropdown.active {
+            display: block;
+        }
+        
+        .menu-item {
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .menu-item:last-child {
+            border-bottom: none;
+        }
+        
+        .menu-item:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .menu-item i {
+            width: 20px;
+            color: var(--primary-color);
+        }
+        
+        .menu-item .badge {
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-left: auto;
+        }
 
         /* Additional styles for features not fully covered in calls.css */
         .url-param-overlay {
@@ -291,9 +359,167 @@
             background-color: rgba(255, 149, 0, 0.7);
             animation: pulse 2s infinite;
         }
+        
+        /* Floating reaction styles */
+        .floating-reaction {
+            position: absolute;
+            font-size: 32px;
+            pointer-events: none;
+            z-index: 100;
+            animation: floatUp 3s ease-in-out forwards;
+        }
+        
+        @keyframes floatUp {
+            0% {
+                transform: translateY(0) scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(-100px) scale(0.5);
+                opacity: 0;
+            }
+        }
+        
+        /* Poll styles */
+        .poll-option-item {
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .poll-option-item:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .poll-option-item.selected {
+            border-color: var(--primary-color);
+            background-color: rgba(0, 132, 255, 0.1);
+        }
+        
+        .poll-option-text {
+            flex: 1;
+        }
+        
+        .poll-option-votes {
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+        
+        .poll-result-bar {
+            height: 20px;
+            background: var(--border-color);
+            border-radius: 10px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        
+        .poll-result-fill {
+            height: 100%;
+            background: var(--primary-color);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        
+        .poll-result-percentage {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        /* Relationship insights styles */
+        .insight-card {
+            background: var(--secondary-color);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .insight-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+        
+        .insight-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        
+        .insight-description {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+        
+        .insight-trend {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-left: 10px;
+        }
+        
+        .trend-up {
+            background: rgba(52, 199, 89, 0.2);
+            color: var(--success-color);
+        }
+        
+        .trend-down {
+            background: rgba(255, 59, 48, 0.2);
+            color: var(--error-color);
+        }
+        
+        .trend-neutral {
+            background: rgba(142, 142, 147, 0.2);
+            color: var(--text-secondary);
+        }
     </style>
 </head>
 <body>
+    <!-- Three Dots Menu Button -->
+    <button class="menu-dots-btn" id="menuDotsBtn">
+        <i class="fas fa-ellipsis-v"></i>
+    </button>
+    
+    <!-- Three Dots Menu Dropdown -->
+    <div class="menu-dots-dropdown" id="menuDotsDropdown">
+        <div class="menu-item" id="menuParticipants">
+            <i class="fas fa-users"></i>
+            <span>Participants</span>
+            <span class="badge" id="participantBadge">0</span>
+        </div>
+        <div class="menu-item" id="menuChat">
+            <i class="fas fa-comment"></i>
+            <span>Chat</span>
+            <span class="badge" id="chatBadge">0</span>
+        </div>
+        <div class="menu-item" id="menuWhiteboard">
+            <i class="fas fa-paint-brush"></i>
+            <span>Whiteboard</span>
+        </div>
+        <div class="menu-item" id="menuNotes">
+            <i class="fas fa-sticky-note"></i>
+            <span>Notes</span>
+        </div>
+        <div class="menu-item" id="menuPolls">
+            <i class="fas fa-poll"></i>
+            <span>Polls</span>
+        </div>
+        <div class="menu-item" id="menuRelationship">
+            <i class="fas fa-heart"></i>
+            <span>Relationship</span>
+        </div>
+    </div>
+    
     <!-- Offline Banner -->
     <div class="offline-banner" id="offlineBanner">
         <i class="fas fa-wifi-slash"></i>
@@ -302,7 +528,7 @@
     
     <!-- API Status Indicator -->
     <div class="api-status-indicator" id="apiStatusIndicator">
-        <span id="apiStatusText">Checking API...</span>
+        <span id="apiStatusText">Waiting for parent API...</span>
     </div>
     
     <!-- URL Parameter Call Overlay -->
@@ -790,7 +1016,7 @@
                             <span>Recent Calls</span>
                             <span class="sync-indicator" id="syncIndicator">
                                 <i class="fas fa-sync"></i>
-                                <span>Synced</span>
+                                <span>Waiting for API...</span>
                             </span>
                         </div>
                         
@@ -804,7 +1030,7 @@
                                 </div>
                                 <div class="loading-placeholder" id="callsLoading">
                                     <div class="loading-spinner"></div>
-                                    <p>Loading call history...</p>
+                                    <p>Waiting for API to load calls...</p>
                                 </div>
                             </div>
                         </div>
@@ -850,7 +1076,7 @@
                     </div>
                     <div class="call-info-text">
                         <h4 id="callWithName">Connecting...</h4>
-                        <p id="callStatusText">Connecting...</p>
+                        <p id="callStatusText">Waiting for API...</p>
                         <div id="callMoodIndicator" style="display: none;"></div>
                         <div id="callIntentionIndicator" style="display: none;"></div>
                     </div>
@@ -1104,11 +1330,290 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
     
     <script>
+        // NEW: Authentication token management - Direct access from localStorage
+        const AuthManager = {
+            // Read tokens directly from localStorage
+            getTokens() {
+                const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_token');
+                const refreshToken = localStorage.getItem('refreshToken');
+                
+                console.log('Tokens retrieved from localStorage:', {
+                    accessToken: accessToken ? 'Available' : 'Missing',
+                    refreshToken: refreshToken ? 'Available' : 'Missing'
+                });
+                
+                return { accessToken, refreshToken };
+            },
+            
+            // Check if user is authenticated
+            isAuthenticated() {
+                const { accessToken } = this.getTokens();
+                if (!accessToken) return false;
+                
+                // Check if token is expired
+                try {
+                    const payload = JSON.parse(atob(accessToken.split('.')[1]));
+                    const isExpired = payload.exp * 1000 < Date.now();
+                    return !isExpired;
+                } catch (error) {
+                    console.error('Error parsing token:', error);
+                    return false;
+                }
+            },
+            
+            // Refresh token if expired
+            async refreshToken() {
+                const { refreshToken } = this.getTokens();
+                if (!refreshToken) {
+                    throw new Error('No refresh token available');
+                }
+                
+                try {
+                    const response = await fetch('/api/auth/refresh', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${refreshToken}`
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Token refresh failed');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Store new tokens
+                    if (data.accessToken) {
+                        localStorage.setItem('accessToken', data.accessToken);
+                    }
+                    if (data.refreshToken) {
+                        localStorage.setItem('refreshToken', data.refreshToken);
+                    }
+                    
+                    console.log('Token refreshed successfully');
+                    return data.accessToken;
+                } catch (error) {
+                    console.error('Token refresh error:', error);
+                    this.handleAuthError();
+                    throw error;
+                }
+            },
+            
+            // Handle authentication errors
+            handleAuthError() {
+                console.error('Authentication failed');
+                
+                // Clear tokens
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('moodchat_token');
+                
+                // Redirect to login page
+                window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+            },
+            
+            // Get authorization header for API calls
+            async getAuthHeader() {
+                let { accessToken } = this.getTokens();
+                
+                if (!accessToken) {
+                    this.handleAuthError();
+                    throw new Error('No access token available');
+                }
+                
+                // Check if token is expired
+                try {
+                    const payload = JSON.parse(atob(accessToken.split('.')[1]));
+                    const isExpired = payload.exp * 1000 < Date.now();
+                    
+                    if (isExpired) {
+                        console.log('Access token expired, attempting refresh...');
+                        accessToken = await this.refreshToken();
+                    }
+                } catch (error) {
+                    console.error('Token validation error:', error);
+                    // Continue with current token
+                }
+                
+                return {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                };
+            },
+            
+            // Make authenticated API request
+            async makeAuthenticatedRequest(url, options = {}) {
+                try {
+                    const headers = await this.getAuthHeader();
+                    
+                    const requestOptions = {
+                        ...options,
+                        headers: {
+                            ...headers,
+                            ...options.headers
+                        }
+                    };
+                    
+                    const response = await fetch(url, requestOptions);
+                    
+                    // Handle 401 Unauthorized
+                    if (response.status === 401) {
+                        console.log('Received 401, attempting token refresh...');
+                        const newAccessToken = await this.refreshToken();
+                        
+                        // Retry request with new token
+                        requestOptions.headers['Authorization'] = `Bearer ${newAccessToken}`;
+                        const retryResponse = await fetch(url, requestOptions);
+                        
+                        if (!retryResponse.ok) {
+                            this.handleAuthError();
+                            throw new Error('Authentication failed after refresh');
+                        }
+                        
+                        return retryResponse;
+                    }
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    return response;
+                } catch (error) {
+                    console.error('Authenticated request failed:', error);
+                    
+                    // If it's an auth error, handle it
+                    if (error.message.includes('Authentication') || 
+                        error.message.includes('token') ||
+                        error.message.includes('401')) {
+                        this.handleAuthError();
+                    }
+                    
+                    throw error;
+                }
+            }
+        };
+        
+        // NEW: API wrapper that uses AuthManager
+        const AuthenticatedAPI = {
+            // Check if API is available
+            isApiAvailable() {
+                return typeof window.api !== 'undefined' && window.api !== null;
+            },
+            
+            // Get user info with authentication
+            async getUserInfo() {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/user/info');
+                return response.json();
+            },
+            
+            // Get call permissions with authentication
+            async getCallPermissions() {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/permissions');
+                return response.json();
+            },
+            
+            // Get contacts with authentication
+            async getContacts() {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/contacts');
+                return response.json();
+            },
+            
+            // Get call history with authentication
+            async getCallHistory() {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/history');
+                return response.json();
+            },
+            
+            // Get premium status with authentication
+            async getPremiumStatus() {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/user/premium');
+                return response.json();
+            },
+            
+            // Start a call with authentication
+            async startCall(callData) {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/start', {
+                    method: 'POST',
+                    body: JSON.stringify(callData)
+                });
+                return response.json();
+            },
+            
+            // Join a call with authentication
+            async joinCall(callData) {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/join', {
+                    method: 'POST',
+                    body: JSON.stringify(callData)
+                });
+                return response.json();
+            },
+            
+            // End a call with authentication
+            async endCall(callData) {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/end', {
+                    method: 'POST',
+                    body: JSON.stringify(callData)
+                });
+                return response.json();
+            },
+            
+            // Send peer ID with authentication
+            async sendPeerId(peerData) {
+                if (!this.isApiAvailable()) {
+                    throw new Error('API not available');
+                }
+                
+                const response = await AuthManager.makeAuthenticatedRequest('/api/calls/peer', {
+                    method: 'POST',
+                    body: JSON.stringify(peerData)
+                });
+                return response.json();
+            }
+        };
+        
         // Global state object
         const AppState = {
+            // Authentication state
+            isAuthenticated: false,
+            authChecked: false,
+            
             // API state
             apiReady: false,
             apiCheckInterval: null,
+            apiConfirmed: false,
             
             // User state
             currentUser: null,
@@ -1119,7 +1624,7 @@
             isInCall: false,
             currentCall: null,
             activeCallId: null,
-            callType: null, // 'voice' or 'video'
+            callType: null,
             callParticipants: [],
             callStartTime: null,
             callDurationInterval: null,
@@ -1181,15 +1686,29 @@
                 polls: false,
                 relationshipInsights: false,
                 callLinks: false
-            }
+            },
+            
+            // Chat state
+            chatMessages: [],
+            unreadChatCount: 0,
+            
+            // Poll state
+            activePoll: null,
+            userVotes: {},
+            
+            // Relationship data
+            relationshipInsights: {}
         };
         
         // DOM Elements
         const elements = {};
         
-        // Initialize function - waits for API to be ready
+        // Initialize function - now checks authentication first
         function initializeApp() {
-            console.log('Initializing call app...');
+            console.log('Initializing call app with direct token access...');
+            
+            // Check authentication first
+            checkAuthentication();
             
             // Cache all DOM elements
             cacheElements();
@@ -1197,7 +1716,7 @@
             // Set up event listeners
             setupEventListeners();
             
-            // Check for API availability
+            // Check for API availability (now uses authenticated API)
             checkApiAvailability();
             
             // Initialize offline detection
@@ -1212,7 +1731,34 @@
             console.log('Call app initialization complete');
         }
         
+        // NEW: Check authentication status
+        function checkAuthentication() {
+            console.log('Checking authentication status...');
+            
+            if (!AuthManager.isAuthenticated()) {
+                console.error('User is not authenticated');
+                AuthManager.handleAuthError();
+                return;
+            }
+            
+            AppState.isAuthenticated = true;
+            AppState.authChecked = true;
+            console.log('User is authenticated');
+        }
+        
         function cacheElements() {
+            // Three dots menu elements
+            elements.menuDotsBtn = document.getElementById('menuDotsBtn');
+            elements.menuDotsDropdown = document.getElementById('menuDotsDropdown');
+            elements.menuParticipants = document.getElementById('menuParticipants');
+            elements.menuChat = document.getElementById('menuChat');
+            elements.menuWhiteboard = document.getElementById('menuWhiteboard');
+            elements.menuNotes = document.getElementById('menuNotes');
+            elements.menuPolls = document.getElementById('menuPolls');
+            elements.menuRelationship = document.getElementById('menuRelationship');
+            elements.participantBadge = document.getElementById('participantBadge');
+            elements.chatBadge = document.getElementById('chatBadge');
+            
             // Offline elements
             elements.offlineBanner = document.getElementById('offlineBanner');
             elements.apiStatusIndicator = document.getElementById('apiStatusIndicator');
@@ -1388,6 +1934,9 @@
             elements.pollQuestion = document.getElementById('pollQuestion');
             elements.pollOptions = document.getElementById('pollOptions');
             elements.pollResults = document.getElementById('pollResults');
+            elements.createPollBtn = document.getElementById('createPollBtn');
+            elements.votePollBtn = document.getElementById('votePollBtn');
+            elements.closePollBtn = document.getElementById('closePollBtn');
             
             elements.relationshipPanel = document.getElementById('relationshipPanel');
             elements.relationshipInfo = document.getElementById('relationshipInfo');
@@ -1400,6 +1949,62 @@
         }
         
         function setupEventListeners() {
+            // Three dots menu events
+            elements.menuDotsBtn.addEventListener('click', toggleMenuDots);
+            
+            // Menu item events
+            elements.menuParticipants.addEventListener('click', () => {
+                closeMenuDots();
+                switchSidePanel('participants');
+                elements.callSidePanel.classList.remove('collapsed');
+            });
+            
+            elements.menuChat.addEventListener('click', () => {
+                closeMenuDots();
+                switchSidePanel('chat');
+                elements.callSidePanel.classList.remove('collapsed');
+                AppState.unreadChatCount = 0;
+                updateChatBadge();
+            });
+            
+            elements.menuWhiteboard.addEventListener('click', () => {
+                closeMenuDots();
+                if (checkPremiumFeature('whiteboard')) {
+                    switchSidePanel('whiteboard');
+                    elements.callSidePanel.classList.remove('collapsed');
+                }
+            });
+            
+            elements.menuNotes.addEventListener('click', () => {
+                closeMenuDots();
+                switchSidePanel('notes');
+                elements.callSidePanel.classList.remove('collapsed');
+            });
+            
+            elements.menuPolls.addEventListener('click', () => {
+                closeMenuDots();
+                if (checkPremiumFeature('polls')) {
+                    switchSidePanel('polls');
+                    elements.callSidePanel.classList.remove('collapsed');
+                }
+            });
+            
+            elements.menuRelationship.addEventListener('click', () => {
+                closeMenuDots();
+                if (checkPremiumFeature('relationshipInsights')) {
+                    switchSidePanel('relationship');
+                    elements.callSidePanel.classList.remove('collapsed');
+                    loadRelationshipInsights();
+                }
+            });
+            
+            // Close menu when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!elements.menuDotsBtn.contains(e.target) && !elements.menuDotsDropdown.contains(e.target)) {
+                    closeMenuDots();
+                }
+            });
+            
             // Window events
             window.addEventListener('online', handleOnline);
             window.addEventListener('offline', handleOffline);
@@ -1548,6 +2153,11 @@
             // Whiteboard events
             elements.clearWhiteboardBtn.addEventListener('click', clearWhiteboard);
             
+            // Poll events
+            elements.createPollBtn.addEventListener('click', createPoll);
+            elements.votePollBtn.addEventListener('click', voteOnPoll);
+            elements.closePollBtn.addEventListener('click', closePoll);
+            
             // PIP events
             elements.pipCloseBtn.addEventListener('click', closePip);
             
@@ -1555,93 +2165,67 @@
             makeDraggable(elements.pipContainer);
         }
         
+        function toggleMenuDots() {
+            elements.menuDotsDropdown.classList.toggle('active');
+        }
+        
+        function closeMenuDots() {
+            elements.menuDotsDropdown.classList.remove('active');
+        }
+        
         function checkApiAvailability() {
-            console.log('Checking API availability...');
+            console.log('Checking API availability with direct token access...');
             
             // Show connecting status
             elements.apiStatusIndicator.style.display = 'block';
             elements.apiStatusIndicator.className = 'api-status-indicator connecting';
             elements.apiStatusText.textContent = 'Connecting to API...';
             
-            // Check for window.api
-            if (typeof window.api !== 'undefined' && window.api) {
-                verifyApiMethods();
-            } else {
-                // API not available yet, start polling
-                startApiPolling();
+            // Check authentication first
+            if (!AppState.isAuthenticated) {
+                console.error('Cannot check API - user not authenticated');
+                showApiError('Authentication required. Please login.');
+                return;
             }
+            
+            // Start API initialization
+            startApiInitialization();
         }
         
-        function verifyApiMethods() {
-            const requiredMethods = [
-                'getUserInfo',
-                'getCallPermissions',
-                'getContacts',
-                'getCallHistory',
-                'startCall',
-                'joinCall',
-                'endCall'
-            ];
-            
-            let allMethodsAvailable = true;
-            const missingMethods = [];
-            
-            for (const method of requiredMethods) {
-                if (typeof window.api[method] !== 'function') {
-                    allMethodsAvailable = false;
-                    missingMethods.push(method);
-                }
-            }
-            
-            if (allMethodsAvailable) {
-                console.log('All required API methods are available');
-                initializeWithApi();
-            } else {
-                console.error('Missing API methods:', missingMethods);
-                showApiError('Some API methods are missing. Please refresh the page.');
-            }
-        }
-        
-        function startApiPolling() {
-            console.log('Starting API polling...');
+        function startApiInitialization() {
+            console.log('Starting API initialization with authenticated API...');
             
             clearInterval(AppState.apiCheckInterval);
             
-            AppState.apiCheckInterval = setInterval(() => {
-                if (typeof window.api !== 'undefined' && window.api) {
-                    clearInterval(AppState.apiCheckInterval);
-                    verifyApiMethods();
-                } else {
-                    console.log('API not available yet, continuing to poll...');
-                }
-            }, 1000); // Check every second
-            
-            // Timeout after 30 seconds
-            setTimeout(() => {
-                if (!AppState.apiReady) {
-                    clearInterval(AppState.apiCheckInterval);
-                    showApiError('Unable to connect to API. Please check your connection and refresh.');
-                }
-            }, 30000);
+            // Check if API is available
+            if (AuthenticatedAPI.isApiAvailable()) {
+                initializeWithApi();
+            } else {
+                // Try to initialize directly
+                initializeWithApi();
+            }
         }
         
         function initializeWithApi() {
-            console.log('Initializing with API...');
+            console.log('Initializing with authenticated API...');
             
             AppState.apiReady = true;
+            AppState.apiConfirmed = true;
             
             // Update API status indicator
             elements.apiStatusIndicator.className = 'api-status-indicator connected';
             elements.apiStatusText.textContent = 'API Connected';
             
-            // Get user info
-            window.api.getUserInfo()
+            // Get user info using authenticated API
+            console.log('Making authenticated API call: getUserInfo()');
+            AuthenticatedAPI.getUserInfo()
                 .then(user => {
                     AppState.currentUser = user;
                     console.log('User loaded:', user);
                     
                     // Get call permissions
-                    return window.api.getCallPermissions();
+                    console.log('Making authenticated API call: getCallPermissions()');
+                    return AuthenticatedAPI.getCallPermissions();
                 })
                 .then(permissions => {
                     AppState.callPermissions = permissions;
@@ -1652,10 +2236,12 @@
                 })
                 .then(() => {
                     // Get premium status
+                    console.log('Making authenticated API call: getPremiumStatus()');
                     return checkPremiumStatus();
                 })
                 .then(() => {
                     // Load initial data
+                    console.log('Loading initial data with authenticated API...');
                     return loadInitialData();
                 })
                 .then(() => {
@@ -1671,7 +2257,17 @@
                 })
                 .catch(error => {
                     console.error('Error during API initialization:', error);
-                    showApiError('Error loading user data. Please refresh.');
+                    
+                    // Check if it's an authentication error
+                    if (error.message.includes('Authentication') || 
+                        error.message.includes('token') ||
+                        error.message.includes('401') ||
+                        error.message.includes('403')) {
+                        console.error('Authentication failed. Token may be invalid.');
+                        showApiError('Authentication failed. Please refresh the page.');
+                    } else {
+                        showApiError('Error loading user data. Please refresh.');
+                    }
                 });
         }
         
@@ -1684,6 +2280,20 @@
         }
         
         function loadInitialData() {
+            console.log('Starting to load initial data with authenticated API...');
+            
+            // Check if we can safely make API calls
+            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
+                console.log('Conditions not met for API calls:', {
+                    apiReady: AppState.apiReady,
+                    isOnline: AppState.isOnline,
+                    isAuthenticated: AppState.isAuthenticated
+                });
+                console.log('Loading from cache instead');
+                return Promise.resolve();
+            }
+            
+            console.log('Making authenticated API calls for initial data...');
             return Promise.all([
                 loadContacts(),
                 loadCallHistory(),
@@ -1691,135 +2301,19 @@
             ]);
         }
         
-        function enableUI() {
-            console.log('Enabling UI elements...');
-            
-            // Enable new call button
-            elements.newCallBtn.disabled = false;
-            
-            // Enable quick action buttons
-            elements.quickVoiceBtn.disabled = false;
-            elements.quickVideoBtn.disabled = false;
-            
-            // Check premium status for group calls
-            if (AppState.premiumFeatures.groupCalls) {
-                elements.quickGroupBtn.disabled = false;
-            }
-            
-            // Update UI based on online status
-            if (AppState.isOnline) {
-                // Show sync indicator
-                elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
-                
-                // Hide offline state
-                elements.offlineCallsState.style.display = 'none';
-                elements.offlineContactsMessage.style.display = 'none';
-                
-                // Load fresh data if needed
-                if (AppState.syncPending) {
-                    syncData();
-                }
-            } else {
-                // Show offline state
-                elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-                showOfflineUI();
-            }
-            
-            // Apply saved settings to toggles
-            applySettingsToUI();
-        }
-        
-        function initializeOfflineDetection() {
-            AppState.isOnline = navigator.onLine;
-            
-            if (!AppState.isOnline) {
-                handleOffline();
-            }
-        }
-        
-        function handleOnline() {
-            console.log('App is online');
-            AppState.isOnline = true;
-            
-            // Hide offline banner
-            elements.offlineBanner.classList.remove('active');
-            
-            // Remove offline UI class
-            elements.appContainer.classList.remove('offline-ui');
-            
-            // Update sync indicator
-            elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
-            elements.syncIndicator.classList.add('syncing');
-            
-            // Sync data
-            syncData();
-            
-            // Enable online features if API is ready
-            if (AppState.apiReady) {
-                enableUI();
-            }
-        }
-        
-        function handleOffline() {
-            console.log('App is offline');
-            AppState.isOnline = false;
-            
-            // Show offline banner
-            elements.offlineBanner.classList.add('active');
-            
-            // Add offline UI class
-            elements.appContainer.classList.add('offline-ui');
-            
-            // Update sync indicator
-            elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-            elements.syncIndicator.classList.remove('syncing');
-            
-            // Show offline UI
-            showOfflineUI();
-        }
-        
-        function showOfflineUI() {
-            // Show offline call placeholder if in call container
-            if (elements.callContainer.classList.contains('active')) {
-                elements.offlineCallPlaceholder.style.display = 'flex';
-                elements.videoGrid.style.display = 'none';
-            }
-            
-            // Show offline contacts message
-            elements.offlineContactsMessage.style.display = 'block';
-            
-            // Show offline calls state
-            elements.offlineCallsState.style.display = 'flex';
-            elements.callsLoading.style.display = 'none';
-            
-            // Load cached data
-            loadCachedDataToUI();
-        }
-        
-        function initializeUI() {
-            // Hide loading placeholders
-            elements.callsLoading.style.display = 'none';
-            elements.contactsLoading.style.display = 'none';
-            
-            // Set default mood and intention
-            updateMoodIndicator('neutral');
-            updateIntentionIndicator('quick');
-            
-            // Initialize whiteboard
-            initializeWhiteboard();
-            
-            // Initialize notifications
-            initializeNotifications();
-        }
-        
-        // API-dependent functions
         function loadContacts() {
-            if (!AppState.apiReady || !AppState.isOnline) {
-                // Load from cache
+            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
+                console.log('Skipping contacts API call - conditions not met');
+                const cachedContacts = getCachedData('contacts');
+                if (cachedContacts) {
+                    AppState.contacts = cachedContacts;
+                    renderContacts();
+                }
                 return Promise.resolve();
             }
             
-            return window.api.getContacts()
+            console.log('Making authenticated API call: getContacts()');
+            return AuthenticatedAPI.getContacts()
                 .then(contacts => {
                     AppState.contacts = contacts;
                     console.log('Contacts loaded:', contacts.length);
@@ -1836,7 +2330,12 @@
                 })
                 .catch(error => {
                     console.error('Error loading contacts:', error);
-                    // Load from cache as fallback
+                    
+                    if (error.message.includes('Authentication')) {
+                        console.error('Authentication error loading contacts.');
+                        showNotification('Authentication error. Please refresh.', 'error');
+                    }
+                    
                     const cachedContacts = getCachedData('contacts');
                     if (cachedContacts) {
                         AppState.contacts = cachedContacts;
@@ -1846,27 +2345,35 @@
         }
         
         function loadCallHistory() {
-            if (!AppState.apiReady || !AppState.isOnline) {
-                // Load from cache
+            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
+                console.log('Skipping call history API call - conditions not met');
+                const cachedCalls = getCachedData('calls');
+                if (cachedCalls) {
+                    AppState.callHistory = cachedCalls;
+                    renderCallHistory();
+                }
                 return Promise.resolve();
             }
             
-            return window.api.getCallHistory()
+            console.log('Making authenticated API call: getCallHistory()');
+            return AuthenticatedAPI.getCallHistory()
                 .then(history => {
                     AppState.callHistory = history;
                     console.log('Call history loaded:', history.length);
                     
-                    // Cache history
                     cacheData('calls', history);
                     
-                    // Render call history
                     renderCallHistory();
                     
                     return history;
                 })
                 .catch(error => {
                     console.error('Error loading call history:', error);
-                    // Load from cache as fallback
+                    
+                    if (error.message.includes('Authentication')) {
+                        console.error('Authentication error loading call history.');
+                    }
+                    
                     const cachedCalls = getCachedData('calls');
                     if (cachedCalls) {
                         AppState.callHistory = cachedCalls;
@@ -1877,24 +2384,30 @@
         
         function loadCachedData() {
             try {
-                // Load settings
                 const savedSettings = localStorage.getItem('callSettings');
                 if (savedSettings) {
                     AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
                 }
                 
-                // Load cached data
                 const cachedData = localStorage.getItem('cachedCallData');
                 if (cachedData) {
                     AppState.cachedData = JSON.parse(cachedData);
                 }
                 
-                // Load mood and intention
                 const savedMood = localStorage.getItem('currentMood');
                 if (savedMood) AppState.currentMood = savedMood;
                 
                 const savedIntention = localStorage.getItem('currentIntention');
                 if (savedIntention) AppState.currentIntention = savedIntention;
+                
+                const savedChat = localStorage.getItem('chatMessages');
+                if (savedChat) AppState.chatMessages = JSON.parse(savedChat);
+                
+                const savedPolls = localStorage.getItem('polls');
+                if (savedPolls) AppState.userVotes = JSON.parse(savedPolls);
+                
+                const savedInsights = localStorage.getItem('relationshipInsights');
+                if (savedInsights) AppState.relationshipInsights = JSON.parse(savedInsights);
                 
                 return Promise.resolve();
             } catch (error) {
@@ -1904,7 +2417,6 @@
         }
         
         function loadCachedDataToUI() {
-            // Render cached contacts if needed
             if (AppState.contacts.length === 0 && AppState.cachedData.contacts.length > 0) {
                 AppState.contacts = AppState.cachedData.contacts;
                 if (elements.newCallModal.classList.contains('active')) {
@@ -1912,7 +2424,6 @@
                 }
             }
             
-            // Render cached call history if needed
             if (AppState.callHistory.length === 0 && AppState.cachedData.calls.length > 0) {
                 AppState.callHistory = AppState.cachedData.calls;
                 renderCallHistory();
@@ -1922,7 +2433,6 @@
         function cacheData(key, data) {
             AppState.cachedData[key] = data;
             
-            // Save to localStorage
             try {
                 localStorage.setItem('cachedCallData', JSON.stringify(AppState.cachedData));
             } catch (error) {
@@ -1935,18 +2445,18 @@
         }
         
         function syncData() {
-            if (!AppState.apiReady || !AppState.isOnline) {
+            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
+                console.log('Cannot sync data - conditions not met');
                 return Promise.resolve();
             }
             
-            console.log('Syncing data...');
+            console.log('Syncing data with authenticated API...');
             
             return Promise.all([
                 loadContacts(),
                 loadCallHistory()
             ])
             .then(() => {
-                // Update sync indicator
                 elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
                 elements.syncIndicator.classList.remove('syncing');
                 
@@ -1962,7 +2472,6 @@
         
         function loadSettings() {
             return new Promise((resolve) => {
-                // Load from localStorage
                 const savedSettings = localStorage.getItem('callSettings');
                 if (savedSettings) {
                     try {
@@ -1999,7 +2508,6 @@
             AppState.settings[setting] = event.target.checked;
             saveSettings();
             
-            // Apply setting changes immediately
             applySettingChange(setting, event.target.checked);
         }
         
@@ -2007,7 +2515,6 @@
             switch (setting) {
                 case 'emotionalContext':
                     if (!value) {
-                        // Hide mood and intention indicators
                         elements.callMoodIndicator.style.display = 'none';
                         elements.callIntentionIndicator.style.display = 'none';
                     }
@@ -2028,12 +2535,16 @@
                         elements.reactionsContainer.style.display = 'none';
                     }
                     break;
+                case 'inCallChat':
+                    if (!value && AppState.isInCall) {
+                        showNotification('Chat disabled', 'info');
+                    }
+                    break;
             }
         }
         
         function resetSettings() {
             if (confirm('Reset all settings to defaults?')) {
-                // Reset to defaults
                 AppState.settings = {
                     emotionalContext: true,
                     callIntention: true,
@@ -2054,11 +2565,16 @@
         }
         
         function checkPremiumStatus() {
-            if (!AppState.apiReady) {
+            if (!AppState.apiReady || !AppState.isAuthenticated) {
+                console.log('Skipping premium status API call - not authenticated');
+                AppState.isPremium = false;
+                AppState.trialDaysLeft = 30;
+                updatePremiumUI();
                 return Promise.resolve();
             }
             
-            return window.api.getPremiumStatus()
+            console.log('Making authenticated API call: getPremiumStatus()');
+            return AuthenticatedAPI.getPremiumStatus()
                 .then(premiumData => {
                     AppState.isPremium = premiumData.isPremium;
                     AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
@@ -2066,14 +2582,17 @@
                     
                     console.log('Premium status:', AppState.isPremium, 'Days left:', AppState.trialDaysLeft);
                     
-                    // Update UI based on premium status
                     updatePremiumUI();
                     
                     return premiumData;
                 })
                 .catch(error => {
                     console.error('Error checking premium status:', error);
-                    // Default to free tier
+                    
+                    if (error.message.includes('Authentication')) {
+                        console.error('Authentication error checking premium status.');
+                    }
+                    
                     AppState.isPremium = false;
                     AppState.trialDaysLeft = 30;
                     updatePremiumUI();
@@ -2082,30 +2601,24 @@
         
         function updatePremiumUI() {
             if (AppState.isPremium) {
-                // Hide premium badges
                 document.querySelectorAll('.premium-badge-small').forEach(badge => {
                     badge.style.display = 'none';
                 });
                 
-                // Enable premium features
                 elements.quickGroupBtn.disabled = false;
                 elements.screenShareBtn.disabled = false;
                 
-                // Enable premium panel tabs
                 document.querySelectorAll('.panel-tab[data-panel="whiteboard"], .panel-tab[data-panel="polls"], .panel-tab[data-panel="relationship"]').forEach(tab => {
                     tab.disabled = false;
                 });
             } else {
-                // Show premium badges
                 document.querySelectorAll('.premium-badge-small').forEach(badge => {
                     badge.style.display = 'block';
                 });
                 
-                // Disable premium features
                 elements.quickGroupBtn.disabled = true;
                 elements.screenShareBtn.disabled = true;
                 
-                // Disable premium panel tabs
                 document.querySelectorAll('.panel-tab[data-panel="whiteboard"], .panel-tab[data-panel="polls"], .panel-tab[data-panel="relationship"]').forEach(tab => {
                     tab.disabled = true;
                 });
@@ -2117,7 +2630,6 @@
                 return true;
             }
             
-            // Show premium limit modal
             let message = '';
             switch (feature) {
                 case 'groupCalls':
@@ -2145,39 +2657,33 @@
             return false;
         }
         
-        // Call Management Functions
         function openNewCallModal() {
-            if (!AppState.apiReady) {
-                showNotification('Call features not ready yet. Please wait.', 'warning');
+            if (!AppState.apiReady || !AppState.isAuthenticated) {
+                showNotification('Authentication required. Please login.', 'warning');
                 return;
             }
             
             elements.newCallModal.classList.add('active');
             
-            // Load contacts if not loaded
             if (AppState.contacts.length === 0) {
                 loadContacts();
             } else {
                 renderContacts();
             }
             
-            // Set default tab
             switchNewCallTab('contacts');
         }
         
         function closeNewCallModal() {
             elements.newCallModal.classList.remove('active');
             
-            // Reset selections
             document.querySelectorAll('.contact-item.selected').forEach(item => {
                 item.classList.remove('selected');
             });
             
-            // Clear search
             elements.contactSearch.value = '';
             elements.groupContactSearch.value = '';
             
-            // Reset group options
             elements.instantGroupOption.classList.remove('selected');
             elements.scheduledGroupOption.classList.remove('selected');
             elements.startGroupCallBtn.disabled = true;
@@ -2192,7 +2698,7 @@
             let html = '';
             
             AppState.contacts.forEach(contact => {
-                const isOnline = Math.random() > 0.3; // Simulated - replace with real data
+                const isOnline = Math.random() > 0.3;
                 const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
                 
                 html += `
@@ -2220,7 +2726,6 @@
             elements.contactsList.innerHTML = html;
             elements.contactsLoading.style.display = 'none';
             
-            // Add event listeners to contact items
             document.querySelectorAll('.contact-item').forEach(item => {
                 item.addEventListener('click', function(e) {
                     if (e.target.type === 'checkbox') return;
@@ -2229,12 +2734,10 @@
                     checkbox.checked = !checkbox.checked;
                     this.classList.toggle('selected', checkbox.checked);
                     
-                    // Update group call button state
                     updateGroupCallButton();
                 });
             });
             
-            // Render group contacts list too
             renderGroupContacts();
         }
         
@@ -2261,13 +2764,11 @@
             
             elements.groupContactsList.innerHTML = html;
             
-            // Add event listeners to group contact items
             document.querySelectorAll('.group-contact').forEach(checkbox => {
                 checkbox.addEventListener('change', function() {
                     const item = this.closest('.contact-item');
                     item.classList.toggle('selected', this.checked);
                     
-                    // Update group call button state
                     updateGroupCallButton();
                 });
             });
@@ -2302,7 +2803,6 @@
         function selectGroupOption(event) {
             const option = event.currentTarget;
             
-            // Deselect other option
             if (option.id === 'instantGroupOption') {
                 elements.scheduledGroupOption.classList.remove('selected');
             } else {
@@ -2372,11 +2872,9 @@
             const isInstant = groupOption.id === 'instantGroupOption';
             
             if (isInstant) {
-                // Start instant group call
                 startCall('video', selectedContacts);
                 closeNewCallModal();
             } else {
-                // Schedule group call
                 scheduleGroupCall(selectedContacts);
             }
         }
@@ -2406,8 +2904,8 @@
         }
         
         function startCall(type, participants) {
-            if (!AppState.apiReady) {
-                showNotification('Call features not available', 'error');
+            if (!AppState.apiReady || !AppState.isAuthenticated) {
+                showNotification('Authentication required. Please login.', 'error');
                 return;
             }
             
@@ -2416,15 +2914,17 @@
                 return;
             }
             
-            // Request media permissions
+            console.log(`Starting ${type} call with ${participants.length} participants`);
+            
             requestMediaPermissions(type)
                 .then(stream => {
                     AppState.localStream = stream;
                     AppState.callType = type;
                     AppState.callParticipants = participants;
                     
-                    // Initialize call with API
-                    return window.api.startCall({
+                    // Use authenticated API
+                    console.log('Making authenticated API call: startCall()');
+                    return AuthenticatedAPI.startCall({
                         type: type,
                         participants: participants.map(p => p.id),
                         mood: AppState.currentMood,
@@ -2435,16 +2935,12 @@
                     AppState.activeCallId = callData.callId;
                     AppState.currentCall = callData;
                     
-                    // Initialize WebRTC peer
                     initializePeer();
                     
-                    // Show call UI
                     showCallUI();
                     
-                    // Start call timer
                     startCallTimer();
                     
-                    // Initialize call features
                     initializeCallFeatures();
                     
                     showNotification(`Starting ${type} call with ${participants.length} participant(s)`, 'success');
@@ -2452,13 +2948,16 @@
                 .catch(error => {
                     console.error('Error starting call:', error);
                     
-                    // Clean up stream
                     if (AppState.localStream) {
                         AppState.localStream.getTracks().forEach(track => track.stop());
                         AppState.localStream = null;
                     }
                     
-                    showNotification(`Failed to start call: ${error.message}`, 'error');
+                    if (error.message.includes('Authentication')) {
+                        showNotification('Authentication error starting call. Please refresh.', 'error');
+                    } else {
+                        showNotification(`Failed to start call: ${error.message}`, 'error');
+                    }
                 });
         }
         
@@ -2488,10 +2987,8 @@
         }
         
         function initializePeer() {
-            // Generate a random peer ID
             const peerId = 'user-' + Math.random().toString(36).substr(2, 9);
             
-            // Initialize PeerJS
             AppState.peer = new Peer(peerId, {
                 config: {
                     'iceServers': [
@@ -2504,30 +3001,27 @@
             AppState.peer.on('open', (id) => {
                 console.log('Peer connected with ID:', id);
                 
-                // Send peer ID to participants via signaling (simulated)
-                if (window.api && window.api.sendPeerId) {
-                    window.api.sendPeerId({
+                if (AuthenticatedAPI.isApiAvailable() && AppState.isAuthenticated) {
+                    AuthenticatedAPI.sendPeerId({
                         callId: AppState.activeCallId,
                         peerId: id
+                    }).catch(error => {
+                        console.error('Error sending peer ID:', error);
                     });
                 }
             });
             
             AppState.peer.on('call', (call) => {
-                // Answer incoming call with local stream
                 call.answer(AppState.localStream);
                 
                 call.on('stream', (remoteStream) => {
-                    // Add remote stream
                     addRemoteStream(call.peer, remoteStream);
                 });
                 
                 call.on('close', () => {
-                    // Remove remote stream
                     removeRemoteStream(call.peer);
                 });
                 
-                // Store connection
                 AppState.connections.set(call.peer, call);
             });
             
@@ -2536,13 +3030,10 @@
                 showNotification('Connection error: ' + error.type, 'error');
             });
             
-            // Connect to other participants (simulated)
             setTimeout(() => {
                 if (AppState.callParticipants && AppState.callParticipants.length > 0) {
-                    // In a real app, you would get peer IDs from signaling server
                     AppState.callParticipants.forEach((participant, index) => {
                         setTimeout(() => {
-                            // Simulate connecting to remote peer
                             simulateRemoteConnection(participant.id);
                         }, index * 1000);
                     });
@@ -2551,25 +3042,18 @@
         }
         
         function simulateRemoteConnection(participantId) {
-            // This simulates a remote participant joining
-            // In a real app, you would use actual WebRTC connections
-            
             const fakePeerId = 'remote-' + participantId;
             
-            // Create a fake remote stream (in real app, this would come from actual peer)
             navigator.mediaDevices.getUserMedia({ video: true, audio: true })
                 .then(stream => {
-                    // Add as remote stream
                     addRemoteStream(fakePeerId, stream);
                     
-                    // Add to participants list
                     const participant = AppState.callParticipants.find(p => p.id === participantId);
                     if (participant) {
                         addParticipantToList(participant);
                     }
                 })
                 .catch(() => {
-                    // If can't get media, add participant without video
                     const participant = AppState.callParticipants.find(p => p.id === participantId);
                     if (participant) {
                         addParticipantToList(participant);
@@ -2580,44 +3064,37 @@
         function addRemoteStream(peerId, stream) {
             AppState.remoteStreams.set(peerId, stream);
             
-            // Update video grid
             updateVideoGrid();
         }
         
         function removeRemoteStream(peerId) {
             AppState.remoteStreams.delete(peerId);
             
-            // Update video grid
             updateVideoGrid();
         }
         
         function showCallUI() {
-            // Hide sidebar
             elements.sidebar.style.display = 'none';
             
-            // Show call container
             elements.callContainer.classList.add('active');
             
-            // Set call info
             const participantNames = AppState.callParticipants.map(p => p.name).join(', ');
             elements.callWithName.textContent = participantNames;
             elements.callStatusText.textContent = 'In call';
             
-            // Set call type icon
             const icon = AppState.callType === 'video' ? 'fa-video' : 'fa-phone';
             elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
             
-            // Show mood and intention if enabled
             if (AppState.settings.emotionalContext) {
                 updateMoodIndicator(AppState.currentMood);
                 updateIntentionIndicator(AppState.currentIntention);
             }
             
-            // Show focus mode button
             elements.focusModeBtn.style.display = 'block';
             
-            // Update participant count
             updateParticipantCount();
+            
+            updateParticipantBadge();
             
             AppState.isInCall = true;
         }
@@ -2636,48 +3113,39 @@
         }
         
         function initializeCallFeatures() {
-            // Create local video element
             if (AppState.localStream && AppState.callType === 'video') {
                 createVideoElement('local', 'You', AppState.localStream, true);
             }
             
-            // Initialize whiteboard
             initializeWhiteboard();
             
-            // Initialize chat
             initializeChat();
             
-            // Initialize notes
             initializeNotes();
             
-            // Show reactions if enabled
+            initializePolls();
+            
             if (AppState.settings.liveReactions) {
                 elements.reactionsContainer.style.display = 'flex';
             }
             
-            // Apply focus mode if enabled
             if (AppState.settings.focusMode) {
                 enableFocusMode();
             }
         }
         
         function updateVideoGrid() {
-            // Clear existing videos except local
             const videoContainers = elements.videoGrid.querySelectorAll('.video-container:not([data-id="local"])');
             videoContainers.forEach(container => container.remove());
             
-            // Hide offline placeholder
             elements.offlineCallPlaceholder.style.display = 'none';
             elements.videoGrid.style.display = 'grid';
             
-            // Add remote videos
             let index = 0;
             AppState.remoteStreams.forEach((stream, peerId) => {
-                // Find participant info
                 let participantName = 'Participant';
                 let participant = null;
                 
-                // Try to find participant by peerId
                 for (const p of AppState.callParticipants) {
                     if ('remote-' + p.id === peerId) {
                         participant = p;
@@ -2690,7 +3158,6 @@
                 index++;
             });
             
-            // Update layout based on number of videos
             updateVideoLayout();
         }
         
@@ -2716,7 +3183,6 @@
             const nameDiv = document.createElement('div');
             nameDiv.className = 'video-name';
             
-            // Add status indicator
             const statusSpan = document.createElement('span');
             statusSpan.className = 'video-status';
             statusSpan.textContent = isLocal ? 'You' : (participant ? 'Connected' : 'Remote');
@@ -2727,7 +3193,6 @@
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'video-actions';
             
-            // Pin button
             const pinBtn = document.createElement('button');
             pinBtn.className = 'video-action-btn' + (isLocal ? ' active' : '');
             pinBtn.innerHTML = '<i class="fas fa-thumbtack"></i>';
@@ -2737,7 +3202,6 @@
                 togglePinVideo(id);
             });
             
-            // Fullscreen button
             const fullscreenBtn = document.createElement('button');
             fullscreenBtn.className = 'video-action-btn';
             fullscreenBtn.innerHTML = '<i class="fas fa-expand"></i>';
@@ -2756,14 +3220,12 @@
             videoContainer.appendChild(video);
             videoContainer.appendChild(overlay);
             
-            // Add click handler for spotlight
             videoContainer.addEventListener('click', () => {
                 spotlightVideo(id);
             });
             
             elements.videoGrid.appendChild(videoContainer);
             
-            // Play video
             video.play().catch(e => console.error('Error playing video:', e));
         }
         
@@ -2771,29 +3233,20 @@
             const videoContainers = elements.videoGrid.querySelectorAll('.video-container');
             const count = videoContainers.length;
             
-            // Reset all containers
             videoContainers.forEach(container => {
                 container.classList.remove('large');
             });
             
-            // Special layouts based on count
             if (count === 1) {
-                // Single video - make it large
                 videoContainers[0].classList.add('large');
-            } else if (count === 2) {
-                // Two videos - side by side
-                // CSS grid handles this automatically
             } else if (count === 3) {
-                // Three videos - one large, two small
                 const pinned = elements.videoGrid.querySelector('.video-container.pinned');
                 if (pinned) {
                     pinned.classList.add('large');
                 } else {
-                    // Make first video large
                     videoContainers[0].classList.add('large');
                 }
             }
-            // For 4+ videos, use default grid layout
         }
         
         function togglePinVideo(videoId) {
@@ -2801,7 +3254,6 @@
             
             if (!videoContainer) return;
             
-            // Unpin all other videos
             elements.videoGrid.querySelectorAll('.video-container.pinned').forEach(container => {
                 if (container.dataset.id !== videoId) {
                     container.classList.remove('pinned');
@@ -2813,7 +3265,6 @@
                 }
             });
             
-            // Toggle pin state
             const isPinned = videoContainer.classList.contains('pinned');
             
             if (isPinned) {
@@ -2822,14 +3273,12 @@
                 videoContainer.classList.add('pinned');
             }
             
-            // Update pin button
             const pinBtn = videoContainer.querySelector('.video-action-btn');
             if (pinBtn) {
                 pinBtn.classList.toggle('active', !isPinned);
                 pinBtn.title = !isPinned ? 'Pinned' : 'Pin video';
             }
             
-            // Update layout
             updateVideoLayout();
         }
         
@@ -2838,20 +3287,16 @@
             
             if (!videoContainer) return;
             
-            // Toggle spotlight (full width)
             const isSpotlight = videoContainer.style.gridColumn === '1 / -1';
             
             if (isSpotlight) {
-                // Remove spotlight
                 videoContainer.style.gridColumn = '';
                 videoContainer.style.gridRow = '';
             } else {
-                // Apply spotlight
                 videoContainer.style.gridColumn = '1 / -1';
                 videoContainer.style.gridRow = '1 / -1';
                 videoContainer.style.zIndex = '10';
                 
-                // Add exit button
                 let exitBtn = videoContainer.querySelector('.spotlight-exit');
                 if (!exitBtn) {
                     exitBtn = document.createElement('button');
@@ -2865,14 +3310,13 @@
                     
                     exitBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        spotlightVideo(videoId); // Toggle off
+                        spotlightVideo(videoId);
                     });
                     
                     videoContainer.querySelector('.video-overlay').appendChild(exitBtn);
                 }
             }
             
-            // Update layout for other videos
             updateVideoLayout();
         }
         
@@ -2913,13 +3357,27 @@
             
             elements.participantsList.appendChild(listItem);
             
-            // Update participant count
             updateParticipantCount();
+            updateParticipantBadge();
         }
         
         function updateParticipantCount() {
-            const count = AppState.callParticipants.length + 1; // +1 for self
+            const count = AppState.callParticipants.length + 1;
             elements.participantCount.textContent = `${count} participant${count !== 1 ? 's' : ''}`;
+        }
+        
+        function updateParticipantBadge() {
+            const count = AppState.callParticipants.length + 1;
+            elements.participantBadge.textContent = count;
+        }
+        
+        function updateChatBadge() {
+            elements.chatBadge.textContent = AppState.unreadChatCount;
+            if (AppState.unreadChatCount > 0) {
+                elements.chatBadge.style.display = 'block';
+            } else {
+                elements.chatBadge.style.display = 'none';
+            }
         }
         
         function toggleMute() {
@@ -2932,7 +3390,6 @@
                     track.enabled = !AppState.isMuted;
                 });
                 
-                // Update button icon
                 const icon = elements.muteBtn.querySelector('i');
                 if (AppState.isMuted) {
                     icon.className = 'fas fa-microphone-slash';
@@ -2942,7 +3399,6 @@
                     elements.muteBtn.title = 'Mute';
                 }
                 
-                // Show notification
                 showNotification(AppState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
             }
         }
@@ -2957,13 +3413,11 @@
                     track.enabled = !AppState.isVideoOff;
                 });
                 
-                // Update button icon
                 const icon = elements.videoBtn.querySelector('i');
                 if (AppState.isVideoOff) {
                     icon.className = 'fas fa-video-slash';
                     elements.videoBtn.title = 'Turn Video On';
                     
-                    // Hide local video element
                     const localVideo = elements.videoGrid.querySelector('.video-container[data-id="local"]');
                     if (localVideo) {
                         localVideo.style.display = 'none';
@@ -2972,14 +3426,12 @@
                     icon.className = 'fas fa-video';
                     elements.videoBtn.title = 'Turn Video Off';
                     
-                    // Show local video element
                     const localVideo = elements.videoGrid.querySelector('.video-container[data-id="local"]');
                     if (localVideo) {
                         localVideo.style.display = 'block';
                     }
                 }
                 
-                // Show notification
                 showNotification(AppState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
             }
         }
@@ -2997,7 +3449,6 @@
         }
         
         function startScreenShare() {
-            // Check for screen sharing API support
             if (!navigator.mediaDevices.getDisplayMedia) {
                 showNotification('Screen sharing is not supported in your browser', 'error');
                 return;
@@ -3008,24 +3459,14 @@
                     AppState.screenStream = stream;
                     AppState.isScreenSharing = true;
                     
-                    // Replace video track in local stream
                     const videoTrack = stream.getVideoTracks()[0];
                     const oldVideoTrack = AppState.localStream.getVideoTracks()[0];
                     
-                    if (oldVideoTrack) {
-                        // Replace track in local stream
-                        const sender = AppState.localStream.getVideoTracks()[0];
-                        // In real app, you would replace track in peer connections
-                    }
-                    
-                    // Update UI
                     elements.screenShareBtn.classList.add('active');
                     elements.screenShareBtn.title = 'Stop Sharing';
                     
-                    // Update local video element to show screen share
                     const localVideo = elements.videoGrid.querySelector('.video-container[data-id="local"] video');
                     if (localVideo) {
-                        // Create new stream with screen video and existing audio
                         const newStream = new MediaStream();
                         newStream.addTrack(videoTrack);
                         newStream.addTrack(AppState.localStream.getAudioTracks()[0]);
@@ -3033,7 +3474,6 @@
                         localVideo.srcObject = newStream;
                     }
                     
-                    // Handle when user stops screen sharing via browser UI
                     stream.getVideoTracks()[0].addEventListener('ended', () => {
                         stopScreenShare();
                     });
@@ -3054,12 +3494,10 @@
         function stopScreenShare() {
             if (!AppState.screenStream) return;
             
-            // Stop screen stream tracks
             AppState.screenStream.getTracks().forEach(track => track.stop());
             AppState.screenStream = null;
             AppState.isScreenSharing = false;
             
-            // Restore camera video
             if (AppState.localStream) {
                 const localVideo = elements.videoGrid.querySelector('.video-container[data-id="local"] video');
                 if (localVideo) {
@@ -3067,7 +3505,6 @@
                 }
             }
             
-            // Update UI
             elements.screenShareBtn.classList.remove('active');
             elements.screenShareBtn.title = 'Share Screen';
             
@@ -3075,10 +3512,8 @@
         }
         
         function toggleSpeaker() {
-            // This is a UI-only toggle since WebRTC handles audio output automatically
             AppState.isSpeakerOn = !AppState.isSpeakerOn;
             
-            // Update button icon
             const icon = elements.speakerBtn.querySelector('i');
             if (AppState.isSpeakerOn) {
                 icon.className = 'fas fa-volume-up';
@@ -3088,9 +3523,6 @@
                 elements.speakerBtn.title = 'Switch to Speaker';
             }
             
-            // In a real app, you would change the audio output device here
-            // await videoElement.setSinkId(speakerDeviceId);
-            
             showNotification(`Switched to ${AppState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
         }
         
@@ -3098,7 +3530,6 @@
             if (!AppState.isInCall) return;
             
             if (confirm('End the call?')) {
-                // Clean up media streams
                 if (AppState.localStream) {
                     AppState.localStream.getTracks().forEach(track => track.stop());
                     AppState.localStream = null;
@@ -3109,37 +3540,34 @@
                     AppState.screenStream = null;
                 }
                 
-                // Clean up remote streams
                 AppState.remoteStreams.forEach(stream => {
                     stream.getTracks().forEach(track => track.stop());
                 });
                 AppState.remoteStreams.clear();
                 
-                // Clean up PeerJS
                 if (AppState.peer) {
                     AppState.peer.destroy();
                     AppState.peer = null;
                 }
                 
-                // Clear connections
                 AppState.connections.clear();
                 
-                // Stop call timer
                 clearInterval(AppState.callDurationInterval);
                 
-                // Calculate call duration
                 const callDuration = AppState.callStartTime ? 
                     Math.floor((Date.now() - AppState.callStartTime) / 1000) : 0;
                 
-                // Notify API
-                if (window.api && window.api.endCall) {
-                    window.api.endCall({
+                // Use authenticated API
+                if (AuthenticatedAPI.isApiAvailable() && AppState.isAuthenticated) {
+                    console.log('Making authenticated API call: endCall()');
+                    AuthenticatedAPI.endCall({
                         callId: AppState.activeCallId,
                         duration: callDuration
+                    }).catch(error => {
+                        console.error('Error ending call via API:', error);
                     });
                 }
                 
-                // Reset call state
                 AppState.isInCall = false;
                 AppState.activeCallId = null;
                 AppState.currentCall = null;
@@ -3147,19 +3575,15 @@
                 AppState.callParticipants = [];
                 AppState.callStartTime = null;
                 
-                // Hide call UI
                 elements.callContainer.classList.remove('active');
                 elements.sidebar.style.display = 'flex';
                 
-                // Hide focus mode button
                 elements.focusModeBtn.style.display = 'none';
                 
-                // Disable focus mode if active
                 if (AppState.currentFocusMode) {
                     disableFocusMode();
                 }
                 
-                // Show private notes modal
                 setTimeout(() => {
                     showPrivateNotesModal();
                 }, 500);
@@ -3169,14 +3593,12 @@
         }
         
         function showPrivateNotesModal() {
-            // Check if private notes are enabled for this contact
-            const lastContact = AppState.callParticipants[0]; // Simple implementation
+            const lastContact = AppState.callParticipants[0];
             
             if (lastContact) {
                 elements.privateNotesTitle.textContent = `Notes about call with ${lastContact.name}`;
                 elements.privateNotesSubtitle.textContent = 'Add private notes about this call (only visible to you)';
                 
-                // Load previous notes if available
                 const previousNotes = getPrivateNotes(lastContact.id);
                 if (previousNotes) {
                     elements.privateNotesTextarea.value = previousNotes;
@@ -3186,7 +3608,6 @@
                 
                 elements.privateNotesModal.classList.add('active');
             } else {
-                // No contact, skip to summary
                 showCallSummary();
             }
         }
@@ -3234,14 +3655,12 @@
         }
         
         function showCallSummary() {
-            // Calculate call details
             const callDuration = AppState.callStartTime ? 
                 Math.floor((Date.now() - AppState.callStartTime) / 1000) : 0;
             
             const minutes = Math.floor(callDuration / 60);
             const seconds = callDuration % 60;
             
-            // Update summary UI
             elements.summaryDuration.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
             elements.summaryTime.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             elements.summaryType.textContent = AppState.callType === 'video' ? 'Video Call' : 'Voice Call';
@@ -3250,7 +3669,7 @@
                                                   AppState.currentIntention === 'important' ? 'Important Discussion' :
                                                   AppState.currentIntention === 'emergency' ? 'Emergency' :
                                                   AppState.currentIntention === 'checkin' ? 'Check-in' : 'Work/Business';
-            elements.summaryParticipants.textContent = AppState.callParticipants.length + 1; // +1 for self
+            elements.summaryParticipants.textContent = AppState.callParticipants.length + 1;
             
             elements.callSummaryModal.classList.add('active');
         }
@@ -3262,7 +3681,6 @@
         function openMoodSelectionModal() {
             elements.moodSelectionModal.classList.add('active');
             
-            // Select current mood
             document.querySelectorAll('.mood-option').forEach(option => {
                 option.classList.remove('selected');
                 if (option.dataset.mood === AppState.currentMood) {
@@ -3281,15 +3699,11 @@
                 const newMood = selectedOption.dataset.mood;
                 AppState.currentMood = newMood;
                 
-                // Save to localStorage
                 localStorage.setItem('currentMood', newMood);
                 
-                // Update UI
                 updateMoodIndicator(newMood);
                 
-                // Broadcast mood to other participants (in real app)
                 if (AppState.isInCall) {
-                    // Send mood via data channel
                     broadcastData({ type: 'mood', mood: newMood });
                 }
                 
@@ -3310,15 +3724,6 @@
                 excited: 'Excited'
             };
             
-            const moodColors = {
-                happy: 'var(--happy-color)',
-                neutral: 'var(--neutral-color)',
-                sad: 'var(--sad-color)',
-                angry: 'var(--angry-color)',
-                tired: 'var(--tired-color)',
-                excited: 'var(--warning-color)'
-            };
-            
             elements.callMoodIndicator.innerHTML = `
                 <div class="mood-indicator mood-${mood}" style="display: inline-flex; margin-top: 5px;">
                     <i class="fas fa-smile"></i>
@@ -3331,7 +3736,6 @@
         function openIntentionSelectionModal() {
             elements.intentionSelectionModal.classList.add('active');
             
-            // Select current intention
             document.querySelectorAll('.intention-option').forEach(option => {
                 option.classList.remove('selected');
                 if (option.dataset.intention === AppState.currentIntention) {
@@ -3350,15 +3754,11 @@
                 const newIntention = selectedOption.dataset.intention;
                 AppState.currentIntention = newIntention;
                 
-                // Save to localStorage
                 localStorage.setItem('currentIntention', newIntention);
                 
-                // Update UI
                 updateIntentionIndicator(newIntention);
                 
-                // Broadcast intention to other participants (in real app)
                 if (AppState.isInCall) {
-                    // Send intention via data channel
                     broadcastData({ type: 'intention', intention: newIntention });
                 }
                 
@@ -3414,13 +3814,10 @@
         function sendReaction(reaction) {
             if (!AppState.isInCall) return;
             
-            // Create floating reaction
             createFloatingReaction(reaction);
             
-            // Broadcast reaction to other participants (in real app)
             broadcastData({ type: 'reaction', reaction: reaction });
             
-            // Show notification
             showNotification(`Sent ${reaction} reaction`, 'info');
         }
         
@@ -3433,22 +3830,31 @@
             
             elements.callContainer.appendChild(reactionEl);
             
-            // Remove after animation
             setTimeout(() => {
                 reactionEl.remove();
             }, 3000);
         }
         
         function broadcastData(data) {
-            // In a real app, send data via WebRTC data channels
             console.log('Broadcasting data:', data);
             
-            // Simulate receiving reaction from others
             if (data.type === 'reaction' && Math.random() > 0.5) {
-                // Simulate other participant sending reaction
                 setTimeout(() => {
                     createFloatingReaction(data.reaction);
                 }, Math.random() * 1000 + 500);
+            }
+            
+            if (data.type === 'chat' && AppState.isInCall && Math.random() > 0.5) {
+                setTimeout(() => {
+                    const participant = AppState.callParticipants[0];
+                    if (participant) {
+                        addChatMessage('received', participant.name, data.message);
+                        if (AppState.currentPanel !== 'chat') {
+                            AppState.unreadChatCount++;
+                            updateChatBadge();
+                        }
+                    }
+                }, Math.random() * 2000 + 1000);
             }
         }
         
@@ -3456,11 +3862,9 @@
             const canvas = elements.whiteboardCanvas;
             const ctx = canvas.getContext('2d');
             
-            // Set canvas size to container
             canvas.width = canvas.offsetWidth;
             canvas.height = canvas.offsetHeight;
             
-            // Whiteboard state
             let isDrawing = false;
             let lastX = 0;
             let lastY = 0;
@@ -3468,26 +3872,21 @@
             let currentColor = '#000000';
             let currentBrushSize = 3;
             
-            // Update size preview
             updateBrushSizePreview();
             
-            // Set up drawing
             canvas.addEventListener('mousedown', startDrawing);
             canvas.addEventListener('mousemove', draw);
             canvas.addEventListener('mouseup', stopDrawing);
             canvas.addEventListener('mouseout', stopDrawing);
             
-            // Touch support
             canvas.addEventListener('touchstart', handleTouchStart);
             canvas.addEventListener('touchmove', handleTouchMove);
             canvas.addEventListener('touchend', stopDrawing);
             
-            // Tool selection
             document.querySelectorAll('[data-tool]').forEach(btn => {
                 btn.addEventListener('click', function() {
                     currentTool = this.dataset.tool;
                     
-                    // Update active tool
                     document.querySelectorAll('[data-tool]').forEach(b => {
                         b.classList.remove('active');
                     });
@@ -3495,12 +3894,10 @@
                 });
             });
             
-            // Color selection
             document.querySelectorAll('.tool-color').forEach(colorBtn => {
                 colorBtn.addEventListener('click', function() {
                     currentColor = this.dataset.color;
                     
-                    // Update active color
                     document.querySelectorAll('.tool-color').forEach(c => {
                         c.classList.remove('selected');
                     });
@@ -3508,7 +3905,6 @@
                 });
             });
             
-            // Brush size
             elements.brushSize.addEventListener('input', function() {
                 currentBrushSize = parseInt(this.value);
                 updateBrushSizePreview();
@@ -3538,13 +3934,9 @@
                     ctx.lineTo(x, y);
                     ctx.stroke();
                 } else if (currentTool === 'line') {
-                    // For line, we draw on mouse up
                 } else if (currentTool === 'rectangle') {
-                    // For rectangle, we draw on mouse up
                 } else if (currentTool === 'circle') {
-                    // For circle, we draw on mouse up
                 } else if (currentTool === 'text') {
-                    // Text tool - show input on click
                     if (e.type === 'mouseup' || e.type === 'touchend') {
                         const text = prompt('Enter text:');
                         if (text) {
@@ -3565,7 +3957,6 @@
                 
                 const [x, y] = getCoordinates(e);
                 
-                // Handle shape tools
                 if (currentTool === 'line') {
                     ctx.beginPath();
                     ctx.moveTo(lastX, lastY);
@@ -3633,11 +4024,15 @@
         }
         
         function initializeChat() {
-            // Clear previous messages
             elements.chatMessages.innerHTML = '';
             
-            // Add welcome message
-            addChatMessage('system', 'Chat started', 'Chat is now active for this call.');
+            if (AppState.chatMessages.length > 0) {
+                AppState.chatMessages.forEach(msg => {
+                    addChatMessage(msg.type, msg.sender, msg.message);
+                });
+            } else {
+                addChatMessage('system', 'System', 'Chat is now active for this call.');
+            }
         }
         
         function sendChatMessage() {
@@ -3645,30 +4040,34 @@
             
             if (!message) return;
             
-            // Add message to UI
+            if (!AppState.settings.inCallChat) {
+                showNotification('Chat is disabled in settings', 'warning');
+                return;
+            }
+            
             addChatMessage('sent', 'You', message);
             
-            // Clear input
+            AppState.chatMessages.push({
+                type: 'sent',
+                sender: 'You',
+                message: message,
+                timestamp: new Date().toISOString()
+            });
+            
+            try {
+                localStorage.setItem('chatMessages', JSON.stringify(AppState.chatMessages));
+            } catch (error) {
+                console.error('Error saving chat messages:', error);
+            }
+            
             elements.chatInput.value = '';
             
-            // Broadcast message to other participants (in real app)
             broadcastData({ 
                 type: 'chat', 
                 sender: AppState.currentUser ? AppState.currentUser.name : 'You',
                 message: message,
                 timestamp: new Date().toISOString()
             });
-            
-            // Simulate response (in real app, this would come from other participants)
-            if (AppState.callParticipants.length > 0 && Math.random() > 0.7) {
-                setTimeout(() => {
-                    const participant = AppState.callParticipants[0];
-                    const responses = ['Thanks!', 'Got it', 'Interesting', 'I agree', 'Let me think about that'];
-                    const response = responses[Math.floor(Math.random() * responses.length)];
-                    
-                    addChatMessage('received', participant.name, response);
-                }, 1000 + Math.random() * 2000);
-            }
         }
         
         function addChatMessage(type, sender, message) {
@@ -3682,15 +4081,12 @@
             
             elements.chatMessages.appendChild(messageEl);
             
-            // Auto-scroll to bottom
             elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
         }
         
         function initializeNotes() {
-            // Set up markdown preview
             elements.notesInput.addEventListener('input', updateNotesPreview);
             
-            // Set up formatting buttons
             document.querySelectorAll('[data-format]').forEach(btn => {
                 btn.addEventListener('click', function() {
                     const format = this.dataset.format;
@@ -3698,7 +4094,6 @@
                 });
             });
             
-            // Load previous notes if available
             loadPreviousNotes();
         }
         
@@ -3731,26 +4126,229 @@
                     break;
             }
             
-            // Replace selected text with formatted text
             textarea.value = textarea.value.substring(0, start) + 
                             formattedText + 
                             textarea.value.substring(end);
             
-            // Update preview
             updateNotesPreview();
             
-            // Restore focus
             textarea.focus();
         }
         
         function loadPreviousNotes() {
-            // In a real app, load from shared state or API
-            // For now, show placeholder
+        }
+        
+        function initializePolls() {
+            AppState.activePoll = null;
+            
+            elements.createPollBtn.addEventListener('click', createPoll);
+            elements.votePollBtn.addEventListener('click', voteOnPoll);
+            elements.closePollBtn.addEventListener('click', closePoll);
+        }
+        
+        function createPoll() {
+            if (!checkPremiumFeature('polls')) {
+                return;
+            }
+            
+            const question = prompt('Enter poll question:');
+            if (!question) return;
+            
+            const optionsInput = prompt('Enter poll options separated by commas:');
+            if (!optionsInput) return;
+            
+            const options = optionsInput.split(',').map(opt => opt.trim()).filter(opt => opt.length > 0);
+            
+            if (options.length < 2) {
+                showNotification('Poll must have at least 2 options', 'error');
+                return;
+            }
+            
+            AppState.activePoll = {
+                id: 'poll-' + Date.now(),
+                question: question,
+                options: options.map(opt => ({
+                    text: opt,
+                    votes: 0
+                })),
+                totalVotes: 0,
+                createdBy: AppState.currentUser ? AppState.currentUser.name : 'You',
+                createdAt: new Date().toISOString()
+            };
+            
+            AppState.userVotes[AppState.activePoll.id] = null;
+            
+            renderPoll();
+            
+            showNotification('Poll created', 'success');
+        }
+        
+        function renderPoll() {
+            if (!AppState.activePoll) {
+                elements.pollQuestion.textContent = 'No active poll. Create one below.';
+                elements.pollOptions.innerHTML = '';
+                elements.pollResults.style.display = 'none';
+                elements.createPollBtn.style.display = 'block';
+                elements.votePollBtn.style.display = 'none';
+                elements.closePollBtn.style.display = 'none';
+                return;
+            }
+            
+            elements.pollQuestion.textContent = AppState.activePoll.question;
+            
+            const userVoted = AppState.userVotes[AppState.activePoll.id] !== null;
+            
+            if (userVoted) {
+                renderPollResults();
+            } else {
+                let optionsHtml = '';
+                AppState.activePoll.options.forEach((option, index) => {
+                    optionsHtml += `
+                        <div class="poll-option-item" data-index="${index}">
+                            <div class="poll-option-text">${option.text}</div>
+                        </div>
+                    `;
+                });
+                
+                elements.pollOptions.innerHTML = optionsHtml;
+                elements.pollResults.style.display = 'none';
+                elements.createPollBtn.style.display = 'none';
+                elements.votePollBtn.style.display = 'block';
+                elements.closePollBtn.style.display = 'block';
+                
+                document.querySelectorAll('.poll-option-item').forEach(item => {
+                    item.addEventListener('click', function() {
+                        document.querySelectorAll('.poll-option-item').forEach(opt => {
+                            opt.classList.remove('selected');
+                        });
+                        this.classList.add('selected');
+                    });
+                });
+            }
+        }
+        
+        function voteOnPoll() {
+            if (!AppState.activePoll) return;
+            
+            const selectedOption = document.querySelector('.poll-option-item.selected');
+            if (!selectedOption) {
+                showNotification('Please select an option', 'warning');
+                return;
+            }
+            
+            const optionIndex = parseInt(selectedOption.dataset.index);
+            
+            AppState.activePoll.options[optionIndex].votes++;
+            AppState.activePoll.totalVotes++;
+            AppState.userVotes[AppState.activePoll.id] = optionIndex;
+            
+            try {
+                localStorage.setItem('polls', JSON.stringify(AppState.userVotes));
+            } catch (error) {
+                console.error('Error saving poll votes:', error);
+            }
+            
+            renderPollResults();
+            
+            showNotification('Vote submitted', 'success');
+        }
+        
+        function renderPollResults() {
+            if (!AppState.activePoll) return;
+            
+            let resultsHtml = '';
+            
+            AppState.activePoll.options.forEach(option => {
+                const percentage = AppState.activePoll.totalVotes > 0 ? 
+                    Math.round((option.votes / AppState.activePoll.totalVotes) * 100) : 0;
+                
+                resultsHtml += `
+                    <div class="poll-result-item">
+                        <div class="poll-option-text">${option.text}</div>
+                        <div class="poll-result-bar">
+                            <div class="poll-result-fill" style="width: ${percentage}%"></div>
+                        </div>
+                        <div class="poll-result-percentage">${option.votes} votes (${percentage}%)</div>
+                    </div>
+                `;
+            });
+            
+            elements.pollResults.innerHTML = resultsHtml;
+            elements.pollResults.style.display = 'block';
+            elements.pollOptions.innerHTML = '';
+            elements.createPollBtn.style.display = 'none';
+            elements.votePollBtn.style.display = 'none';
+            elements.closePollBtn.style.display = 'block';
+        }
+        
+        function closePoll() {
+            AppState.activePoll = null;
+            renderPoll();
+            showNotification('Poll closed', 'info');
+        }
+        
+        function loadRelationshipInsights() {
+            if (AppState.callParticipants.length === 0) {
+                elements.insightsDisplay.style.display = 'none';
+                elements.relationshipInfo.style.display = 'block';
+                return;
+            }
+            
+            const contact = AppState.callParticipants[0];
+            
+            const insights = {
+                totalCalls: Math.floor(Math.random() * 50) + 5,
+                avgDuration: Math.floor(Math.random() * 30) + 5,
+                callFrequency: ['Daily', 'Weekly', 'Monthly', 'Occasionally'][Math.floor(Math.random() * 4)],
+                moodTrend: ['Improving', 'Stable', 'Declining'][Math.floor(Math.random() * 3)],
+                lastCall: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+                topics: ['Work', 'Family', 'Hobbies', 'Travel'].slice(0, Math.floor(Math.random() * 4) + 1)
+            };
+            
+            let insightsHtml = `
+                <div class="insight-card">
+                    <div class="insight-title">Total Calls</div>
+                    <div class="insight-value">${insights.totalCalls}</div>
+                    <div class="insight-description">All time calls with ${contact.name}</div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-title">Average Duration</div>
+                    <div class="insight-value">${insights.avgDuration} min</div>
+                    <div class="insight-description">Per call average</div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-title">Call Frequency</div>
+                    <div class="insight-value">${insights.callFrequency}</div>
+                    <div class="insight-description">How often you connect</div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-title">Mood Trend</div>
+                    <div class="insight-value">${insights.moodTrend}</div>
+                    <div class="insight-description">Emotional pattern in calls</div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-title">Last Call</div>
+                    <div class="insight-value">${insights.lastCall}</div>
+                    <div class="insight-description">Most recent connection</div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-title">Common Topics</div>
+                    <div class="insight-value">${insights.topics.join(', ')}</div>
+                    <div class="insight-description">Frequently discussed subjects</div>
+                </div>
+            `;
+            
+            elements.insightsDisplay.innerHTML = insightsHtml;
+            elements.insightsDisplay.style.display = 'block';
+            elements.relationshipInfo.style.display = 'none';
         }
         
         function scheduleGroupCall(participants) {
-            // In a real app, this would open a scheduling interface
-            // For now, just show notification
             showNotification('Group call scheduled successfully', 'success');
             closeNewCallModal();
         }
@@ -3764,7 +4362,6 @@
         }
         
         function generateCallLink(type) {
-            // Generate unique call ID
             const callId = 'call-' + Math.random().toString(36).substr(2, 9);
             const baseUrl = window.location.origin + window.location.pathname;
             const callUrl = `${baseUrl}?call=${callId}&type=${type}`;
@@ -3814,7 +4411,6 @@
                     showNotification('Failed to share link', 'error');
                 });
             } else {
-                // Fallback to copy
                 copyCallLink();
             }
         }
@@ -3825,7 +4421,6 @@
             const callType = urlParams.get('type');
             
             if (callId) {
-                // Show URL parameter overlay
                 elements.urlParamText.textContent = `You've been invited to join a ${callType || 'voice'} call. Would you like to join now?`;
                 elements.urlParamOverlay.classList.add('active');
             }
@@ -3834,7 +4429,6 @@
         function closeUrlParamOverlay() {
             elements.urlParamOverlay.classList.remove('active');
             
-            // Remove call parameter from URL
             const url = new URL(window.location);
             url.searchParams.delete('call');
             url.searchParams.delete('type');
@@ -3846,16 +4440,11 @@
             const callId = urlParams.get('call');
             const callType = urlParams.get('type') || 'voice';
             
-            // Simulate joining a call
             showNotification(`Joining ${callType} call...`, 'info');
             
-            // In a real app, you would join the call via API
-            // For now, just close the overlay
             closeUrlParamOverlay();
             
-            // Show call UI (simulated)
             setTimeout(() => {
-                // Simulate joining a call with a random contact
                 const randomContact = AppState.contacts.length > 0 ? 
                     AppState.contacts[0] : 
                     { id: 'remote', name: 'Remote Participant' };
@@ -3873,7 +4462,6 @@
         }
         
         function renderCallHistory() {
-            // Clear loading state
             elements.callsLoading.style.display = 'none';
             
             if (AppState.callHistory.length === 0) {
@@ -3888,15 +4476,12 @@
             AppState.callHistory.forEach(call => {
                 const callItem = createCallHistoryItem(call);
                 
-                // Add to all calls
                 allCallsHtml += callItem;
                 
-                // Add to missed calls if missed
                 if (call.status === 'missed') {
                     missedCallsHtml += callItem;
                 }
                 
-                // Add to group calls if group
                 if (call.isGroup) {
                     groupCallsHtml += callItem;
                 }
@@ -3906,7 +4491,6 @@
             elements.missedCallsList.innerHTML = missedCallsHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No missed calls</p><p class="subtext">All calls have been answered</p></div>';
             elements.groupCallsList.innerHTML = groupCallsHtml || '<div class="offline-state"><i class="fas fa-users-slash"></i><p>No group calls yet</p><p class="subtext">Start your first group call to see it here</p></div>';
             
-            // Add event listeners to call back buttons
             document.querySelectorAll('.call-action-btn').forEach(btn => {
                 btn.addEventListener('click', function() {
                     const callItem = this.closest('.call-item');
@@ -3970,7 +4554,6 @@
         function switchCallCategory(category) {
             AppState.currentCategory = category;
             
-            // Update active tab
             document.querySelectorAll('.category-btn').forEach(btn => {
                 btn.classList.remove('active');
                 if (btn.dataset.category === category) {
@@ -3978,7 +4561,6 @@
                 }
             });
             
-            // Show corresponding section
             elements.allCallsSection.classList.remove('active');
             elements.missedCallsSection.classList.remove('active');
             elements.groupCallsSection.classList.remove('active');
@@ -3993,7 +4575,6 @@
         }
         
         function switchNewCallTab(tabId) {
-            // Update active tab
             document.querySelectorAll('.new-call-tab').forEach(tab => {
                 tab.classList.remove('active');
                 if (tab.dataset.tab === tabId) {
@@ -4001,7 +4582,6 @@
                 }
             });
             
-            // Show corresponding content
             document.querySelectorAll('.new-call-tab-content').forEach(content => {
                 content.classList.remove('active');
                 if (content.id === tabId + 'Tab') {
@@ -4013,7 +4593,6 @@
         function switchSidePanel(panel) {
             AppState.currentPanel = panel;
             
-            // Update active tab
             document.querySelectorAll('.panel-tab').forEach(tab => {
                 tab.classList.remove('active');
                 if (tab.dataset.panel === panel) {
@@ -4021,7 +4600,6 @@
                 }
             });
             
-            // Show corresponding content
             document.querySelectorAll('.panel-section').forEach(section => {
                 section.classList.remove('active');
                 if (section.id === panel + 'Panel') {
@@ -4029,7 +4607,6 @@
                 }
             });
             
-            // Update panel title
             const panelTitles = {
                 participants: 'Participants',
                 chat: 'Chat',
@@ -4079,10 +4656,6 @@
             });
             
             event.currentTarget.classList.add('selected');
-            
-            // Show corresponding form
-            const option = event.currentTarget.id.replace('Option', '');
-            // In a real app, you would show different forms for different payment options
         }
         
         function processPayment() {
@@ -4099,12 +4672,9 @@
                 return;
             }
             
-            // Simulate payment processing
             showNotification('Processing payment...', 'info');
             
-            // In a real app, you would call M-Pesa API here
             setTimeout(() => {
-                // Simulate successful payment
                 closePaymentModal();
                 AppState.isPremium = true;
                 updatePremiumUI();
@@ -4117,12 +4687,10 @@
         }
         
         function initializeNotifications() {
-            // Hide notification toast initially
             elements.notificationToast.style.display = 'none';
         }
         
         function showNotification(message, type = 'success') {
-            // Create notification element
             const notification = document.createElement('div');
             notification.className = `call-notification ${type}`;
             
@@ -4136,15 +4704,12 @@
                 </button>
             `;
             
-            // Add to notification area
             elements.notificationArea.appendChild(notification);
             
-            // Add close event
             notification.querySelector('.call-notification-close').addEventListener('click', () => {
                 notification.remove();
             });
             
-            // Auto-remove after 3 seconds
             setTimeout(() => {
                 if (notification.parentNode) {
                     notification.remove();
@@ -4156,7 +4721,6 @@
             let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
             
             if (element.querySelector('.pip-controls')) {
-                // Make the controls the drag handle
                 element.querySelector('.pip-controls').onmousedown = dragMouseDown;
             } else {
                 element.onmousedown = dragMouseDown;
@@ -4166,7 +4730,6 @@
                 e = e || window.event;
                 e.preventDefault();
                 
-                // Get the mouse cursor position at startup
                 pos3 = e.clientX;
                 pos4 = e.clientY;
                 
@@ -4178,19 +4741,16 @@
                 e = e || window.event;
                 e.preventDefault();
                 
-                // Calculate the new cursor position
                 pos1 = pos3 - e.clientX;
                 pos2 = pos4 - e.clientY;
                 pos3 = e.clientX;
                 pos4 = e.clientY;
                 
-                // Set the element's new position
                 element.style.top = (element.offsetTop - pos2) + "px";
                 element.style.left = (element.offsetLeft - pos1) + "px";
             }
             
             function closeDragElement() {
-                // Stop moving when mouse button is released
                 document.onmouseup = null;
                 document.onmousemove = null;
             }
@@ -4200,28 +4760,124 @@
             elements.pipContainer.style.display = 'none';
         }
         
-        // Handle incoming call
+        function initializeOfflineDetection() {
+            AppState.isOnline = navigator.onLine;
+            
+            if (!AppState.isOnline) {
+                handleOffline();
+            }
+        }
+        
+        function handleOnline() {
+            console.log('App is online');
+            AppState.isOnline = true;
+            
+            elements.offlineBanner.classList.remove('active');
+            
+            elements.appContainer.classList.remove('offline-ui');
+            
+            elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
+            elements.syncIndicator.classList.add('syncing');
+            
+            syncData();
+            
+            if (AppState.apiReady) {
+                enableUI();
+            }
+        }
+        
+        function handleOffline() {
+            console.log('App is offline');
+            AppState.isOnline = false;
+            
+            elements.offlineBanner.classList.add('active');
+            
+            elements.appContainer.classList.add('offline-ui');
+            
+            elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+            elements.syncIndicator.classList.remove('syncing');
+            
+            showOfflineUI();
+        }
+        
+        function showOfflineUI() {
+            if (elements.callContainer.classList.contains('active')) {
+                elements.offlineCallPlaceholder.style.display = 'flex';
+                elements.videoGrid.style.display = 'none';
+            }
+            
+            elements.offlineContactsMessage.style.display = 'block';
+            
+            elements.offlineCallsState.style.display = 'flex';
+            elements.callsLoading.style.display = 'none';
+            
+            loadCachedDataToUI();
+        }
+        
+        function enableUI() {
+            console.log('Enabling UI elements...');
+            console.log('Authentication status:', AppState.isAuthenticated);
+            console.log('API ready:', AppState.apiReady);
+            
+            elements.newCallBtn.disabled = false;
+            
+            elements.quickVoiceBtn.disabled = false;
+            elements.quickVideoBtn.disabled = false;
+            
+            if (AppState.premiumFeatures.groupCalls) {
+                elements.quickGroupBtn.disabled = false;
+            }
+            
+            if (AppState.isOnline) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+                
+                elements.offlineCallsState.style.display = 'none';
+                elements.offlineContactsMessage.style.display = 'none';
+                
+                if (AppState.syncPending) {
+                    syncData();
+                }
+            } else {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+                showOfflineUI();
+            }
+            
+            applySettingsToUI();
+        }
+        
+        function initializeUI() {
+            elements.callsLoading.style.display = 'none';
+            elements.contactsLoading.style.display = 'none';
+            
+            updateMoodIndicator('neutral');
+            updateIntentionIndicator('quick');
+            
+            initializeWhiteboard();
+            
+            initializeNotifications();
+            
+            initializeChat();
+            
+            initializePolls();
+        }
+        
         function simulateIncomingCall() {
             if (AppState.isInCall || elements.incomingCallModal.classList.contains('active')) {
                 return;
             }
             
-            // Pick a random contact
             if (AppState.contacts.length === 0) return;
             
             const randomContact = AppState.contacts[Math.floor(Math.random() * AppState.contacts.length)];
             const isVideoCall = Math.random() > 0.5;
             
-            // Show incoming call modal
             elements.incomingCallName.textContent = randomContact.name;
             elements.incomingCallType.textContent = isVideoCall ? 'Video Call' : 'Voice Call';
             
-            // Set avatar
             const initials = randomContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
             elements.incomingCallAvatar.innerHTML = initials;
             elements.incomingCallAvatar.style.backgroundColor = stringToColor(randomContact.name);
             
-            // Show mood and intention indicators (random for demo)
             if (Math.random() > 0.5) {
                 const moods = ['happy', 'neutral', 'sad', 'angry', 'tired'];
                 const randomMood = moods[Math.floor(Math.random() * moods.length)];
@@ -4242,7 +4898,6 @@
                 elements.incomingCallIntention.style.display = 'none';
             }
             
-            // Start auto-decline timer
             let timeLeft = 45;
             elements.declineTimer.textContent = timeLeft;
             
@@ -4256,23 +4911,18 @@
                 }
             }, 1000);
             
-            // Store timer reference
             elements.incomingCallModal.dataset.timer = countdown;
             
-            // Show modal
             elements.incomingCallModal.classList.add('active');
             
-            // Also show notification
             showNotification(`Incoming ${isVideoCall ? 'video' : 'voice'} call from ${randomContact.name}`, 'info');
         }
         
         function declineIncomingCall() {
-            // Clear timer
             if (elements.incomingCallModal.dataset.timer) {
                 clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
             }
             
-            // Hide modal
             elements.incomingCallModal.classList.remove('active');
             
             showNotification('Call declined', 'info');
@@ -4287,36 +4937,29 @@
         }
         
         function acceptIncomingCallGeneric(asVideo) {
-            // Clear timer
             if (elements.incomingCallModal.dataset.timer) {
                 clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
             }
             
-            // Get caller info
             const callerName = elements.incomingCallName.textContent;
             const isVideoCall = elements.incomingCallType.textContent.includes('Video');
             const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
             
-            // Hide modal
             elements.incomingCallModal.classList.remove('active');
             
-            // Simulate accepting call
             showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
             
-            // Start a call with simulated participant
             const simulatedParticipant = {
                 id: 'incoming-caller',
                 name: callerName
             };
             
-            // Request media and start call
             requestMediaPermissions(callType)
                 .then(stream => {
                     AppState.localStream = stream;
                     AppState.callType = callType;
                     AppState.callParticipants = [simulatedParticipant];
                     
-                    // Show call UI
                     showCallUI();
                     startCallTimer();
                     initializeCallFeatures();
@@ -4330,7 +4973,6 @@
         
         function handleStorageEvent(event) {
             if (event.key === 'callSettings') {
-                // Settings changed in another tab
                 try {
                     const newSettings = JSON.parse(event.newValue);
                     AppState.settings = { ...AppState.settings, ...newSettings };
@@ -4341,7 +4983,6 @@
             }
         }
         
-        // Utility Functions
         function debounce(func, wait) {
             let timeout;
             return function executedFunction(...args) {
@@ -4397,32 +5038,47 @@
             return div.innerHTML;
         }
         
-        // Initialize the app when DOM is loaded
         document.addEventListener('DOMContentLoaded', initializeApp);
         
-        // Simulate an incoming call after 10 seconds (for demo purposes)
         setTimeout(() => {
-            if (AppState.apiReady && !AppState.isInCall) {
+            if (AppState.apiReady && AppState.isAuthenticated && !AppState.isInCall) {
                 simulateIncomingCall();
+            } else {
+                console.log('Skipping simulated incoming call - not authenticated or API not ready');
             }
         }, 10000);
         
-        // Simulate another incoming call after 30 seconds
         setTimeout(() => {
-            if (AppState.apiReady && !AppState.isInCall) {
+            if (AppState.apiReady && AppState.isAuthenticated && !AppState.isInCall) {
                 simulateIncomingCall();
+            } else {
+                console.log('Skipping simulated incoming call - not authenticated or API not ready');
             }
         }, 30000);
         
-        // Make some functions available globally for debugging
         window.CallApp = {
             simulateIncomingCall,
             startTestCall: () => {
-                if (AppState.contacts.length > 0) {
+                if (AppState.contacts.length > 0 && AppState.isAuthenticated) {
                     startCall('video', [AppState.contacts[0]]);
+                } else {
+                    console.log('Cannot start test call - conditions not met');
                 }
             },
-            getState: () => AppState
+            getState: () => AppState,
+            checkApiStatus: () => {
+                return {
+                    isAuthenticated: AppState.isAuthenticated,
+                    authChecked: AppState.authChecked,
+                    apiReady: AppState.apiReady,
+                    apiConfirmed: AppState.apiConfirmed,
+                    tokens: {
+                        accessToken: localStorage.getItem('accessToken') ? 'Available' : 'Missing',
+                        refreshToken: localStorage.getItem('refreshToken') ? 'Available' : 'Missing',
+                        moodchat_token: localStorage.getItem('moodchat_token') ? 'Available' : 'Missing'
+                    }
+                };
+            }
         };
     </script>
 </body>

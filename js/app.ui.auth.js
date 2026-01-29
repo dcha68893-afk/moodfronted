@@ -6,6 +6,7 @@
 // CRITICAL FIX: Reliable auth state across refreshes - prevents white screens and auth loops
 // NEW FIX: /auth/me endpoint handling improved with proper token validation and response parsing
 // LOGIN FLOW FIX: Login waits for backend authentication validation before redirecting
+// SECURE TOKEN STORAGE: Token stored in localStorage for independent in-frame access and API authentication
 
 // ============================================================================
 // PREVENT DOUBLE INITIALIZATION
@@ -134,15 +135,34 @@ LoginAttempts.init();
 
 /**
  * Saves JWT token and user info to localStorage
+ * UPDATED: Secure token storage for independent in-frame access and API authentication
  */
-function saveAuthData(token, userData) {
+function saveAuthData(token, userData, expiresAt = null) {
   console.log('Saving auth data to localStorage');
+  
+  // SECURE TOKEN STORAGE: Store token for independent in-frame access and API authentication
+  // This ensures iframe pages and API requests can access tokens independently from parent window
+  if (token && token !== 'undefined' && token !== 'null') {
+    // Store token in localStorage for API authentication
+    localStorage.setItem('accessToken', token);
+    console.log('Token stored in localStorage for API authentication and in-frame access');
+    
+    // Store expiry if provided
+    if (expiresAt) {
+      localStorage.setItem('tokenExpiresAt', expiresAt);
+      console.log('Token expiry stored in localStorage');
+    }
+  } else {
+    console.error('Invalid token provided for storage');
+    return;
+  }
   
   // Save combined auth data
   const authUser = {
     token: token,
     user: userData,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    expiresAt: expiresAt
   };
   
   localStorage.setItem('authUser', JSON.stringify(authUser));
@@ -152,7 +172,6 @@ function saveAuthData(token, userData) {
   
   // Save token in multiple formats for compatibility
   localStorage.setItem('moodchat_token', token);
-  localStorage.setItem('accessToken', token);
   
   // Assign to window.currentUser for compatibility
   window.currentUser = userData;
@@ -183,10 +202,10 @@ function getAuthData() {
       }
     }
     
-    // Check for individual token keys
-    const moodchatToken = localStorage.getItem('moodchat_token');
+    // Check for individual token keys - SECURE TOKEN ACCESS: Prioritize accessToken for in-frame access
     const accessToken = localStorage.getItem('accessToken');
-    const token = moodchatToken || accessToken;
+    const moodchatToken = localStorage.getItem('moodchat_token');
+    const token = accessToken || moodchatToken;
     
     if (token) {
       // Try to get user from currentUser
@@ -201,10 +220,14 @@ function getAuthData() {
         }
       }
       
+      // Check for token expiry
+      const expiresAt = localStorage.getItem('tokenExpiresAt');
+      
       console.log('Auth data retrieved from individual token keys');
       return {
         token: token,
         user: user,
+        expiresAt: expiresAt,
         timestamp: new Date().toISOString()
       };
     }
@@ -219,23 +242,31 @@ function getAuthData() {
 
 /**
  * Gets ONLY the token from localStorage - checks multiple keys
+ * UPDATED: Prioritize accessToken for secure in-frame access
  */
 function getAuthToken() {
   try {
-    // Check authUser first
+    // SECURE TOKEN ACCESS: Check accessToken first for in-frame API authentication
+    const accessToken = localStorage.getItem('accessToken');
+    if (accessToken && accessToken !== 'undefined' && accessToken !== 'null') {
+      return accessToken;
+    }
+    
+    // Fallback to other token keys for compatibility
     const authUserStr = localStorage.getItem('authUser');
     if (authUserStr) {
       const authUser = JSON.parse(authUserStr);
-      if (authUser.token) {
+      if (authUser.token && authUser.token !== 'undefined' && authUser.token !== 'null') {
         return authUser.token;
       }
     }
     
-    // Check individual token keys
     const moodchatToken = localStorage.getItem('moodchat_token');
-    const accessToken = localStorage.getItem('accessToken');
+    if (moodchatToken && moodchatToken !== 'undefined' && moodchatToken !== 'null') {
+      return moodchatToken;
+    }
     
-    return moodchatToken || accessToken || null;
+    return null;
   } catch (error) {
     console.error('Error retrieving auth token:', error);
     return null;
@@ -243,10 +274,37 @@ function getAuthToken() {
 }
 
 /**
+ * Gets token expiry from localStorage
+ */
+function getTokenExpiry() {
+  try {
+    const expiresAt = localStorage.getItem('tokenExpiresAt');
+    if (expiresAt && expiresAt !== 'undefined' && expiresAt !== 'null') {
+      return expiresAt;
+    }
+    
+    // Also check authUser object
+    const authUserStr = localStorage.getItem('authUser');
+    if (authUserStr) {
+      const authUser = JSON.parse(authUserStr);
+      if (authUser.expiresAt && authUser.expiresAt !== 'undefined' && authUser.expiresAt !== 'null') {
+        return authUser.expiresAt;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error retrieving token expiry:', error);
+    return null;
+  }
+}
+
+/**
  * Validates JWT token (basic validation - checks if token exists)
+ * UPDATED: Also checks token expiry from localStorage if available
  */
 function validateToken(token) {
-  if (!token) return false;
+  if (!token || token === 'undefined' || token === 'null') return false;
   
   // Basic validation - token should be a string
   if (typeof token !== 'string') return false;
@@ -255,14 +313,28 @@ function validateToken(token) {
   const parts = token.split('.');
   if (parts.length !== 3) return false;
   
-  // Check if each part is valid base64
+  // Check token expiry from localStorage first (if available)
+  const storedExpiry = getTokenExpiry();
+  if (storedExpiry) {
+    try {
+      const expiryTime = new Date(storedExpiry).getTime();
+      if (Date.now() >= expiryTime) {
+        console.log('Token has expired (from stored expiry)');
+        return false;
+      }
+    } catch (e) {
+      console.error('Error parsing stored token expiry:', e);
+    }
+  }
+  
+  // Check if token has valid JWT payload
   try {
     // Try to decode the payload to check if it's a valid JWT
     const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
     
-    // Check if token has expired
+    // Check if token has expired from JWT payload
     if (payload.exp && Date.now() >= payload.exp * 1000) {
-      console.log('Token has expired');
+      console.log('Token has expired (from JWT payload)');
       return false;
     }
     
@@ -276,16 +348,18 @@ function validateToken(token) {
 /**
  * Clears auth data from localStorage (logout)
  * Clears ALL token formats for compatibility
+ * UPDATED: Also clears secure token storage
  */
 function clearAuthData() {
   console.log('Clearing auth data from localStorage');
   
-  // Clear all token formats
+  // Clear all token formats including secure token storage
   localStorage.removeItem('authUser');
   localStorage.removeItem('currentUser');
   localStorage.removeItem('authToken');
   localStorage.removeItem('moodchat_token');
-  localStorage.removeItem('accessToken');
+  localStorage.removeItem('accessToken'); // Clear secure token storage
+  localStorage.removeItem('tokenExpiresAt'); // Clear token expiry
   
   window.currentUser = null;
   
@@ -401,7 +475,7 @@ async function checkAuthOnAppLoad() {
   window.AuthStatus.checking = true;
   
   try {
-    // 1. Check for token in localStorage (multiple keys)
+    // 1. Check for token in localStorage (multiple keys) - Prioritize secure token storage
     const token = getAuthToken();
     
     if (!token) {
@@ -916,6 +990,7 @@ async function validateBackendAuth(token) {
 /**
  * UNIVERSAL LOGIN HANDLER - Works even if forms are recreated
  * UPDATED WITH LOGIN FLOW FIX: Waits for backend validation before redirecting
+ * UPDATED: Implements secure token storage for independent in-frame access
  */
 async function handleLoginSubmit(event) {
   console.log('🔐 LOGIN SUBMIT HANDLER TRIGGERED - UNIVERSAL');
@@ -1049,6 +1124,7 @@ async function handleLoginSubmit(event) {
       // Extract token and user from response
       const token = response.token || response.data?.token || response.accessToken;
       const user = response.user || response.data?.user;
+      const expiresAt = response.expiresAt || response.data?.expiresAt || response.expiry;
       
       if (!token || !user) {
         console.error('❌ Invalid login response - missing token or user');
@@ -1057,8 +1133,9 @@ async function handleLoginSubmit(event) {
       
       console.log('💾 Saving authentication data...');
       
-      // Save to localStorage using our function (handles multiple formats)
-      saveAuthData(token, user);
+      // SECURE TOKEN STORAGE: Save token securely for independent in-frame access and API authentication
+      // Only store valid tokens after confirmed successful login
+      saveAuthData(token, user, expiresAt);
       
       // Reset login attempts for this identifier
       LoginAttempts.resetAttempts(identifier);
@@ -1074,7 +1151,7 @@ async function handleLoginSubmit(event) {
         
         // Update with validated user data
         if (validationResult.user) {
-          saveAuthData(token, validationResult.user);
+          saveAuthData(token, validationResult.user, expiresAt);
         }
         
         // Show success message
@@ -1290,6 +1367,7 @@ function triggerUISuccessFlow(user) {
 /**
  * STRICT API-DRIVEN REGISTRATION HANDLER - FIXED response handling
  * UPDATED WITH LOGIN FLOW FIX: Waits for backend validation before redirecting
+ * UPDATED: Implements secure token storage for independent in-frame access
  */
 async function handleRegisterSubmit(event) {
   event.preventDefault();
@@ -1357,13 +1435,14 @@ async function handleRegisterSubmit(event) {
       // Extract token and user from response
       const token = response.token || response.data?.token || response.accessToken;
       const user = response.user || response.data?.user;
+      const expiresAt = response.expiresAt || response.data?.expiresAt || response.expiry;
       
       if (!token || !user) {
         throw new Error('Invalid registration response: missing token or user data');
       }
       
-      // Save JWT and user info
-      saveAuthData(token, user);
+      // SECURE TOKEN STORAGE: Save token securely for independent in-frame access and API authentication
+      saveAuthData(token, user, expiresAt);
       
       // LOGIN FLOW FIX: Validate authentication with backend BEFORE proceeding
       console.log('🔐 LOGIN FLOW FIX: Starting backend authentication validation for registration...');
@@ -1376,7 +1455,7 @@ async function handleRegisterSubmit(event) {
         
         // Update with validated user data
         if (validationResult.user) {
-          saveAuthData(token, validationResult.user);
+          saveAuthData(token, validationResult.user, expiresAt);
         }
         
         // STRICT REQUIREMENT: Only show success AFTER API confirms
@@ -2276,6 +2355,8 @@ window.debugNetworkStatus = function() {
   console.log('AuthStatus:', window.AuthStatus);
   console.log('Current AppState.network:', window.AppState?.network);
   console.log('Auth data exists:', !!localStorage.getItem('authUser'));
+  console.log('Secure accessToken exists:', !!localStorage.getItem('accessToken'));
+  console.log('Token expiry:', getTokenExpiry());
   console.log('Login attempts:', LoginAttempts.attempts);
   console.log('window.currentUser:', window.currentUser);
   console.log('===========================');
@@ -2874,3 +2955,4 @@ initialize();
 
 console.log('app.ui.auth.js - CRITICAL UPDATE: Reliable auth state across refreshes - prevents white screens and auth loops');
 console.log('LOGIN FLOW FIX: Login waits for backend authentication validation before redirecting');
+console.log('SECURE TOKEN STORAGE: Token stored in localStorage for independent in-frame access and API authentication');

@@ -10,8 +10,203 @@
 // UPDATED: Auth restoration logic - only mark user as authenticated if /auth/me succeeds
 // UPDATED: Proper /auth/me route mounting and middleware integration
 // FIXED: Application initialization order - wait for auth validation before fallback
+// ADDED: Token validation on startup to check localStorage for accessToken and redirect if missing/expired
 
 (function () {
+  // ============================================================================
+  // TOKEN VALIDATION ON STARTUP - ADDED
+  // ============================================================================
+  
+  // Validate stored token on app start to ensure user is authenticated
+  function validateTokenOnStartup() {
+    console.log('🔐 Validating stored token on app startup...');
+    
+    // Check if we're already on login page - if so, skip validation
+    if (window.location.pathname.endsWith('index.html') || 
+        window.location.pathname.endsWith('/') ||
+        window.location.pathname.includes('/login')) {
+      console.log('On login page, skipping token validation');
+      return;
+    }
+    
+    // Check for accessToken in localStorage
+    const accessToken = localStorage.getItem('accessToken');
+    const tokenExpiresAt = localStorage.getItem('tokenExpiresAt');
+    
+    // If no token exists or token is expired, redirect to login
+    if (!accessToken) {
+      console.log('❌ No accessToken found in localStorage');
+      
+      // Also check if we have the MoodChat JWT token
+      const moodchatToken = localStorage.getItem('moodchat_jwt_token');
+      if (!moodchatToken) {
+        console.log('❌ No MoodChat JWT token found either, redirecting to login');
+        localStorage.clear();
+        setTimeout(() => {
+          window.location.href = '/index.html';
+        }, 100);
+        return;
+      } else {
+        console.log('⚠️ No accessToken but found moodchat_jwt_token, continuing with MoodChat token');
+        return;
+      }
+    }
+    
+    // Check if token is expired (if expiresAt is available)
+    if (tokenExpiresAt) {
+      const expiresDate = new Date(tokenExpiresAt);
+      const now = new Date();
+      
+      if (now > expiresDate) {
+        console.log('❌ Token expired, redirecting to login');
+        localStorage.clear();
+        setTimeout(() => {
+          window.location.href = '/index.html';
+        }, 100);
+        return;
+      }
+      
+      // Calculate time until expiration
+      const timeUntilExpiry = expiresDate - now;
+      const hoursUntilExpiry = Math.floor(timeUntilExpiry / (1000 * 60 * 60));
+      const minutesUntilExpiry = Math.floor((timeUntilExpiry % (1000 * 60 * 60)) / (1000 * 60));
+      
+      console.log(`✅ Token valid, expires in ${hoursUntilExpiry}h ${minutesUntilExpiry}m`);
+      
+      // Schedule token refresh check if token will expire soon (within 1 hour)
+      if (timeUntilExpiry < 60 * 60 * 1000) { // 1 hour
+        console.log('⚠️ Token will expire soon, scheduling refresh check');
+        setTimeout(() => {
+          checkTokenRefreshNeeded();
+        }, Math.max(5000, timeUntilExpiry - (30 * 60 * 1000))); // Check 30 minutes before expiry
+      }
+    } else {
+      console.log('✅ Token found (no expiry check)');
+    }
+    
+    // Ensure the token is available for api.js
+    ensureTokenForApiJs(accessToken);
+  }
+  
+  // Check if token refresh is needed
+  function checkTokenRefreshNeeded() {
+    console.log('🔄 Checking if token refresh is needed...');
+    
+    const accessToken = localStorage.getItem('accessToken');
+    const tokenExpiresAt = localStorage.getItem('tokenExpiresAt');
+    
+    if (!accessToken || !tokenExpiresAt) {
+      console.log('No token or expiry info available for refresh check');
+      return;
+    }
+    
+    const expiresDate = new Date(tokenExpiresAt);
+    const now = new Date();
+    const timeUntilExpiry = expiresDate - now;
+    
+    // If token expires in less than 15 minutes, try to refresh
+    if (timeUntilExpiry < 15 * 60 * 1000) {
+      console.log('Token expires soon, attempting refresh...');
+      attemptTokenRefresh(accessToken);
+    } else {
+      console.log(`Token still valid for ${Math.floor(timeUntilExpiry / (1000 * 60))} minutes`);
+      
+      // Schedule next check
+      const nextCheckDelay = Math.max(30000, timeUntilExpiry - (30 * 60 * 1000));
+      setTimeout(checkTokenRefreshNeeded, nextCheckDelay);
+    }
+  }
+  
+  // Attempt to refresh the token
+  function attemptTokenRefresh(currentToken) {
+    console.log('Attempting token refresh...');
+    
+    // Check if api.js is available for token refresh
+    if (typeof window.api === 'function' || window.MoodChatConfig?.api) {
+      console.log('Using api.js for token refresh');
+      
+      const apiFunction = window.MoodChatConfig?.api || window.api;
+      
+      // Try to refresh the token
+      apiFunction('/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${currentToken}`
+        }
+      })
+      .then(response => {
+        if (response && response.success && response.data && response.data.token) {
+          // Store new token
+          localStorage.setItem('accessToken', response.data.token);
+          
+          // Update expiry if provided
+          if (response.data.expiresAt || response.data.expiresIn) {
+            let newExpiresAt;
+            if (response.data.expiresAt) {
+              newExpiresAt = response.data.expiresAt;
+            } else if (response.data.expiresIn) {
+              // Calculate expiry from seconds
+              const expiresInMs = response.data.expiresIn * 1000;
+              newExpiresAt = new Date(Date.now() + expiresInMs).toISOString();
+            }
+            localStorage.setItem('tokenExpiresAt', newExpiresAt);
+            console.log('✅ Token refreshed successfully');
+          }
+        } else {
+          console.log('Token refresh failed, will require re-login');
+          // Schedule check for when token actually expires
+          const tokenExpiresAt = localStorage.getItem('tokenExpiresAt');
+          if (tokenExpiresAt) {
+            const expiresDate = new Date(tokenExpiresAt);
+            const timeUntilExpiry = expiresDate - Date.now();
+            setTimeout(() => {
+              validateTokenOnStartup();
+            }, Math.max(1000, timeUntilExpiry));
+          }
+        }
+      })
+      .catch(error => {
+        console.log('Token refresh error:', error.message);
+        // Schedule check for when token actually expires
+        const tokenExpiresAt = localStorage.getItem('tokenExpiresAt');
+        if (tokenExpiresAt) {
+          const expiresDate = new Date(tokenExpiresAt);
+          const timeUntilExpiry = expiresDate - Date.now();
+          setTimeout(() => {
+            validateTokenOnStartup();
+          }, Math.max(1000, timeUntilExpiry));
+        }
+      });
+    } else {
+      console.log('api.js not available for token refresh');
+      // Schedule check for when token actually expires
+      const tokenExpiresAt = localStorage.getItem('tokenExpiresAt');
+      if (tokenExpiresAt) {
+        const expiresDate = new Date(tokenExpiresAt);
+        const timeUntilExpiry = expiresDate - Date.now();
+        setTimeout(() => {
+          validateTokenOnStartup();
+        }, Math.max(1000, timeUntilExpiry));
+      }
+    }
+  }
+  
+  // Ensure token is available for api.js
+  function ensureTokenForApiJs(accessToken) {
+    // If api.js expects token in a specific format or location, ensure it's available
+    console.log('Ensuring token is available for api.js...');
+    
+    // Also store in MoodChat JWT token location for compatibility
+    if (!localStorage.getItem('moodchat_jwt_token') && accessToken) {
+      localStorage.setItem('moodchat_jwt_token', accessToken);
+      console.log('Token also stored in moodchat_jwt_token for compatibility');
+    }
+  }
+  
+  // Run token validation immediately when script loads
+  // (before any other initialization)
+  validateTokenOnStartup();
+
   // ============================================================================
   // CONFIGURATION
   // ============================================================================
@@ -4114,7 +4309,6 @@
     
     // This function should be implemented by individual tab modules
     // It will fetch fresh data from the server using api.js and update the cache
-    
     // Dispatch event to trigger background data refresh
     const event = new CustomEvent('refresh-cached-data', {
       detail: {
@@ -6204,9 +6398,9 @@
       const msgTransaction = db.transaction(['messages'], 'readwrite');
       const msgStore = msgTransaction.objectStore('messages');
       const msgIndex = msgStore.index('userId');
-      const msgRange = IDBKeyRange.only(userId);
+      const range = IDBKeyRange.only(userId);
       
-      const cursorRequest = msgIndex.openCursor(msgRange);
+      const cursorRequest = msgIndex.openCursor(range);
       if (cursorRequest) {
         cursorRequest.onsuccess = function(cursorEvent) {
           const cursor = cursorEvent.target.result;
@@ -6221,9 +6415,8 @@
       const actTransaction = db.transaction(['actions'], 'readwrite');
       const actStore = actTransaction.objectStore('actions');
       const actIndex = actStore.index('userId');
-      const actRange = IDBKeyRange.only(userId);
-    
-      const actionCursorRequest = actIndex.openCursor(actRange);
+      
+      const actionCursorRequest = actIndex.openCursor(range);
       if (actionCursorRequest) {
         actionCursorRequest.onsuccess = function(cursorEvent) {
           const cursor = cursorEvent.target.result;
@@ -6234,104 +6427,30 @@
         };
       }
       
-      syncQueue = syncQueue.filter(item => item.userId !== userId);
-      window.MOODCHAT_NETWORK.syncQueueSize = syncQueue.length;
-      
       console.log(`Message queue cleared for user: ${userId}`);
     };
   };
 
-  window.processQueuedMessages = processQueuedMessages;
-
-  // Data loading functions using api.js
-  window.loadTabData = function(tabName, forceRefresh = false) {
-    return new Promise(async (resolve) => {
-      const userId = window.currentUser ? window.currentUser.uid : null;
-      console.log(`Loading real data for tab: ${tabName}, user: ${userId}, forceRefresh: ${forceRefresh}`);
-      
-      // Use api.js to fetch data based on tab name (only if backend reachable)
-      const networkStatus = API_COORDINATION.getNetworkStatus();
-      if (API_COORDINATION.isApiAvailable() && window.MoodChatConfig.backendReachable === true && 
-          networkStatus === 'online' && window.currentUser && JWT_VALIDATION.hasToken()) {
-        let endpoint = '';
-        switch(tabName) {
-          case 'friends':
-            endpoint = '/friends/list';
-            break;
-          case 'chats':
-            endpoint = '/chats/list';
-            break;
-          case 'calls':
-            endpoint = '/calls/history';
-            break;
-          case 'groups':
-            endpoint = '/groups/list';
-            break;
-          default:
-            endpoint = '/user/profile';
-        }
-        
-        try {
-          const response = await API_COORDINATION.safeApiCall(endpoint, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${JWT_VALIDATION.getToken()}`
-            }
-          });
-          
-          if (response && response.success && response.data) {
-            // Cache the response
-            switch(tabName) {
-              case 'friends': DATA_CACHE.cacheFriends(response.data); break;
-              case 'chats': DATA_CACHE.cacheChats(response.data); break;
-              case 'calls': DATA_CACHE.cacheCalls(response.data); break;
-              case 'groups': DATA_CACHE.cacheGroups(response.data); break;
-            }
-            
-            resolve({
-              success: true,
-              data: response.data,
-              cached: false,
-              message: 'Data loaded from server'
-            });
-          } else {
-            resolve({
-              success: false,
-              message: response?.message || 'Failed to load data',
-              cached: false
-            });
-          }
-        } catch (error) {
-          resolve({
-            success: false,
-            message: 'API error: ' + error.message,
-            cached: false
-          });
-        }
-      } else {
-        // Offline or backend unreachable
-        resolve({
-          success: false,
-          offline: true,
-          message: 'Cannot load data while offline',
-          cached: false
-        });
-      }
-    });
-  };
-
-  // ============================================================================
-  // STYLES INJECTION
-  // ============================================================================
-
+  // STYLES
   function injectStyles() {
-    const styleId = 'moodchat-core-styles';
-    if (document.getElementById(styleId)) return;
-    
     const style = document.createElement('style');
-    style.id = styleId;
     style.textContent = `
-      /* Loading indicator */
+      @keyframes slideIn {
+        from { transform: translateX(-100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(-100%); opacity: 0; }
+      }
+      @keyframes slideInUp {
+        from { transform: translateY(100%); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      @keyframes slideOutDown {
+        from { transform: translateY(0); opacity: 1; }
+        to { transform: translateY(100%); opacity: 0; }
+      }
       .tab-loading-indicator {
         position: fixed;
         top: 50%;
@@ -6347,156 +6466,37 @@
         align-items: center;
         justify-content: center;
       }
-      
       .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 4px solid rgba(255, 255, 255, 0.3);
+        border: 3px solid rgba(255, 255, 255, 0.3);
         border-radius: 50%;
-        border-top-color: white;
-        animation: spin 1s ease-in-out infinite;
+        border-top: 3px solid white;
+        width: 30px;
+        height: 30px;
+        animation: spin 1s linear infinite;
         margin-bottom: 10px;
       }
-      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
       .loading-text {
         font-size: 14px;
         opacity: 0.9;
       }
-      
-      /* Animations */
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-      
-      @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-      }
-      
-      @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(100%); opacity: 0; }
-      }
-      
-      @keyframes slideInUp {
-        from { transform: translateY(20px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-      
-      @keyframes slideOutDown {
-        from { transform: translateY(0); opacity: 1; }
-        to { transform: translateY(20px); opacity: 0; }
-      }
-      
-      /* Theme classes */
-      .theme-dark {
-        color-scheme: dark;
-        --bg-primary: #111827;
-        --bg-secondary: #1f2937;
-        --text-primary: #f9fafb;
-        --text-secondary: #d1d5db;
-      }
-      
-      .theme-light {
-        color-scheme: light;
-        --bg-primary: #f9fafb;
-        --bg-secondary: #ffffff;
-        --text-primary: #111827;
-        --text-secondary: #4b5563;
-      }
-      
-      /* Font size classes */
-      .font-small { font-size: 0.875rem; }
-      .font-medium { font-size: 1rem; }
-      .font-large { font-size: 1.125rem; }
-      .font-xlarge { font-size: 1.25rem; }
-      
-      /* Accessibility classes */
-      .high-contrast {
-        --bg-primary: #000000;
-        --bg-secondary: #1a1a1a;
-        --text-primary: #ffffff;
-        --text-secondary: #cccccc;
-      }
-      
-      .reduce-motion * {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-      }
-      
-      .large-text {
-        font-size: 1.25rem;
-      }
-      
-      /* Wallpaper classes */
-      .wallpaper-default { background: var(--bg-secondary); }
-      .wallpaper-gradient1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-      .wallpaper-gradient2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-      .wallpaper-pattern1 { background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiMwMDAiIGZpbGwtb3BhY2l0eT0iMC4wNCI+PHBhdGggZD0iTTM2IDM0aC0ydi0yaDJ2MnptMC00aC0ydi0yaDJ2MnptMC00aC0ydi0yaDJ2MnptMi0yLjQyQzM4IDIxLjI0IDM2Ljc2IDIwIDM1LjQyIDIwaC0yLjg0Yy0xLjM0IDAtMi41OCAxLjI0LTIuNTggMi41OFYyNmgydi0zLjQyaC4wOEMzMiA2MCAwIDYwIDAgNjBoNjBWMzZIMzh2LTIuNDJ6TTM2IDMwaC0ydi0yaDJ2MnptLTQtMmgtMnYtMmgydjJ6bTAtNGgtMnYtMmgydjJ6bTItMmgtMnYtMmgydjJ6bTQgMGgtMnYtMmgydjJ6Ii8+PC9nPjwvZz48L3N2Zz4='); }
-      
-      /* Error message */
-      .error-message {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #f87171;
-        color: white;
-        padding: 12px 16px;
-        border-radius: 8px;
-        z-index: 10000;
-        max-width: 300px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        animation: slideIn 0.3s ease-out;
-      }
-      
-      /* Tab panel transitions */
-      .tab-panel {
-        transition: opacity 0.2s ease-in-out;
-      }
-      
-      .tab-panel.hidden {
-        display: none;
-      }
-      
-      .tab-panel.active {
-        display: block;
-        animation: fadeIn 0.3s ease-out;
-      }
-      
-      @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      
-      /* Sidebar transitions */
-      .sidebar {
-        transition: transform 0.3s ease-in-out;
-      }
-      
-      @media (max-width: 767px) {
-        .sidebar.translate-x-full {
-          transform: translateX(100%);
-        }
-        
-        .sidebar.translate-x-0 {
-          transform: translateX(0);
-        }
-      }
     `;
-    
     document.head.appendChild(style);
   }
 
-  // ============================================================================
-  // STARTUP EXECUTION
-  // ============================================================================
+  // START THE APP
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, starting app initialization...');
+    initializeApp();
+  });
 
-  // Start the app initialization when DOM is ready
+  // If DOM is already loaded, start immediately
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
-    // DOM already loaded
-    setTimeout(initializeApp, 100);
+    setTimeout(initializeApp, 0);
   }
 })();

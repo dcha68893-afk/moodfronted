@@ -2167,8 +2167,9 @@
     <div class="notification-container" id="notificationContainer"></div>
 
     <!-- ============================================= -->
-    <!-- JAVASCRIPT LOADING - CORRECTED ORDER -->
+    <!-- JAVASCRIPT LOADING - UPDATED ORDER -->
     <!-- ============================================= -->
+    <!-- Ensure auth, API, and core scripts load in this order for token handling and app startup -->
     
     <!-- 1. jQuery FIRST - Required for plugins -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -2177,14 +2178,16 @@
         window.jQuery || document.write('<script src="js/vendor/jquery.min.js"><\/script>');
     </script>
     
-    <!-- 2. api.js SECOND - Must load before auth scripts that use window.api -->
-    <script src="js/api.js"></script>
-    
-    <!-- 3. Core app scripts THIRD -->
-    <script src="js/app.core.js"></script>
+    <!-- 2. Auth UI script SECOND - Authentication logic for login UI -->
     <script src="js/app.ui.auth.js"></script>
     
-    <!-- 4. Auth UI script LAST - Depends on jQuery, api.js, and app.core.js -->
+    <!-- 3. API script THIRD - API requests that require tokens -->
+    <script src="js/api.js"></script>
+    
+    <!-- 4. Core app script FOURTH - App initialization and token validation -->
+    <script src="js/app.core.js"></script>
+    
+    <!-- 5. Inline auth JavaScript - Must load after api.js -->
     <script>
         // All your existing auth JavaScript code remains here
         // =============================================
@@ -2306,9 +2309,9 @@
             }
         }
         
-        // =============================================
+        // ============================================= */
         // UTILITY FUNCTIONS
-        // =============================================
+        // ============================================= */
         function showNotification(type, title, message) {
             console.log(`${type}: ${title} - ${message}`);
             
@@ -2430,9 +2433,9 @@
             sessionStorage.removeItem(USER_DATA_KEY);
         }
         
-        // =============================================
+        // ============================================= */
         // OFFLINE MODE FUNCTIONS
-        // =============================================
+        // ============================================= */
         function attemptOfflineLogin(identifier, password) {
             const cachedUser = getUserData();
             
@@ -2450,9 +2453,9 @@
             throw new Error('Cannot login offline. No cached credentials found.');
         }
         
-        // =============================================
+        // ============================================= */
         // IMMEDIATE FORM TOGGLING SCRIPT
-        // =============================================
+        // ============================================= */
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Form Toggler: Initializing immediate form switching...');
             console.log('API available?', typeof window.api);
@@ -2552,9 +2555,9 @@
                 }, 10);
             }
             
-            // =============================================
+            // ============================================= */
             // REDIRECT FUNCTIONALITY TO CHAT.HTML
-            // =============================================
+            // ============================================= */
             function redirectToChat() {
                 console.log('Redirecting to chat.html...');
                 
@@ -2573,9 +2576,9 @@
                 }, 1500);
             }
             
-            // =============================================
+            // ============================================= */
             // LOGIN FORM SUBMISSION HANDLER - UPDATED TO USE WINDOW.API
-            // =============================================
+            // ============================================= */
             const loginFormElement = document.getElementById('login-form');
             if (loginFormElement) {
                 loginFormElement.addEventListener('submit', async function(e) {
@@ -2673,9 +2676,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // REGISTER FORM SUBMISSION HANDLER - UPDATED TO USE WINDOW.API
-            // =============================================
+            // ============================================= */
             const registerFormElement = document.getElementById('register-form');
             if (registerFormElement) {
                 registerFormElement.addEventListener('submit', async function(e) {
@@ -2774,9 +2777,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // QUICK LOGIN HANDLER
-            // =============================================
+            // ============================================= */
             const quickLoginBtn = document.getElementById('quickLoginBtn');
             if (quickLoginBtn) {
                 quickLoginBtn.addEventListener('click', function() {
@@ -2800,9 +2803,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // ENTER CHAT BUTTON HANDLER
-            // =============================================
+            // ============================================= */
             const enterChatBtn = document.getElementById('enterChatBtn');
             if (enterChatBtn) {
                 enterChatBtn.addEventListener('click', function() {
@@ -2810,9 +2813,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // EXISTING FORM TOGGLING LOGIC
-            // =============================================
+            // ============================================= */
             if (signupButton) {
                 signupButton.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -2843,9 +2846,9 @@
             
             console.log('Form Toggler: Immediate form switching initialized.');
             
-            // =============================================
+            // ============================================= */
             // EXISTING MOBILE MENU FUNCTIONALITY
-            // =============================================
+            // ============================================= */
             const menuToggle = document.getElementById('mobileMenuToggle');
             const mobileSidebar = document.getElementById('mobileSidebar');
             const overlay = document.getElementById('mobileSidebarOverlay');
@@ -2865,9 +2868,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // EXISTING PASSWORD TOGGLE FUNCTIONALITY
-            // =============================================
+            // ============================================= */
             const passwordToggles = document.querySelectorAll('.password-toggle');
             passwordToggles.forEach(toggle => {
                 toggle.addEventListener('click', function() {
@@ -2885,9 +2888,9 @@
                 });
             });
             
-            // =============================================
+            // ============================================= */
             // EXISTING FEATURE TAGS FUNCTIONALITY
-            // =============================================
+            // ============================================= */
             const featureTags = document.querySelectorAll('.feature-tag');
             const selectedInterests = [];
             
@@ -2911,9 +2914,9 @@
                 });
             });
             
-            // =============================================
+            // ============================================= */
             // EXISTING AUTH TABS FUNCTIONALITY
-            // =============================================
+            // ============================================= */
             const authTabs = document.querySelectorAll('.auth-tab');
             authTabs.forEach(tab => {
                 tab.addEventListener('click', function() {
@@ -2955,9 +2958,9 @@
                 });
             });
             
-            // =============================================
+            // ============================================= */
             // EXISTING FORGOT PASSWORD FORM HANDLER
-            // =============================================
+            // ============================================= */
             const forgotFormElement = document.getElementById('forgot-form');
             if (forgotFormElement) {
                 forgotFormElement.addEventListener('submit', function(e) {
@@ -2991,9 +2994,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // EXISTING QUICK LOGIN CARD FUNCTIONALITY
-            // =============================================
+            // ============================================= */
             const removeQuickLogin = document.getElementById('removeQuickLogin');
             if (removeQuickLogin) {
                 removeQuickLogin.addEventListener('click', function() {
@@ -3015,9 +3018,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // EXISTING LOGOUT FUNCTIONALITY
-            // =============================================
+            // ============================================= */
             const logoutBtn = document.getElementById('logoutBtn');
             if (logoutBtn) {
                 logoutBtn.addEventListener('click', function() {
@@ -3030,9 +3033,9 @@
                 });
             }
             
-            // =============================================
+            // ============================================= */
             // CHECK FOR EXISTING AUTH ON PAGE LOAD
-            // =============================================
+            // ============================================= */
             const authToken = getAuthToken();
             const userData = getUserData();
             
@@ -3050,9 +3053,9 @@
                 }
             }
             
-            // =============================================
+            // ============================================= */
             // AUTO-FOCUS ON FIRST INPUT
-            // =============================================
+            // ============================================= */
             const observer = new MutationObserver(function(mutations) {
                 mutations.forEach(function(mutation) {
                     if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
@@ -3079,9 +3082,9 @@
                 }
             }
             
-            // =============================================
+            // ============================================= */
             // ENTER KEY SUBMISSION
-            // =============================================
+            // ============================================= */
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     const activeForm = document.querySelector('.auth-form.active');
@@ -3094,9 +3097,9 @@
                 }
             });
             
-            // =============================================
+            // ============================================= */
             // INPUT VALIDATION ON BLUR
-            // =============================================
+            // ============================================= */
             document.querySelectorAll('.form-input').forEach(input => {
                 input.addEventListener('blur', function() {
                     if (this.value.trim() === '') {
@@ -3110,7 +3113,7 @@
         });
     </script>
     
-    <!-- 5. Service Worker Registration - UPDATED WITH ENVIRONMENT CHECK -->
+    <!-- 6. Service Worker Registration - UPDATED WITH ENVIRONMENT CHECK -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             if ('serviceWorker' in navigator) {

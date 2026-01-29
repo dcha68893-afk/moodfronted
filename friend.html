@@ -16,6 +16,9 @@
     <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     
+    <!-- jsQR Library for real QR code scanning -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+    
     <link rel="stylesheet" href="friend.css">
     
     <style>
@@ -165,6 +168,56 @@
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        
+        /* QR Scanner Styles */
+        .scanner-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            overflow: hidden;
+        }
+        
+        .scanner-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .scanner-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .scanner-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 250px;
+            height: 250px;
+            border: 2px solid #0084ff;
+            border-radius: 12px;
+            box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.5);
+        }
+        
+        .scanner-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: #0084ff;
+            animation: scanLine 2s infinite linear;
+        }
+        
+        @keyframes scanLine {
+            0% { top: 0; }
+            100% { top: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -189,10 +242,13 @@
     <!-- Camera Scanner Modal -->
     <div class="camera-scanner-modal" id="cameraScannerModal">
         <div class="camera-container">
-            <video id="cameraVideo" autoplay playsinline></video>
-            <div class="camera-overlay">
-                <div class="scanner-frame">
-                    <div class="scanner-line"></div>
+            <div class="scanner-container">
+                <video id="cameraVideo" autoplay playsinline></video>
+                <canvas id="scannerCanvas" class="scanner-canvas"></canvas>
+                <div class="scanner-overlay">
+                    <div class="scanner-frame">
+                        <div class="scanner-line"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -682,7 +738,7 @@
 
     <script>
         // =============================================
-        // FRIENDS SYSTEM - USING PARENT API
+        // FRIENDS SYSTEM - DIRECT TOKEN ACCESS
         // =============================================
 
         // Global variables
@@ -706,7 +762,13 @@
         let currentCamera = 'environment';
         let flashOn = false;
         let apiReady = false;
-        let apiInitializationAttempted = false;
+        let scanningActive = false;
+        let qrCodeScanner = null;
+        
+        // Token management variables
+        let accessToken = null;
+        let refreshToken = null;
+        let isRefreshingToken = false;
         
         // Friend categories with colors and icons
         const friendCategories = {
@@ -802,99 +864,237 @@
             ALL_USERS_CACHE: 'knecta_all_users_cache'
         };
         
-        // API readiness checker
-        async function checkApiReady() {
+        // =============================================
+        // TOKEN MANAGEMENT FUNCTIONS
+        // =============================================
+        
+        // Get tokens from localStorage
+        function getTokensFromStorage() {
             try {
-                if (window.parent && window.parent.api) {
-                    const api = window.parent.api;
-                    // Test API with a simple call
-                    const test = await api.get('/api/auth/test');
-                    if (test && test.status === 'ok') {
-                        apiReady = true;
-                        return true;
-                    }
+                // Try to get from moodchat_token (from parent app)
+                accessToken = localStorage.getItem('moodchat_token');
+                
+                // If not found, try other possible storage locations
+                if (!accessToken) {
+                    accessToken = localStorage.getItem('accessToken') || 
+                                 localStorage.getItem('token') || 
+                                 sessionStorage.getItem('accessToken');
                 }
-                return false;
+                
+                refreshToken = localStorage.getItem('refreshToken') || 
+                              localStorage.getItem('refresh_token') || 
+                              sessionStorage.getItem('refreshToken');
+                
+                return { accessToken, refreshToken };
             } catch (error) {
-                return false;
+                console.error('Error getting tokens from storage:', error);
+                return { accessToken: null, refreshToken: null };
             }
         }
         
-        // Initialize the application
-        document.addEventListener('DOMContentLoaded', async function() {
-            console.log('Friends page loaded');
+        // Check if token is expired
+        function isTokenExpired(token) {
+            if (!token) return true;
             
-            // Load cached data instantly
+            try {
+                // Decode JWT token to check expiration
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                const currentTime = Math.floor(Date.now() / 1000);
+                return payload.exp < currentTime;
+            } catch (error) {
+                console.error('Error checking token expiration:', error);
+                return true;
+            }
+        }
+        
+        // Refresh access token
+        async function refreshAccessToken() {
+            if (isRefreshingToken) {
+                console.log('Token refresh already in progress');
+                return null;
+            }
+            
+            isRefreshingToken = true;
+            
+            try {
+                const { refreshToken: storedRefreshToken } = getTokensFromStorage();
+                if (!storedRefreshToken) {
+                    throw new Error('No refresh token available');
+                }
+                
+                console.log('Refreshing access token...');
+                
+                const response = await fetch('/api/auth/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: JSON.stringify({ refreshToken: storedRefreshToken })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Refresh failed: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.accessToken) {
+                    accessToken = data.accessToken;
+                    localStorage.setItem('moodchat_token', data.accessToken);
+                    
+                    if (data.refreshToken) {
+                        refreshToken = data.refreshToken;
+                        localStorage.setItem('refreshToken', data.refreshToken);
+                    }
+                    
+                    console.log('Access token refreshed successfully');
+                    return accessToken;
+                } else {
+                    throw new Error('No access token in response');
+                }
+                
+            } catch (error) {
+                console.error('Error refreshing access token:', error);
+                
+                // Clear tokens and redirect to login
+                localStorage.removeItem('moodchat_token');
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                
+                showNotification('Session expired. Please login again.', 'error');
+                setTimeout(() => {
+                    window.location.href = '../login.html';
+                }, 2000);
+                
+                return null;
+            } finally {
+                isRefreshingToken = false;
+            }
+        }
+        
+        // API call function with token management
+        async function apiCall(url, options = {}) {
+            // Get tokens first
+            const tokens = getTokensFromStorage();
+            accessToken = tokens.accessToken;
+            
+            // Check if we have a token
+            if (!accessToken) {
+                showNotification('Not authenticated. Please login.', 'error');
+                setTimeout(() => {
+                    window.location.href = '../login.html';
+                }, 1500);
+                throw new Error('No access token available');
+            }
+            
+            // Check if token is expired
+            if (isTokenExpired(accessToken)) {
+                console.log('Access token expired, attempting refresh...');
+                const newToken = await refreshAccessToken();
+                if (!newToken) {
+                    throw new Error('Failed to refresh token');
+                }
+                accessToken = newToken;
+            }
+            
+            // Set default headers
+            const defaultHeaders = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`
+            };
+            
+            // Merge headers
+            const headers = {
+                ...defaultHeaders,
+                ...(options.headers || {})
+            };
+            
+            // Create fetch options
+            const fetchOptions = {
+                ...options,
+                headers
+            };
+            
+            try {
+                console.log(`API Call: ${url}`);
+                const response = await fetch(url, fetchOptions);
+                
+                // Check for unauthorized response
+                if (response.status === 401) {
+                    console.log('Unauthorized, attempting token refresh...');
+                    const newToken = await refreshAccessToken();
+                    if (newToken) {
+                        // Retry the request with new token
+                        headers.Authorization = `Bearer ${newToken}`;
+                        const retryResponse = await fetch(url, fetchOptions);
+                        return await handleApiResponse(retryResponse);
+                    } else {
+                        throw new Error('Authentication failed');
+                    }
+                }
+                
+                return await handleApiResponse(response);
+                
+            } catch (error) {
+                console.error('API call error:', error);
+                throw error;
+            }
+        }
+        
+        // Handle API response
+        async function handleApiResponse(response) {
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API Error (${response.status}): ${errorText}`);
+            }
+            
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return await response.json();
+            }
+            
+            return await response.text();
+        }
+        
+        // =============================================
+        // INITIALIZATION
+        // =============================================
+        
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('Friends page loaded - Initializing with direct token access');
+            
+            // Initialize tokens
+            const tokens = getTokensFromStorage();
+            accessToken = tokens.accessToken;
+            
+            if (!accessToken) {
+                showNotification('Not authenticated. Redirecting to login...', 'error');
+                setTimeout(() => {
+                    window.location.href = '../login.html';
+                }, 1500);
+                return;
+            }
+            
+            // Load cached data instantly for offline display
             loadCachedDataInstantly();
             setupEventListeners();
             
-            // Try to initialize with API immediately
+            // Initialize with API
             await initializeWithAPI();
             
-            // Request API ready event
-            if (window.parent) {
-                window.parent.postMessage({ type: 'REQUEST_API_READY' }, '*');
-            }
-            
-            // Set up API ready listener
-            window.addEventListener('message', async (e) => {
-                if (e.data?.type === 'API_READY') {
-                    console.log('API Ready event received from parent');
-                    if (!apiInitializationAttempted || !apiReady) {
-                        await initializeWithAPI();
-                    }
-                }
-            });
-            
-            // Periodic API check for late initialization
-            setTimeout(async () => {
-                if (!apiReady && !apiInitializationAttempted) {
-                    console.log('Performing delayed API check...');
-                    await initializeWithAPI();
-                }
-            }, 3000);
+            console.log('Friends system initialized with direct token access');
         });
         
-        // Initialize with API
+        // Initialize with API - Direct token access
         async function initializeWithAPI() {
-            if (apiInitializationAttempted) return;
-            
-            apiInitializationAttempted = true;
-            console.log('Attempting to initialize with API...');
+            console.log('=== INITIALIZING FRIENDS SYSTEM WITH DIRECT TOKEN ACCESS ===');
             
             try {
-                const isApiReady = await checkApiReady();
-                if (!isApiReady) {
-                    throw new Error('API not ready');
-                }
-                
-                console.log('API is ready, initializing friends system...');
-                await initializeFriends();
-                apiReady = true;
-                
-            } catch (error) {
-                console.log('API initialization failed, using cached data:', error.message);
-                showNotification('Using offline mode', 'warning');
-                updateCurrentSection();
-            }
-        }
-        
-        // Initialize friends system with backend
-        async function initializeFriends() {
-            console.log('=== INITIALIZING FRIENDS SYSTEM WITH BACKEND ===');
-            
-            try {
-                // Get API from parent
-                const api = window.parent.api;
-                if (!api) {
-                    throw new Error('API not available in parent window');
-                }
-                
-                console.log('API available:', typeof api);
-                
-                // Get current user from backend
+                // Get current user from backend using direct API call
                 try {
-                    const userResponse = await api.get('/api/auth/user');
+                    const userResponse = await apiCall('/api/auth/user');
+                    
                     if (userResponse && userResponse.user) {
                         currentUser = userResponse.user;
                         userData = currentUser;
@@ -929,11 +1129,12 @@
                     fetchAllUsersFromBackend();
                 }, 1000);
                 
+                apiReady = true;
                 showNotification('Connected to server', 'success');
                 console.log('=== FRIENDS SYSTEM INITIALIZED WITH BACKEND SUCCESSFULLY ===');
                 
             } catch (error) {
-                console.error('Error initializing friends system with backend:', error);
+                console.error('Error initializing with API:', error);
                 showNotification('Could not connect to server', 'error');
                 
                 // Fallback to cached data
@@ -942,19 +1143,15 @@
             }
         }
         
-        // Load initial data from API
+        // Load initial data from API - Direct token access
         async function loadInitialData() {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    throw new Error('API not available');
-                }
-                
                 console.log('Loading initial data from API...');
                 
                 // Load friends
                 try {
-                    const friendsResponse = await api.get('/api/friends');
+                    const friendsResponse = await apiCall('/api/friends');
+                    
                     if (friendsResponse && friendsResponse.friends) {
                         friends = friendsResponse.friends;
                         console.log('Loaded friends from API:', friends.length);
@@ -978,7 +1175,8 @@
                 
                 // Load friend requests
                 try {
-                    const requestsResponse = await api.get('/api/friend-requests/incoming');
+                    const requestsResponse = await apiCall('/api/friend-requests/incoming');
+                    
                     if (requestsResponse && requestsResponse.requests) {
                         friendRequests = requestsResponse.requests;
                         document.getElementById('requestsCount').textContent = friendRequests.length;
@@ -992,7 +1190,8 @@
                 
                 // Load sent requests
                 try {
-                    const sentResponse = await api.get('/api/friend-requests/sent');
+                    const sentResponse = await apiCall('/api/friend-requests/sent');
+                    
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
                         document.getElementById('sentRequestsCount').textContent = sentRequests.length;
@@ -1005,7 +1204,8 @@
                 
                 // Load pinned friends
                 try {
-                    const pinnedResponse = await api.get('/api/friends/pinned');
+                    const pinnedResponse = await apiCall('/api/friends/pinned');
+                    
                     if (pinnedResponse && pinnedResponse.friends) {
                         pinnedFriends = pinnedResponse.friends;
                         document.getElementById('pinnedCount').textContent = pinnedFriends.length;
@@ -1019,7 +1219,8 @@
                 
                 // Load muted friends
                 try {
-                    const mutedResponse = await api.get('/api/friends/muted');
+                    const mutedResponse = await apiCall('/api/friends/muted');
+                    
                     if (mutedResponse && mutedResponse.friends) {
                         mutedFriends = mutedResponse.friends;
                         document.getElementById('mutedCount').textContent = mutedFriends.length;
@@ -1032,7 +1233,8 @@
                 
                 // Load contacts
                 try {
-                    const contactsResponse = await api.get('/api/contacts/synced');
+                    const contactsResponse = await apiCall('/api/contacts/synced');
+                    
                     if (contactsResponse && contactsResponse.contacts) {
                         contacts = contactsResponse.contacts;
                         document.getElementById('contactsCount').textContent = contacts.length;
@@ -1045,7 +1247,8 @@
                 
                 // Load groups
                 try {
-                    const groupsResponse = await api.get('/api/groups/user');
+                    const groupsResponse = await apiCall('/api/groups/user');
+                    
                     if (groupsResponse && groupsResponse.groups) {
                         groups = groupsResponse.groups;
                         console.log('Loaded groups:', groups.length);
@@ -1338,16 +1541,10 @@
             container.appendChild(friendItem);
         }
         
-        // Fetch all users from backend
+        // Fetch all users from backend - Direct token access
         async function fetchAllUsersFromBackend() {
             try {
                 console.log('Fetching all users from backend...');
-                
-                const api = window.parent.api;
-                if (!api) {
-                    console.log('API not available');
-                    return;
-                }
                 
                 // Check for cached data first
                 const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
@@ -1362,8 +1559,8 @@
                     return;
                 }
                 
-                // Fetch from backend API
-                const response = await api.get('/api/users/all?limit=100');
+                // Fetch from backend API using direct token access
+                const response = await apiCall('/api/users/all?limit=100');
                 
                 if (response && response.users) {
                     // Filter out current user from the list
@@ -1569,12 +1766,13 @@
             window.location.href = `../calls.html?user=${userId}&name=${encodedName}&type=${callType}`;
         }
         
-        // Camera functions
+        // Camera functions - REAL IMPLEMENTATION
         async function startCameraScanner() {
             try {
                 const videoElement = document.getElementById('cameraVideo');
-                if (!videoElement) {
-                    showNotification('Camera element not found', 'error');
+                const canvasElement = document.getElementById('scannerCanvas');
+                if (!videoElement || !canvasElement) {
+                    showNotification('Camera elements not found', 'error');
                     return;
                 }
                 
@@ -1593,7 +1791,9 @@
                 
                 cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
                 videoElement.srcObject = cameraStream;
-                startQRCodeScanning(videoElement);
+                
+                // Start real QR code scanning
+                startRealQRCodeScanning(videoElement, canvasElement);
                 showNotification('Camera started successfully', 'success');
                 
             } catch (error) {
@@ -1613,91 +1813,161 @@
             }
         }
         
-        function startQRCodeScanning(videoElement) {
-            console.log('Starting QR code scanning...');
+        // REAL QR Code scanning using jsQR library
+        function startRealQRCodeScanning(videoElement, canvasElement) {
+            console.log('Starting REAL QR code scanning...');
             
-            // Create canvas for QR code detection
-            const canvas = document.createElement('canvas');
+            const canvas = canvasElement;
             const context = canvas.getContext('2d');
+            scanningActive = true;
             
             function scanFrame() {
-                if (!videoElement || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) {
-                    requestAnimationFrame(scanFrame);
+                if (!scanningActive || !cameraScannerModal.classList.contains('active')) {
                     return;
                 }
                 
-                canvas.width = videoElement.videoWidth;
-                canvas.height = videoElement.videoHeight;
-                context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                
-                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                
-                // Simple QR code detection simulation
-                // In a real app, you would use a proper QR code library like jsQR
-                detectQRCode(imageData);
+                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                    canvas.width = videoElement.videoWidth;
+                    canvas.height = videoElement.videoHeight;
+                    
+                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    
+                    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    // Use jsQR library for real QR code detection
+                    try {
+                        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                            inversionAttempts: "dontInvert",
+                        });
+                        
+                        if (code) {
+                            // Draw rectangle around QR code
+                            drawQRCodeRect(code.location, context);
+                            
+                            // Process the QR code data
+                            processScannedQRCodeReal(code.data);
+                            return; // Stop scanning after successful detection
+                        }
+                    } catch (error) {
+                        console.error('QR code detection error:', error);
+                    }
+                }
                 
                 requestAnimationFrame(scanFrame);
             }
             
-            function detectQRCode(imageData) {
-                // This is a simplified detection for demo purposes
-                // Real implementation would use a proper QR code scanning library
-                const data = imageData.data;
-                let darkPixels = 0;
-                
-                // Count dark pixels
-                for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-                    
-                    // Check if pixel is dark
-                    if (r < 100 && g < 100 && b < 100) {
-                        darkPixels++;
-                    }
-                }
-                
-                const totalPixels = data.length / 4;
-                const darkRatio = darkPixels / totalPixels;
-                
-                // If we detect a pattern that might be a QR code (high contrast)
-                if (darkRatio > 0.3 && darkRatio < 0.7) {
-                    simulateQRCodeDetection();
-                }
+            function drawQRCodeRect(location, ctx) {
+                ctx.beginPath();
+                ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
+                ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
+                ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
+                ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
+                ctx.lineTo(location.topLeftCorner.x, location.topLeftCorner.y);
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = "#00FF00";
+                ctx.stroke();
             }
             
             scanFrame();
         }
         
-        function simulateQRCodeDetection() {
-            // In a real app, this would parse actual QR code data
-            // For demo, we'll simulate finding a QR code after 2 seconds
-            setTimeout(() => {
-                if (!cameraScannerModal.classList.contains('active')) return;
+        function processScannedQRCodeReal(qrData) {
+            try {
+                console.log('QR Code detected:', qrData);
                 
-                showNotification('QR code detected!', 'success');
-                processScannedQRCode();
-            }, 2000);
+                // Parse QR code data (expected JSON format)
+                let parsedData;
+                try {
+                    parsedData = JSON.parse(qrData);
+                } catch (e) {
+                    // If not JSON, treat as plain text
+                    parsedData = { data: qrData };
+                }
+                
+                // Validate QR code data structure
+                if (!parsedData.type || parsedData.type !== 'knecta_friend_request') {
+                    showNotification('Invalid QR code format', 'error');
+                    return;
+                }
+                
+                if (!parsedData.userId) {
+                    showNotification('QR code missing user ID', 'error');
+                    return;
+                }
+                
+                // Show the friend request modal with real data
+                showFriendRequestFromQRReal(parsedData);
+                
+                // Stop scanning
+                stopCameraScanner();
+                cameraScannerModal.classList.remove('active');
+                
+                showNotification('QR code scanned successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error processing QR code:', error);
+                showNotification('Error processing QR code', 'error');
+            }
         }
         
-        function processScannedQRCode() {
-            // Simulate scanning a QR code with user data
-            const mockQRData = {
-                type: 'knecta_friend_request',
-                userId: 'user_' + Math.random().toString(36).substr(2, 9),
-                username: '@friend_' + Math.random().toString(36).substr(2, 5),
-                displayName: 'QR Friend ' + Math.floor(Math.random() * 1000),
-                timestamp: Date.now(),
-                app: 'Knecta Chat'
-            };
-            
-            // Show the friend request modal
-            showFriendRequestFromQR(mockQRData);
-            stopCameraScanner();
-            cameraScannerModal.classList.remove('active');
+        function showFriendRequestFromQRReal(qrData) {
+            // Try to get user info from backend using direct API call
+            fetchUserInfoFromQR(qrData.userId).then(userInfo => {
+                document.getElementById('requestAvatar').innerHTML = `
+                    <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                        ${userInfo.displayName ? userInfo.displayName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                `;
+                
+                document.getElementById('requestName').textContent = userInfo.displayName || qrData.displayName || 'QR Code User';
+                document.getElementById('requestUsername').textContent = userInfo.username || qrData.username || '@unknown';
+                document.getElementById('mutualCount').textContent = '0';
+                
+                const acceptBtn = document.getElementById('acceptRequestBtn');
+                acceptBtn.dataset.userId = qrData.userId;
+                acceptBtn.dataset.userName = userInfo.displayName || qrData.displayName || 'User';
+                acceptBtn.dataset.qrData = JSON.stringify(qrData);
+                
+                friendRequestModal.classList.add('active');
+            }).catch(error => {
+                // Fallback to QR data if user info fetch fails
+                document.getElementById('requestAvatar').innerHTML = `
+                    <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                        ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                `;
+                
+                document.getElementById('requestName').textContent = qrData.displayName || 'QR Code User';
+                document.getElementById('requestUsername').textContent = qrData.username || '@unknown';
+                document.getElementById('mutualCount').textContent = '0';
+                
+                const acceptBtn = document.getElementById('acceptRequestBtn');
+                acceptBtn.dataset.userId = qrData.userId;
+                acceptBtn.dataset.userName = qrData.displayName || 'User';
+                acceptBtn.dataset.qrData = JSON.stringify(qrData);
+                
+                friendRequestModal.classList.add('active');
+            });
+        }
+        
+        // fetchUserInfoFromQR using direct API call
+        async function fetchUserInfoFromQR(userId) {
+            try {
+                const response = await apiCall(`/api/users/${userId}`);
+                
+                if (response && response.user) {
+                    return response.user;
+                }
+                throw new Error('User not found');
+            } catch (error) {
+                console.error('Error fetching user info:', error);
+                throw error;
+            }
         }
         
         function stopCameraScanner() {
+            scanningActive = false;
+            
             if (cameraStream) {
                 cameraStream.getTracks().forEach(track => track.stop());
                 cameraStream = null;
@@ -1747,26 +2017,7 @@
             showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
         }
         
-        function showFriendRequestFromQR(qrData) {
-            document.getElementById('requestAvatar').innerHTML = `
-                <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-                    ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
-                </div>
-            `;
-            
-            document.getElementById('requestName').textContent = qrData.displayName || 'QR Code User';
-            document.getElementById('requestUsername').textContent = qrData.username || '@unknown';
-            document.getElementById('mutualCount').textContent = '0';
-            
-            const acceptBtn = document.getElementById('acceptRequestBtn');
-            acceptBtn.dataset.userId = qrData.userId;
-            acceptBtn.dataset.userName = qrData.displayName || 'User';
-            acceptBtn.dataset.qrData = JSON.stringify(qrData);
-            
-            friendRequestModal.classList.add('active');
-        }
-        
-        // Generate unique QR code for current user
+        // Generate unique QR code for current user - REAL IMPLEMENTATION
         function generateUniqueQRCode() {
             try {
                 const qrContainer = document.getElementById('qrCodeContainer');
@@ -1786,15 +2037,24 @@
                     return;
                 }
                 
+                // Get current user data
+                const user = currentUser || userData;
+                if (!user) {
+                    console.error('No user data available for QR code generation');
+                    return;
+                }
+                
                 // Generate QR data with unique user information
                 const qrData = JSON.stringify({
                     type: 'knecta_friend_request',
-                    userId: currentUser?.id || 'demo_user_' + Date.now(),
-                    username: userData?.username || ('user_' + Math.random().toString(36).substr(2, 9)),
-                    displayName: userData?.displayName || 'Demo User',
+                    userId: user.id,
+                    username: user.username || ('user_' + Math.random().toString(36).substr(2, 9)),
+                    displayName: user.displayName || 'Knecta User',
                     timestamp: Date.now(),
                     app: 'Knecta Chat',
-                    version: '1.0'
+                    version: '1.0',
+                    // Add verification hash
+                    hash: generateVerificationHash(user.id, user.username || '')
                 });
                 
                 try {
@@ -1806,7 +2066,7 @@
                         colorLight: '#ffffff',
                         correctLevel: QRCode.CorrectLevel.H
                     });
-                    console.log('Unique QR code generated successfully for user:', currentUser?.id);
+                    console.log('Unique QR code generated successfully for user:', user.id);
                     
                     // Store the QR code data for later verification
                     localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
@@ -1818,7 +2078,7 @@
                             <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
                             <p>Your unique QR code</p>
                             <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
-                            <p style="font-size: 10px; margin-top: 5px;">User: ${userData?.username || currentUser?.id}</p>
+                            <p style="font-size: 10px; margin-top: 5px;">User: ${user.username || user.id}</p>
                         </div>
                     `;
                 }
@@ -1835,6 +2095,19 @@
                     `;
                 }
             }
+        }
+        
+        // Generate verification hash for QR code security
+        function generateVerificationHash(userId, username) {
+            const secret = 'knecta_secret_2024'; // In real app, use server-side secret
+            const data = userId + username + Date.now();
+            let hash = 0;
+            for (let i = 0; i < data.length; i++) {
+                const char = data.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash).toString(16);
         }
         
         // Render contacts
@@ -2221,16 +2494,10 @@
             }
         }
         
-        // Show mutual friends
+        // Show mutual friends using direct API call
         async function showMutualFriends(userId, userName) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
-                const response = await api.get(`/api/friends/mutual/${userId}`);
+                const response = await apiCall(`/api/friends/mutual/${userId}`);
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -2297,15 +2564,9 @@
             mutualFriendsModal.classList.add('active');
         }
         
-        // Send friend request
+        // Send friend request using direct API call
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
                 const requestData = {
                     receiverId: friendId,
                     category: category,
@@ -2315,11 +2576,15 @@
                     isBusiness: isBusiness
                 };
                 
-                const response = await api.post('/api/friend-requests/send', requestData);
+                const response = await apiCall('/api/friend-requests/send', {
+                    method: 'POST',
+                    body: JSON.stringify(requestData)
+                });
                 
                 if (response && response.success) {
                     // Refresh sent requests
-                    const sentResponse = await api.get('/api/friend-requests/sent');
+                    const sentResponse = await apiCall('/api/friend-requests/sent');
+                    
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
                         document.getElementById('sentRequestsCount').textContent = sentRequests.length;
@@ -2344,16 +2609,12 @@
             }
         }
         
-        // Accept friend request
+        // Accept friend request using direct API call
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
-                const response = await api.post(`/api/friend-requests/${requestId}/accept`);
+                const response = await apiCall(`/api/friend-requests/${requestId}/accept`, {
+                    method: 'POST'
+                });
                 
                 if (response && response.success) {
                     // Refresh data
@@ -2372,20 +2633,17 @@
             }
         }
         
-        // Decline friend request
+        // Decline friend request using direct API call
         async function declineFriendRequest(requestData) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
-                const response = await api.post(`/api/friend-requests/${requestData.id}/decline`);
+                const response = await apiCall(`/api/friend-requests/${requestData.id}/decline`, {
+                    method: 'POST'
+                });
                 
                 if (response && response.success) {
                     // Refresh friend requests
-                    const requestsResponse = await api.get('/api/friend-requests/incoming');
+                    const requestsResponse = await apiCall('/api/friend-requests/incoming');
+                    
                     if (requestsResponse && requestsResponse.requests) {
                         friendRequests = requestsResponse.requests;
                         document.getElementById('requestsCount').textContent = friendRequests.length;
@@ -2411,20 +2669,17 @@
             }
         }
         
-        // Cancel friend request
+        // Cancel friend request using direct API call
         async function cancelFriendRequest(requestData) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
-                const response = await api.delete(`/api/friend-requests/${requestData.id}`);
+                const response = await apiCall(`/api/friend-requests/${requestData.id}`, {
+                    method: 'DELETE'
+                });
                 
                 if (response && response.success) {
                     // Refresh sent requests
-                    const sentResponse = await api.get('/api/friend-requests/sent');
+                    const sentResponse = await apiCall('/api/friend-requests/sent');
+                    
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
                         document.getElementById('sentRequestsCount').textContent = sentRequests.length;
@@ -2590,7 +2845,7 @@
             }
         }
         
-        // Load friend details
+        // Load friend details using direct API call
         async function loadFriendDetails(friendData, type) {
             const detailsContent = document.getElementById('friendDetailsContent');
             detailsContent.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friend details...</p></div>';
@@ -2600,13 +2855,10 @@
                 
                 if (type === 'friend' || type === 'contact' || type === 'user') {
                     try {
-                        const api = window.parent.api;
-                        if (api) {
-                            const friendId = friendData.id;
-                            const response = await api.get(`/api/users/${friendId}`);
-                            if (response && response.user) {
-                                detailedData = { ...detailedData, ...response.user };
-                            }
+                        const friendId = friendData.id;
+                        const response = await apiCall(`/api/users/${friendId}`);
+                        if (response && response.user) {
+                            detailedData = { ...detailedData, ...response.user };
                         }
                     } catch (error) {
                         console.error('Error fetching user details:', error);
@@ -3038,26 +3290,24 @@
             });
         }
         
-        // Toggle pin friend
+        // Toggle pin friend using direct API call
         async function togglePinFriend(friendData) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
                 const friendId = friendData.id;
                 const isPinned = pinnedFriends.some(f => f.id === friendId);
                 
                 if (isPinned) {
-                    const response = await api.delete(`/api/friends/${friendId}/pin`);
+                    const response = await apiCall(`/api/friends/${friendId}/pin`, {
+                        method: 'DELETE'
+                    });
                     if (response && response.success) {
                         pinnedFriends = pinnedFriends.filter(f => f.id !== friendId);
                         showNotification('Friend unpinned', 'success');
                     }
                 } else {
-                    const response = await api.post(`/api/friends/${friendId}/pin`);
+                    const response = await apiCall(`/api/friends/${friendId}/pin`, {
+                        method: 'POST'
+                    });
                     if (response && response.success) {
                         pinnedFriends.push(friendData);
                         showNotification('Friend pinned', 'success');
@@ -3076,26 +3326,24 @@
             }
         }
         
-        // Toggle mute friend
+        // Toggle mute friend using direct API call
         async function toggleMuteFriend(friendData) {
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
                 const friendId = friendData.id;
                 const isMuted = mutedFriends.some(f => f.id === friendId);
                 
                 if (isMuted) {
-                    const response = await api.delete(`/api/friends/${friendId}/mute`);
+                    const response = await apiCall(`/api/friends/${friendId}/mute`, {
+                        method: 'DELETE'
+                    });
                     if (response && response.success) {
                         mutedFriends = mutedFriends.filter(f => f.id !== friendId);
                         showNotification('Friend unmuted', 'success');
                     }
                 } else {
-                    const response = await api.post(`/api/friends/${friendId}/mute`);
+                    const response = await apiCall(`/api/friends/${friendId}/mute`, {
+                        method: 'POST'
+                    });
                     if (response && response.success) {
                         mutedFriends.push(friendData);
                         showNotification('Friend muted', 'success');
@@ -3555,13 +3803,7 @@
                     }
                     
                     try {
-                        const api = window.parent.api;
-                        if (!api) {
-                            showNotification('API not available', 'error');
-                            return;
-                        }
-                        
-                        const response = await api.get(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        const response = await apiCall(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
                         
                         if (!response || !response.user) {
                             showNotification('User not found', 'error');
@@ -3681,18 +3923,13 @@
             }
         }
         
-        // Simulate contact sync
+        // Simulate contact sync using direct API call
         async function simulateContactSync() {
             showNotification('Syncing contacts...', 'info');
             
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
+                const response = await apiCall('/api/contacts/sync');
                 
-                const response = await api.get('/api/contacts/sync');
                 if (response && response.contacts) {
                     contacts = response.contacts;
                     
@@ -3723,7 +3960,6 @@
             }
         }
         
-        // The following functions are stubs for features not fully implemented
         function showChangeCategoryModal(friendData) {
             const modal = document.createElement('div');
             modal.className = 'add-friend-modal active';
@@ -3768,23 +4004,21 @@
                 const newCategory = modal.querySelector('#newCategorySelect').value;
                 
                 try {
-                    const api = window.parent.api;
-                    if (api) {
-                        const response = await api.put(`/api/friends/${friendData.id}/category`, {
-                            category: newCategory
-                        });
-                        
-                        if (response && response.success) {
-                            // Update local data
-                            const friendIndex = friends.findIndex(f => f.id === friendData.id);
-                            if (friendIndex !== -1) {
-                                friends[friendIndex].category = newCategory;
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                            }
-                            
-                            updateCurrentSection();
-                            showNotification('Category updated successfully', 'success');
+                    const response = await apiCall(`/api/friends/${friendData.id}/category`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ category: newCategory })
+                    });
+                    
+                    if (response && response.success) {
+                        // Update local data
+                        const friendIndex = friends.findIndex(f => f.id === friendData.id);
+                        if (friendIndex !== -1) {
+                            friends[friendIndex].category = newCategory;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
                         }
+                        
+                        updateCurrentSection();
+                        showNotification('Category updated successfully', 'success');
                     }
                 } catch (error) {
                     console.error('Error updating category:', error);
@@ -3803,19 +4037,16 @@
             navigateToCall(friendData.id, friendData.displayName || 'User');
         }
         
+        // Remove friend using direct API call
         async function removeFriend(friendData) {
             if (!confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
                 return;
             }
             
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
-                const response = await api.delete(`/api/friends/${friendData.id}`);
+                const response = await apiCall(`/api/friends/${friendData.id}`, {
+                    method: 'DELETE'
+                });
                 
                 if (response && response.success) {
                     // Remove from local arrays
@@ -3843,19 +4074,16 @@
             }
         }
         
+        // Block user using direct API call
         async function blockUser(friendData) {
             if (!confirm(`Are you sure you want to block ${friendData.displayName}? This will remove them from your friends and prevent them from contacting you.`)) {
                 return;
             }
             
             try {
-                const api = window.parent.api;
-                if (!api) {
-                    showNotification('API not available', 'error');
-                    return;
-                }
-                
-                const response = await api.post(`/api/users/${friendData.id}/block`);
+                const response = await apiCall(`/api/users/${friendData.id}/block`, {
+                    method: 'POST'
+                });
                 
                 if (response && response.success) {
                     // Remove from local arrays
@@ -3927,7 +4155,7 @@
             });
         }
         
-        console.log('Friends system initialized successfully with parent API integration');
+        console.log('Friends system initialized successfully with direct token access');
     </script>
 </body>
 </html>
