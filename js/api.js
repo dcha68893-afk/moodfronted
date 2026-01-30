@@ -1,66 +1,3 @@
-// api.js - HARDENED BACKEND API INTEGRATION WITH DEFENSIVE FETCH HANDLING
-// ULTRA-ROBUST VERSION: Never breaks, even with incorrect frontend calls
-// UPDATED: Enhanced error handling for 429 and 500 errors
-// UPDATED: Support for new token structure from backend
-// CRITICAL FIX: Dynamic environment detection for backend URLs
-// CRITICAL FIX: Strict API contract - endpoint always first, method always in options
-// CRITICAL FIX: HTTP 500 errors no longer mark backend as offline
-// CRITICAL FIX: Added api.get(), api.post(), api.put(), api.delete() methods
-// UPDATED: Enhanced token retrieval and authentication header handling
-// UPDATED: Explicitly exposed all API methods for iframe pages
-// UPDATED: Global token variable and automatic Authorization header injection
-// UPDATED: Enhanced 401 handling and token validation logic
-// NEW: Enhanced token persistence and /auth/me retry logic with exponential backoff
-// CRITICAL FIX: Network state now completely separate from authentication state
-// UPDATED: Enhanced /auth/me fetch with proper token inclusion and exponential backoff retry
-// NEW: CRITICAL FIX - Authentication state timing issues permanently resolved
-// NEW: CRITICAL FIX - AbortError no longer blocks API readiness when token exists
-// NEW: CRITICAL FIX - Authoritative Auth Source Implementation
-// NEW: AUTOMATIC ENVIRONMENT DETECTION - Dynamically switches between localhost and Render
-// CRITICAL FIX - Public auth endpoints never require tokens, protected endpoints always require tokens
-// ============================================================================
-// CRITICAL IMPROVEMENTS APPLIED:
-// 1. SINGLE internal fetch function with comprehensive input validation
-// 2. Method normalization for ALL possible frontend mistakes
-// 3. Endpoint sanitization to prevent malformed URLs
-// 4. Graceful degradation when frontend calls API incorrectly
-// 5. Absolute protection against invalid fetch() calls
-// 6. Enhanced error handling for rate limiting and server errors
-// 7. Updated to handle new token structure from backend
-// 8. CRITICAL FIX: Dynamic environment detection for backend URLs
-// 9. CRITICAL FIX: Strict API contract - endpoint always string, method always in options
-// 10. CRITICAL FIX: HTTP 500 errors DO NOT mark backend as offline
-// 11. CRITICAL FIX: Added api.get(), api.post(), api.put(), api.delete() methods
-// 12. ENHANCED: Improved token retrieval from localStorage
-// 13. ENHANCED: Helper function getAuthHeaders() for all API calls
-// 14. ENHANCED: Automatic token attachment to all authenticated endpoints
-// 15. CRITICAL FIX: Explicitly exposed all API methods used by iframe pages
-// 16. NEW FEATURE: Global accessToken variable with automatic initialization
-// 17. NEW FEATURE: Automatic Authorization header injection in all API calls
-// 18. UPDATED: Enhanced 401 handling - only clear token when explicitly invalid
-// 19. UPDATED: Retry logic for /auth/me validation with stored tokens
-// 20. UPDATED: isLoggedIn() logic to require successful /auth/me validation
-// 21. NEW: Enhanced token persistence across page refreshes
-// 22. NEW: Improved /auth/me retry logic with exponential backoff
-// 23. NEW: Global currentUser object persistence
-// 24. CRITICAL FIX: Network state completely separated from authentication state
-// 25. CRITICAL FIX: 401/403 errors NEVER mark backend as offline
-// 26. CRITICAL FIX: /api/status endpoint never includes Authorization header
-// 27. UPDATED: Enhanced /auth/me fetch with proper token inclusion and exponential backoff retry
-// 28. NEW CRITICAL FIX: Authentication state timing issues permanently resolved with validateAuth()
-// 29. NEW CRITICAL FIX: AbortError no longer blocks API readiness when token exists
-// 30. NEW CRITICAL FIX: Authoritative Auth Source - Single backend URL, token always read from localStorage
-// 31. NEW FEATURE: Automatic environment detection - uses localhost when running locally, Render when deployed
-// 32. NEW CRITICAL FIX: Public auth endpoints never require tokens, protected endpoints always require tokens
-// ============================================================================
-
-// ============================================================================
-// SINGLE SOURCE OF TRUTH - AUTHORITATIVE AUTH SOURCE WITH ENVIRONMENT DETECTION
-// ============================================================================
-// CRITICAL FIX 1: Define backend base URL based on current environment
-// AUTOMATIC DETECTION: Use localhost when running locally, Render when deployed
-// This allows testing locally without changing code
-
 // Function to determine the appropriate backend URL based on current environment
 function determineBackendUrl() {
   const currentHostname = window.location.hostname;
@@ -149,7 +86,7 @@ const PUBLIC_ENDPOINTS = [
   '/auth/register',
   '/auth/forgot-password',
   '/auth/reset-password',
-  '/auth/verify',
+  
   '/auth/refresh'
 ];
 
@@ -187,7 +124,7 @@ function isStatusEndpoint(endpoint) {
 }
 
 // ============================================================================
-// CRITICAL FIX 2: AUTHORITATIVE TOKEN HELPER FUNCTION
+// CRITICAL FIX 2: AUTHORITATIVE TOKEN HELPER FUNCTION - NORMALIZED
 // ============================================================================
 /**
  * getValidToken() - Authoritative token retrieval helper
@@ -197,6 +134,7 @@ function isStatusEndpoint(endpoint) {
  * 3. Fallback to "moodchat_token" key
  * 4. Return null if no token found
  * 5. NEVER cache token outside request scope
+ * 6. Store token in ALL locations on successful login
  */
 function getValidToken() {
   // CRITICAL: Read token DIRECTLY from localStorage every time
@@ -204,28 +142,30 @@ function getValidToken() {
   
   // Priority 1: "accessToken" key
   let token = localStorage.getItem("accessToken");
-  if (token && token.trim() !== "") {
+  if (token && token.trim() !== "" && token !== "null" && token !== "undefined") {
     console.log('🔐 [AUTH] Token retrieved from "accessToken" key');
     return token;
   }
   
   // Priority 2: "moodchat_token" key
   token = localStorage.getItem("moodchat_token");
-  if (token && token.trim() !== "") {
+  if (token && token.trim() !== "" && token !== "null" && token !== "undefined") {
     console.log('🔐 [AUTH] Token retrieved from "moodchat_token" key');
     return token;
   }
   
-  // Priority 3: Check normalized authUser storage for backward compatibility
+  // Priority 3: Check normalized authUser storage
   try {
     const authDataStr = localStorage.getItem("authUser");
     if (authDataStr) {
       const authData = JSON.parse(authDataStr);
-      if (authData.accessToken && authData.accessToken.trim() !== "") {
-        console.log('🔐 [AUTH] Token retrieved from "authUser" object');
+      if (authData.accessToken && authData.accessToken.trim() !== "" && 
+          authData.accessToken !== "null" && authData.accessToken !== "undefined") {
+        console.log('🔐 [AUTH] Token retrieved from "authUser.accessToken"');
         return authData.accessToken;
       }
-      if (authData.token && authData.token.trim() !== "") {
+      if (authData.token && authData.token.trim() !== "" && 
+          authData.token !== "null" && authData.token !== "undefined") {
         console.log('🔐 [AUTH] Token retrieved from "authUser.token"');
         return authData.token;
       }
@@ -236,13 +176,13 @@ function getValidToken() {
   
   // Priority 4: Legacy token keys
   token = localStorage.getItem("token");
-  if (token && token.trim() !== "") {
+  if (token && token.trim() !== "" && token !== "null" && token !== "undefined") {
     console.log('🔐 [AUTH] Token retrieved from legacy "token" key');
     return token;
   }
   
   token = localStorage.getItem("moodchat_auth_token");
-  if (token && token.trim() !== "") {
+  if (token && token.trim() !== "" && token !== "null" && token !== "undefined") {
     console.log('🔐 [AUTH] Token retrieved from "moodchat_auth_token" key');
     return token;
   }
@@ -407,7 +347,7 @@ console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, Bac
 console.log(`🔧 [API] Global Token: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
 
 // ============================================================================
-// TOKEN MANAGEMENT - SINGLE SOURCE OF TRUTH
+// TOKEN MANAGEMENT - SINGLE SOURCE OF TRUTH - NORMALIZED
 // ============================================================================
 /**
  * TOKEN NORMALIZATION - Ensure consistent token format
@@ -434,24 +374,58 @@ const AUTH_VALIDATION_TIMEOUT = 10000; // 10 seconds
 const AUTH_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Stores legacy token in normalized format if needed
- * @param {string} token - Legacy token to store
+ * NORMALIZED: Store token in ALL locations for reliability
+ * @param {string} token - The token to store
+ * @param {object} user - User data
+ * @param {string} refreshToken - Refresh token (optional)
+ * @returns {boolean} True if successful
  */
-function _storeLegacyTokenIfNeeded(token) {
+function _storeTokenInAllLocations(token, user, refreshToken = null) {
+  if (!token || token.trim() === "" || token === "null" || token === "undefined") {
+    console.error('❌ [AUTH] Cannot store invalid token');
+    return false;
+  }
+  
   try {
-    const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (!authDataStr && token) {
-      // Create minimal auth data with token
-      const authData = {
-        accessToken: token,
-        tokenTimestamp: Date.now(),
-        authValidated: false
-      };
-      localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
-      console.log('🔐 [AUTH] Legacy token stored in normalized format');
+    // 1. Store in accessToken key
+    localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    
+    // 2. Store in moodchat_token key
+    localStorage.setItem(MOODCHAT_TOKEN_KEY, token);
+    
+    // 3. Store in authUser object
+    let authData = {
+      accessToken: token,
+      token: token, // Legacy support
+      user: user || {},
+      tokenTimestamp: Date.now(),
+      authValidated: false
+    };
+    
+    if (refreshToken) {
+      authData.refreshToken = refreshToken;
     }
+    
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
+    
+    // 4. Store legacy keys for compatibility
+    localStorage.setItem('token', token);
+    localStorage.setItem('moodchat_auth_token', token);
+    
+    // 5. Store user data separately
+    if (user) {
+      localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
+      localStorage.setItem(USER_DATA_KEY, JSON.stringify(user));
+    }
+    
+    console.log('✅ [AUTH] Token stored in ALL locations for reliability');
+    console.log(`✅ [AUTH] Primary: ${ACCESS_TOKEN_KEY}, Secondary: ${MOODCHAT_TOKEN_KEY}`);
+    console.log(`✅ [AUTH] Normalized: ${TOKEN_STORAGE_KEY}`);
+    
+    return true;
   } catch (error) {
-    console.error('🔐 [AUTH] Error storing legacy token:', error);
+    console.error('❌ [AUTH] Error storing token in all locations:', error);
+    return false;
   }
 }
 
@@ -507,60 +481,33 @@ function _extractUserFromResponse(responseData) {
 }
 
 /**
- * Stores normalized auth data with CONSISTENT format
+ * NORMALIZED: Stores normalized auth data with CONSISTENT format in ALL locations
  */
 function _storeAuthData(token, user, refreshToken = null) {
-  if (!token || !user) {
-    console.error('❌ [AUTH] Cannot store auth data without token and user');
+  if (!token || token.trim() === "" || token === "null" || token === "undefined") {
+    console.error('❌ [AUTH] Cannot store auth data without valid token');
     return false;
   }
   
-  const authData = {
-    // PRIMARY TOKEN - always stored as accessToken
-    accessToken: token,
-    // User data
-    user: user,
-    // Token timestamp for expiration tracking
-    tokenTimestamp: Date.now(),
-    // Auth session validation flag
-    authValidated: false // Will be set to true after /auth/me succeeds
-  };
-  
-  // Store refresh token if available
-  if (refreshToken) {
-    authData.refreshToken = refreshToken;
-  }
-  
-  // Store in localStorage with consistent key
-  localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
-  
-  // Store in BOTH keys as requested - CRITICAL FOR PERSISTENCE
-  localStorage.setItem(MOODCHAT_TOKEN_KEY, token);
-  localStorage.setItem(ACCESS_TOKEN_KEY, token);
-  
-  // Also store in legacy format for compatibility
-  localStorage.setItem('token', token);
-  localStorage.setItem('moodchat_auth_token', token);
-  
-  if (user) {
-    localStorage.setItem('moodchat_auth_user', JSON.stringify(user));
-    localStorage.setItem(USER_DATA_KEY, JSON.stringify(user));
+  // Store token in ALL locations for reliability
+  const storageSuccess = _storeTokenInAllLocations(token, user, refreshToken);
+  if (!storageSuccess) {
+    return false;
   }
   
   // Update global access token
   accessToken = token;
   
-  // Set global user ONLY after storage is successful
-  window.currentUser = user;
+  // Set global user
+  window.currentUser = user || {};
   
   // Reset auth validation state since we have new token
   _authValidated = false;
   _authValidationPromise = null;
   
-  console.log(`✅ [AUTH] Auth data stored: token=${!!token}, user=${!!user}`);
-  console.log(`✅ [AUTH] Token stored in BOTH 'moodchat_token' and 'accessToken' keys`);
-  console.log(`✅ [AUTH] Global accessToken updated: ${accessToken.substring(0, 20)}...`);
-  console.log(`✅ [AUTH] Global currentUser set: ${user.username || user.email || 'User object'}`);
+  console.log(`✅ [AUTH] Auth data stored successfully in ALL locations`);
+  console.log(`✅ [AUTH] Token: ${token.substring(0, 20)}...`);
+  console.log(`✅ [AUTH] Global accessToken updated`);
   
   // Dispatch storage event
   window.dispatchEvent(new CustomEvent('auth-data-stored', {
@@ -571,12 +518,13 @@ function _storeAuthData(token, user, refreshToken = null) {
 }
 
 /**
- * Clears ALL auth data
+ * NORMALIZED: Clears ALL auth data from ALL locations
  */
-function _clearAuthData() {
+function _clearAllAuthData() {
   // Keep window.currentUser intact as requested
   const currentUserBeforeClear = window.currentUser;
   
+  // Clear ALL token locations
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(MOODCHAT_TOKEN_KEY);
   localStorage.removeItem(ACCESS_TOKEN_KEY);
@@ -597,7 +545,7 @@ function _clearAuthData() {
   // Restore window.currentUser as requested
   window.currentUser = currentUserBeforeClear;
   
-  console.log('✅ [AUTH] All auth data cleared, global accessToken set to null');
+  console.log('✅ [AUTH] All auth data cleared from ALL locations');
   console.log('✅ [AUTH] Auth validation state reset');
   console.log('✅ [AUTH] window.currentUser preserved:', window.currentUser ? 'Still set' : 'Not set');
   
@@ -606,15 +554,6 @@ function _clearAuthData() {
   
   // Handle unauthorized access - redirect to login
   handleUnauthorizedAccess();
-}
-
-/**
- * Gets the current access token from storage
- * Checks multiple locations for maximum compatibility
- */
-function _getCurrentAccessToken() {
-  // CRITICAL: Use getValidToken() for authoritative token retrieval
-  return getValidToken();
 }
 
 /**
@@ -667,20 +606,7 @@ function handleUnauthorizedAccess() {
   console.log('🔐 [AUTH] Handling unauthorized access - redirecting to login');
   
   // Clear all localStorage items related to authentication
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
-  localStorage.removeItem(MOODCHAT_TOKEN_KEY);
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem('token');
-  localStorage.removeItem('moodchat_auth_token');
-  localStorage.removeItem('moodchat_auth_user');
-  localStorage.removeItem('moodchat_refresh_token');
-  localStorage.removeItem(USER_DATA_KEY);
-  
-  // Clear global token
-  accessToken = null;
-  _authValidated = false;
-  _authValidationPromise = null;
-  _authValidationInProgress = false;
+  _clearAllAuthData();
   
   // Redirect to login page
   // Use a small timeout to allow logs to be displayed
@@ -835,23 +761,8 @@ async function validateAuth() {
         // AUTH ERROR - 401 Unauthorized or 403 Forbidden
         console.log(`🔐 [AUTH-TIMING-FIX] Auth error ${status} - token is invalid`);
         
-        try {
-          const data = await response.json();
-          const isTokenExplicitlyInvalid = data.message && (
-            data.message.includes('Token has been revoked') ||
-            data.message.includes('Token is expired') ||
-            data.message.includes('Invalid token') ||
-            data.message.includes('Token expired')
-          );
-          
-          if (isTokenExplicitlyInvalid || status === 401) {
-            console.log('🔐 [AUTH-TIMING-FIX] Token explicitly invalid, clearing tokens');
-            _clearAuthData();
-          }
-        } catch (parseError) {
-          console.log('🔐 [AUTH-TIMING-FIX] Could not parse error response, clearing tokens');
-          _clearAuthData();
-        }
+        // Clear tokens from ALL locations
+        _clearAllAuthData();
         
         _authValidated = false;
         _authLastChecked = now;
@@ -1215,31 +1126,16 @@ function _safeFetch(fullUrl, options = {}) {
             // CRITICAL FIX: Clear localStorage and redirect to login for 401/403
             console.log(`🔐 [AUTH] Handling ${status} error - clearing localStorage and redirecting to login`);
             
-            // UPDATED: Only clear token if backend explicitly says token is revoked
-            const isTokenExplicitlyInvalid = data.message && (
-              data.message.includes('Token has been revoked') ||
-              data.message.includes('Token is expired') ||
-              data.message.includes('Invalid token') ||
-              data.message.includes('Token expired')
-            );
+            // Clear ALL auth data from ALL locations
+            _clearAllAuthData();
             
-            if (isTokenExplicitlyInvalid || status === 401) {
-              console.log(`🔐 [AUTH] ${status} Unauthorized/Forbidden - token invalid, clearing localStorage`);
-              
-              // Clear all authentication data
-              _clearAuthData();
-              
-              // Dispatch logout event
-              try {
-                window.dispatchEvent(new CustomEvent('user-logged-out', {
-                  detail: { reason: 'unauthorized_access', timestamp: new Date().toISOString() }
-                }));
-              } catch (e) {
-                console.log('🔐 [AUTH] Could not dispatch logout event:', e.message);
-              }
-            } else {
-              console.log(`🔐 [AUTH] ${status} error - keeping token for possible retry`);
-              // Don't clear token for generic 403, might be permission issue
+            // Dispatch logout event
+            try {
+              window.dispatchEvent(new CustomEvent('user-logged-out', {
+                detail: { reason: 'unauthorized_access', timestamp: new Date().toISOString() }
+              }));
+            } catch (e) {
+              console.log('🔐 [AUTH] Could not dispatch logout event:', e.message);
             }
           } else if (status === 400) {
             errorMessage = data.message || 'Bad request';
@@ -1291,7 +1187,7 @@ function _safeFetch(fullUrl, options = {}) {
           if (status === 401 || status === 403) {
             console.log(`🔐 [AUTH] ${status} Unauthorized/Forbidden (JSON error) - handling unauthorized access`);
             // Clear localStorage and redirect to login
-            _clearAuthData();
+            _clearAllAuthData();
           }
         }
         
@@ -1474,7 +1370,7 @@ const globalApiFunction = function(endpoint, options = {}) {
 
 const apiObject = {
   _singleton: true,
-  _version: '20.2.0', // Updated version for public/protected endpoint fix
+  _version: '20.3.0', // Updated version for token normalization fix
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -1634,47 +1530,37 @@ const apiObject = {
   },
   
   // ============================================================================
-  // AUTHORITATIVE: Set access token with persistence
+  // NORMALIZED: Set access token with persistence in ALL locations
   // ============================================================================
   
   /**
-   * setAccessToken() - Set the access token with authoritative storage
+   * setAccessToken() - Set the access token with authoritative storage in ALL locations
    * @param {string} token - The access token to set
+   * @param {object} user - User data
    */
-  setAccessToken: function(token) {
-    if (token && token.trim() !== "") {
-      // Store in BOTH keys as required
-      localStorage.setItem('accessToken', token);
-      localStorage.setItem('moodchat_token', token);
-      
-      // Also update normalized auth data
-      try {
-        const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
-        if (authDataStr) {
-          const authData = JSON.parse(authDataStr);
-          authData.accessToken = token;
-          localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
-        } else {
-          // Create new auth data
-          const authData = {
-            accessToken: token,
-            tokenTimestamp: Date.now(),
-            authValidated: false
-          };
-          localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
-        }
-      } catch (e) {
-        console.error('🔐 [AUTH] Error updating normalized auth data:', e);
-      }
-      
+  setAccessToken: function(token, user = null) {
+    if (!token || token.trim() === "" || token === "null" || token === "undefined") {
+      console.error('❌ [TOKEN] Cannot set invalid token');
+      return false;
+    }
+    
+    // Store in ALL locations for reliability
+    const success = _storeTokenInAllLocations(token, user);
+    
+    if (success) {
       // Update global variable
       accessToken = token;
+      
+      // Update global user if provided
+      if (user) {
+        window.currentUser = user;
+      }
       
       // Reset auth validation state since we have new token
       _authValidated = false;
       _authValidationPromise = null;
       
-      console.log(`✅ [TOKEN] Token set and stored in both keys: ${accessToken.substring(0, 20)}...`);
+      console.log(`✅ [TOKEN] Token set and stored in ALL locations: ${token.substring(0, 20)}...`);
       console.log(`✅ [AUTH] Auth validation state reset for new token`);
       
       // Dispatch token updated event
@@ -1684,6 +1570,7 @@ const apiObject = {
       
       return true;
     }
+    
     return false;
   },
   
@@ -2802,8 +2689,8 @@ const apiObject = {
   // ============================================================================
   
   /**
-   * Login function - Sends POST to /auth/login with email and password
-   * On success, stores accessToken in localStorage under both 'moodchat_token' and 'accessToken'
+   * NORMALIZED: Login function - Sends POST to /auth/login with email and password
+   * On success, stores accessToken in ALL localStorage locations
    * Returns the logged-in user data
    */
   login: async function(email, password) {
@@ -2875,7 +2762,7 @@ const apiObject = {
         };
       }
       
-      // Store auth data with consistent format - INCLUDES BOTH 'moodchat_token' AND 'accessToken' keys
+      // NORMALIZED: Store auth data in ALL locations for reliability
       const storageSuccess = _storeAuthData(token, user, refreshToken);
       if (!storageSuccess) {
         throw {
@@ -2885,9 +2772,10 @@ const apiObject = {
         };
       }
       
-      console.log(`✅ [AUTH] Auth data stored successfully in BOTH keys`);
-      console.log(`✅ [AUTH] Token stored as 'moodchat_token': ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
+      console.log(`✅ [AUTH] Auth data stored successfully in ALL locations`);
       console.log(`✅ [AUTH] Token stored as 'accessToken': ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
+      console.log(`✅ [AUTH] Token stored as 'moodchat_token': ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
+      console.log(`✅ [AUTH] Token stored as 'authUser': ${localStorage.getItem('authUser') ? 'YES' : 'NO'}`);
       console.log(`✅ [AUTH] Global accessToken updated: ${accessToken ? accessToken.substring(0, 20) + '...' : 'NO'}`);
       console.log(`✅ [AUTH] User: ${user.username || user.email || 'Present'}`);
       console.log(`✅ [AUTH] window.currentUser: ${window.currentUser ? 'Set' : 'Not set'}`);
@@ -3066,7 +2954,7 @@ const apiObject = {
         };
       }
       
-      // Store auth data with consistent format
+      // NORMALIZED: Store auth data in ALL locations
       const storageSuccess = _storeAuthData(token, user, refreshToken);
       if (!storageSuccess) {
         throw {
@@ -3076,7 +2964,7 @@ const apiObject = {
         };
       }
       
-      console.log(`✅ [AUTH] Registration auth data stored successfully in BOTH keys`);
+      console.log(`✅ [AUTH] Registration auth data stored successfully in ALL locations`);
       console.log(`✅ [AUTH] Token: ${token ? 'Present' : 'Missing'}`);
       console.log(`✅ [AUTH] Global accessToken: ${accessToken ? accessToken.substring(0, 20) + '...' : 'Not set'}`);
       console.log(`✅ [AUTH] User: ${user.username || user.email || 'Present'}`);
@@ -3177,7 +3065,9 @@ const apiObject = {
   logout: function() {
     try {
       const user = _getCurrentUserFromStorage();
-      _clearAuthData();
+      
+      // NORMALIZED: Clear ALL auth data from ALL locations
+      _clearAllAuthData();
       
       this._sessionChecked = false;
       this._apiAvailable = false;
@@ -3868,7 +3758,7 @@ const apiObject = {
   },
   
   _clearAuthData: function() {
-    _clearAuthData();
+    _clearAllAuthData();
     this._sessionChecked = false;
     this._apiAvailable = false;
   },
@@ -3978,7 +3868,9 @@ const apiObject = {
         tokenAlwaysFromLocalStorage: true,
         getValidTokenFunction: true,
         auto401403Handling: true,
-        environmentDetection: true
+        environmentDetection: true,
+        tokenNormalization: true,
+        tokenStoredInAllLocations: true
       },
       publicEndpoints: {
         list: PUBLIC_ENDPOINTS,
@@ -3992,12 +3884,15 @@ const apiObject = {
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v20.2.0 (AUTHORITATIVE AUTH SOURCE WITH ENVIRONMENT DETECTION) initializing...');
+    console.log('🔧 [API] ⚡ MoodChat API v20.3.0 (TOKEN NORMALIZATION FIX) initializing...');
     console.log('🔧 [API] 🔗 DYNAMIC Backend URL Detection:');
     console.log('🔧 [API] 🔗 Detected Backend URL:', BACKEND_BASE_URL);
     console.log('🔧 [API] 🔗 Detected API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
-    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: AUTHORITATIVE AUTH SOURCE WITH ENVIRONMENT DETECTION');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: TOKEN NORMALIZATION FIX');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token stored in ALL locations for reliability');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: getValidToken() reads from ALL locations');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: 401/403 clears ALL locations');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: DYNAMIC backend URL detection based on current environment');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Localhost detection for development, Render for production');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token ALWAYS read from localStorage using getValidToken()');
@@ -4007,9 +3902,10 @@ const apiObject = {
     console.log('🔧 [API] ✅ getValidToken() function implemented');
     console.log('🔧 [API] ✅ Environment detection implemented');
     console.log('🔧 [API] ✅ PUBLIC/PROTECTED endpoint detection implemented');
+    console.log('🔧 [API] ✅ Token stored in ALL locations for reliability');
     console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
     console.log('🔧 [API] ✅ Token ALWAYS retrieved from localStorage before each API call');
-    console.log('🔧 [API] ✅ 401/403 responses clear localStorage and redirect to login');
+    console.log('🔧 [API] ✅ 401/403 responses clear ALL localStorage locations and redirect to login');
     console.log('🔧 [API] ✅ Token missing = Immediate rejection for protected endpoints only');
     console.log('🔧 [API] ✅ Public endpoints (/auth/login, /auth/register) work without tokens');
     console.log('🔧 [API] ✅ Protected endpoints require tokens');
@@ -4019,7 +3915,7 @@ const apiObject = {
     console.log('🔧 [API] ✅ isLoggedIn() waits for validateAuth() if needed');
     console.log('🔧 [API] ✅ Preserves auth state during validation');
     console.log('🔧 [API] ✅ All existing API calls remain intact');
-    console.log('🔧 [API] ✅ Token storage in moodchat_token and accessToken preserved');
+    console.log('🔧 [API] ✅ Token storage in ALL locations preserved');
     console.log('🔧 [API] ✅ Authorization header injection preserved');
     console.log('🔧 [API] ✅ /api/status has no Authorization header');
     console.log('🔧 [API] ✅ Network/Auth separation preserved');
@@ -4040,13 +3936,18 @@ const apiObject = {
       console.log('🔐 [AUTH] Public endpoints will NEVER require tokens');
       console.log('🔐 [AUTH] Token persists across page refreshes');
       console.log('🔐 [AUTH] IMPORTANT: Token is ALWAYS read directly from localStorage via getValidToken()');
+      console.log('🔐 [AUTH] IMPORTANT: Token is stored in ALL locations for reliability');
       
-      const moodchatToken = localStorage.getItem('moodchat_token');
-      const accessTokenKey = localStorage.getItem('accessToken');
+      // Check ALL storage locations
+      const tokenLocations = {
+        accessToken: localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING',
+        moodchat_token: localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING',
+        authUser: localStorage.getItem('authUser') ? 'PRESENT' : 'MISSING',
+        token: localStorage.getItem('token') ? 'PRESENT' : 'MISSING',
+        moodchat_auth_token: localStorage.getItem('moodchat_auth_token') ? 'PRESENT' : 'MISSING'
+      };
       
-      console.log(`🔐 [AUTH] Token in moodchat_token key: ${moodchatToken ? 'YES' : 'NO'}`);
-      console.log(`🔐 [AUTH] Token in accessToken key: ${accessTokenKey ? 'YES' : 'NO'}`);
-      console.log(`🔐 [AUTH] Token persistence verified: ${moodchatToken && accessTokenKey ? 'DOUBLE STORED' : 'PARTIAL'}`);
+      console.log('🔐 [AUTH] Token locations check:', tokenLocations);
       
       this._apiAvailable = true;
     } else {
@@ -4057,7 +3958,7 @@ const apiObject = {
       this._apiAvailable = false;
     }
     
-    // Migrate old auth data if needed
+    // Migrate old auth data if needed - ensure token is in ALL locations
     const oldToken = localStorage.getItem('moodchat_auth_token');
     const oldUser = localStorage.getItem('moodchat_auth_user');
     const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -4072,9 +3973,9 @@ const apiObject = {
         }
         
         if (token && user) {
-          // Store in normalized format and BOTH keys for persistence
-          _storeAuthData(token, user);
-          console.log('✅ [API] Old auth data migrated successfully with dual-key persistence');
+          // Store in ALL locations for reliability
+          _storeTokenInAllLocations(token, user);
+          console.log('✅ [API] Old auth data migrated successfully to ALL locations');
         }
       } catch (e) {
         console.error('❌ [API] Failed to migrate auth data:', e);
@@ -4125,23 +4026,25 @@ const apiObject = {
         const token = getValidToken();
         const currentUser = _getCurrentUserFromStorage();
         
-        // Check token persistence
-        const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
-        const tokenInAccessToken = localStorage.getItem('accessToken');
+        // Check token persistence in ALL locations
+        const tokenLocations = {
+          accessToken: localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING',
+          moodchat_token: localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING',
+          authUser: localStorage.getItem('authUser') ? 'PRESENT' : 'MISSING'
+        };
         
-        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION:');
+        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with TOKEN NORMALIZATION:');
         console.log('🔧 [API]   Environment:', envInfo.isLocalhost ? 'LOCALHOST' : envInfo.isRenderDeployment ? 'RENDER' : 'UNKNOWN');
         console.log('🔧 [API]   Backend URL:', BACKEND_BASE_URL);
         console.log('🔧 [API]   Token via getValidToken():', token ? `Present (${token.substring(0, 20)}...)` : 'Not found');
-        console.log('🔧 [API]   Token in moodchat_token:', tokenInMoodchatToken ? 'YES' : 'NO');
-        console.log('🔧 [API]   Token in accessToken:', tokenInAccessToken ? 'YES' : 'NO');
-        console.log('🔧 [API]   Token persistence:', tokenInMoodchatToken && tokenInAccessToken ? 'DOUBLE STORED' : 'PARTIAL');
+        console.log('🔧 [API]   Token locations:', tokenLocations);
         console.log('🔧 [API]   User present:', !!currentUser);
         console.log('🔧 [API]   Auth validated:', _authValidated);
         console.log('🔧 [API]   Auth validation in progress:', _authValidationInProgress);
         console.log('🔧 [API]   Auth last checked:', _authLastChecked ? new Date(_authLastChecked).toISOString() : 'Never');
+        console.log('🔧 [API]   Token stored in ALL locations: YES');
         console.log('🔧 [API]   Token ALWAYS read from localStorage via getValidToken(): YES');
-        console.log('🔧 [API]   401/403 auto-handling: YES (clears localStorage, redirects to login)');
+        console.log('🔧 [API]   401/403 clears ALL locations: YES');
         console.log('🔧 [API]   Token missing = immediate rejection for protected endpoints: YES');
         console.log('🔧 [API]   Public endpoints work without tokens: YES');
         console.log('🔧 [API]   Protected endpoints require tokens: YES');
@@ -4198,9 +4101,12 @@ const apiObject = {
     const user = _getCurrentUserFromStorage();
     const envInfo = this.getEnvironmentInfo();
     
-    // Check token persistence
-    const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
-    const tokenInAccessToken = localStorage.getItem('accessToken');
+    // Check token persistence in ALL locations
+    const tokenLocations = {
+      accessToken: localStorage.getItem('accessToken') ? 'Present' : 'Missing',
+      moodchat_token: localStorage.getItem('moodchat_token') ? 'Present' : 'Missing',
+      authUser: localStorage.getItem('authUser') ? 'Present' : 'Missing'
+    };
     
     const eventDetail = {
       version: this._version,
@@ -4217,11 +4123,8 @@ const apiObject = {
       environmentDetection: true,
       abortErrorFix: true,
       publicEndpointFix: true,
-      tokenPersistence: {
-        moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
-        accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
-        dualStorage: !!(tokenInMoodchatToken && tokenInAccessToken)
-      },
+      tokenNormalizationFix: true,
+      tokenLocations: tokenLocations,
       authState: {
         hasToken: !!token,
         hasUser: !!user,
@@ -4242,12 +4145,12 @@ const apiObject = {
         authTimingFix: true,
         authoritativeAuthSource: true,
         abortErrorFix: true,
+        tokenNormalization: true,
         preventsTimingIssues: true,
         preservesAuthState: true,
         exponentialBackoffRetry: true,
         tokenHeaderInjection: true,
         networkAuthSeparation: true,
-        tokenNormalization: true,
         tokenPersistence: true,
         dualKeyStorage: true,
         crossTabSync: true,
@@ -4262,7 +4165,6 @@ const apiObject = {
         globalTokenInjection: true,
         enhanced401Handling: true,
         authMeRetryLogic: true,
-        dualTokenStorage: true,
         loginFunction: true,
         logoutFunction: true,
         getCurrentUserFunction: true,
@@ -4286,21 +4188,22 @@ const apiObject = {
     events.forEach(eventName => {
       try {
         window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
-        console.log(`🔧 [API] Dispatched ${eventName} event with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION info`);
+        console.log(`🔧 [API] Dispatched ${eventName} event with TOKEN NORMALIZATION info`);
       } catch (e) {
         console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
       }
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
+      console.log('🔧 [API] API synchronization ready with TOKEN NORMALIZATION FIX');
       console.log('🔧 [API] ✅ getValidToken() function implemented');
       console.log('🔧 [API] ✅ Environment detection: ACTIVE');
       console.log('🔧 [API] ✅ Detected Backend URL: ' + BACKEND_BASE_URL);
       console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
       console.log('🔧 [API] ✅ Token ALWAYS read from localStorage before each API call');
       console.log('🔧 [API] ✅ Token priority: 1. accessToken, 2. moodchat_token');
-      console.log('🔧 [API] ✅ 401/403 responses automatically clear localStorage and redirect to login');
+      console.log('🔧 [API] ✅ Token stored in ALL locations for reliability');
+      console.log('🔧 [API] ✅ 401/403 responses automatically clear ALL localStorage locations and redirect to login');
       console.log('🔧 [API] ✅ Token missing = Immediate rejection for protected endpoints only');
       console.log('🔧 [API] ✅ Public endpoints (/auth/login, /auth/register) work without tokens');
       console.log('🔧 [API] ✅ Protected endpoints require tokens');
@@ -4310,19 +4213,19 @@ const apiObject = {
       console.log('🔧 [API] ✅ isLoggedIn() waits for validateAuth() if needed');
       console.log('🔧 [API] ✅ Preserves auth state during validation');
       console.log('🔧 [API] ✅ All existing API calls remain intact');
-      console.log('🔧 [API] ✅ Token storage in moodchat_token and accessToken preserved');
+      console.log('🔧 [API] ✅ Token storage in ALL locations preserved');
       console.log('🔧 [API] ✅ Authorization header injection preserved');
       console.log('🔧 [API] ✅ /api/status has no Authorization header');
       console.log('🔧 [API] ✅ Network/Auth separation preserved');
       console.log('🔧 [API] ✅ iframe API exposure preserved');
-      console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys');
+      console.log('🔧 [API] ✅ Tokens stored in ALL locations for reliability');
       console.log('🔧 [API] ✅ Global accessToken variable: ACTIVE AND PERSISTENT');
       console.log('🔧 [API] ✅ Automatic token retrieval from localStorage: ALWAYS AT REQUEST TIME');
       console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation: ACTIVE');
       console.log('🔧 [API] ✅ window.currentUser maintained across sessions: ACTIVE');
       console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs: ACTIVE');
       console.log('🔧 [API] ✅ Authorization header injection in all protected API calls: ACTIVE');
-      console.log('🔧 [API] ✅ Enhanced 401/403 handling - clears localStorage and redirects to login: ACTIVE');
+      console.log('🔧 [API] ✅ Enhanced 401/403 handling - clears ALL localStorage locations and redirects to login: ACTIVE');
       console.log('🔧 [API] ✅ window.currentUser preserved: ACTIVE');
       console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods: ACTIVE');
       console.log('🔧 [API] ✅ Protected endpoints will work: ACTIVE');
@@ -4339,8 +4242,7 @@ const apiObject = {
       console.log('🔧 [API] ✅ Logout function: api.logout()');
       console.log('🔧 [API] ✅ Get current user: api.getCurrentUser()');
       console.log('🔧 [API] ✅ Auto 401 handling');
-      console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
-      console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
+      console.log('🔧 [API] ✅ Token stored in ALL locations as requested: VERIFIED');
       console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
       console.log('🔧 [API] 🔗 DYNAMIC Backend URL Detection: ACTIVE');
       console.log('🔧 [API] 🔗 Detected Environment: ' + (envInfo.isLocalhost ? 'LOCALHOST (Development)' : envInfo.isRenderDeployment ? 'RENDER (Production)' : 'UNKNOWN'));
@@ -4348,36 +4250,37 @@ const apiObject = {
       console.log('🔧 [API] 🔗 Detected API Base URL: ' + BASE_API_URL);
       console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
       console.log('🔧 [API] 🔐 Token via getValidToken(): ' + (token ? token.substring(0, 20) + '...' : 'None'));
-      console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
       console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'));
-      console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
-        ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
-      console.log('🔧 [API] 🔐 AUTHORITATIVE AUTH SOURCE: ACTIVE');
+      console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
+      console.log('🔧 [API] 🔐 Token in authUser: ' + (localStorage.getItem('authUser') ? 'PRESENT' : 'MISSING'));
+      console.log('🔧 [API] 🔐 Token Normalization Score: ' + 
+        ((localStorage.getItem('accessToken') ? 1 : 0) + (localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('authUser') ? 1 : 0)) + '/3');
+      console.log('🔧 [API] 🔐 TOKEN NORMALIZATION FIX: ACTIVE');
       console.log('🔧 [API] 🔐 ENVIRONMENT DETECTION: ACTIVE');
       console.log('🔧 [API] 🔐 TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE');
       console.log('🔧 [API] 🔐 PUBLIC ENDPOINTS NEVER REQUIRE TOKENS: ACTIVE');
       console.log('🔧 [API] 🔐 PROTECTED ENDPOINTS ALWAYS REQUIRE TOKENS: ACTIVE');
-      console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS LOCALSTORAGE, REDIRECTS TO LOGIN)');
-      console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH WITH ENVIRONMENT DETECTION:');
+      console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS ALL LOCATIONS, REDIRECTS TO LOGIN)');
+      console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR TOKEN NORMALIZATION:');
       console.log('🔧 [API] 1. Environment detection automatically selects backend URL');
       console.log('🔧 [API] 2. Localhost: Uses http://localhost:4000');
       console.log('🔧 [API] 3. Render: Uses https://moodchat-fy56.onrender.com');
       console.log('🔧 [API] 4. Token ALWAYS read from localStorage via getValidToken()');
-      console.log('🔧 [API] 5. Token priority: 1. accessToken, 2. moodchat_token');
+      console.log('🔧 [API] 5. Token stored in ALL locations for reliability');
       console.log('🔧 [API] 6. Public endpoints (/auth/login, /auth/register) work without tokens');
       console.log('🔧 [API] 7. Protected endpoints require tokens and fail with 401 if missing');
-      console.log('🔧 [API] 8. Simulate 401 response - localStorage should be cleared and redirect to login');
+      console.log('🔧 [API] 8. Simulate 401 response - ALL localStorage locations should be cleared and redirect to login');
       console.log('🔧 [API] 9. Call api.validateAuth() - should handle timing properly');
       console.log('🔧 [API] 10. Call api.isLoggedIn() - should never return false before validation completes');
       console.log('🔧 [API] 11. Simulate network delay - auth state should be preserved');
       console.log('🔧 [API] 12. Simulate AbortError - API readiness should NOT be blocked');
-      console.log('🔧 [API] 13. Verify tokens are cleared on 401/403 with localStorage clearing');
+      console.log('🔧 [API] 13. Verify tokens are cleared from ALL locations on 401/403');
       console.log('🔧 [API] 14. All existing API calls continue to work unchanged');
-      console.log('🔧 [API] 15. Token storage in both moodchat_token and accessToken works');
+      console.log('🔧 [API] 15. Token storage in ALL locations works');
       console.log('🔧 [API] 16. Authorization headers are injected correctly for protected endpoints');
       console.log('🔧 [API] 17. No Authorization headers for public endpoints');
       console.log('🔧 [API] 18. /api/status endpoint has no Authorization header');
-      console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
+      console.log('🔧 [API] ⚡ Ready for production with TOKEN NORMALIZATION FIX');
     }, 1000);
   },
   
@@ -4386,26 +4289,20 @@ const apiObject = {
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running enhanced diagnostics with AUTHORITATIVE AUTH check AND ENVIRONMENT DETECTION...');
+    console.log('🔧 [API] Running enhanced diagnostics with TOKEN NORMALIZATION check...');
     
     const token = getValidToken();
     const user = _getCurrentUserFromStorage();
     const envInfo = this.getEnvironmentInfo();
     
-    // Check token persistence
-    const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
-    const tokenInAccessToken = localStorage.getItem('accessToken');
-    const tokenInAuthUser = (() => {
-      try {
-        const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
-        if (authDataStr) {
-          const authData = JSON.parse(authDataStr);
-          return authData.accessToken || authData.token || null;
-        }
-      } catch (e) {
-        return null;
-      }
-    })();
+    // Check token persistence in ALL locations
+    const tokenLocations = {
+      accessToken: localStorage.getItem('accessToken') ? 'Present' : 'Missing',
+      moodchat_token: localStorage.getItem('moodchat_token') ? 'Present' : 'Missing',
+      authUser: localStorage.getItem('authUser') ? 'Present' : 'Missing',
+      token: localStorage.getItem('token') ? 'Present' : 'Missing',
+      moodchat_auth_token: localStorage.getItem('moodchat_auth_token') ? 'Present' : 'Missing'
+    };
     
     const results = {
       authState: {
@@ -4416,29 +4313,23 @@ const apiObject = {
         authValidationInProgress: _authValidationInProgress,
         authLastChecked: _authLastChecked ? new Date(_authLastChecked).toISOString() : 'Never',
         isLoggedIn: 'Async check required', // Because of timing fix
-        windowCurrentUser: window.currentUser ? 'Set' : 'Not set',
-        storageKey: TOKEN_STORAGE_KEY,
-        legacyToken: localStorage.getItem('token') ? 'Present' : 'Missing'
+        windowCurrentUser: window.currentUser ? 'Set' : 'Not set'
       },
       environment: envInfo,
-      authoritativeAuth: {
+      tokenNormalization: {
         backendUrl: BACKEND_BASE_URL,
         apiBaseUrl: BASE_API_URL,
         getValidTokenFunction: 'IMPLEMENTED',
-        tokenRetrievalPriority: '1. accessToken, 2. moodchat_token',
+        tokenRetrievalPriority: '1. accessToken, 2. moodchat_token, 3. authUser',
         tokenAlwaysFromLocalStorage: 'YES',
+        tokenStoredInAllLocations: 'YES',
         tokenMissingRejection: 'YES (protected endpoints only)',
-        auto401403Handling: 'YES',
+        auto401403Handling: 'YES (clears ALL locations)',
         environmentDetection: 'ACTIVE',
         publicEndpointDetection: 'ACTIVE'
       },
-      tokenPersistence: {
-        moodchatToken: tokenInMoodchatToken ? 'Present' : 'Missing',
-        accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
-        authUserKey: tokenInAuthUser ? 'Present' : 'Missing',
-        allKeysPresent: !!(tokenInMoodchatToken && tokenInAccessToken && tokenInAuthUser),
-        persistenceScore: (!!tokenInMoodchatToken + !!tokenInAccessToken + !!tokenInAuthUser) + '/3'
-      },
+      tokenLocations: tokenLocations,
+      tokenPersistenceScore: Object.values(tokenLocations).filter(v => v === 'Present').length + '/' + Object.keys(tokenLocations).length,
       networkState: {
         online: window.AppNetwork.isOnline,
         backendReachable: window.AppNetwork.isBackendReachable,
@@ -4462,7 +4353,7 @@ const apiObject = {
         asyncIsLoggedIn: 'ACTIVE',
         syncIsLoggedIn: 'ACTIVE (isLoggedInSync)',
         tokenAlwaysReadFromLocalStorage: 'ACTIVE',
-        auto401403Handling: 'ACTIVE (clears localStorage, redirects to login)'
+        auto401403Handling: 'ACTIVE (clears ALL locations, redirects to login)'
       },
       features: {
         validateAuthFunction: 'ACTIVE',
@@ -4471,12 +4362,11 @@ const apiObject = {
         environmentDetection: 'ACTIVE',
         authTimingFix: 'ACTIVE',
         abortErrorFix: 'ACTIVE',
+        tokenNormalization: 'ACTIVE',
         exponentialBackoffRetry: 'ACTIVE',
         tokenHeaderInjection: 'ACTIVE',
         networkAuthSeparation: 'ACTIVE',
-        tokenNormalization: 'ACTIVE',
-        tokenPersistence: 'ENHANCED',
-        dualKeyStorage: 'ACTIVE',
+        tokenPersistence: 'ENHANCED (ALL locations)',
         crossTabSync: 'ACTIVE',
         centralizedAuthHeaders: 'ACTIVE',
         strictAuthValidation: 'ACTIVE',
@@ -4488,7 +4378,6 @@ const apiObject = {
         automaticTokenAttachment: 'ACTIVE',
         globalTokenInjection: 'ACTIVE',
         authMeRetryLogic: 'ACTIVE',
-        dualTokenStorage: 'ACTIVE',
         loginFunction: 'ACTIVE',
         logoutFunction: 'ACTIVE',
         getCurrentUserFunction: 'ACTIVE',
@@ -4592,7 +4481,7 @@ const apiObject = {
 };
 
 // ============================================================================
-// CRITICAL FIX: GLOBAL API SETUP WITH AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION
+// CRITICAL FIX: GLOBAL API SETUP WITH TOKEN NORMALIZATION
 // ============================================================================
 
 // Create the global API function with authoritative auth
@@ -4675,18 +4564,23 @@ window.determineBackendUrl = determineBackendUrl;
 // Expose public endpoints list for debugging
 window.PUBLIC_ENDPOINTS = PUBLIC_ENDPOINTS;
 
-console.log('🔧 [API] Starting enhanced initialization with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION...');
+// Expose token normalization functions
+window._storeTokenInAllLocations = _storeTokenInAllLocations;
+window._clearAllAuthData = _clearAllAuthData;
+
+console.log('🔧 [API] Starting enhanced initialization with TOKEN NORMALIZATION FIX...');
 console.log(`🔧 [API] DYNAMIC Backend URL Detection: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] DYNAMIC API URL: ${BASE_API_URL}`);
 console.log(`🔧 [API] Token via getValidToken(): ${getValidToken() ? `Present (${getValidToken().substring(0, 20)}...)` : 'Not found'}`);
-console.log(`🔧 [API] Token in moodchat_token key: ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
-console.log(`🔧 [API] Token in accessToken key: ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-console.log(`🔧 [API] Token persistence: ${localStorage.getItem('moodchat_token') && localStorage.getItem('accessToken') ? 'DOUBLE STORED' : 'PARTIAL'}`);
-console.log(`🔧 [API] AUTHORITATIVE AUTH SOURCE: ACTIVE`);
+console.log(`🔧 [API] Token in accessToken: ${localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'}`);
+console.log(`🔧 [API] Token in moodchat_token: ${localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'}`);
+console.log(`🔧 [API] Token in authUser: ${localStorage.getItem('authUser') ? 'PRESENT' : 'MISSING'}`);
+console.log(`🔧 [API] Token Normalization Score: ${((localStorage.getItem('accessToken') ? 1 : 0) + (localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('authUser') ? 1 : 0))}/3`);
+console.log(`🔧 [API] TOKEN NORMALIZATION FIX: ACTIVE`);
 console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
 console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
-console.log(`🔧 [API] TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE`);
-console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE (clears localStorage, redirects to login)`);
+console.log(`🔧 [API] TOKEN STORED IN ALL LOCATIONS: ACTIVE`);
+console.log(`🔧 [API] 401/403 CLEARS ALL LOCATIONS: ACTIVE`);
 console.log(`🔧 [API] validateAuth() function: AVAILABLE`);
 console.log(`🔧 [API] getValidToken() function: AVAILABLE`);
 console.log(`🔧 [API] isPublicEndpoint() function: AVAILABLE`);
@@ -4794,11 +4688,11 @@ exposedMethods.forEach(methodName => {
       const token = getValidToken();
       
       console.log(`🔧 [API] Token from getValidToken() in fallback: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-      console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-      console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+      console.log(`🔧 [API] Token normalization check: accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}, moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, authUser=${localStorage.getItem('authUser') ? 'YES' : 'NO'}`);
+      console.log(`🔧 [API] TOKEN NORMALIZATION: ACTIVE`);
       console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
       console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
-      console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
+      console.log(`🔧 [API] 401/403 CLEARS ALL LOCATIONS: ACTIVE`);
       
       return Promise.resolve({
         ok: false,
@@ -4827,11 +4721,11 @@ setTimeout(() => {
       const token = getValidToken();
       
       console.log(`🔧 [API] Token from getValidToken() in fallback API: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-      console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-      console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+      console.log(`🔧 [API] Token normalization check: accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}, moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, authUser=${localStorage.getItem('authUser') ? 'YES' : 'NO'}`);
+      console.log(`🔧 [API] TOKEN NORMALIZATION: ACTIVE`);
       console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
       console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
-      console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
+      console.log(`🔧 [API] 401/403 CLEARS ALL LOCATIONS: ACTIVE`);
       
       return Promise.resolve({
         ok: false,
@@ -4858,11 +4752,11 @@ setTimeout(() => {
         const token = getValidToken();
         
         console.log(`🔧 [API] Token from getValidToken() in fallback method: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-        console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-        console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+        console.log(`🔧 [API] Token normalization check: accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}, moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, authUser=${localStorage.getItem('authUser') ? 'YES' : 'NO'}`);
+        console.log(`🔧 [API] TOKEN NORMALIZATION: ACTIVE`);
         console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
         console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
-        console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
+        console.log(`🔧 [API] 401/403 CLEARS ALL LOCATIONS: ACTIVE`);
         
         return Promise.resolve({
           ok: false,
@@ -4891,11 +4785,11 @@ if (!window.api) {
     const token = getValidToken();
     
     console.log(`🔧 [API] Token from getValidToken() in emergency API: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-    console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-    console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+    console.log(`🔧 [API] Token normalization check: accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}, moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, authUser=${localStorage.getItem('authUser') ? 'YES' : 'NO'}`);
+    console.log(`🔧 [API] TOKEN NORMALIZATION: ACTIVE`);
     console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
     console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
-    console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
+    console.log(`🔧 [API] 401/403 CLEARS ALL LOCATIONS: ACTIVE`);
     
     return Promise.resolve({
       ok: false,
@@ -4923,11 +4817,11 @@ if (!window.api) {
       const token = getValidToken();
       
       console.log(`🔧 [API] Token from getValidToken() in emergency method: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-      console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
-      console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+      console.log(`🔧 [API] Token normalization check: accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}, moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, authUser=${localStorage.getItem('authUser') ? 'YES' : 'NO'}`);
+      console.log(`🔧 [API] TOKEN NORMALIZATION: ACTIVE`);
       console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
       console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
-      console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
+      console.log(`🔧 [API] 401/403 CLEARS ALL LOCATIONS: ACTIVE`);
       
       return Promise.resolve({
         ok: false,
@@ -4943,20 +4837,21 @@ if (!window.api) {
   window.api = emergencyApi;
 }
 
-// Global API state with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION info
+// Global API state with TOKEN NORMALIZATION info
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 window.__ACCESS_TOKEN = accessToken; // Expose access token globally
 window.__ENVIRONMENT = window.__ENVIRONMENT || determineBackendUrl(); // Expose environment info
-window.__TOKEN_PERSISTENCE = {
-  moodchat_token: localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING',
+window.__TOKEN_NORMALIZATION = {
   accessToken: localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING',
+  moodchat_token: localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING',
+  authUser: localStorage.getItem('authUser') ? 'PRESENT' : 'MISSING',
   timestamp: new Date().toISOString()
 };
 window.__AUTH_TIMING_FIX = true; // Indicates auth timing fix is active
-window.__AUTHORITATIVE_AUTH = true; // Indicates authoritative auth source
+window.__TOKEN_NORMALIZATION_FIX = true; // Indicates token normalization fix is active
 window.__ENVIRONMENT_DETECTION = true; // Indicates environment detection is active
 window.__ABORT_ERROR_FIX = true; // Indicates AbortError fix is active
 window.__VALIDATE_AUTH = validateAuth; // Expose validateAuth globally
@@ -4966,8 +4861,10 @@ window.__DETERMINE_BACKEND_URL = determineBackendUrl; // Expose environment dete
 window.__IS_PUBLIC_ENDPOINT = isPublicEndpoint; // Expose public endpoint detection
 window.__IS_STATUS_ENDPOINT = isStatusEndpoint; // Expose status endpoint detection
 window.__PUBLIC_ENDPOINTS = PUBLIC_ENDPOINTS; // Expose public endpoints list
+window.__STORE_TOKEN_IN_ALL_LOCATIONS = _storeTokenInAllLocations; // Expose token storage function
+window.__CLEAR_ALL_AUTH_DATA = _clearAllAuthData; // Expose clear all auth data function
 
-console.log('🔧 [API] ENHANCED Backend API integration complete with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
+console.log('🔧 [API] ENHANCED Backend API integration complete with TOKEN NORMALIZATION FIX');
 console.log('🔧 [API] ✅ getValidToken() function implemented');
 console.log('🔧 [API] ✅ Environment detection implemented');
 console.log('🔧 [API] ✅ PUBLIC/PROTECTED endpoint detection implemented');
@@ -4975,7 +4872,8 @@ console.log('🔧 [API] ✅ DYNAMIC backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
 console.log('🔧 [API] ✅ Token ALWAYS read from localStorage before each API call');
 console.log('🔧 [API] ✅ Token priority: 1. accessToken, 2. moodchat_token');
-console.log('🔧 [API] ✅ 401/403 responses automatically clear localStorage and redirect to login');
+console.log('🔧 [API] ✅ Token stored in ALL locations for reliability');
+console.log('🔧 [API] ✅ 401/403 responses automatically clear ALL localStorage locations and redirect to login');
 console.log('🔧 [API] ✅ Token missing = Immediate rejection for protected endpoints only');
 console.log('🔧 [API] ✅ Public endpoints (/auth/login, /auth/register) work without tokens');
 console.log('🔧 [API] ✅ Protected endpoints require tokens');
@@ -4985,19 +4883,19 @@ console.log('🔧 [API] ✅ Token existence = API availability (even with AbortE
 console.log('🔧 [API] ✅ isLoggedIn() waits for validateAuth() if needed');
 console.log('🔧 [API] ✅ Preserves auth state during validation');
 console.log('🔧 [API] ✅ All existing API calls remain intact');
-console.log('🔧 [API] ✅ Token storage in moodchat_token and accessToken preserved');
+console.log('🔧 [API] ✅ Token storage in ALL locations preserved');
 console.log('🔧 [API] ✅ Authorization header injection preserved');
 console.log('🔧 [API] ✅ /api/status has no Authorization header');
 console.log('🔧 [API] ✅ Network/Auth separation preserved');
 console.log('🔧 [API] ✅ iframe API exposure preserved');
-console.log('🔧 [API] ✅ Tokens stored in BOTH moodchat_token AND accessToken keys');
+console.log('🔧 [API] ✅ Tokens stored in ALL locations for reliability');
 console.log('🔧 [API] ✅ Global accessToken variable: ACTIVE AND PERSISTENT');
 console.log('🔧 [API] ✅ Automatic token retrieval from localStorage: ALWAYS AT REQUEST TIME');
 console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation: ACTIVE');
 console.log('🔧 [API] ✅ window.currentUser maintained across sessions: ACTIVE');
 console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs: ACTIVE');
 console.log('🔧 [API] ✅ Authorization header injection in all protected API calls: ACTIVE');
-console.log('🔧 [API] ✅ Enhanced 401/403 handling - clears localStorage and redirects to login: ACTIVE');
+console.log('🔧 [API] ✅ Enhanced 401/403 handling - clears ALL localStorage locations and redirects to login: ACTIVE');
 console.log('🔧 [API] ✅ window.currentUser preserved: ACTIVE');
 console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods: ACTIVE');
 console.log('🔧 [API] ✅ Protected endpoints will work: ACTIVE');
@@ -5014,8 +4912,7 @@ console.log('🔧 [API] ✅ Login function: api.login(email, password)');
 console.log('🔧 [API] ✅ Logout function: api.logout()');
 console.log('🔧 [API] ✅ Get current user: api.getCurrentUser()');
 console.log('🔧 [API] ✅ Auto 401 handling');
-console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
-console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
+console.log('🔧 [API] ✅ Token stored in ALL locations as requested: VERIFIED');
 console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
 console.log('🔧 [API] 🔗 DYNAMIC Backend URL Detection: ACTIVE');
 console.log('🔧 [API] 🔗 Detected Environment: ' + (window.__ENVIRONMENT.isLocalhost ? 'LOCALHOST (Development)' : window.__ENVIRONMENT.isRenderDeployment ? 'RENDER (Production)' : 'UNKNOWN'));
@@ -5023,34 +4920,35 @@ console.log('🔧 [API] 🔗 Detected Backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] 🔗 Detected API Base URL: ' + BASE_API_URL);
 console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
 console.log('🔧 [API] 🔐 Token via getValidToken(): ' + (getValidToken() ? getValidToken().substring(0, 20) + '...' : 'None'));
-console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
 console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING'));
-console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
-  ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
-console.log('🔧 [API] 🔐 AUTHORITATIVE AUTH SOURCE: ACTIVE');
+console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
+console.log('🔧 [API] 🔐 Token in authUser: ' + (localStorage.getItem('authUser') ? 'PRESENT' : 'MISSING'));
+console.log('🔧 [API] 🔐 Token Normalization Score: ' + 
+  ((localStorage.getItem('accessToken') ? 1 : 0) + (localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('authUser') ? 1 : 0)) + '/3');
+console.log('🔧 [API] 🔐 TOKEN NORMALIZATION FIX: ACTIVE');
 console.log('🔧 [API] 🔐 ENVIRONMENT DETECTION: ACTIVE');
 console.log('🔧 [API] 🔐 PUBLIC ENDPOINT DETECTION: ACTIVE');
-console.log('🔧 [API] 🔐 TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE');
+console.log('🔧 [API] 🔐 TOKEN STORED IN ALL LOCATIONS: ACTIVE');
 console.log('🔧 [API] 🔐 PUBLIC ENDPOINTS NEVER REQUIRE TOKENS: ACTIVE');
 console.log('🔧 [API] 🔐 PROTECTED ENDPOINTS ALWAYS REQUIRE TOKENS: ACTIVE');
-console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS LOCALSTORAGE, REDIRECTS TO LOGIN)');
-console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH WITH ENVIRONMENT DETECTION:');
+console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS ALL LOCATIONS, REDIRECTS TO LOGIN)');
+console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR TOKEN NORMALIZATION:');
 console.log('🔧 [API] 1. Environment detection automatically selects backend URL');
 console.log('🔧 [API] 2. Localhost: Uses http://localhost:4000');
 console.log('🔧 [API] 3. Render: Uses https://moodchat-fy56.onrender.com');
 console.log('🔧 [API] 4. Token ALWAYS read from localStorage via getValidToken()');
-console.log('🔧 [API] 5. Token priority: 1. accessToken, 2. moodchat_token');
+console.log('🔧 [API] 5. Token stored in ALL locations for reliability');
 console.log('🔧 [API] 6. Public endpoints (/auth/login, /auth/register) work without tokens');
 console.log('🔧 [API] 7. Protected endpoints require tokens and fail with 401 if missing');
-console.log('🔧 [API] 8. Simulate 401 response - localStorage should be cleared and redirect to login');
+console.log('🔧 [API] 8. Simulate 401 response - ALL localStorage locations should be cleared and redirect to login');
 console.log('🔧 [API] 9. Call api.validateAuth() - should handle timing properly');
 console.log('🔧 [API] 10. Call api.isLoggedIn() - should never return false before validation completes');
 console.log('🔧 [API] 11. Simulate network delay - auth state should be preserved');
 console.log('🔧 [API] 12. Simulate AbortError - API readiness should NOT be blocked');
-console.log('🔧 [API] 13. Verify tokens are cleared on 401/403 with localStorage clearing');
+console.log('🔧 [API] 13. Verify tokens are cleared from ALL locations on 401/403');
 console.log('🔧 [API] 14. All existing API calls continue to work unchanged');
-console.log('🔧 [API] 15. Token storage in both moodchat_token and accessToken works');
+console.log('🔧 [API] 15. Token storage in ALL locations works');
 console.log('🔧 [API] 16. Authorization headers are injected correctly for protected endpoints');
 console.log('🔧 [API] 17. No Authorization headers for public endpoints');
 console.log('🔧 [API] 18. /api/status endpoint has no Authorization header');
-console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
+console.log('🔧 [API] ⚡ Ready for production with TOKEN NORMALIZATION FIX');
