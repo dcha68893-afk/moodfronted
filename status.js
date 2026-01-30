@@ -396,8 +396,8 @@ const TOKEN_KEYS = {
     TOKEN_EXPIRY: 'knecta_token_expiry'
 };
 
-// API base URL
-const API_BASE_URL = window.API_BASE_URL || '';
+// API base URL - Will be handled by api.js
+const API_BASE_URL = '';
 
 // =============================================
 // BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
@@ -416,7 +416,7 @@ async function bootstrapIframe() {
             return false;
         }
         
-        // Read tokens from localStorage
+        // Read tokens from localStorage with fallback
         const tokenData = readTokensFromStorage();
         
         if (!tokenData.accessToken) {
@@ -425,47 +425,105 @@ async function bootstrapIframe() {
             return false;
         }
         
-        // Validate token with /api/auth/me endpoint
-        const userData = await validateTokenWithAPI(tokenData.accessToken);
+        // Set access token for api.js
+        accessToken = tokenData.accessToken;
+        refreshToken = tokenData.refreshToken;
         
-        if (!userData || !userData.user) {
-            console.error('Token validation failed');
+        // Validate token using api.js /api/auth/me endpoint
+        try {
+            const response = await window.knectaAPI?.get('/api/auth/me');
+            
+            if (!response || !response.user) {
+                console.error('Token validation failed - no user data');
+                throw new Error('Token validation failed');
+            }
+            
+            // Set current user
+            currentUser = response.user;
+            userData = currentUser;
+            authValidated = true;
+            
+            console.log('User authenticated via api.js:', currentUser.id);
+            
+            // Save user to cache
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                uid: currentUser.id,
+                id: currentUser.id,
+                displayName: currentUser.displayName,
+                email: currentUser.email,
+                photoURL: currentUser.photoURL
+            }));
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Initialize UI components
+            initializeUIComponents();
+            
+            // Show loading state
+            showNotification('Connecting to server...', 'info');
+            
+            // Initialize status system
+            await initializeStatusSystem();
+            
+            console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
+            return true;
+            
+        } catch (apiError) {
+            console.error('API validation error:', apiError);
+            
+            // Try token refresh if we have a refresh token
+            if (refreshToken) {
+                console.log('Attempting token refresh...');
+                try {
+                    const refreshResponse = await window.knectaAPI?.post('/api/auth/refresh', {
+                        refreshToken: refreshToken
+                    });
+                    
+                    if (refreshResponse && refreshResponse.accessToken) {
+                        // Save new tokens
+                        accessToken = refreshResponse.accessToken;
+                        if (refreshResponse.refreshToken) {
+                            refreshToken = refreshResponse.refreshToken;
+                        }
+                        
+                        // Retry auth
+                        const retryResponse = await window.knectaAPI?.get('/api/auth/me');
+                        if (retryResponse && retryResponse.user) {
+                            currentUser = retryResponse.user;
+                            userData = currentUser;
+                            authValidated = true;
+                            
+                            // Save tokens and user
+                            localStorage.setItem(TOKEN_KEYS.ACCESS_TOKEN, accessToken);
+                            if (refreshToken) {
+                                localStorage.setItem(TOKEN_KEYS.REFRESH_TOKEN, refreshToken);
+                            }
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                                uid: currentUser.id,
+                                id: currentUser.id,
+                                displayName: currentUser.displayName,
+                                email: currentUser.email,
+                                photoURL: currentUser.photoURL
+                            }));
+                            
+                            // Setup event listeners and initialize
+                            setupEventListeners();
+                            initializeUIComponents();
+                            showNotification('Connecting to server...', 'info');
+                            await initializeStatusSystem();
+                            return true;
+                        }
+                    }
+                } catch (refreshError) {
+                    console.error('Token refresh failed:', refreshError);
+                }
+            }
+            
+            // If all authentication attempts fail
             handleAuthError('Session expired. Please log in again.');
             return false;
         }
-        
-        // Set current user
-        currentUser = userData.user;
-        userData = currentUser;
-        accessToken = tokenData.accessToken;
-        refreshToken = tokenData.refreshToken;
-        authValidated = true;
-        
-        console.log('User authenticated:', currentUser.id);
-        
-        // Save user to cache
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-            uid: currentUser.id,
-            id: currentUser.id,
-            displayName: currentUser.displayName,
-            email: currentUser.email,
-            photoURL: currentUser.photoURL
-        }));
-        
-        // Setup event listeners
-        setupEventListeners();
-        
-        // Initialize UI components
-        initializeUIComponents();
-        
-        // Show loading state
-        showNotification('Connecting to server...', 'info');
-        
-        // Initialize status system
-        await initializeStatusSystem();
-        
-        console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
-        return true;
         
     } catch (error) {
         console.error('Bootstrap error:', error);
@@ -482,24 +540,25 @@ function readTokensFromStorage() {
         tokenExpiry: null
     };
     
-    // Try multiple possible token locations
+    // Try multiple possible token locations with priority
     const possibleAccessTokenKeys = [
-        'knecta_access_token',
-        'access_token',
-        'token',
-        'auth_token'
+        'accessToken',           // Primary
+        'moodchat_token',        // Fallback
+        'knecta_access_token',   // Legacy
+        'token',                 // Generic
+        'auth_token'             // Generic
     ];
     
     const possibleRefreshTokenKeys = [
-        'knecta_refresh_token',
-        'refresh_token',
-        'refreshToken'
+        'refreshToken',          // Primary
+        'knecta_refresh_token',  // Legacy
+        'refresh_token'          // Generic
     ];
     
     // Find access token
     for (const key of possibleAccessTokenKeys) {
         const token = localStorage.getItem(key);
-        if (token && token.length > 10) {
+        if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
             tokenData.accessToken = token;
             break;
         }
@@ -508,7 +567,7 @@ function readTokensFromStorage() {
     // Find refresh token
     for (const key of possibleRefreshTokenKeys) {
         const token = localStorage.getItem(key);
-        if (token && token.length > 10) {
+        if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
             tokenData.refreshToken = token;
             break;
         }
@@ -517,7 +576,7 @@ function readTokensFromStorage() {
     // Check token expiry
     const expiryKey = 'knecta_token_expiry';
     const expiry = localStorage.getItem(expiryKey);
-    if (expiry) {
+    if (expiry && expiry !== 'undefined' && expiry !== 'null') {
         tokenData.tokenExpiry = new Date(expiry);
     }
     
@@ -528,42 +587,6 @@ function readTokensFromStorage() {
     });
     
     return tokenData;
-}
-
-// Validate token with API /auth/me endpoint
-async function validateTokenWithAPI(token) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (response.status === 401) {
-            // Token expired, try to refresh
-            console.log('Token expired, attempting refresh...');
-            const refreshed = await attemptTokenRefresh();
-            if (refreshed) {
-                // Retry with new token
-                return await validateTokenWithAPI(accessToken);
-            }
-            return null;
-        }
-        
-        if (!response.ok) {
-            console.error('Token validation failed with status:', response.status);
-            return null;
-        }
-        
-        const data = await response.json();
-        return data;
-        
-    } catch (error) {
-        console.error('Error validating token:', error);
-        return null;
-    }
 }
 
 // Initialize the application
@@ -586,57 +609,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 // AUTHENTICATION FUNCTIONS
 // =============================================
 
-// Attempt to refresh the access token
-async function attemptTokenRefresh() {
-    try {
-        if (!refreshToken) {
-            console.error('No refresh token available');
-            return false;
-        }
-        
-        console.log('Refreshing token...');
-        
-        const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ refreshToken })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            
-            if (data.accessToken) {
-                // Save new tokens
-                accessToken = data.accessToken;
-                localStorage.setItem(TOKEN_KEYS.ACCESS_TOKEN, accessToken);
-                
-                if (data.refreshToken) {
-                    refreshToken = data.refreshToken;
-                    localStorage.setItem(TOKEN_KEYS.REFRESH_TOKEN, refreshToken);
-                }
-                
-                if (data.expiresIn) {
-                    const expiryDate = new Date();
-                    expiryDate.setSeconds(expiryDate.getSeconds() + data.expiresIn);
-                    localStorage.setItem(TOKEN_KEYS.TOKEN_EXPIRY, expiryDate.toISOString());
-                }
-                
-                console.log('Token refreshed successfully');
-                return true;
-            }
-        }
-        
-        console.error('Refresh failed with status:', response.status);
-        return false;
-        
-    } catch (error) {
-        console.error('Error refreshing token:', error);
-        return false;
-    }
-}
-
 // Handle authentication error
 function handleAuthError(message) {
     console.error('Authentication failed:', message);
@@ -650,22 +622,34 @@ function handleAuthError(message) {
         retryBtn.textContent = 'Go to Login';
         retryBtn.onclick = function() {
             // Clear all auth data
-            localStorage.removeItem(TOKEN_KEYS.ACCESS_TOKEN);
-            localStorage.removeItem(TOKEN_KEYS.REFRESH_TOKEN);
-            localStorage.removeItem(TOKEN_KEYS.TOKEN_EXPIRY);
-            localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+            const keysToRemove = [
+                'accessToken', 'moodchat_token', 'knecta_access_token', 'token', 'auth_token',
+                'refreshToken', 'knecta_refresh_token', 'refresh_token',
+                'knecta_token_expiry', 'knecta_current_user'
+            ];
             
-            // Redirect to main page
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+            });
+            
+            // Redirect to login page
+            const loginUrl = '/login.html';
             if (window.top !== window.self) {
-                window.top.location.href = '/index.html';
+                window.top.location.href = loginUrl;
             } else {
-                window.location.href = '/index.html';
+                window.location.href = loginUrl;
             }
         };
     }
+    
+    // Update offline mode button
+    const offlineBtn = document.getElementById('offlineModeBtn');
+    if (offlineBtn) {
+        offlineBtn.style.display = 'block';
+    }
 }
 
-// Make authenticated API call
+// Make authenticated API call using api.js
 async function makeAuthenticatedRequest(endpoint, options = {}) {
     // Ensure we have a valid token
     if (!accessToken) {
@@ -673,67 +657,84 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
         throw new Error('Authentication required');
     }
     
-    // Set default headers
-    const defaultHeaders = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-    };
-    
-    // Merge headers
-    const headers = {
-        ...defaultHeaders,
-        ...options.headers
-    };
+    // Ensure api.js is available
+    if (!window.knectaAPI) {
+        console.error('api.js is not loaded');
+        throw new Error('API library not available');
+    }
     
     try {
-        console.log('Making authenticated API call to:', endpoint);
+        console.log('Making authenticated API call via api.js to:', endpoint);
         
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        // Prepare request options
+        const requestOptions = {
             ...options,
-            headers
-        });
-        
-        // Check for unauthorized response
-        if (response.status === 401) {
-            console.log('Token expired or invalid, attempting refresh...');
-            const refreshed = await attemptTokenRefresh();
-            
-            if (refreshed && accessToken) {
-                // Retry the request with new token
-                headers.Authorization = `Bearer ${accessToken}`;
-                const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
-                    ...options,
-                    headers
-                });
-                
-                if (!retryResponse.ok) {
-                    // If still failing, clear auth and redirect
-                    if (retryResponse.status === 401 || retryResponse.status === 403) {
-                        handleAuthError('Session expired. Please log in again.');
-                        throw new Error('Authentication failed');
-                    }
-                    throw new Error(`API request failed after refresh: ${retryResponse.status}`);
-                }
-                
-                return await retryResponse.json();
-            } else {
-                handleAuthError('Session expired. Please log in again.');
-                throw new Error('Failed to refresh token');
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
             }
+        };
+        
+        let response;
+        
+        // Handle different HTTP methods
+        switch (options.method?.toUpperCase() || 'GET') {
+            case 'GET':
+                response = await window.knectaAPI.get(endpoint);
+                break;
+            case 'POST':
+                response = await window.knectaAPI.post(endpoint, options.body ? JSON.parse(options.body) : {});
+                break;
+            case 'PUT':
+                response = await window.knectaAPI.put(endpoint, options.body ? JSON.parse(options.body) : {});
+                break;
+            case 'DELETE':
+                response = await window.knectaAPI.delete(endpoint);
+                break;
+            default:
+                throw new Error(`Unsupported method: ${options.method}`);
         }
         
-        if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-        }
-        
-        return await response.json();
+        return response;
         
     } catch (error) {
-        console.error('API request error:', error);
+        console.error('API request error via api.js:', error);
         
-        // If it's an auth error, handle it
-        if (error.message.includes('Authentication') || error.message.includes('Session')) {
-            throw error;
+        // Check if it's an auth error
+        if (error.message?.includes('401') || error.message?.includes('Unauthorized') || 
+            error.message?.includes('Authentication') || error.message?.includes('Session')) {
+            
+            console.log('Auth error detected, attempting token refresh...');
+            
+            // Attempt token refresh if we have a refresh token
+            if (refreshToken) {
+                try {
+                    const refreshResponse = await window.knectaAPI?.post('/api/auth/refresh', {
+                        refreshToken: refreshToken
+                    });
+                    
+                    if (refreshResponse && refreshResponse.accessToken) {
+                        // Save new tokens
+                        accessToken = refreshResponse.accessToken;
+                        localStorage.setItem(TOKEN_KEYS.ACCESS_TOKEN, accessToken);
+                        
+                        if (refreshResponse.refreshToken) {
+                            refreshToken = refreshResponse.refreshToken;
+                            localStorage.setItem(TOKEN_KEYS.REFRESH_TOKEN, refreshToken);
+                        }
+                        
+                        // Retry the original request
+                        console.log('Token refreshed, retrying original request...');
+                        return await makeAuthenticatedRequest(endpoint, options);
+                    }
+                } catch (refreshError) {
+                    console.error('Token refresh failed:', refreshError);
+                }
+            }
+            
+            // If refresh fails or no refresh token, clear auth and redirect
+            handleAuthError('Session expired. Please log in again.');
+            throw new Error('Authentication failed');
         }
         
         // For other errors, show notification but don't redirect
@@ -747,7 +748,7 @@ async function initializeStatusSystem() {
     console.log('=== INITIALIZING STATUS SYSTEM ===');
     
     try {
-        // Load initial data from API
+        // Load initial data from API via api.js
         await loadInitialData();
         
         // Update UI
@@ -1008,49 +1009,79 @@ function addStatusItemInstant(statusData, container) {
 // Initialize UI components
 function initializeUIComponents() {
     // Initialize emoji picker
-    initializeEmojiPicker();
+    if (document.getElementById('emojiGrid')) {
+        initializeEmojiPicker();
+    }
     
     // Initialize background options
-    initializeBackgroundOptions();
+    if (document.getElementById('backgroundGrid')) {
+        initializeBackgroundOptions();
+    }
     
     // Initialize intent options
-    initializeIntentOptions();
+    if (document.getElementById('intentOptions')) {
+        initializeIntentOptions();
+    }
     
     // Initialize mood options
-    initializeMoodOptions();
+    if (document.getElementById('moodOptions')) {
+        initializeMoodOptions();
+    }
     
     // Initialize category options
-    initializeCategoryOptions();
+    if (document.getElementById('categoryOptions')) {
+        initializeCategoryOptions();
+    }
     
     // Initialize action buttons selector
-    initializeActionButtonsSelector();
+    if (document.getElementById('actionButtonsSelector')) {
+        initializeActionButtonsSelector();
+    }
     
     // Initialize privacy options
-    initializePrivacyOptions();
+    if (document.getElementById('privacyOptions')) {
+        initializePrivacyOptions();
+    }
     
     // Initialize duration options
-    initializeDurationOptions();
+    if (document.getElementById('durationOptions')) {
+        initializeDurationOptions();
+    }
     
     // Initialize template options
-    initializeTemplateOptions();
+    if (document.getElementById('templateOptions')) {
+        initializeTemplateOptions();
+    }
     
     // Initialize report reasons
-    initializeReportReasons();
+    if (document.getElementById('reportReasons')) {
+        initializeReportReasons();
+    }
     
     // Initialize reactions
-    initializeReactions();
+    if (document.getElementById('reactionsContainer')) {
+        initializeReactions();
+    }
     
     // Initialize poll options
-    initializePollOptions();
+    if (document.getElementById('pollOptionsContainer')) {
+        initializePollOptions();
+    }
     
     // Initialize highlight color options
-    initializeHighlightColorOptions();
+    if (document.getElementById('highlightColorGrid')) {
+        initializeHighlightColorOptions();
+    }
     
     // Initialize highlight privacy options
-    initializeHighlightPrivacyOptions();
+    if (document.getElementById('highlightPrivacyOptions')) {
+        initializeHighlightPrivacyOptions();
+    }
     
     // Initialize repeat options
-    initializeRepeatOptions();
+    if (document.getElementById('repeatOptions')) {
+        initializeRepeatOptions();
+    }
 }
 
 // Initialize emoji picker
@@ -1303,7 +1334,11 @@ function initializeTemplateOptions() {
         templateOption.textContent = template.name;
         
         templateOption.addEventListener('click', () => {
-            document.getElementById('textStatusInput').value = template.text;
+            const textInput = document.getElementById('textStatusInput');
+            if (textInput) {
+                textInput.value = template.text;
+                updateTextStatusCounter();
+            }
             
             // Select corresponding background
             const bgOption = document.querySelector(`.background-option[data-bg="${template.background}"]`);
@@ -1587,10 +1622,10 @@ function initializeRepeatOptions() {
     }
 }
 
-// Load initial data from API - USING DIRECT AUTHENTICATED REQUESTS
+// Load initial data from API - USING api.js
 async function loadInitialData() {
     try {
-        console.log('Loading initial data from API (direct token access)...');
+        console.log('Loading initial data from API via api.js...');
         
         // Load statuses
         try {
@@ -1689,7 +1724,10 @@ async function loadInitialData() {
             if (streakResponse && streakResponse.streak !== undefined) {
                 streakCount = streakResponse.streak;
                 localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
-                document.getElementById('streakCount').textContent = streakCount;
+                const streakElement = document.getElementById('streakCount');
+                if (streakElement) {
+                    streakElement.textContent = streakCount;
+                }
             }
         } catch (streakError) {
             console.error('Error loading streak data from API:', streakError);
@@ -1752,19 +1790,19 @@ function updateMyStatusPreview() {
     const myStatusIndicator = document.getElementById('myStatusIndicator');
     const myStatusText = document.getElementById('myStatusText');
     
-    if (currentUser && currentUser.photoURL) {
+    if (currentUser && currentUser.photoURL && myStatusAvatar) {
         myStatusAvatar.innerHTML = `<img src="${escapeHtml(currentUser.photoURL)}" style="width: 100%; height: 100%; border-radius: 50%;">`;
     }
     
     if (myStatuses.length > 0) {
         const latestStatus = myStatuses[0];
-        myStatusRing.classList.remove('viewed');
-        myStatusIndicator.classList.remove('viewed');
-        myStatusText.textContent = getStatusPreviewText(latestStatus);
+        if (myStatusRing) myStatusRing.classList.remove('viewed');
+        if (myStatusIndicator) myStatusIndicator.classList.remove('viewed');
+        if (myStatusText) myStatusText.textContent = getStatusPreviewText(latestStatus);
     } else {
-        myStatusRing.classList.add('viewed');
-        myStatusIndicator.classList.add('viewed');
-        myStatusText.textContent = 'No recent status';
+        if (myStatusRing) myStatusRing.classList.add('viewed');
+        if (myStatusIndicator) myStatusIndicator.classList.add('viewed');
+        if (myStatusText) myStatusText.textContent = 'No recent status';
     }
 }
 
@@ -1792,7 +1830,10 @@ function updateStreakCounter() {
         streakCount = 1;
     }
     
-    document.getElementById('streakCount').textContent = streakCount;
+    const streakElement = document.getElementById('streakCount');
+    if (streakElement) {
+        streakElement.textContent = streakCount;
+    }
     localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
 }
 
@@ -1852,25 +1893,25 @@ function updateCurrentSection() {
         
         switch(sectionId) {
             case 'allStatusSection':
-                renderStatusesList(allStatusList, statuses);
+                if (allStatusList) renderStatusesList(allStatusList, statuses);
                 break;
             case 'friendsStatusSection':
-                renderStatusesList(friendsStatusList, filterStatusesByType('friends'));
+                if (friendsStatusList) renderStatusesList(friendsStatusList, filterStatusesByType('friends'));
                 break;
             case 'closeFriendsStatusSection':
-                renderStatusesList(closeFriendsStatusList, filterStatusesByType('close-friends'));
+                if (closeFriendsStatusList) renderStatusesList(closeFriendsStatusList, filterStatusesByType('close-friends'));
                 break;
             case 'pinnedStatusSection':
-                renderStatusesList(pinnedStatusList, filterStatusesByType('pinned'));
+                if (pinnedStatusList) renderStatusesList(pinnedStatusList, filterStatusesByType('pinned'));
                 break;
             case 'mutedStatusSection':
-                renderStatusesList(mutedStatusList, filterStatusesByType('muted'));
+                if (mutedStatusList) renderStatusesList(mutedStatusList, filterStatusesByType('muted'));
                 break;
             case 'microCirclesStatusSection':
-                renderStatusesList(microCirclesStatusList, filterStatusesByType('micro-circle'));
+                if (microCirclesStatusList) renderStatusesList(microCirclesStatusList, filterStatusesByType('micro-circle'));
                 break;
             case 'myStatusSection':
-                renderStatusesList(myStatusList, myStatuses);
+                if (myStatusList) renderStatusesList(myStatusList, myStatuses);
                 break;
         }
     }
@@ -1896,6 +1937,8 @@ function filterStatusesByType(type) {
 
 // Render statuses list
 function renderStatusesList(container, statusesList) {
+    if (!container) return;
+    
     container.innerHTML = '';
     
     // Apply additional filters
@@ -2163,14 +2206,16 @@ function loadViewerContent(statusData) {
     }
     
     // Progress indicators
-    progressIndicators.innerHTML = `
-        <div class="progress-bar">
-            <div class="progress-fill" id="progressFill"></div>
-        </div>
-    `;
+    if (progressIndicators) {
+        progressIndicators.innerHTML = `
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        `;
+    }
     
     // Action buttons
-    if (statusData.actionButtons && statusData.actionButtons.length > 0) {
+    if (actionButtonsOverlay && statusData.actionButtons && statusData.actionButtons.length > 0) {
         actionButtonsOverlay.innerHTML = '';
         statusData.actionButtons.forEach(actionKey => {
             const action = actionButtons[actionKey];
@@ -2184,7 +2229,7 @@ function loadViewerContent(statusData) {
                 actionButtonsOverlay.appendChild(actionButton);
             }
         });
-    } else {
+    } else if (actionButtonsOverlay) {
         actionButtonsOverlay.innerHTML = '';
     }
     
@@ -2429,7 +2474,7 @@ function toggleAutoAdvance() {
     }
 }
 
-// Add reaction to status - USING DIRECT AUTHENTICATED REQUEST
+// Add reaction to status - USING api.js
 async function addReactionToStatus(statusId, reaction) {
     try {
         // Check if we're in offline mode
@@ -2441,7 +2486,7 @@ async function addReactionToStatus(statusId, reaction) {
             return;
         }
         
-        console.log('Adding reaction via authenticated request');
+        console.log('Adding reaction via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/react`, {
             method: 'POST',
             body: JSON.stringify({ reaction })
@@ -2456,7 +2501,7 @@ async function addReactionToStatus(statusId, reaction) {
     }
 }
 
-// Vote on poll - USING DIRECT AUTHENTICATED REQUEST
+// Vote on poll - USING api.js
 async function voteOnPoll(statusId, optionId) {
     try {
         // Check if we're in offline mode
@@ -2465,7 +2510,7 @@ async function voteOnPoll(statusId, optionId) {
             return;
         }
         
-        console.log('Voting on poll via authenticated request');
+        console.log('Voting on poll via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/vote`, {
             method: 'POST',
             body: JSON.stringify({ optionId })
@@ -2534,10 +2579,10 @@ async function voteOnPoll(statusId, optionId) {
     }
 }
 
-// Pin status - USING DIRECT AUTHENTICATED REQUEST
+// Pin status - USING api.js
 async function pinStatus(statusData) {
     try {
-        console.log('Pinning status via authenticated request');
+        console.log('Pinning status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusData.id}/pin`, {
             method: 'POST'
         });
@@ -2554,10 +2599,10 @@ async function pinStatus(statusData) {
     }
 }
 
-// Unpin status - USING DIRECT AUTHENTICATED REQUEST
+// Unpin status - USING api.js
 async function unpinStatus(statusData) {
     try {
-        console.log('Unpinning status via authenticated request');
+        console.log('Unpinning status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusData.id}/pin`, {
             method: 'DELETE'
         });
@@ -2574,10 +2619,10 @@ async function unpinStatus(statusData) {
     }
 }
 
-// Mute user - USING DIRECT AUTHENTICATED REQUEST
+// Mute user - USING api.js
 async function muteUser(userId) {
     try {
-        console.log('Muting user via authenticated request');
+        console.log('Muting user via api.js');
         const response = await makeAuthenticatedRequest(`/api/users/${userId}/mute`, {
             method: 'POST'
         });
@@ -2594,10 +2639,10 @@ async function muteUser(userId) {
     }
 }
 
-// Unmute user - USING DIRECT AUTHENTICATED REQUEST
+// Unmute user - USING api.js
 async function unmuteUser(userId) {
     try {
-        console.log('Unmuting user via authenticated request');
+        console.log('Unmuting user via api.js');
         const response = await makeAuthenticatedRequest(`/api/users/${userId}/mute`, {
             method: 'DELETE'
         });
@@ -2614,7 +2659,7 @@ async function unmuteUser(userId) {
     }
 }
 
-// Post status - USING DIRECT AUTHENTICATED REQUEST
+// Post status - USING api.js
 async function postStatus(statusData) {
     try {
         // Check if we're in offline mode
@@ -2643,7 +2688,7 @@ async function postStatus(statusData) {
             return;
         }
         
-        console.log('Posting status via authenticated request');
+        console.log('Posting status via api.js');
         const response = await makeAuthenticatedRequest('/api/statuses/create', {
             method: 'POST',
             body: JSON.stringify(statusData)
@@ -2685,10 +2730,10 @@ async function postStatus(statusData) {
     }
 }
 
-// Schedule status - USING DIRECT AUTHENTICATED REQUEST
+// Schedule status - USING api.js
 async function scheduleStatus(statusData, scheduleTime) {
     try {
-        console.log('Scheduling status via authenticated request');
+        console.log('Scheduling status via api.js');
         const response = await makeAuthenticatedRequest('/api/statuses/schedule', {
             method: 'POST',
             body: JSON.stringify({
@@ -2728,10 +2773,10 @@ function saveDraft(statusData) {
     }
 }
 
-// Report status - USING DIRECT AUTHENTICATED REQUEST
+// Report status - USING api.js
 async function reportStatus(statusId, reason, details) {
     try {
-        console.log('Reporting status via authenticated request');
+        console.log('Reporting status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/report`, {
             method: 'POST',
             body: JSON.stringify({
@@ -2878,7 +2923,7 @@ function showHighlightsEditor(highlight = null) {
     highlightsEditorModal.classList.add('active');
 }
 
-// Save highlight - USING DIRECT AUTHENTICATED REQUEST
+// Save highlight - USING api.js
 async function saveHighlight() {
     const nameInput = document.getElementById('highlightNameInput');
     const iconSelect = document.getElementById('highlightIconSelect');
@@ -2902,7 +2947,7 @@ async function saveHighlight() {
     };
     
     try {
-        console.log('Saving highlight via authenticated request');
+        console.log('Saving highlight via api.js');
         const response = await makeAuthenticatedRequest('/api/statuses/highlights', {
             method: 'POST',
             body: JSON.stringify(highlight)
@@ -3012,12 +3057,19 @@ function loadStatsContent() {
     const mostPopularMood = getMostPopularMood();
     
     // Update quick stats
-    document.getElementById('totalStatusesStat').textContent = totalStatuses;
-    document.getElementById('totalViewsStat').textContent = totalViews;
-    document.getElementById('totalReactionsStat').textContent = totalReactions;
-    document.getElementById('streakStat').textContent = streakCount;
-    document.getElementById('avgViewTimeStat').textContent = avgViewTime + 's';
-    document.getElementById('engagementRateStat').textContent = engagementRate + '%';
+    const totalStatusesStat = document.getElementById('totalStatusesStat');
+    const totalViewsStat = document.getElementById('totalViewsStat');
+    const totalReactionsStat = document.getElementById('totalReactionsStat');
+    const streakStat = document.getElementById('streakStat');
+    const avgViewTimeStat = document.getElementById('avgViewTimeStat');
+    const engagementRateStat = document.getElementById('engagementRateStat');
+    
+    if (totalStatusesStat) totalStatusesStat.textContent = totalStatuses;
+    if (totalViewsStat) totalViewsStat.textContent = totalViews;
+    if (totalReactionsStat) totalReactionsStat.textContent = totalReactions;
+    if (streakStat) streakStat.textContent = streakCount;
+    if (avgViewTimeStat) avgViewTimeStat.textContent = avgViewTime + 's';
+    if (engagementRateStat) engagementRateStat.textContent = engagementRate + '%';
     
     // Update chart
     updateStatsChart();
@@ -3190,10 +3242,16 @@ function updateDraftsList() {
                 draftItem.classList.toggle('selected');
                 if (draftItem.classList.contains('selected')) {
                     selectedDraft = draft;
-                    document.getElementById('loadDraftBtn').disabled = false;
+                    const loadDraftBtn = document.getElementById('loadDraftBtn');
+                    if (loadDraftBtn) {
+                        loadDraftBtn.disabled = false;
+                    }
                 } else {
                     selectedDraft = null;
-                    document.getElementById('loadDraftBtn').disabled = true;
+                    const loadDraftBtn = document.getElementById('loadDraftBtn');
+                    if (loadDraftBtn) {
+                        loadDraftBtn.disabled = true;
+                    }
                 }
             }
         });
@@ -3233,20 +3291,32 @@ function loadDraft(draft) {
     
     // Set text based on draft type
     if (draft.type === 'text') {
-        document.querySelector('.create-status-tab[data-tab="text"]').click();
-        if (draft.text) {
-            document.getElementById('textStatusInput').value = draft.text;
+        const textTab = document.querySelector('.create-status-tab[data-tab="text"]');
+        if (textTab) {
+            textTab.click();
+        }
+        const textInput = document.getElementById('textStatusInput');
+        if (textInput && draft.text) {
+            textInput.value = draft.text;
             updateTextStatusCounter();
         }
     } else if (draft.type === 'media') {
-        document.querySelector('.create-status-tab[data-tab="media"]').click();
-        if (draft.caption) {
-            document.getElementById('mediaCaptionInput').value = draft.caption;
+        const mediaTab = document.querySelector('.create-status-tab[data-tab="media"]');
+        if (mediaTab) {
+            mediaTab.click();
+        }
+        const captionInput = document.getElementById('mediaCaptionInput');
+        if (captionInput && draft.caption) {
+            captionInput.value = draft.caption;
         }
     } else if (draft.type === 'poll') {
-        document.querySelector('.create-status-tab[data-tab="poll"]').click();
-        if (draft.question) {
-            document.getElementById('pollQuestionInput').value = draft.question;
+        const pollTab = document.querySelector('.create-status-tab[data-tab="poll"]');
+        if (pollTab) {
+            pollTab.click();
+        }
+        const questionInput = document.getElementById('pollQuestionInput');
+        if (questionInput && draft.question) {
+            questionInput.value = draft.question;
         }
     }
     
@@ -3351,14 +3421,14 @@ function handleScheduleAction(action, scheduled) {
     }
 }
 
-// Cancel scheduled status - USING DIRECT AUTHENTICATED REQUEST
+// Cancel scheduled status - USING api.js
 async function cancelScheduledStatus(scheduleId) {
     if (!confirm('Are you sure you want to cancel this scheduled status?')) {
         return;
     }
     
     try {
-        console.log('Cancelling scheduled status via authenticated request');
+        console.log('Cancelling scheduled status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/schedule/${scheduleId}`, {
             method: 'DELETE'
         });
@@ -3483,15 +3553,24 @@ function formatTimeAgo(date) {
 // Setup event listeners
 function setupEventListeners() {
     // Create status button
-    document.getElementById('createStatusBtn').addEventListener('click', () => {
-        createStatusModal.classList.add('active');
-        document.querySelector('.create-status-tab[data-tab="text"]').click();
-    });
+    const createStatusBtn = document.getElementById('createStatusBtn');
+    if (createStatusBtn) {
+        createStatusBtn.addEventListener('click', () => {
+            createStatusModal.classList.add('active');
+            const textTab = document.querySelector('.create-status-tab[data-tab="text"]');
+            if (textTab) {
+                textTab.click();
+            }
+        });
+    }
     
     // Close create status modal
-    document.getElementById('closeCreateStatusModal').addEventListener('click', () => {
-        createStatusModal.classList.remove('active');
-    });
+    const closeCreateStatusModal = document.getElementById('closeCreateStatusModal');
+    if (closeCreateStatusModal) {
+        closeCreateStatusModal.addEventListener('click', () => {
+            createStatusModal.classList.remove('active');
+        });
+    }
     
     // Create status tabs
     document.querySelectorAll('.create-status-tab').forEach(tab => {
@@ -3522,12 +3601,15 @@ function setupEventListeners() {
     }
     
     // Clear text button
-    document.getElementById('clearTextBtn').addEventListener('click', () => {
-        if (textStatusInput) {
-            textStatusInput.value = '';
-            updateTextStatusCounter();
-        }
-    });
+    const clearTextBtn = document.getElementById('clearTextBtn');
+    if (clearTextBtn) {
+        clearTextBtn.addEventListener('click', () => {
+            if (textStatusInput) {
+                textStatusInput.value = '';
+                updateTextStatusCounter();
+            }
+        });
+    }
     
     // Media upload area
     const mediaUploadArea = document.getElementById('mediaUploadArea');
@@ -3563,242 +3645,286 @@ function setupEventListeners() {
     }
     
     // Add poll option
-    document.getElementById('addPollOptionBtn').addEventListener('click', () => {
-        const pollOptionsContainer = document.getElementById('pollOptionsContainer');
-        if (!pollOptionsContainer) return;
-        
-        const optionCount = pollOptionsContainer.children.length + 1;
-        if (optionCount > 6) {
-            showNotification('Maximum 6 options allowed', 'warning');
-            return;
-        }
-        
-        addPollOption(optionCount);
-    });
+    const addPollOptionBtn = document.getElementById('addPollOptionBtn');
+    if (addPollOptionBtn) {
+        addPollOptionBtn.addEventListener('click', () => {
+            const pollOptionsContainer = document.getElementById('pollOptionsContainer');
+            if (!pollOptionsContainer) return;
+            
+            const optionCount = pollOptionsContainer.children.length + 1;
+            if (optionCount > 6) {
+                showNotification('Maximum 6 options allowed', 'warning');
+                return;
+            }
+            
+            addPollOption(optionCount);
+        });
+    }
     
     // Post status button
-    document.getElementById('postStatusBtn').addEventListener('click', () => {
-        const activeTab = document.querySelector('.create-status-tab.active');
-        if (!activeTab) return;
-        
-        const activeTabName = activeTab.dataset.tab;
-        let statusData = {
-            type: activeTabName,
-            userId: currentUser?.id,
-            user: currentUser,
-            createdAt: new Date().toISOString(),
-            views: 0,
-            reactions: 0
-        };
-        
-        // Get metadata
-        const selectedIntent = document.querySelector('.intent-option.selected')?.dataset.intent;
-        const selectedMood = document.querySelector('.mood-option.selected')?.dataset.mood;
-        const selectedCategory = document.querySelector('.category-option.selected')?.dataset.category;
-        const selectedPrivacy = document.querySelector('.privacy-option.selected')?.dataset.privacy;
-        const selectedDuration = document.querySelector('.duration-option.selected')?.dataset.duration;
-        const selectedActions = Array.from(document.querySelectorAll('.action-button-option.selected')).map(opt => opt.dataset.action);
-        
-        if (selectedIntent) statusData.intent = selectedIntent;
-        if (selectedMood) statusData.mood = selectedMood;
-        if (selectedCategory) statusData.category = selectedCategory;
-        if (selectedPrivacy) statusData.privacy = selectedPrivacy;
-        if (selectedDuration) statusData.duration = selectedDuration;
-        if (selectedActions.length > 0) statusData.actionButtons = selectedActions;
-        
-        // Advanced options
-        statusData.isSensitive = document.getElementById('sensitiveContentToggle').checked;
-        statusData.isSilent = document.getElementById('silentModeToggle').checked;
-        statusData.autoTranslate = document.getElementById('autoTranslateToggle').checked;
-        statusData.offlineQueue = document.getElementById('offlineQueueToggle').checked;
-        
-        if (activeTabName === 'text') {
-            const text = document.getElementById('textStatusInput').value.trim();
-            if (!text) {
-                showNotification('Please enter text for your status', 'error');
-                return;
+    const postStatusBtn = document.getElementById('postStatusBtn');
+    if (postStatusBtn) {
+        postStatusBtn.addEventListener('click', () => {
+            const activeTab = document.querySelector('.create-status-tab.active');
+            if (!activeTab) return;
+            
+            const activeTabName = activeTab.dataset.tab;
+            let statusData = {
+                type: activeTabName,
+                userId: currentUser?.id,
+                user: currentUser,
+                createdAt: new Date().toISOString(),
+                views: 0,
+                reactions: 0
+            };
+            
+            // Get metadata
+            const selectedIntent = document.querySelector('.intent-option.selected')?.dataset.intent;
+            const selectedMood = document.querySelector('.mood-option.selected')?.dataset.mood;
+            const selectedCategory = document.querySelector('.category-option.selected')?.dataset.category;
+            const selectedPrivacy = document.querySelector('.privacy-option.selected')?.dataset.privacy;
+            const selectedDuration = document.querySelector('.duration-option.selected')?.dataset.duration;
+            const selectedActions = Array.from(document.querySelectorAll('.action-button-option.selected')).map(opt => opt.dataset.action);
+            
+            if (selectedIntent) statusData.intent = selectedIntent;
+            if (selectedMood) statusData.mood = selectedMood;
+            if (selectedCategory) statusData.category = selectedCategory;
+            if (selectedPrivacy) statusData.privacy = selectedPrivacy;
+            if (selectedDuration) statusData.duration = selectedDuration;
+            if (selectedActions.length > 0) statusData.actionButtons = selectedActions;
+            
+            // Advanced options
+            const sensitiveToggle = document.getElementById('sensitiveContentToggle');
+            const silentToggle = document.getElementById('silentModeToggle');
+            const translateToggle = document.getElementById('autoTranslateToggle');
+            const offlineToggle = document.getElementById('offlineQueueToggle');
+            
+            if (sensitiveToggle) statusData.isSensitive = sensitiveToggle.checked;
+            if (silentToggle) statusData.isSilent = silentToggle.checked;
+            if (translateToggle) statusData.autoTranslate = translateToggle.checked;
+            if (offlineToggle) statusData.offlineQueue = offlineToggle.checked;
+            
+            if (activeTabName === 'text') {
+                const textInput = document.getElementById('textStatusInput');
+                const text = textInput ? textInput.value.trim() : '';
+                if (!text) {
+                    showNotification('Please enter text for your status', 'error');
+                    return;
+                }
+                
+                statusData.text = text;
+                const selectedBg = document.querySelector('.background-option.selected');
+                if (selectedBg) {
+                    statusData.background = selectedBg.dataset.bg;
+                }
+                
+            } else if (activeTabName === 'media') {
+                // Check if media is uploaded
+                const mediaPreview = document.getElementById('mediaPreview');
+                if (!mediaPreview || mediaPreview.children.length === 0) {
+                    showNotification('Please upload at least one media file', 'error');
+                    return;
+                }
+                
+                const captionInput = document.getElementById('mediaCaptionInput');
+                const caption = captionInput ? captionInput.value.trim() : '';
+                statusData.caption = caption;
+                statusData.mediaType = 'image'; // Simplified - in real app would detect type
+                statusData.mediaUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='; // Placeholder
+                
+            } else if (activeTabName === 'poll') {
+                const questionInput = document.getElementById('pollQuestionInput');
+                const question = questionInput ? questionInput.value.trim() : '';
+                if (!question) {
+                    showNotification('Please enter a question for your poll', 'error');
+                    return;
+                }
+                
+                const options = Array.from(document.querySelectorAll('.poll-option-input')).map(input => ({
+                    id: `option_${input.dataset.index}`,
+                    text: input.value.trim(),
+                    votes: 0
+                })).filter(opt => opt.text);
+                
+                if (options.length < 2) {
+                    showNotification('Please enter at least 2 options', 'error');
+                    return;
+                }
+                
+                statusData.question = question;
+                statusData.options = options;
+                const durationSelect = document.getElementById('pollDurationSelect');
+                if (durationSelect) {
+                    statusData.duration = durationSelect.value;
+                }
             }
             
-            statusData.text = text;
-            statusData.background = document.querySelector('.background-option.selected')?.dataset.bg;
-            
-        } else if (activeTabName === 'media') {
-            // Check if media is uploaded
-            const mediaPreview = document.getElementById('mediaPreview');
-            if (!mediaPreview || mediaPreview.children.length === 0) {
-                showNotification('Please upload at least one media file', 'error');
-                return;
-            }
-            
-            const caption = document.getElementById('mediaCaptionInput').value.trim();
-            statusData.caption = caption;
-            statusData.mediaType = 'image'; // Simplified - in real app would detect type
-            statusData.mediaUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='; // Placeholder
-            
-        } else if (activeTabName === 'poll') {
-            const question = document.getElementById('pollQuestionInput').value.trim();
-            if (!question) {
-                showNotification('Please enter a question for your poll', 'error');
-                return;
-            }
-            
-            const options = Array.from(document.querySelectorAll('.poll-option-input')).map(input => ({
-                id: `option_${input.dataset.index}`,
-                text: input.value.trim(),
-                votes: 0
-            })).filter(opt => opt.text);
-            
-            if (options.length < 2) {
-                showNotification('Please enter at least 2 options', 'error');
-                return;
-            }
-            
-            statusData.question = question;
-            statusData.options = options;
-            statusData.duration = document.getElementById('pollDurationSelect').value;
-        }
-        
-        postStatus(statusData);
-        createStatusModal.classList.remove('active');
-    });
+            postStatus(statusData);
+            createStatusModal.classList.remove('active');
+        });
+    }
     
     // Save draft button
-    document.getElementById('saveDraftBtn').addEventListener('click', () => {
-        const activeTab = document.querySelector('.create-status-tab.active');
-        if (!activeTab) return;
-        
-        const activeTabName = activeTab.dataset.tab;
-        let draftData = {
-            type: activeTabName,
-            createdAt: new Date().toISOString()
-        };
-        
-        if (activeTabName === 'text') {
-            const text = document.getElementById('textStatusInput').value.trim();
-            if (!text) {
-                showNotification('Nothing to save', 'warning');
-                return;
-            }
-            draftData.text = text;
-            draftData.background = document.querySelector('.background-option.selected')?.dataset.bg;
-        } else if (activeTabName === 'media') {
-            const caption = document.getElementById('mediaCaptionInput').value.trim();
-            if (!caption) {
-                showNotification('Nothing to save', 'warning');
-                return;
-            }
-            draftData.caption = caption;
-        } else if (activeTabName === 'poll') {
-            const question = document.getElementById('pollQuestionInput').value.trim();
-            if (!question) {
-                showNotification('Nothing to save', 'warning');
-                return;
-            }
-            draftData.question = question;
+    const saveDraftBtn = document.getElementById('saveDraftBtn');
+    if (saveDraftBtn) {
+        saveDraftBtn.addEventListener('click', () => {
+            const activeTab = document.querySelector('.create-status-tab.active');
+            if (!activeTab) return;
             
-            const options = Array.from(document.querySelectorAll('.poll-option-input')).map(input => ({
-                id: `option_${input.dataset.index}`,
-                text: input.value.trim(),
-                votes: 0
-            })).filter(opt => opt.text);
+            const activeTabName = activeTab.dataset.tab;
+            let draftData = {
+                type: activeTabName,
+                createdAt: new Date().toISOString()
+            };
             
-            if (options.length < 2) {
-                showNotification('Please enter at least 2 options to save as draft', 'error');
-                return;
+            if (activeTabName === 'text') {
+                const textInput = document.getElementById('textStatusInput');
+                const text = textInput ? textInput.value.trim() : '';
+                if (!text) {
+                    showNotification('Nothing to save', 'warning');
+                    return;
+                }
+                draftData.text = text;
+                const selectedBg = document.querySelector('.background-option.selected');
+                if (selectedBg) {
+                    draftData.background = selectedBg.dataset.bg;
+                }
+            } else if (activeTabName === 'media') {
+                const captionInput = document.getElementById('mediaCaptionInput');
+                const caption = captionInput ? captionInput.value.trim() : '';
+                if (!caption) {
+                    showNotification('Nothing to save', 'warning');
+                    return;
+                }
+                draftData.caption = caption;
+            } else if (activeTabName === 'poll') {
+                const questionInput = document.getElementById('pollQuestionInput');
+                const question = questionInput ? questionInput.value.trim() : '';
+                if (!question) {
+                    showNotification('Nothing to save', 'warning');
+                    return;
+                }
+                draftData.question = question;
+                
+                const options = Array.from(document.querySelectorAll('.poll-option-input')).map(input => ({
+                    id: `option_${input.dataset.index}`,
+                    text: input.value.trim(),
+                    votes: 0
+                })).filter(opt => opt.text);
+                
+                if (options.length < 2) {
+                    showNotification('Please enter at least 2 options to save as draft', 'error');
+                    return;
+                }
+                
+                draftData.options = options;
             }
             
-            draftData.options = options;
-        }
-        
-        // Get metadata
-        const selectedIntent = document.querySelector('.intent-option.selected')?.dataset.intent;
-        const selectedMood = document.querySelector('.mood-option.selected')?.dataset.mood;
-        const selectedCategory = document.querySelector('.category-option.selected')?.dataset.category;
-        
-        if (selectedIntent) draftData.intent = selectedIntent;
-        if (selectedMood) draftData.mood = selectedMood;
-        if (selectedCategory) draftData.category = selectedCategory;
-        
-        saveDraft(draftData);
-        createStatusModal.classList.remove('active');
-    });
+            // Get metadata
+            const selectedIntent = document.querySelector('.intent-option.selected')?.dataset.intent;
+            const selectedMood = document.querySelector('.mood-option.selected')?.dataset.mood;
+            const selectedCategory = document.querySelector('.category-option.selected')?.dataset.category;
+            
+            if (selectedIntent) draftData.intent = selectedIntent;
+            if (selectedMood) draftData.mood = selectedMood;
+            if (selectedCategory) draftData.category = selectedCategory;
+            
+            saveDraft(draftData);
+            createStatusModal.classList.remove('active');
+        });
+    }
     
     // Schedule button
-    document.getElementById('scheduleStatusBtn').addEventListener('click', () => {
-        scheduleModal.classList.add('active');
-        
-        // Set default date/time (tomorrow at same time)
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const dateStr = tomorrow.toISOString().split('T')[0];
-        const timeStr = tomorrow.toTimeString().split(':').slice(0, 2).join(':');
-        
-        document.getElementById('scheduleDate').value = dateStr;
-        document.getElementById('scheduleTime').value = timeStr;
-    });
+    const scheduleStatusBtn = document.getElementById('scheduleStatusBtn');
+    if (scheduleStatusBtn) {
+        scheduleStatusBtn.addEventListener('click', () => {
+            scheduleModal.classList.add('active');
+            
+            // Set default date/time (tomorrow at same time)
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const dateStr = tomorrow.toISOString().split('T')[0];
+            const timeStr = tomorrow.toTimeString().split(':').slice(0, 2).join(':');
+            
+            const scheduleDate = document.getElementById('scheduleDate');
+            const scheduleTime = document.getElementById('scheduleTime');
+            
+            if (scheduleDate) scheduleDate.value = dateStr;
+            if (scheduleTime) scheduleTime.value = timeStr;
+        });
+    }
     
     // Close schedule modal
-    document.getElementById('closeScheduleModal').addEventListener('click', () => {
-        scheduleModal.classList.remove('active');
-    });
+    const closeScheduleModal = document.getElementById('closeScheduleModal');
+    if (closeScheduleModal) {
+        closeScheduleModal.addEventListener('click', () => {
+            scheduleModal.classList.remove('active');
+        });
+    }
     
     // Confirm schedule
-    document.getElementById('confirmScheduleBtn').addEventListener('click', () => {
-        const scheduleDate = document.getElementById('scheduleDate').value;
-        const scheduleTime = document.getElementById('scheduleTime').value;
-        
-        if (!scheduleDate || !scheduleTime) {
-            showNotification('Please select both date and time', 'error');
-            return;
-        }
-        
-        const scheduleDateTime = new Date(`${scheduleDate}T${scheduleTime}`);
-        if (scheduleDateTime <= new Date()) {
-            showNotification('Please select a future date and time', 'error');
-            return;
-        }
-        
-        // Get status data from create modal
-        const activeTab = document.querySelector('.create-status-tab.active');
-        if (!activeTab) {
-            showNotification('Please create a status first', 'error');
-            return;
-        }
-        
-        const activeTabName = activeTab.dataset.tab;
-        let statusData = {
-            type: activeTabName,
-            userId: currentUser?.id,
-            user: currentUser
-        };
-        
-        if (activeTabName === 'text') {
-            const text = document.getElementById('textStatusInput').value.trim();
-            if (!text) {
-                showNotification('Please enter text for your status', 'error');
+    const confirmScheduleBtn = document.getElementById('confirmScheduleBtn');
+    if (confirmScheduleBtn) {
+        confirmScheduleBtn.addEventListener('click', () => {
+            const scheduleDate = document.getElementById('scheduleDate');
+            const scheduleTime = document.getElementById('scheduleTime');
+            
+            if (!scheduleDate || !scheduleTime || !scheduleDate.value || !scheduleTime.value) {
+                showNotification('Please select both date and time', 'error');
                 return;
             }
-            statusData.text = text;
-        } else if (activeTabName === 'media') {
-            const caption = document.getElementById('mediaCaptionInput').value.trim();
-            statusData.caption = caption;
-        } else if (activeTabName === 'poll') {
-            const question = document.getElementById('pollQuestionInput').value.trim();
-            if (!question) {
-                showNotification('Please enter a question for your poll', 'error');
+            
+            const scheduleDateTime = new Date(`${scheduleDate.value}T${scheduleTime.value}`);
+            if (scheduleDateTime <= new Date()) {
+                showNotification('Please select a future date and time', 'error');
                 return;
             }
-            statusData.question = question;
-        }
-        
-        // Get repeat option
-        const selectedRepeat = document.querySelector('.repeat-option.selected')?.dataset.repeat || 'none';
-        
-        scheduleStatus(statusData, scheduleDateTime.toISOString());
-        showNotification('Status scheduled successfully', 'success');
-        scheduleModal.classList.remove('active');
-        createStatusModal.classList.remove('active');
-    });
+            
+            // Get status data from create modal
+            const activeTab = document.querySelector('.create-status-tab.active');
+            if (!activeTab) {
+                showNotification('Please create a status first', 'error');
+                return;
+            }
+            
+            const activeTabName = activeTab.dataset.tab;
+            let statusData = {
+                type: activeTabName,
+                userId: currentUser?.id,
+                user: currentUser
+            };
+            
+            if (activeTabName === 'text') {
+                const textInput = document.getElementById('textStatusInput');
+                const text = textInput ? textInput.value.trim() : '';
+                if (!text) {
+                    showNotification('Please enter text for your status', 'error');
+                    return;
+                }
+                statusData.text = text;
+            } else if (activeTabName === 'media') {
+                const captionInput = document.getElementById('mediaCaptionInput');
+                const caption = captionInput ? captionInput.value.trim() : '';
+                statusData.caption = caption;
+            } else if (activeTabName === 'poll') {
+                const questionInput = document.getElementById('pollQuestionInput');
+                const question = questionInput ? questionInput.value.trim() : '';
+                if (!question) {
+                    showNotification('Please enter a question for your poll', 'error');
+                    return;
+                }
+                statusData.question = question;
+            }
+            
+            // Get repeat option
+            const selectedRepeat = document.querySelector('.repeat-option.selected')?.dataset.repeat || 'none';
+            
+            scheduleStatus(statusData, scheduleDateTime.toISOString());
+            showNotification('Status scheduled successfully', 'success');
+            scheduleModal.classList.remove('active');
+            createStatusModal.classList.remove('active');
+        });
+    }
     
     // Category tabs
     const categoryTabs = {
@@ -3850,107 +3976,131 @@ function setupEventListeners() {
     });
     
     // Clear filters button
-    document.getElementById('clearFiltersBtn').addEventListener('click', clearAllFilters);
+    const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', clearAllFilters);
+    }
     
     // Viewer back button
-    document.getElementById('viewerBackBtn').addEventListener('click', () => {
-        statusViewerPanel.classList.remove('active');
-        stopAutoAdvance();
-    });
+    const viewerBackBtn = document.getElementById('viewerBackBtn');
+    if (viewerBackBtn) {
+        viewerBackBtn.addEventListener('click', () => {
+            statusViewerPanel.classList.remove('active');
+            stopAutoAdvance();
+        });
+    }
     
     // Pause/resume button
-    document.getElementById('pauseResumeBtn').addEventListener('click', toggleAutoAdvance);
+    const pauseResumeBtn = document.getElementById('pauseResumeBtn');
+    if (pauseResumeBtn) {
+        pauseResumeBtn.addEventListener('click', toggleAutoAdvance);
+    }
     
     // Mute user button
-    document.getElementById('muteUserBtn').addEventListener('click', () => {
-        if (currentViewerStatus) {
-            if (mutedUsers.has(currentViewerStatus.userId)) {
-                unmuteUser(currentViewerStatus.userId);
-            } else {
-                muteUser(currentViewerStatus.userId);
+    const muteUserBtn = document.getElementById('muteUserBtn');
+    if (muteUserBtn) {
+        muteUserBtn.addEventListener('click', () => {
+            if (currentViewerStatus) {
+                if (mutedUsers.has(currentViewerStatus.userId)) {
+                    unmuteUser(currentViewerStatus.userId);
+                } else {
+                    muteUser(currentViewerStatus.userId);
+                }
             }
-        }
-    });
+        });
+    }
     
     // Share status button
-    document.getElementById('shareStatusBtn').addEventListener('click', () => {
-        if (currentViewerStatus) {
-            // Use Web Share API if available
-            if (navigator.share) {
-                navigator.share({
-                    title: 'Status from ' + (currentViewerStatus.user?.displayName || 'User'),
-                    text: currentViewerStatus.text || currentViewerStatus.caption || currentViewerStatus.question || 'Check out this status',
-                    url: window.location.href
-                }).catch(error => {
-                    console.log('Error sharing:', error);
-                });
-            } else {
-                // Fallback to clipboard
-                navigator.clipboard.writeText(window.location.href).then(() => {
-                    showNotification('Link copied to clipboard', 'success');
-                }).catch(err => {
-                    console.error('Failed to copy: ', err);
-                });
+    const shareStatusBtn = document.getElementById('shareStatusBtn');
+    if (shareStatusBtn) {
+        shareStatusBtn.addEventListener('click', () => {
+            if (currentViewerStatus) {
+                // Use Web Share API if available
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Status from ' + (currentViewerStatus.user?.displayName || 'User'),
+                        text: currentViewerStatus.text || currentViewerStatus.caption || currentViewerStatus.question || 'Check out this status',
+                        url: window.location.href
+                    }).catch(error => {
+                        console.log('Error sharing:', error);
+                    });
+                } else {
+                    // Fallback to clipboard
+                    navigator.clipboard.writeText(window.location.href).then(() => {
+                        showNotification('Link copied to clipboard', 'success');
+                    }).catch(err => {
+                        console.error('Failed to copy: ', err);
+                    });
+                }
             }
-        }
-    });
+        });
+    }
     
     // Save status button
-    document.getElementById('saveStatusBtn').addEventListener('click', () => {
-        if (currentViewerStatus) {
-            const action = document.getElementById('saveStatusBtn').dataset.action;
-            
-            if (action === 'save') {
-                // Save to highlights
-                if (highlights.length === 0) {
-                    showNotification('Please create a highlight first', 'info');
-                    showHighlightsModal();
-                } else {
-                    // Add to first highlight for simplicity
-                    const highlight = highlights[0];
-                    if (!highlight.statusIds) {
-                        highlight.statusIds = [];
-                    }
-                    if (!highlight.statusIds.includes(currentViewerStatus.id)) {
-                        highlight.statusIds.push(currentViewerStatus.id);
-                        highlight.count = highlight.statusIds.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
-                        
-                        document.getElementById('saveStatusBtn').innerHTML = '<i class="fas fa-bookmark"></i>';
-                        document.getElementById('saveStatusBtn').title = 'Remove from Highlights';
-                        document.getElementById('saveStatusBtn').dataset.action = 'unsave';
-                        showNotification('Status saved to highlights', 'success');
-                    }
-                }
-            } else if (action === 'unsave') {
-                // Remove from highlights
-                highlights.forEach(highlight => {
-                    if (highlight.statusIds && highlight.statusIds.includes(currentViewerStatus.id)) {
-                        highlight.statusIds = highlight.statusIds.filter(id => id !== currentViewerStatus.id);
-                        highlight.count = highlight.statusIds.length;
-                    }
-                });
-                localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+    const saveStatusBtn = document.getElementById('saveStatusBtn');
+    if (saveStatusBtn) {
+        saveStatusBtn.addEventListener('click', () => {
+            if (currentViewerStatus) {
+                const action = saveStatusBtn.dataset.action;
                 
-                document.getElementById('saveStatusBtn').innerHTML = '<i class="far fa-bookmark"></i>';
-                document.getElementById('saveStatusBtn').title = 'Save to Highlights';
-                document.getElementById('saveStatusBtn').dataset.action = 'save';
-                showNotification('Status removed from highlights', 'success');
+                if (action === 'save') {
+                    // Save to highlights
+                    if (highlights.length === 0) {
+                        showNotification('Please create a highlight first', 'info');
+                        showHighlightsModal();
+                    } else {
+                        // Add to first highlight for simplicity
+                        const highlight = highlights[0];
+                        if (!highlight.statusIds) {
+                            highlight.statusIds = [];
+                        }
+                        if (!highlight.statusIds.includes(currentViewerStatus.id)) {
+                            highlight.statusIds.push(currentViewerStatus.id);
+                            highlight.count = highlight.statusIds.length;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+                            
+                            saveStatusBtn.innerHTML = '<i class="fas fa-bookmark"></i>';
+                            saveStatusBtn.title = 'Remove from Highlights';
+                            saveStatusBtn.dataset.action = 'unsave';
+                            showNotification('Status saved to highlights', 'success');
+                        }
+                    }
+                } else if (action === 'unsave') {
+                    // Remove from highlights
+                    highlights.forEach(highlight => {
+                        if (highlight.statusIds && highlight.statusIds.includes(currentViewerStatus.id)) {
+                            highlight.statusIds = highlight.statusIds.filter(id => id !== currentViewerStatus.id);
+                            highlight.count = highlight.statusIds.length;
+                        }
+                    });
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+                    
+                    saveStatusBtn.innerHTML = '<i class="far fa-bookmark"></i>';
+                    saveStatusBtn.title = 'Save to Highlights';
+                    saveStatusBtn.dataset.action = 'save';
+                    showNotification('Status removed from highlights', 'success');
+                }
             }
-        }
-    });
+        });
+    }
     
     // Report status button
-    document.getElementById('reportStatusBtn').addEventListener('click', () => {
-        if (currentViewerStatus) {
-            reportModal.classList.add('active');
-        }
-    });
+    const reportStatusBtn = document.getElementById('reportStatusBtn');
+    if (reportStatusBtn) {
+        reportStatusBtn.addEventListener('click', () => {
+            if (currentViewerStatus) {
+                reportModal.classList.add('active');
+            }
+        });
+    }
     
     // Close report modal
-    document.getElementById('closeReportModal').addEventListener('click', () => {
-        reportModal.classList.remove('active');
-    });
+    const closeReportModal = document.getElementById('closeReportModal');
+    if (closeReportModal) {
+        closeReportModal.addEventListener('click', () => {
+            reportModal.classList.remove('active');
+        });
+    }
     
     // Report details counter
     const reportDetails = document.getElementById('reportDetails');
@@ -3965,181 +4115,262 @@ function setupEventListeners() {
     }
     
     // Submit report
-    document.getElementById('submitReportBtn').addEventListener('click', () => {
-        const selectedReason = document.querySelector('#reportReasons .category-option.selected')?.dataset.reason;
-        const details = document.getElementById('reportDetails').value.trim();
-        const isAnonymous = document.getElementById('anonymousReportToggle').checked;
-        
-        if (!selectedReason) {
-            showNotification('Please select a reason', 'error');
-            return;
-        }
-        
-        if (details.length < 10) {
-            showNotification('Please provide more details (minimum 10 characters)', 'error');
-            return;
-        }
-        
-        if (currentViewerStatus) {
-            reportStatus(currentViewerStatus.id, selectedReason, details);
-            showNotification(`Report submitted ${isAnonymous ? 'anonymously' : ''}`, 'success');
-            reportModal.classList.remove('active');
-        }
-    });
+    const submitReportBtn = document.getElementById('submitReportBtn');
+    if (submitReportBtn) {
+        submitReportBtn.addEventListener('click', () => {
+            const selectedReason = document.querySelector('#reportReasons .category-option.selected')?.dataset.reason;
+            const reportDetails = document.getElementById('reportDetails');
+            const details = reportDetails ? reportDetails.value.trim() : '';
+            const anonymousToggle = document.getElementById('anonymousReportToggle');
+            const isAnonymous = anonymousToggle ? anonymousToggle.checked : false;
+            
+            if (!selectedReason) {
+                showNotification('Please select a reason', 'error');
+                return;
+            }
+            
+            if (details.length < 10) {
+                showNotification('Please provide more details (minimum 10 characters)', 'error');
+                return;
+            }
+            
+            if (currentViewerStatus) {
+                reportStatus(currentViewerStatus.id, selectedReason, details);
+                showNotification(`Report submitted ${isAnonymous ? 'anonymously' : ''}`, 'success');
+                reportModal.classList.remove('active');
+            }
+        });
+    }
     
     // Send reply
-    document.getElementById('sendReplyBtn').addEventListener('click', () => {
-        const replyInput = document.getElementById('replyInput');
-        if (!replyInput) return;
-        
-        const replyText = replyInput.value.trim();
-        if (!replyText) return;
-        
-        if (currentViewerStatus) {
-            // In a real implementation, this would send a reply to the status
-            showNotification('Reply sent: ' + replyText, 'success');
-            replyInput.value = '';
-        }
-    });
+    const sendReplyBtn = document.getElementById('sendReplyBtn');
+    if (sendReplyBtn) {
+        sendReplyBtn.addEventListener('click', () => {
+            const replyInput = document.getElementById('replyInput');
+            if (!replyInput) return;
+            
+            const replyText = replyInput.value.trim();
+            if (!replyText) return;
+            
+            if (currentViewerStatus) {
+                // In a real implementation, this would send a reply to the status
+                showNotification('Reply sent: ' + replyText, 'success');
+                replyInput.value = '';
+            }
+        });
+    }
     
     // Reply input enter key
     const replyInput = document.getElementById('replyInput');
     if (replyInput) {
         replyInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                document.getElementById('sendReplyBtn').click();
+                const sendReplyBtn = document.getElementById('sendReplyBtn');
+                if (sendReplyBtn) {
+                    sendReplyBtn.click();
+                }
             }
         });
     }
     
     // View highlights
-    document.getElementById('viewHighlightsBtn').addEventListener('click', showHighlightsModal);
-    document.getElementById('closeHighlightsModal').addEventListener('click', () => {
-        highlightsModal.classList.remove('active');
-    });
+    const viewHighlightsBtn = document.getElementById('viewHighlightsBtn');
+    if (viewHighlightsBtn) {
+        viewHighlightsBtn.addEventListener('click', showHighlightsModal);
+    }
+    
+    const closeHighlightsModal = document.getElementById('closeHighlightsModal');
+    if (closeHighlightsModal) {
+        closeHighlightsModal.addEventListener('click', () => {
+            highlightsModal.classList.remove('active');
+        });
+    }
     
     // Create highlight
-    document.getElementById('createHighlightBtn').addEventListener('click', () => {
-        showHighlightsEditor();
-    });
+    const createHighlightBtn = document.getElementById('createHighlightBtn');
+    if (createHighlightBtn) {
+        createHighlightBtn.addEventListener('click', () => {
+            showHighlightsEditor();
+        });
+    }
     
     // Close highlights editor
-    document.getElementById('closeHighlightsEditor').addEventListener('click', () => {
-        highlightsEditorModal.classList.remove('active');
-    });
+    const closeHighlightsEditor = document.getElementById('closeHighlightsEditor');
+    if (closeHighlightsEditor) {
+        closeHighlightsEditor.addEventListener('click', () => {
+            highlightsEditorModal.classList.remove('active');
+        });
+    }
     
     // Cancel highlight
-    document.getElementById('cancelHighlightBtn').addEventListener('click', () => {
-        highlightsEditorModal.classList.remove('active');
-    });
+    const cancelHighlightBtn = document.getElementById('cancelHighlightBtn');
+    if (cancelHighlightBtn) {
+        cancelHighlightBtn.addEventListener('click', () => {
+            highlightsEditorModal.classList.remove('active');
+        });
+    }
     
     // Save highlight
-    document.getElementById('saveHighlightBtn').addEventListener('click', saveHighlight);
+    const saveHighlightBtn = document.getElementById('saveHighlightBtn');
+    if (saveHighlightBtn) {
+        saveHighlightBtn.addEventListener('click', saveHighlight);
+    }
     
     // View timeline
-    document.getElementById('viewTimelineBtn').addEventListener('click', showMemoryTimelineModal);
-    document.getElementById('closeMemoryTimelineModal').addEventListener('click', () => {
-        memoryTimelineModal.classList.remove('active');
-    });
+    const viewTimelineBtn = document.getElementById('viewTimelineBtn');
+    if (viewTimelineBtn) {
+        viewTimelineBtn.addEventListener('click', showMemoryTimelineModal);
+    }
+    
+    const closeMemoryTimelineModal = document.getElementById('closeMemoryTimelineModal');
+    if (closeMemoryTimelineModal) {
+        closeMemoryTimelineModal.addEventListener('click', () => {
+            memoryTimelineModal.classList.remove('active');
+        });
+    }
     
     // Export timeline
-    document.getElementById('exportTimelineBtn').addEventListener('click', () => {
-        // Create a blob with the timeline data
-        const timelineData = {
-            user: currentUser?.displayName || 'User',
-            exportDate: new Date().toISOString(),
-            totalStatuses: myStatuses.length,
-            statuses: myStatuses.map(s => ({
-                date: s.createdAt,
-                type: s.type,
-                text: s.text || s.caption || s.question,
-                mood: s.mood,
-                intent: s.intent
-            }))
-        };
-        
-        const blob = new Blob([JSON.stringify(timelineData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `timeline-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        showNotification('Timeline exported successfully', 'success');
-    });
+    const exportTimelineBtn = document.getElementById('exportTimelineBtn');
+    if (exportTimelineBtn) {
+        exportTimelineBtn.addEventListener('click', () => {
+            // Create a blob with the timeline data
+            const timelineData = {
+                user: currentUser?.displayName || 'User',
+                exportDate: new Date().toISOString(),
+                totalStatuses: myStatuses.length,
+                statuses: myStatuses.map(s => ({
+                    date: s.createdAt,
+                    type: s.type,
+                    text: s.text || s.caption || s.question,
+                    mood: s.mood,
+                    intent: s.intent
+                }))
+            };
+            
+            const blob = new Blob([JSON.stringify(timelineData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `timeline-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showNotification('Timeline exported successfully', 'success');
+        });
+    }
     
     // View stats
-    document.getElementById('viewStatsBtn').addEventListener('click', showStatsModal);
-    document.getElementById('closeStatsModal').addEventListener('click', () => {
-        statsModal.classList.remove('active');
-    });
+    const viewStatsBtn = document.getElementById('viewStatsBtn');
+    if (viewStatsBtn) {
+        viewStatsBtn.addEventListener('click', showStatsModal);
+    }
+    
+    const closeStatsModal = document.getElementById('closeStatsModal');
+    if (closeStatsModal) {
+        closeStatsModal.addEventListener('click', () => {
+            statsModal.classList.remove('active');
+        });
+    }
     
     // Refresh stats
-    document.getElementById('refreshStatsBtn').addEventListener('click', () => {
-        loadStatsContent();
-        showNotification('Stats refreshed', 'success');
-    });
+    const refreshStatsBtn = document.getElementById('refreshStatsBtn');
+    if (refreshStatsBtn) {
+        refreshStatsBtn.addEventListener('click', () => {
+            loadStatsContent();
+            showNotification('Stats refreshed', 'success');
+        });
+    }
     
     // View drafts
-    document.getElementById('viewDraftsBtn').addEventListener('click', showDraftsModal);
-    document.getElementById('closeDraftsModal').addEventListener('click', () => {
-        draftsModal.classList.remove('active');
-    });
+    const viewDraftsBtn = document.getElementById('viewDraftsBtn');
+    if (viewDraftsBtn) {
+        viewDraftsBtn.addEventListener('click', showDraftsModal);
+    }
+    
+    const closeDraftsModal = document.getElementById('closeDraftsModal');
+    if (closeDraftsModal) {
+        closeDraftsModal.addEventListener('click', () => {
+            draftsModal.classList.remove('active');
+        });
+    }
     
     // Delete all drafts
-    document.getElementById('deleteAllDraftsBtn').addEventListener('click', deleteAllDrafts);
+    const deleteAllDraftsBtn = document.getElementById('deleteAllDraftsBtn');
+    if (deleteAllDraftsBtn) {
+        deleteAllDraftsBtn.addEventListener('click', deleteAllDrafts);
+    }
     
     // Load draft
-    document.getElementById('loadDraftBtn').addEventListener('click', () => {
-        if (selectedDraft) {
-            loadDraft(selectedDraft);
-        }
-    });
+    const loadDraftBtn = document.getElementById('loadDraftBtn');
+    if (loadDraftBtn) {
+        loadDraftBtn.addEventListener('click', () => {
+            if (selectedDraft) {
+                loadDraft(selectedDraft);
+            }
+        });
+    }
     
     // View scheduled
-    document.getElementById('viewScheduledBtn').addEventListener('click', () => {
-        scheduleModal.classList.add('active');
-    });
+    const viewScheduledBtn = document.getElementById('viewScheduledBtn');
+    if (viewScheduledBtn) {
+        viewScheduledBtn.addEventListener('click', () => {
+            scheduleModal.classList.add('active');
+        });
+    }
     
     // View my status
-    document.getElementById('viewMyStatusBtn').addEventListener('click', () => {
-        if (myStatuses.length > 0) {
-            showStatusViewer(myStatuses[0]);
-        } else {
-            showNotification('You have no statuses yet', 'info');
-        }
-    });
+    const viewMyStatusBtn = document.getElementById('viewMyStatusBtn');
+    if (viewMyStatusBtn) {
+        viewMyStatusBtn.addEventListener('click', () => {
+            if (myStatuses.length > 0) {
+                showStatusViewer(myStatuses[0]);
+            } else {
+                showNotification('You have no statuses yet', 'info');
+            }
+        });
+    }
     
     // Edit my status
-    document.getElementById('editMyStatusBtn').addEventListener('click', () => {
-        if (myStatuses.length > 0) {
-            // Load latest status for editing
-            const latestStatus = myStatuses[0];
-            createStatusModal.classList.add('active');
-            document.querySelector('.create-status-tab[data-tab="text"]').click();
-            
-            if (latestStatus.type === 'text' && latestStatus.text) {
-                document.getElementById('textStatusInput').value = latestStatus.text;
-                updateTextStatusCounter();
+    const editMyStatusBtn = document.getElementById('editMyStatusBtn');
+    if (editMyStatusBtn) {
+        editMyStatusBtn.addEventListener('click', () => {
+            if (myStatuses.length > 0) {
+                // Load latest status for editing
+                const latestStatus = myStatuses[0];
+                createStatusModal.classList.add('active');
+                const textTab = document.querySelector('.create-status-tab[data-tab="text"]');
+                if (textTab) {
+                    textTab.click();
+                }
+                
+                if (latestStatus.type === 'text' && latestStatus.text) {
+                    const textInput = document.getElementById('textStatusInput');
+                    if (textInput) {
+                        textInput.value = latestStatus.text;
+                        updateTextStatusCounter();
+                    }
+                }
+                
+                showNotification('Loaded latest status for editing', 'success');
+            } else {
+                createStatusModal.classList.add('active');
             }
-            
-            showNotification('Loaded latest status for editing', 'success');
-        } else {
-            createStatusModal.classList.add('active');
-        }
-    });
+        });
+    }
     
     // My status preview click
-    document.getElementById('myStatusPreview').addEventListener('click', () => {
-        if (myStatuses.length > 0) {
-            showStatusViewer(myStatuses[0]);
-        } else {
-            createStatusModal.classList.add('active');
-        }
-    });
+    const myStatusPreview = document.getElementById('myStatusPreview');
+    if (myStatusPreview) {
+        myStatusPreview.addEventListener('click', () => {
+            if (myStatuses.length > 0) {
+                showStatusViewer(myStatuses[0]);
+            } else {
+                createStatusModal.classList.add('active');
+            }
+        });
+    }
     
     // Notification time select
     const notificationTimeSelect = document.getElementById('notificationTimeSelect');
@@ -4152,32 +4383,41 @@ function setupEventListeners() {
     }
     
     // Error UI buttons
-    document.getElementById('retryConnectionBtn').addEventListener('click', async () => {
-        errorUI.classList.remove('active');
-        showNotification('Retrying connection...', 'info');
-        
-        try {
-            // Reload tokens and reinitialize
-            const success = await bootstrapIframe();
-            if (!success) {
+    const retryConnectionBtn = document.getElementById('retryConnectionBtn');
+    if (retryConnectionBtn) {
+        retryConnectionBtn.addEventListener('click', async () => {
+            errorUI.classList.remove('active');
+            showNotification('Retrying connection...', 'info');
+            
+            try {
+                // Reload tokens and reinitialize
+                const success = await bootstrapIframe();
+                if (!success) {
+                    errorUI.classList.add('active');
+                }
+            } catch (error) {
                 errorUI.classList.add('active');
             }
-        } catch (error) {
-            errorUI.classList.add('active');
-        }
-    });
+        });
+    }
     
-    document.getElementById('offlineModeBtn').addEventListener('click', () => {
-        errorUI.classList.remove('active');
-        isOfflineMode = true;
-        showNotification('Offline mode enabled', 'warning');
-        loadCachedDataInstantly();
-    });
+    const offlineModeBtn = document.getElementById('offlineModeBtn');
+    if (offlineModeBtn) {
+        offlineModeBtn.addEventListener('click', () => {
+            errorUI.classList.remove('active');
+            isOfflineMode = true;
+            showNotification('Offline mode enabled', 'warning');
+            loadCachedDataInstantly();
+        });
+    }
     
     // Close notification
-    document.getElementById('closeNotificationBtn').addEventListener('click', () => {
-        notification.classList.remove('active');
-    });
+    const closeNotificationBtn = document.getElementById('closeNotificationBtn');
+    if (closeNotificationBtn) {
+        closeNotificationBtn.addEventListener('click', () => {
+            notification.classList.remove('active');
+        });
+    }
     
     // Window resize
     window.addEventListener('resize', () => {

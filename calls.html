@@ -10,10 +10,12 @@
     
     <link rel="stylesheet" href="calls.css">
     
+    <!-- Script loading order: api.js first, then dependencies -->
+    <script src="/api.js" type="module"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
     
     <style>
-        
-        
         /* Three dots menu styles */
         .menu-dots-btn {
             position: fixed;
@@ -1324,10 +1326,6 @@
         <i class="fas fa-check-circle"></i>
         <span id="notificationMessage">Success!</span>
     </div>
-    
-    <!-- External Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
     
     <script>
         // Global state object

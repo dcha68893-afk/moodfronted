@@ -396,9 +396,9 @@ async function attemptTokenRefresh() {
     }
 }
 
-// Unified API call function
+// Unified API call function using api.js
 async function makeApiCall(method, endpoint, data = null) {
-    console.log(`Making API call: ${method} ${endpoint}`);
+    console.log(`Making API call via api.js: ${method} ${endpoint}`);
     
     // Ensure we have a token
     if (!accessToken) {
@@ -415,51 +415,15 @@ async function makeApiCall(method, endpoint, data = null) {
         accessToken = getTokenFromStorage();
     }
     
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-    };
-    
-    const options = {
-        method: method,
-        headers: headers,
-        credentials: 'include'
-    };
-    
-    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-        options.body = JSON.stringify(data);
+    // Use api.js for all API calls
+    if (typeof window.apiCall !== 'function') {
+        console.error('api.js not loaded');
+        throw new Error('API library not available');
     }
     
     try {
-        const response = await fetch(endpoint, options);
-        
-        // Handle 401 Unauthorized
-        if (response.status === 401) {
-            console.log('API returned 401, attempting token refresh');
-            await attemptTokenRefresh();
-            
-            // Retry with new token
-            accessToken = getTokenFromStorage();
-            headers.Authorization = `Bearer ${accessToken}`;
-            const retryResponse = await fetch(endpoint, options);
-            
-            if (!retryResponse.ok) {
-                throw { status: retryResponse.status, message: `API error after refresh: ${retryResponse.status}` };
-            }
-            
-            return await retryResponse.json();
-        }
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw { 
-                status: response.status, 
-                message: errorData.message || `API error: ${response.status}` 
-            };
-        }
-        
-        return await response.json();
-        
+        const response = await window.apiCall(method, endpoint, data);
+        return response;
     } catch (error) {
         console.error(`API call failed: ${method} ${endpoint}`, error);
         
@@ -936,9 +900,6 @@ async function loadSpotlightListingsFromBackend() {
         console.error('Error loading spotlight listings:', error);
     }
 }
-
-// The rest of the functions remain exactly the same as in the original file
-// Only the authentication and initialization logic has been updated
 
 function updatePremiumStatusUI() {
     if (userSubscription && userSubscription.status === 'active') {

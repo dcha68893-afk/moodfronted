@@ -27,6 +27,9 @@
     <!-- Wavesurfer.js for audio visualization -->
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6.6.0/dist/wavesurfer.min.js"></script>
     
+    <!-- Load api.js FIRST -->
+    <script type="module" src="../api.js"></script>
+    
     <link rel="stylesheet" href="messages.css">
 
     <style>
@@ -723,7 +726,7 @@
         </div>
     </div>
     
-    <script>
+    <script type="module">
         // =============================================
         // COMPLETE CHAT SYSTEM WITH DIRECT TOKEN ACCESS
         // =============================================
@@ -852,7 +855,7 @@
         
         /**
          * Bootstrap the iframe - independent authentication
-         * Reads tokens from localStorage, validates via /api/auth/me
+         * Reads tokens from localStorage, validates via api.js
          * Only proceeds after successful authentication
          */
         async function bootstrapIframe() {
@@ -873,19 +876,26 @@
                     return false;
                 }
                 
-                // Step 2: Validate token by calling /api/auth/me
+                // Step 2: Validate token by calling api.js
                 updateApiStatus('Validating user session...');
                 
-                // Use api.js if available, otherwise fallback to direct fetch
+                // Use api.js if available
+                if (!window.api) {
+                    console.error('api.js not loaded');
+                    showAuthError('System Error', 'API service not available. Please refresh.', false);
+                    return false;
+                }
+                
+                if (typeof window.api.getCurrentUser !== 'function') {
+                    console.error('api.getCurrentUser not available');
+                    showAuthError('System Error', 'API service not properly loaded. Please refresh.', false);
+                    return false;
+                }
+                
                 let userData;
                 try {
-                    // Try to use window.api if it exists (from api.js)
-                    if (window.api && typeof window.api.getCurrentUser === 'function') {
-                        userData = await window.api.getCurrentUser();
-                    } else {
-                        // Fallback: direct fetch to /api/auth/me
-                        userData = await validateTokenWithApi();
-                    }
+                    // Use api.js to validate user
+                    userData = await window.api.getCurrentUser();
                 } catch (apiError) {
                     console.error('API validation error:', apiError);
                     
@@ -898,7 +908,7 @@
                             return false;
                         }
                         // Retry validation with new token
-                        userData = await validateTokenWithApi();
+                        userData = await window.api.getCurrentUser();
                     } else {
                         showAuthError('Authentication Failed', 'Could not validate your session. Please login again.', true);
                         return false;
@@ -937,31 +947,7 @@
         }
         
         /**
-         * Validate token by calling /api/auth/me endpoint
-         */
-        async function validateTokenWithApi() {
-            const response = await fetch('/api/auth/me', {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (response.status === 401) {
-                // Token is invalid or expired
-                throw new Error('Token validation failed: 401 Unauthorized');
-            }
-            
-            if (!response.ok) {
-                throw new Error(`Token validation failed: ${response.status}`);
-            }
-            
-            return await response.json();
-        }
-        
-        /**
-         * Attempt to refresh the access token
+         * Attempt to refresh the access token using api.js
          */
         async function attemptTokenRefresh() {
             if (!refreshToken) {
@@ -971,31 +957,24 @@
             try {
                 updateApiStatus('Refreshing token...');
                 
-                const response = await fetch('/api/auth/refresh', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        refreshToken: refreshToken
-                    })
-                });
+                if (!window.api || typeof window.api.refreshToken !== 'function') {
+                    console.error('api.refreshToken not available');
+                    return false;
+                }
                 
-                if (response.ok) {
-                    const data = await response.json();
+                const data = await window.api.refreshToken(refreshToken);
+                
+                if (data && data.accessToken) {
+                    accessToken = data.accessToken;
+                    localStorage.setItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
                     
-                    if (data.accessToken) {
-                        accessToken = data.accessToken;
-                        localStorage.setItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
-                        
-                        if (data.refreshToken) {
-                            refreshToken = data.refreshToken;
-                            localStorage.setItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
-                        }
-                        
-                        console.log('Token refreshed successfully');
-                        return true;
+                    if (data.refreshToken) {
+                        refreshToken = data.refreshToken;
+                        localStorage.setItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
                     }
+                    
+                    console.log('Token refreshed successfully');
+                    return true;
                 }
                 
                 console.error('Token refresh failed');
@@ -1016,6 +995,7 @@
                 const possibleAccessTokenKeys = [
                     'accessToken',
                     'knecta_access_token',
+                    'moodchat_token',
                     'auth_token',
                     'token'
                 ];
@@ -1074,19 +1054,21 @@
             console.error('Auth error:', title, '-', message);
             
             // Update error overlay
-            authErrorTitle.textContent = title;
-            authErrorMessage.textContent = message;
+            if (authErrorTitle) authErrorTitle.textContent = title;
+            if (authErrorMessage) authErrorMessage.textContent = message;
             
             // Show/hide login button
-            if (showLoginButton) {
-                authErrorLoginBtn.style.display = 'block';
-            } else {
-                authErrorLoginBtn.style.display = 'none';
+            if (authErrorLoginBtn) {
+                if (showLoginButton) {
+                    authErrorLoginBtn.style.display = 'block';
+                } else {
+                    authErrorLoginBtn.style.display = 'none';
+                }
             }
             
             // Switch to error overlay
-            apiLoadingOverlay.classList.add('hidden');
-            authErrorOverlay.classList.remove('hidden');
+            if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
+            if (authErrorOverlay) authErrorOverlay.classList.remove('hidden');
         }
         
         /**
@@ -1129,49 +1111,34 @@
                     }
                 }
                 
-                const defaultHeaders = {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${accessToken}`
-                };
-                
-                const headers = { ...defaultHeaders, ...options.headers };
-                
-                const response = await fetch(endpoint, {
-                    ...options,
-                    headers
-                });
-                
-                // Handle 401 - token expired
-                if (response.status === 401) {
-                    console.log('Token expired, attempting refresh...');
-                    
-                    // Try to refresh token
-                    const refreshed = await attemptTokenRefresh();
-                    if (!refreshed) {
-                        // Refresh failed, redirect to login
-                        showAuthError('Session Expired', 'Your session has expired. Please login again.', true);
-                        throw new Error('Authentication failed');
-                    }
-                    
-                    // Retry with new token
-                    headers.Authorization = `Bearer ${accessToken}`;
-                    const retryResponse = await fetch(endpoint, {
-                        ...options,
-                        headers
-                    });
-                    
-                    if (!retryResponse.ok) {
-                        throw new Error(`API request failed: ${retryResponse.status}`);
-                    }
-                    
-                    return await retryResponse.json();
+                // Use api.js if available
+                if (!window.api) {
+                    throw new Error('API service not available');
                 }
                 
-                if (!response.ok) {
-                    throw new Error(`API request failed: ${response.status}`);
+                const method = options.method || 'GET';
+                const body = options.body ? JSON.parse(options.body) : undefined;
+                
+                let response;
+                
+                switch (method) {
+                    case 'GET':
+                        response = await window.api.get(endpoint);
+                        break;
+                    case 'POST':
+                        response = await window.api.post(endpoint, body);
+                        break;
+                    case 'PUT':
+                        response = await window.api.put(endpoint, body);
+                        break;
+                    case 'DELETE':
+                        response = await window.api.delete(endpoint);
+                        break;
+                    default:
+                        throw new Error(`Unsupported method: ${method}`);
                 }
                 
-                return await response.json();
+                return response;
                 
             } catch (error) {
                 console.error('API request error:', error);
@@ -1190,10 +1157,12 @@
             // Get current user
             getCurrentUser: async function() {
                 try {
-                    const data = await makeApiRequest('/api/user/me');
-                    
-                    if (data && data.user) {
-                        return data;
+                    if (window.api && typeof window.api.getCurrentUser === 'function') {
+                        const data = await window.api.getCurrentUser();
+                        
+                        if (data && data.user) {
+                            return data;
+                        }
                     }
                     
                     throw new Error('Failed to get user data');
@@ -1499,26 +1468,32 @@
         async function openChatPanel(userId, username, userAvatar = '') {
             try {
                 // Show loading state
-                chatPanel.classList.remove('hidden');
-                sidebar.classList.remove('active');
-                messagesContainer.innerHTML = `
-                    <div class="loading-state">
-                        <div class="loading-spinner"></div>
-                        <div>Loading chat with ${username}...</div>
-                    </div>
-                `;
+                if (chatPanel) chatPanel.classList.remove('hidden');
+                if (sidebar) sidebar.classList.remove('active');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `
+                        <div class="loading-state">
+                            <div class="loading-spinner"></div>
+                            <div>Loading chat with ${username}...</div>
+                        </div>
+                    `;
+                }
                 
                 // Update chat header with user info
-                document.getElementById('chatFriendName').textContent = username;
-                document.getElementById('chatStatusText').textContent = 'Loading...';
+                const chatFriendName = document.getElementById('chatFriendName');
+                const chatStatusText = document.getElementById('chatStatusText');
+                if (chatFriendName) chatFriendName.textContent = username;
+                if (chatStatusText) chatStatusText.textContent = 'Loading...';
                 
                 const avatarEl = document.getElementById('chatFriendAvatar');
-                if (userAvatar) {
-                    avatarEl.style.backgroundImage = `url('${userAvatar}')`;
-                    avatarEl.innerHTML = '';
-                } else {
-                    const initials = username.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
-                    avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
+                if (avatarEl) {
+                    if (userAvatar) {
+                        avatarEl.style.backgroundImage = `url('${userAvatar}')`;
+                        avatarEl.innerHTML = '';
+                    } else {
+                        const initials = username.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                        avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
+                    }
                 }
                 
                 // Create temporary friend object
@@ -1569,24 +1544,27 @@
                 }
                 
                 // Set user status
-                document.getElementById('chatStatusText').textContent = 'Online';
-                document.getElementById('chatStatusIndicator').className = 'chat-status online';
+                if (chatStatusText) chatStatusText.textContent = 'Online';
+                const statusIndicator = document.getElementById('chatStatusIndicator');
+                if (statusIndicator) statusIndicator.className = 'chat-status online';
                 
             } catch (error) {
                 console.error('Error opening chat panel:', error);
                 showNotification('Error loading chat', 'error');
                 
                 // Show error state
-                messagesContainer.innerHTML = `
-                    <div class="empty-chat">
-                        <i class="fas fa-exclamation-triangle empty-chat-icon"></i>
-                        <div class="empty-chat-title">Error loading chat</div>
-                        <div class="empty-chat-message">Could not load conversation with ${username}</div>
-                        <button onclick="backToChatList()" style="margin-top: 20px; padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                            Back to Chats
-                        </button>
-                    </div>
-                `;
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `
+                        <div class="empty-chat">
+                            <i class="fas fa-exclamation-triangle empty-chat-icon"></i>
+                            <div class="empty-chat-title">Error loading chat</div>
+                            <div class="empty-chat-message">Could not load conversation with ${username}</div>
+                            <button onclick="backToChatList()" style="margin-top: 20px; padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                Back to Chats
+                            </button>
+                        </div>
+                    `;
+                }
             }
         }
         
@@ -1658,7 +1636,7 @@
             
             // Hide loading overlay completely
             setTimeout(() => {
-                apiLoadingOverlay.classList.add('hidden');
+                if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
             }, 1000);
         }
         
@@ -1667,7 +1645,9 @@
             console.log('DOM loaded, starting app initialization...');
             
             // Setup auth error login button
-            authErrorLoginBtn.addEventListener('click', redirectToLogin);
+            if (authErrorLoginBtn) {
+                authErrorLoginBtn.addEventListener('click', redirectToLogin);
+            }
             
             // Initialize app
             initializeApp();
@@ -1675,6 +1655,8 @@
         
         // Update network status
         function updateNetworkStatus() {
+            if (!offlineOverlay) return;
+            
             if (!navigator.onLine) {
                 offlineOverlay.classList.add('active');
             } else {
@@ -1806,7 +1788,8 @@
                     draftBadge = document.createElement('div');
                     draftBadge.className = 'draft-badge';
                     draftBadge.textContent = 'Draft';
-                    chatItem.querySelector('.chat-item-preview').appendChild(draftBadge);
+                    const preview = chatItem.querySelector('.chat-item-preview');
+                    if (preview) preview.appendChild(draftBadge);
                 } else if (!hasDraft && draftBadge) {
                     draftBadge.remove();
                 }
@@ -1814,6 +1797,8 @@
         }
         
         function showAttachmentPreview(attachment) {
+            if (!attachmentPreview) return;
+            
             if (!attachment) {
                 attachmentPreview.style.display = 'none';
                 attachmentPreview.innerHTML = '';
@@ -1866,8 +1851,10 @@
         
         function removeAttachment() {
             currentAttachment = null;
-            attachmentPreview.style.display = 'none';
-            attachmentPreview.innerHTML = '';
+            if (attachmentPreview) {
+                attachmentPreview.style.display = 'none';
+                attachmentPreview.innerHTML = '';
+            }
             saveMessageDraft();
         }
         
@@ -1972,9 +1959,9 @@
                 }
                 
                 // Hide contacts sidebar and show main chat
-                contactsSidebar.classList.add('hidden');
-                sidebar.classList.remove('active');
-                chatPanel.classList.remove('hidden');
+                if (contactsSidebar) contactsSidebar.classList.add('hidden');
+                if (sidebar) sidebar.classList.remove('active');
+                if (chatPanel) chatPanel.classList.remove('hidden');
                 
             } catch (error) {
                 console.error('Error starting chat with contact:', error);
@@ -2005,6 +1992,8 @@
         }
         
         function renderChatsList() {
+            if (!chatsList) return;
+            
             chatsList.innerHTML = '';
             
             // Filter chats based on current category
@@ -2116,11 +2105,17 @@
             const blockedCount = chats.filter(chat => chat.blocked).length;
             const notesCount = chats.filter(chat => chat.type === 'note').length;
             
-            document.getElementById('allBadge').textContent = allCount;
-            document.getElementById('unreadBadge').textContent = unreadCount;
-            document.getElementById('archivedBadge').textContent = archivedCount;
-            document.getElementById('blockedBadge').textContent = blockedCount;
-            document.getElementById('notesBadge').textContent = notesCount;
+            const allBadge = document.getElementById('allBadge');
+            const unreadBadge = document.getElementById('unreadBadge');
+            const archivedBadge = document.getElementById('archivedBadge');
+            const blockedBadge = document.getElementById('blockedBadge');
+            const notesBadge = document.getElementById('notesBadge');
+            
+            if (allBadge) allBadge.textContent = allCount;
+            if (unreadBadge) unreadBadge.textContent = unreadCount;
+            if (archivedBadge) archivedBadge.textContent = archivedCount;
+            if (blockedBadge) blockedBadge.textContent = blockedCount;
+            if (notesBadge) notesBadge.textContent = notesCount;
         }
         
         async function openChat(chat) {
@@ -2139,21 +2134,25 @@
                 };
                 
                 // Update UI
-                document.getElementById('chatFriendName').textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
-                document.getElementById('chatStatusText').textContent = chat.type === 'note' ? 'Private notes' : 'Online';
+                const chatFriendName = document.getElementById('chatFriendName');
+                const chatStatusText = document.getElementById('chatStatusText');
+                if (chatFriendName) chatFriendName.textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
+                if (chatStatusText) chatStatusText.textContent = chat.type === 'note' ? 'Private notes' : 'Online';
                 
                 const avatarEl = document.getElementById('chatFriendAvatar');
-                if (chat.friendAvatar && chat.type !== 'note') {
-                    avatarEl.style.backgroundImage = `url('${chat.friendAvatar}')`;
-                    avatarEl.innerHTML = '';
-                } else {
-                    const initials = chat.type === 'note' ? 'NT' : chat.friendName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
-                    avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
+                if (avatarEl) {
+                    if (chat.friendAvatar && chat.type !== 'note') {
+                        avatarEl.style.backgroundImage = `url('${chat.friendAvatar}')`;
+                        avatarEl.innerHTML = '';
+                    } else {
+                        const initials = chat.type === 'note' ? 'NT' : chat.friendName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                        avatarEl.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
+                    }
                 }
                 
                 // Switch to chat panel
-                sidebar.classList.remove('active');
-                chatPanel.classList.remove('hidden');
+                if (sidebar) sidebar.classList.remove('active');
+                if (chatPanel) chatPanel.classList.remove('hidden');
                 
                 // Load messages
                 await loadMessages();
@@ -2170,17 +2169,17 @@
                 loadMessageDraft();
                 
                 // Set read-only mode if enabled
-                messageInput.disabled = readOnlyMode || chat.readOnly;
-                sendButton.disabled = readOnlyMode || chat.readOnly;
+                if (messageInput) messageInput.disabled = readOnlyMode || chat.readOnly;
+                if (sendButton) sendButton.disabled = readOnlyMode || chat.readOnly;
                 
                 // Focus input if not read-only
-                if (!readOnlyMode && !chat.readOnly) {
+                if (!readOnlyMode && !chat.readOnly && messageInput) {
                     messageInput.focus();
                 }
                 
                 // Hide search if active
-                chatSearchBar.classList.remove('active');
-                searchResultsDiv.classList.remove('active');
+                if (chatSearchBar) chatSearchBar.classList.remove('active');
+                if (searchResultsDiv) searchResultsDiv.classList.remove('active');
                 
             } catch (error) {
                 console.error('Error opening chat:', error);
@@ -2259,6 +2258,8 @@
         
         async function loadMessages() {
             try {
+                if (!messagesContainer) return;
+                
                 messagesContainer.innerHTML = `
                     <div class="loading-state">
                         <div class="loading-spinner"></div>
@@ -2283,7 +2284,9 @@
                 
                 // Scroll to bottom
                 setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    if (messagesContainer) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
                 }, 100);
                 
             } catch (error) {
@@ -2295,18 +2298,22 @@
                     messages = JSON.parse(cachedMessages);
                     renderMessages();
                 } else if (messages.length === 0) {
-                    messagesContainer.innerHTML = `
-                        <div class="empty-chat">
-                            <i class="fas fa-comments empty-chat-icon"></i>
-                            <div class="empty-chat-title">No messages yet</div>
-                            <div class="empty-chat-message">Say hello to start the conversation</div>
-                        </div>
-                    `;
+                    if (messagesContainer) {
+                        messagesContainer.innerHTML = `
+                            <div class="empty-chat">
+                                <i class="fas fa-comments empty-chat-icon"></i>
+                                <div class="empty-chat-title">No messages yet</div>
+                                <div class="empty-chat-message">Say hello to start the conversation</div>
+                            </div>
+                        `;
+                    }
                 }
             }
         }
         
         function renderMessages() {
+            if (!messagesContainer) return;
+            
             if (messages.length === 0) {
                 messagesContainer.innerHTML = `
                     <div class="empty-chat">
@@ -2753,8 +2760,11 @@
                                 const duration = wavesurfer.getDuration();
                                 const minutes = Math.floor(duration / 60);
                                 const seconds = Math.floor(duration % 60);
-                                document.getElementById(`duration_${message.id}`).textContent = 
-                                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                                const durationEl = document.getElementById(`duration_${message.id}`);
+                                if (durationEl) {
+                                    durationEl.textContent = 
+                                        `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                                }
                             });
                             
                             audioPlayers.set(message.id, wavesurfer);
@@ -2839,11 +2849,15 @@
                 messages.push(messageData);
                 
                 renderMessages();
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
                 
                 // Clear input and reset state
-                messageInput.value = '';
-                messageInput.style.height = 'auto';
+                if (messageInput) {
+                    messageInput.value = '';
+                    messageInput.style.height = 'auto';
+                }
                 replyToMessage = null;
                 removeAttachment();
                 
@@ -2977,6 +2991,8 @@
         }
         
         function updateScheduleBadge() {
+            if (!scheduleBadge) return;
+            
             const hasScheduled = scheduledMessages.some(msg => msg.chatId === currentChat?.id);
             scheduleBadge.style.display = hasScheduled ? 'flex' : 'none';
         }
@@ -3071,10 +3087,11 @@
             showNotification(`Sent to ${successCount} of ${chatIds.length} chats`, 'success');
             
             // Clear after sending
-            document.getElementById('multiSendInput').value = '';
+            const multiSendInput = document.getElementById('multiSendInput');
+            if (multiSendInput) multiSendInput.value = '';
             multiSendSelectedChats.clear();
             updateSelectedCount();
-            multiSendPanel.classList.remove('active');
+            if (multiSendPanel) multiSendPanel.classList.remove('active');
             
             // Refresh chat list
             renderChatsList();
@@ -3186,6 +3203,8 @@
             selectedMessage = message;
             
             const actionsMenu = document.getElementById('messageActions');
+            if (!actionsMenu) return;
+            
             actionsMenu.style.left = x + 'px';
             actionsMenu.style.top = y + 'px';
             actionsMenu.classList.add('active');
@@ -3201,44 +3220,54 @@
             
             // Check if message is starred
             const starredMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.STARRED_MESSAGES) || '{}');
-            if (starredMessages[message.id]) {
-                starBtn.innerHTML = '<i class="fas fa-star"></i> Unstar';
-                starBtn.classList.add('starred');
-            } else {
-                starBtn.innerHTML = '<i class="far fa-star"></i> Star';
-                starBtn.classList.remove('starred');
+            if (starBtn) {
+                if (starredMessages[message.id]) {
+                    starBtn.innerHTML = '<i class="fas fa-star"></i> Unstar';
+                    starBtn.classList.add('starred');
+                } else {
+                    starBtn.innerHTML = '<i class="far fa-star"></i> Star';
+                    starBtn.classList.remove('starred');
+                }
             }
             
             // Only show edit button for user's own text messages that aren't deleted
-            if (message.senderId === currentUser.uid && (message.type === 'text' || message.type === 'note') && !message.deleted) {
-                editBtn.style.display = 'flex';
-            } else {
-                editBtn.style.display = 'none';
+            if (editBtn) {
+                if (message.senderId === currentUser.uid && (message.type === 'text' || message.type === 'note') && !message.deleted) {
+                    editBtn.style.display = 'flex';
+                } else {
+                    editBtn.style.display = 'none';
+                }
             }
             
             // Update delete button text based on message ownership
-            if (message.senderId === currentUser.uid) {
-                deleteBtn.innerHTML = '<i class="fas fa-trash"></i> Delete for everyone';
-            } else {
-                deleteBtn.innerHTML = '<i class="fas fa-trash"></i> Delete for me';
+            if (deleteBtn) {
+                if (message.senderId === currentUser.uid) {
+                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i> Delete for everyone';
+                } else {
+                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i> Delete for me';
+                }
             }
             
             // Only show report button for other people's messages
-            if (message.senderId !== currentUser.uid && message.type !== 'note') {
-                reportBtn.style.display = 'flex';
-            } else {
-                reportBtn.style.display = 'none';
+            if (reportBtn) {
+                if (message.senderId !== currentUser.uid && message.type !== 'note') {
+                    reportBtn.style.display = 'flex';
+                } else {
+                    reportBtn.style.display = 'none';
+                }
             }
             
             // Show reaction buttons for silent reactions
-            if (silentReactionsEnabled && !message.deleted) {
-                reactLikeBtn.style.display = 'flex';
-                reactLoveBtn.style.display = 'flex';
-                reactLaughBtn.style.display = 'flex';
-            } else {
-                reactLikeBtn.style.display = 'none';
-                reactLoveBtn.style.display = 'none';
-                reactLaughBtn.style.display = 'none';
+            if (reactLikeBtn && reactLoveBtn && reactLaughBtn) {
+                if (silentReactionsEnabled && !message.deleted) {
+                    reactLikeBtn.style.display = 'flex';
+                    reactLoveBtn.style.display = 'flex';
+                    reactLaughBtn.style.display = 'flex';
+                } else {
+                    reactLikeBtn.style.display = 'none';
+                    reactLoveBtn.style.display = 'none';
+                    reactLaughBtn.style.display = 'none';
+                }
             }
             
             // Close menu when clicking elsewhere
@@ -3249,7 +3278,9 @@
         
         function closeMessageActions() {
             const actionsMenu = document.getElementById('messageActions');
-            actionsMenu.classList.remove('active');
+            if (actionsMenu) {
+                actionsMenu.classList.remove('active');
+            }
             document.removeEventListener('click', closeMessageActions);
         }
         
@@ -3259,7 +3290,7 @@
             switch (action) {
                 case 'reply':
                     replyToMessage = selectedMessage;
-                    messageInput.focus();
+                    if (messageInput) messageInput.focus();
                     showNotification('Replying to message', 'info');
                     break;
                     
@@ -3267,7 +3298,7 @@
                     if (selectedMessage.senderId === currentUser.uid && (selectedMessage.type === 'text' || selectedMessage.type === 'note')) {
                         editingMessageId = selectedMessage.id;
                         renderMessages();
-                        messageInput.focus();
+                        if (messageInput) messageInput.focus();
                     }
                     break;
                     
@@ -3368,8 +3399,11 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function showReportModal(message) {
+            if (!reportModal) return;
+            
             reportModal.classList.add('active');
-            document.getElementById('reportText').value = '';
+            const reportText = document.getElementById('reportText');
+            if (reportText) reportText.value = '';
             
             localStorage.setItem('knecta_reported_message', JSON.stringify({
                 messageId: message.id,
@@ -3382,8 +3416,11 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function submitReport() {
-            const reportText = document.getElementById('reportText').value.trim();
-            if (!reportText) {
+            const reportText = document.getElementById('reportText');
+            if (!reportText) return;
+            
+            const reportTextValue = reportText.value.trim();
+            if (!reportTextValue) {
                 showNotification('Please describe the issue', 'warning');
                 return;
             }
@@ -3391,7 +3428,7 @@ Message ID: ${message.id.substring(0, 8)}...
             try {
                 const reportData = {
                     message: JSON.parse(localStorage.getItem('knecta_reported_message')),
-                    reason: reportText,
+                    reason: reportTextValue,
                     reporterId: currentUser.uid,
                     timestamp: new Date()
                 };
@@ -3404,7 +3441,7 @@ Message ID: ${message.id.substring(0, 8)}...
                 // Send to API
                 api.submitReport(reportData);
                 
-                reportModal.classList.remove('active');
+                if (reportModal) reportModal.classList.remove('active');
                 showNotification('Report submitted. Thank you for helping keep our community safe.', 'success');
                 
             } catch (error) {
@@ -3472,13 +3509,17 @@ Message ID: ${message.id.substring(0, 8)}...
             emojiPicker = document.querySelector('emoji-picker');
             if (emojiPicker) {
                 emojiPicker.addEventListener('emoji-click', event => {
-                    messageInput.value += event.detail.unicode;
-                    messageInput.focus();
+                    if (messageInput) {
+                        messageInput.value += event.detail.unicode;
+                        messageInput.focus();
+                    }
                 });
             }
         }
         
         function toggleEmojiPicker() {
+            if (!emojiPickerContainer) return;
+            
             emojiPickerContainer.classList.toggle('active');
             
             if (emojiPickerContainer.classList.contains('active')) {
@@ -3491,6 +3532,8 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function closeEmojiPickerOnClickOutside(event) {
+            if (!emojiPickerContainer) return;
+            
             if (!emojiPickerContainer.contains(event.target) && !event.target.closest('#emojiBtn')) {
                 emojiPickerContainer.classList.remove('active');
                 document.removeEventListener('click', closeEmojiPickerOnClickOutside);
@@ -3498,24 +3541,27 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function toggleFormattingToolbar() {
+            if (!formattingToolbar) return;
+            
             formattingToolbar.classList.toggle('active');
             
             // Update active formatting buttons
-            const text = messageInput.value.substring(messageInput.selectionStart, messageInput.selectionEnd);
+            const text = messageInput ? messageInput.value.substring(messageInput.selectionStart, messageInput.selectionEnd) : '';
             document.querySelectorAll('.format-btn').forEach(btn => {
+                if (!text) {
+                    btn.classList.remove('active');
+                    return;
+                }
+                
                 const tag = btn.dataset.tag;
-                if (text) {
-                    if (tag === 'b' && text.startsWith('**') && text.endsWith('**')) {
-                        btn.classList.add('active');
-                    } else if (tag === 'i' && text.startsWith('*') && text.endsWith('*')) {
-                        btn.classList.add('active');
-                    } else if (tag === 'code' && text.startsWith('`') && text.endsWith('`')) {
-                        btn.classList.add('active');
-                    } else if (tag === 'pre' && text.startsWith('```') && text.endsWith('```')) {
-                        btn.classList.add('active');
-                    } else {
-                        btn.classList.remove('active');
-                    }
+                if (tag === 'b' && text.startsWith('**') && text.endsWith('**')) {
+                    btn.classList.add('active');
+                } else if (tag === 'i' && text.startsWith('*') && text.endsWith('*')) {
+                    btn.classList.add('active');
+                } else if (tag === 'code' && text.startsWith('`') && text.endsWith('`')) {
+                    btn.classList.add('active');
+                } else if (tag === 'pre' && text.startsWith('```') && text.endsWith('```')) {
+                    btn.classList.add('active');
                 } else {
                     btn.classList.remove('active');
                 }
@@ -3531,6 +3577,8 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function closeFormattingToolbarOnClickOutside(event) {
+            if (!formattingToolbar) return;
+            
             if (!formattingToolbar.contains(event.target) && !event.target.closest('#formatBtn')) {
                 formattingToolbar.classList.remove('active');
                 document.removeEventListener('click', closeFormattingToolbarOnClickOutside);
@@ -3538,6 +3586,8 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function toggleAttachmentOptions() {
+            if (!attachmentOptions) return;
+            
             attachmentOptions.classList.toggle('active');
             
             if (attachmentOptions.classList.contains('active')) {
@@ -3550,6 +3600,8 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function closeAttachmentOptionsOnClickOutside(event) {
+            if (!attachmentOptions) return;
+            
             if (!attachmentOptions.contains(event.target) && !event.target.closest('#attachBtn')) {
                 attachmentOptions.classList.remove('active');
                 document.removeEventListener('click', closeAttachmentOptionsOnClickOutside);
@@ -3557,6 +3609,8 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function applyFormatting(tag) {
+            if (!messageInput) return;
+            
             const input = messageInput;
             const start = input.selectionStart;
             const end = input.selectionEnd;
@@ -3588,11 +3642,15 @@ Message ID: ${message.id.substring(0, 8)}...
         
         // Setup scroll detection for jump button
         function setupScrollDetection() {
-            messagesContainer.addEventListener('scroll', updateJumpButtonVisibility);
+            if (messagesContainer) {
+                messagesContainer.addEventListener('scroll', updateJumpButtonVisibility);
+            }
         }
         
         // Update jump button visibility
         function updateJumpButtonVisibility() {
+            if (!jumpToLatestBtn || !messagesContainer) return;
+            
             const container = messagesContainer;
             const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
             
@@ -3605,12 +3663,18 @@ Message ID: ${message.id.substring(0, 8)}...
         
         // Jump to latest messages
         function jumpToLatest() {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            jumpToLatestBtn.classList.remove('visible');
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+            if (jumpToLatestBtn) {
+                jumpToLatestBtn.classList.remove('visible');
+            }
         }
         
         // COMPLETE In-chat search
         function searchInChat(query) {
+            if (!searchResultsDiv) return;
+            
             if (!query.trim()) {
                 searchResultsDiv.classList.remove('active');
                 searchResults = [];
@@ -3686,8 +3750,8 @@ Message ID: ${message.id.substring(0, 8)}...
             if (index >= 0 && index < searchResults.length) {
                 const messageId = searchResults[index].id;
                 scrollToMessage(messageId);
-                searchResultsDiv.classList.remove('active');
-                inChatSearch.value = '';
+                if (searchResultsDiv) searchResultsDiv.classList.remove('active');
+                if (inChatSearch) inChatSearch.value = '';
                 removeSearchHighlights();
             }
         }
@@ -3702,8 +3766,8 @@ Message ID: ${message.id.substring(0, 8)}...
                     messageElement.style.backgroundColor = '';
                 }, 2000);
             }
-            searchResultsDiv.classList.remove('active');
-            chatSearchBar.classList.remove('active');
+            if (searchResultsDiv) searchResultsDiv.classList.remove('active');
+            if (chatSearchBar) chatSearchBar.classList.remove('active');
         }
         
         async function startRecording() {
@@ -3725,7 +3789,7 @@ Message ID: ${message.id.substring(0, 8)}...
                 isRecording = true;
                 
                 // Show recording indicator
-                recordingIndicator.style.display = 'flex';
+                if (recordingIndicator) recordingIndicator.style.display = 'flex';
                 recordingStartTime = Date.now();
                 
                 // Start timer
@@ -3733,16 +3797,17 @@ Message ID: ${message.id.substring(0, 8)}...
                     const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
                     const minutes = Math.floor(elapsed / 60);
                     const seconds = elapsed % 60;
-                    recordingTimerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    if (recordingTimerEl) recordingTimerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
                     
                     // Show cancel overlay after 1 second
-                    if (elapsed >= 1 && !recordingCancelOverlay.classList.contains('active')) {
+                    if (elapsed >= 1 && recordingCancelOverlay && !recordingCancelOverlay.classList.contains('active')) {
                         recordingCancelOverlay.classList.add('active');
                     }
                 }, 1000);
                 
                 // Update UI
-                document.getElementById('attachBtn').classList.add('recording');
+                const attachBtn = document.getElementById('attachBtn');
+                if (attachBtn) attachBtn.classList.add('recording');
                 
             } catch (error) {
                 console.error('Error starting recording:', error);
@@ -3754,15 +3819,16 @@ Message ID: ${message.id.substring(0, 8)}...
             if (!mediaRecorder || !isRecording) return;
             
             clearInterval(recordingTimer);
-            recordingCancelOverlay.classList.remove('active');
+            if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
             
             mediaRecorder.stopRecording(async () => {
                 const blob = mediaRecorder.getBlob();
                 const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
                 
                 // Hide recording indicator
-                recordingIndicator.style.display = 'none';
-                document.getElementById('attachBtn').classList.remove('recording');
+                if (recordingIndicator) recordingIndicator.style.display = 'none';
+                const attachBtn = document.getElementById('attachBtn');
+                if (attachBtn) attachBtn.classList.remove('recording');
                 
                 if (duration < 1) {
                     showNotification('Recording too short', 'warning');
@@ -3797,12 +3863,13 @@ Message ID: ${message.id.substring(0, 8)}...
             if (!mediaRecorder || !isRecording) return;
             
             clearInterval(recordingTimer);
-            recordingCancelOverlay.classList.remove('active');
+            if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
             mediaRecorder.stopRecording();
             
             // Hide recording indicator
-            recordingIndicator.style.display = 'none';
-            document.getElementById('attachBtn').classList.remove('recording');
+            if (recordingIndicator) recordingIndicator.style.display = 'none';
+            const attachBtn = document.getElementById('attachBtn');
+            if (attachBtn) attachBtn.classList.remove('recording');
             
             // Stop all tracks
             mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
@@ -3838,19 +3905,19 @@ Message ID: ${message.id.substring(0, 8)}...
                     break;
             }
             
-            attachmentOptions.classList.remove('active');
+            if (attachmentOptions) attachmentOptions.classList.remove('active');
         }
         
         // Create note to self
         function createNote() {
-            const noteContent = messageInput.value.trim();
+            const noteContent = messageInput ? messageInput.value.trim() : '';
             if (!noteContent && !currentAttachment) {
                 showNotification('Enter note content first', 'warning');
                 return;
             }
             
             sendMessageWithOptions(noteContent || 'Note', { isNote: true });
-            messageInput.value = '';
+            if (messageInput) messageInput.value = '';
         }
         
         function selectImage() {
@@ -4096,7 +4163,7 @@ Message ID: ${message.id.substring(0, 8)}...
         
         function openThread(messageId) {
             currentThread = messageId;
-            threadPanel.classList.add('active');
+            if (threadPanel) threadPanel.classList.add('active');
             
             // Load thread messages
             loadThreadMessages(messageId);
@@ -4105,7 +4172,8 @@ Message ID: ${message.id.substring(0, 8)}...
         async function loadThreadMessages(messageId) {
             try {
                 // TODO: Implement thread message loading
-                document.getElementById('threadCount').textContent = '0 replies';
+                const threadCount = document.getElementById('threadCount');
+                if (threadCount) threadCount.textContent = '0 replies';
                 
             } catch (error) {
                 console.error('Error loading thread messages:', error);
@@ -4114,6 +4182,7 @@ Message ID: ${message.id.substring(0, 8)}...
         
         function showChatInfo(chat) {
             const chatInfoBody = document.getElementById('chatInfoBody');
+            if (!chatInfoBody) return;
             
             chatInfoBody.innerHTML = `
                 <div class="chat-info-section">
@@ -4170,35 +4239,48 @@ Message ID: ${message.id.substring(0, 8)}...
             `;
             
             // Update modal title
-            document.getElementById('chatInfoName').textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
+            const chatInfoName = document.getElementById('chatInfoName');
+            if (chatInfoName) chatInfoName.textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
             
             // Show modal
-            chatInfoModal.classList.add('active');
+            if (chatInfoModal) chatInfoModal.classList.add('active');
             
             // Add event listeners
             if (chat.type !== 'note') {
-                document.getElementById('chatInfoBlockBtn').addEventListener('click', () => {
-                    toggleBlockUser(chat.friendId, !chat.blocked);
-                    chatInfoModal.classList.remove('active');
+                const blockBtn = document.getElementById('chatInfoBlockBtn');
+                if (blockBtn) {
+                    blockBtn.addEventListener('click', () => {
+                        toggleBlockUser(chat.friendId, !chat.blocked);
+                        if (chatInfoModal) chatInfoModal.classList.remove('active');
+                    });
+                }
+            }
+            
+            const archiveBtn = document.getElementById('chatInfoArchiveBtn');
+            if (archiveBtn) {
+                archiveBtn.addEventListener('click', () => {
+                    toggleArchiveChat(chat.id, !chat.archived);
+                    if (chatInfoModal) chatInfoModal.classList.remove('active');
                 });
             }
             
-            document.getElementById('chatInfoArchiveBtn').addEventListener('click', () => {
-                toggleArchiveChat(chat.id, !chat.archived);
-                chatInfoModal.classList.remove('active');
-            });
+            const readOnlyBtn = document.getElementById('chatInfoReadOnlyBtn');
+            if (readOnlyBtn) {
+                readOnlyBtn.addEventListener('click', () => {
+                    toggleReadOnly(chat.id, !chat.readOnly);
+                    if (chatInfoModal) chatInfoModal.classList.remove('active');
+                });
+            }
             
-            document.getElementById('chatInfoReadOnlyBtn').addEventListener('click', () => {
-                toggleReadOnly(chat.id, !chat.readOnly);
-                chatInfoModal.classList.remove('active');
-            });
-            
-            document.getElementById('chatInfoClearBtn').addEventListener('click', () => {
-                if (confirm('Clear all messages in this chat?')) {
-                    clearChatHistory(chat.id);
-                    chatInfoModal.classList.remove('active');
-                }
-            });
+            const clearBtn = document.getElementById('chatInfoClearBtn');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    if (confirm('Clear all messages in this chat?')) {
+                        clearChatHistory(chat.id);
+                        if (chatInfoModal) chatInfoModal.classList.remove('active');
+                    }
+                });
+            }
         }
         
         function loadChatThemes() {
@@ -4234,7 +4316,7 @@ Message ID: ${message.id.substring(0, 8)}...
                 try {
                     if (!isSyncing && navigator.onLine) {
                         isSyncing = true;
-                        syncingIndicator.classList.add('active');
+                        if (syncingIndicator) syncingIndicator.classList.add('active');
                         
                         // Sync chats
                         try {
@@ -4278,12 +4360,12 @@ Message ID: ${message.id.substring(0, 8)}...
                         await checkOfflineQueue();
                         
                         isSyncing = false;
-                        syncingIndicator.classList.remove('active');
+                        if (syncingIndicator) syncingIndicator.classList.remove('active');
                     }
                 } catch (error) {
                     console.error('Background sync error:', error);
                     isSyncing = false;
-                    syncingIndicator.classList.remove('active');
+                    if (syncingIndicator) syncingIndicator.classList.remove('active');
                 }
             }, 30000);
             
@@ -4310,27 +4392,31 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function showNotification(message, type = 'success') {
+            if (!notification) return;
+            
             const notificationText = document.getElementById('notificationText');
-            notificationText.textContent = message;
+            if (notificationText) notificationText.textContent = message;
             
             notification.className = 'notification';
             notification.classList.add(type, 'active');
             
             // Set icon based on type
             const icon = notification.querySelector('i');
-            switch (type) {
-                case 'success':
-                    icon.className = 'fas fa-check-circle';
-                    break;
-                case 'error':
-                    icon.className = 'fas fa-exclamation-circle';
-                    break;
-                case 'warning':
-                    icon.className = 'fas fa-exclamation-triangle';
-                    break;
-                case 'info':
-                    icon.className = 'fas fa-info-circle';
-                    break;
+            if (icon) {
+                switch (type) {
+                    case 'success':
+                        icon.className = 'fas fa-check-circle';
+                        break;
+                    case 'error':
+                        icon.className = 'fas fa-exclamation-circle';
+                        break;
+                    case 'warning':
+                        icon.className = 'fas fa-exclamation-triangle';
+                        break;
+                    case 'info':
+                        icon.className = 'fas fa-info-circle';
+                        break;
+                }
             }
             
             setTimeout(() => {
@@ -4350,14 +4436,14 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function showContactsSidebar() {
-            sidebar.classList.add('hidden');
-            contactsSidebar.classList.remove('hidden');
+            if (sidebar) sidebar.classList.add('hidden');
+            if (contactsSidebar) contactsSidebar.classList.remove('hidden');
         }
         
         function backToChatList() {
-            sidebar.classList.add('active');
-            chatPanel.classList.add('hidden');
-            contactsSidebar.classList.add('hidden');
+            if (sidebar) sidebar.classList.add('active');
+            if (chatPanel) chatPanel.classList.add('hidden');
+            if (contactsSidebar) contactsSidebar.classList.add('hidden');
             
             // Save draft before leaving
             saveMessageDraft();
@@ -4367,12 +4453,14 @@ Message ID: ${message.id.substring(0, 8)}...
             currentFriend = null;
             
             // Update UI
-            document.getElementById('chatFriendName').textContent = 'Select a chat';
-            document.getElementById('chatStatusText').textContent = 'Tap on a chat to start messaging';
+            const chatFriendName = document.getElementById('chatFriendName');
+            const chatStatusText = document.getElementById('chatStatusText');
+            if (chatFriendName) chatFriendName.textContent = 'Select a chat';
+            if (chatStatusText) chatStatusText.textContent = 'Tap on a chat to start messaging';
             
             // Hide search if active
-            chatSearchBar.classList.remove('active');
-            searchResultsDiv.classList.remove('active');
+            if (chatSearchBar) chatSearchBar.classList.remove('active');
+            if (searchResultsDiv) searchResultsDiv.classList.remove('active');
         }
         
         // Toggle read-only mode for chat
@@ -4385,8 +4473,8 @@ Message ID: ${message.id.substring(0, 8)}...
                     
                     // Update UI
                     if (currentChat && currentChat.id === chatId) {
-                        messageInput.disabled = readOnly;
-                        sendButton.disabled = readOnly;
+                        if (messageInput) messageInput.disabled = readOnly;
+                        if (sendButton) sendButton.disabled = readOnly;
                         if (readOnly) {
                             showNotification('Chat is now read-only', 'info');
                         } else {
@@ -4576,7 +4664,7 @@ Message ID: ${message.id.substring(0, 8)}...
             });
             
             // Show attachment preview if exists
-            if (currentAttachment) {
+            if (currentAttachment && multiSendAttachmentPreview) {
                 multiSendAttachmentPreview.style.display = 'flex';
                 multiSendAttachmentPreview.innerHTML = `
                     <img src="${currentAttachment.data}" alt="Preview" style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px;">
@@ -4597,6 +4685,8 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function updateSelectedCount() {
+            if (!selectedCount) return;
+            
             selectedCount.textContent = `${multiSendSelectedChats.size} selected`;
         }
         
@@ -4681,9 +4771,11 @@ Message ID: ${message.id.substring(0, 8)}...
         
         // Global functions for event handlers
         window.viewMedia = function(url, fileName) {
-            document.getElementById('mediaViewerImage').src = url;
-            document.getElementById('mediaFileName').textContent = fileName;
-            mediaViewer.classList.add('active');
+            const mediaViewerImage = document.getElementById('mediaViewerImage');
+            const mediaFileName = document.getElementById('mediaFileName');
+            if (mediaViewerImage) mediaViewerImage.src = url;
+            if (mediaFileName) mediaFileName.textContent = fileName;
+            if (mediaViewer) mediaViewer.classList.add('active');
         };
         
         window.playVideo = function(url) {
@@ -4694,11 +4786,14 @@ Message ID: ${message.id.substring(0, 8)}...
             video.style.maxHeight = '100%';
             
             const mediaContent = document.querySelector('.media-content');
-            mediaContent.innerHTML = '';
-            mediaContent.appendChild(video);
+            if (mediaContent) {
+                mediaContent.innerHTML = '';
+                mediaContent.appendChild(video);
+            }
             
-            document.getElementById('mediaFileName').textContent = 'Video';
-            mediaViewer.classList.add('active');
+            const mediaFileName = document.getElementById('mediaFileName');
+            if (mediaFileName) mediaFileName.textContent = 'Video';
+            if (mediaViewer) mediaViewer.classList.add('active');
         };
         
         window.playAudio = function(messageId, url, duration) {
@@ -4709,7 +4804,8 @@ Message ID: ${message.id.substring(0, 8)}...
                     const otherWavesurfer = audioPlayers.get(activeAudioElement);
                     if (otherWavesurfer) {
                         otherWavesurfer.pause();
-                        document.getElementById(`progress_${activeAudioElement}`).style.width = '0%';
+                        const progressEl = document.getElementById(`progress_${activeAudioElement}`);
+                        if (progressEl) progressEl.style.width = '0%';
                     }
                 }
                 
@@ -4722,11 +4818,13 @@ Message ID: ${message.id.substring(0, 8)}...
                     // Update progress
                     wavesurfer.on('audioprocess', () => {
                         const progress = (wavesurfer.getCurrentTime() / duration) * 100;
-                        document.getElementById(`progress_${messageId}`).style.width = progress + '%';
+                        const progressEl = document.getElementById(`progress_${messageId}`);
+                        if (progressEl) progressEl.style.width = progress + '%';
                     });
                     
                     wavesurfer.on('finish', () => {
-                        document.getElementById(`progress_${messageId}`).style.width = '0%';
+                        const progressEl = document.getElementById(`progress_${messageId}`);
+                        if (progressEl) progressEl.style.width = '0%';
                         activeAudioElement = null;
                     });
                 }
@@ -4756,114 +4854,124 @@ Message ID: ${message.id.substring(0, 8)}...
         
         function setupEventListeners() {
             // Message input
-            messageInput.addEventListener('input', function() {
-                // Auto-resize textarea
-                this.style.height = 'auto';
-                this.style.height = (this.scrollHeight) + 'px';
+            if (messageInput) {
+                messageInput.addEventListener('input', function() {
+                    // Auto-resize textarea
+                    this.style.height = 'auto';
+                    this.style.height = (this.scrollHeight) + 'px';
+                    
+                    // Auto-save draft (debounced)
+                    clearTimeout(window.draftSaveTimeout);
+                    window.draftSaveTimeout = setTimeout(saveMessageDraft, 1000);
+                    
+                    // Typing indicator
+                    if (!isTyping) {
+                        isTyping = true;
+                        // Send typing indicator to API
+                        if (currentChat) api.sendTypingIndicator(currentChat.id, true);
+                    }
+                    
+                    clearTimeout(typingTimeout);
+                    typingTimeout = setTimeout(() => {
+                        isTyping = false;
+                        if (currentChat) api.sendTypingIndicator(currentChat.id, false);
+                    }, 1000);
+                });
                 
-                // Auto-save draft (debounced)
-                clearTimeout(window.draftSaveTimeout);
-                window.draftSaveTimeout = setTimeout(saveMessageDraft, 1000);
-                
-                // Typing indicator
-                if (!isTyping) {
-                    isTyping = true;
-                    // Send typing indicator to API
-                    api.sendTypingIndicator(currentChat.id, true);
-                }
-                
-                clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => {
-                    isTyping = false;
-                    api.sendTypingIndicator(currentChat.id, false);
-                }, 1000);
-            });
-            
-            messageInput.addEventListener('keydown', function(e) {
-                // Shift+Enter for new line, Enter to send
-                if (e.key === 'Enter') {
-                    if (e.shiftKey) {
-                        // Allow new line
-                        return;
-                    } else {
-                        e.preventDefault();
-                        if (this.value.trim() || currentAttachment) {
-                            sendMessage(this.value.trim());
+                messageInput.addEventListener('keydown', function(e) {
+                    // Shift+Enter for new line, Enter to send
+                    if (e.key === 'Enter') {
+                        if (e.shiftKey) {
+                            // Allow new line
+                            return;
+                        } else {
+                            e.preventDefault();
+                            if (this.value.trim() || currentAttachment) {
+                                sendMessage(this.value.trim());
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
             
             // Send button
-            sendButton.addEventListener('click', () => {
-                if (messageInput.value.trim() || currentAttachment) {
-                    sendMessage(messageInput.value.trim());
-                }
-            });
-            
-            // Send button with long press for options
-            let sendPressTimer;
-            sendButton.addEventListener('mousedown', () => {
-                sendPressTimer = setTimeout(() => {
-                    sendOptions.classList.add('active');
-                    sendOptionsOverlay.classList.add('active');
-                }, 500);
-            });
-            
-            sendButton.addEventListener('mouseup', () => {
-                clearTimeout(sendPressTimer);
-            });
-            
-            sendButton.addEventListener('mouseleave', () => {
-                clearTimeout(sendPressTimer);
-            });
+            if (sendButton) {
+                sendButton.addEventListener('click', () => {
+                    if (messageInput && (messageInput.value.trim() || currentAttachment)) {
+                        sendMessage(messageInput.value.trim());
+                    }
+                });
+                
+                // Send button with long press for options
+                let sendPressTimer;
+                sendButton.addEventListener('mousedown', () => {
+                    sendPressTimer = setTimeout(() => {
+                        if (sendOptions) sendOptions.classList.add('active');
+                        if (sendOptionsOverlay) sendOptionsOverlay.classList.add('active');
+                    }, 500);
+                });
+                
+                sendButton.addEventListener('mouseup', () => {
+                    clearTimeout(sendPressTimer);
+                });
+                
+                sendButton.addEventListener('mouseleave', () => {
+                    clearTimeout(sendPressTimer);
+                });
+            }
             
             // Send options overlay
-            sendOptionsOverlay.addEventListener('click', () => {
-                sendOptions.classList.remove('active');
-                sendOptionsOverlay.classList.remove('active');
-            });
-            
-            // Send options
-            document.querySelectorAll('#sendOptions .action-item').forEach(item => {
-                item.addEventListener('click', (e) => {
-                    const action = e.currentTarget.dataset.action;
-                    const content = messageInput.value.trim();
-                    
-                    if (!content && !currentAttachment) {
-                        showNotification('Message cannot be empty', 'warning');
-                        return;
-                    }
-                    
-                    switch (action) {
-                        case 'send-normal':
-                            sendMessage(content);
-                            break;
-                        case 'send-view-once':
-                            sendMessageWithOptions(content, { viewOnce: true });
-                            break;
-                        case 'send-expire-1h':
-                            sendMessageWithOptions(content, { expiresAt: Date.now() + 3600000 });
-                            break;
-                        case 'send-expire-1d':
-                            sendMessageWithOptions(content, { expiresAt: Date.now() + 86400000 });
-                            break;
-                        case 'send-note':
-                            sendMessageWithOptions(content, { isNote: true });
-                            break;
-                    }
-                    
-                    messageInput.value = '';
-                    sendOptions.classList.remove('active');
+            if (sendOptionsOverlay) {
+                sendOptionsOverlay.addEventListener('click', () => {
+                    if (sendOptions) sendOptions.classList.remove('active');
                     sendOptionsOverlay.classList.remove('active');
                 });
-            });
+            }
+            
+            // Send options
+            if (sendOptions) {
+                document.querySelectorAll('#sendOptions .action-item').forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        const action = e.currentTarget.dataset.action;
+                        const content = messageInput ? messageInput.value.trim() : '';
+                        
+                        if (!content && !currentAttachment) {
+                            showNotification('Message cannot be empty', 'warning');
+                            return;
+                        }
+                        
+                        switch (action) {
+                            case 'send-normal':
+                                sendMessage(content);
+                                break;
+                            case 'send-view-once':
+                                sendMessageWithOptions(content, { viewOnce: true });
+                                break;
+                            case 'send-expire-1h':
+                                sendMessageWithOptions(content, { expiresAt: Date.now() + 3600000 });
+                                break;
+                            case 'send-expire-1d':
+                                sendMessageWithOptions(content, { expiresAt: Date.now() + 86400000 });
+                                break;
+                            case 'send-note':
+                                sendMessageWithOptions(content, { isNote: true });
+                                break;
+                        }
+                        
+                        if (messageInput) messageInput.value = '';
+                        sendOptions.classList.remove('active');
+                        if (sendOptionsOverlay) sendOptionsOverlay.classList.remove('active');
+                    });
+                });
+            }
             
             // Emoji button
-            document.getElementById('emojiBtn').addEventListener('click', toggleEmojiPicker);
+            const emojiBtn = document.getElementById('emojiBtn');
+            if (emojiBtn) emojiBtn.addEventListener('click', toggleEmojiPicker);
             
             // Format button
-            document.getElementById('formatBtn').addEventListener('click', toggleFormattingToolbar);
+            const formatBtn = document.getElementById('formatBtn');
+            if (formatBtn) formatBtn.addEventListener('click', toggleFormattingToolbar);
             
             // Formatting buttons
             document.querySelectorAll('.format-btn').forEach(btn => {
@@ -4874,142 +4982,171 @@ Message ID: ${message.id.substring(0, 8)}...
             });
             
             // Schedule button
-            document.getElementById('scheduleBtn').addEventListener('click', () => {
-                const content = messageInput.value.trim();
-                if (!content && !currentAttachment) {
-                    showNotification('Enter message first', 'warning');
-                    return;
-                }
-                
-                document.getElementById('scheduleMessage').value = content;
-                
-                // Show attachment preview in schedule modal
-                if (currentAttachment) {
-                    scheduleAttachmentPreview.style.display = 'flex';
-                    scheduleAttachmentPreview.innerHTML = `
-                        <img src="${currentAttachment.data}" alt="Preview" style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px;">
-                        <div class="attachment-preview-info">
-                            <div style="font-weight: 500; font-size: 12px;">${currentAttachment.type}</div>
-                            <div style="font-size: 10px; color: #65676b;">${currentAttachment.name || 'Attachment'}</div>
-                        </div>
-                    `;
-                } else {
-                    scheduleAttachmentPreview.style.display = 'none';
-                }
-                
-                scheduleModal.classList.add('active');
-            });
-            
-            // Cancel schedule button
-            document.getElementById('cancelScheduleBtn').addEventListener('click', () => {
-                scheduleModal.classList.remove('active');
-            });
-            
-            // Confirm schedule button
-            document.getElementById('confirmScheduleBtn').addEventListener('click', () => {
-                const content = document.getElementById('scheduleMessage').value.trim();
-                const date = document.getElementById('scheduleDate').value;
-                const time = document.getElementById('scheduleTime').value;
-                const sendNow = document.getElementById('sendNow').checked;
-                
-                if (!content && !currentAttachment) {
-                    showNotification('Message cannot be empty', 'warning');
-                    return;
-                }
-                
-                if (sendNow || (!date && !time)) {
-                    sendMessage(content);
-                } else {
-                    const scheduleTime = new Date(`${date}T${time}`).getTime();
-                    if (scheduleTime <= Date.now()) {
-                        showNotification('Schedule time must be in the future', 'warning');
+            const scheduleBtn = document.getElementById('scheduleBtn');
+            if (scheduleBtn) {
+                scheduleBtn.addEventListener('click', () => {
+                    const content = messageInput ? messageInput.value.trim() : '';
+                    if (!content && !currentAttachment) {
+                        showNotification('Enter message first', 'warning');
                         return;
                     }
                     
-                    scheduleMessage(content, scheduleTime, {
-                        attachment: currentAttachment
-                    });
-                }
-                
-                scheduleModal.classList.remove('active');
-                messageInput.value = '';
-            });
+                    const scheduleMessageInput = document.getElementById('scheduleMessage');
+                    if (scheduleMessageInput) scheduleMessageInput.value = content;
+                    
+                    // Show attachment preview in schedule modal
+                    if (currentAttachment && scheduleAttachmentPreview) {
+                        scheduleAttachmentPreview.style.display = 'flex';
+                        scheduleAttachmentPreview.innerHTML = `
+                            <img src="${currentAttachment.data}" alt="Preview" style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px;">
+                            <div class="attachment-preview-info">
+                                <div style="font-weight: 500; font-size: 12px;">${currentAttachment.type}</div>
+                                <div style="font-size: 10px; color: #65676b;">${currentAttachment.name || 'Attachment'}</div>
+                            </div>
+                        `;
+                    } else if (scheduleAttachmentPreview) {
+                        scheduleAttachmentPreview.style.display = 'none';
+                    }
+                    
+                    if (scheduleModal) scheduleModal.classList.add('active');
+                });
+            }
+            
+            // Cancel schedule button
+            const cancelScheduleBtn = document.getElementById('cancelScheduleBtn');
+            if (cancelScheduleBtn) {
+                cancelScheduleBtn.addEventListener('click', () => {
+                    if (scheduleModal) scheduleModal.classList.remove('active');
+                });
+            }
+            
+            // Confirm schedule button
+            const confirmScheduleBtn = document.getElementById('confirmScheduleBtn');
+            if (confirmScheduleBtn) {
+                confirmScheduleBtn.addEventListener('click', () => {
+                    const scheduleMessageInput = document.getElementById('scheduleMessage');
+                    const scheduleDate = document.getElementById('scheduleDate');
+                    const scheduleTime = document.getElementById('scheduleTime');
+                    const sendNow = document.getElementById('sendNow');
+                    
+                    if (!scheduleMessageInput || !scheduleDate || !scheduleTime || !sendNow) return;
+                    
+                    const content = scheduleMessageInput.value.trim();
+                    const date = scheduleDate.value;
+                    const time = scheduleTime.value;
+                    const sendNowChecked = sendNow.checked;
+                    
+                    if (!content && !currentAttachment) {
+                        showNotification('Message cannot be empty', 'warning');
+                        return;
+                    }
+                    
+                    if (sendNowChecked || (!date && !time)) {
+                        sendMessage(content);
+                    } else {
+                        const scheduleTimeValue = new Date(`${date}T${time}`).getTime();
+                        if (scheduleTimeValue <= Date.now()) {
+                            showNotification('Schedule time must be in the future', 'warning');
+                            return;
+                        }
+                        
+                        scheduleMessage(content, scheduleTimeValue, {
+                            attachment: currentAttachment
+                        });
+                    }
+                    
+                    if (scheduleModal) scheduleModal.classList.remove('active');
+                    if (messageInput) messageInput.value = '';
+                });
+            }
             
             // Close schedule modal
-            document.getElementById('closeScheduleBtn').addEventListener('click', () => {
-                scheduleModal.classList.remove('active');
-            });
+            const closeScheduleBtn = document.getElementById('closeScheduleBtn');
+            if (closeScheduleBtn) {
+                closeScheduleBtn.addEventListener('click', () => {
+                    if (scheduleModal) scheduleModal.classList.remove('active');
+                });
+            }
             
             // Attach button (with press-and-hold for voice)
             const attachBtn = document.getElementById('attachBtn');
             let pressTimer;
             
-            attachBtn.addEventListener('mousedown', () => {
-                pressTimer = setTimeout(() => {
-                    startRecording();
-                }, 500);
-            });
-            
-            attachBtn.addEventListener('mouseup', () => {
-                clearTimeout(pressTimer);
-                if (isRecording) {
-                    stopRecording();
-                } else {
-                    toggleAttachmentOptions();
-                }
-            });
-            
-            attachBtn.addEventListener('mouseleave', () => {
-                clearTimeout(pressTimer);
-                if (isRecording) {
-                    stopRecording();
-                }
-            });
+            if (attachBtn) {
+                attachBtn.addEventListener('mousedown', () => {
+                    pressTimer = setTimeout(() => {
+                        startRecording();
+                    }, 500);
+                });
+                
+                attachBtn.addEventListener('mouseup', () => {
+                    clearTimeout(pressTimer);
+                    if (isRecording) {
+                        stopRecording();
+                    } else {
+                        toggleAttachmentOptions();
+                    }
+                });
+                
+                attachBtn.addEventListener('mouseleave', () => {
+                    clearTimeout(pressTimer);
+                    if (isRecording) {
+                        stopRecording();
+                    }
+                });
+            }
             
             // Recording cancel overlay
-            document.getElementById('cancelRecordingOverlayBtn').addEventListener('click', cancelRecording);
+            const cancelRecordingOverlayBtn = document.getElementById('cancelRecordingOverlayBtn');
+            if (cancelRecordingOverlayBtn) {
+                cancelRecordingOverlayBtn.addEventListener('click', cancelRecording);
+            }
             
             // Drag to cancel recording
-            recordingCancelOverlay.addEventListener('touchstart', (e) => {
-                dragStartY = e.touches[0].clientY;
-            });
-            
-            recordingCancelOverlay.addEventListener('touchmove', (e) => {
-                if (!isRecording) return;
+            if (recordingCancelOverlay) {
+                recordingCancelOverlay.addEventListener('touchstart', (e) => {
+                    dragStartY = e.touches[0].clientY;
+                });
                 
-                const currentY = e.touches[0].clientY;
-                const diff = dragStartY - currentY;
+                recordingCancelOverlay.addEventListener('touchmove', (e) => {
+                    if (!isRecording) return;
+                    
+                    const currentY = e.touches[0].clientY;
+                    const diff = dragStartY - currentY;
+                    
+                    if (diff > 100) {
+                        isDraggingToCancel = true;
+                        recordingCancelOverlay.style.backgroundColor = 'rgba(255, 59, 48, 0.8)';
+                    }
+                });
                 
-                if (diff > 100) {
-                    isDraggingToCancel = true;
-                    recordingCancelOverlay.style.backgroundColor = 'rgba(255, 59, 48, 0.8)';
-                }
-            });
+                recordingCancelOverlay.addEventListener('touchend', () => {
+                    if (isDraggingToCancel && isRecording) {
+                        cancelRecording();
+                    }
+                    isDraggingToCancel = false;
+                    recordingCancelOverlay.style.backgroundColor = '';
+                });
+            }
             
-            recordingCancelOverlay.addEventListener('touchend', () => {
-                if (isDraggingToCancel && isRecording) {
-                    cancelRecording();
-                }
-                isDraggingToCancel = false;
-                recordingCancelOverlay.style.backgroundColor = '';
-            });
-            
-            attachBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                pressTimer = setTimeout(() => {
-                    startRecording();
-                }, 500);
-            });
-            
-            attachBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                clearTimeout(pressTimer);
-                if (isRecording) {
-                    stopRecording();
-                } else {
-                    toggleAttachmentOptions();
-                }
-            });
+            if (attachBtn) {
+                attachBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    pressTimer = setTimeout(() => {
+                        startRecording();
+                    }, 500);
+                });
+                
+                attachBtn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    clearTimeout(pressTimer);
+                    if (isRecording) {
+                        stopRecording();
+                    } else {
+                        toggleAttachmentOptions();
+                    }
+                });
+            }
             
             // Attachment options
             document.querySelectorAll('.attachment-option').forEach(option => {
@@ -5020,83 +5157,131 @@ Message ID: ${message.id.substring(0, 8)}...
             });
             
             // Cancel recording button
-            document.getElementById('cancelRecordingBtn').addEventListener('click', cancelRecording);
+            const cancelRecordingBtn = document.getElementById('cancelRecordingBtn');
+            if (cancelRecordingBtn) {
+                cancelRecordingBtn.addEventListener('click', cancelRecording);
+            }
             
             // Jump to latest button
-            document.getElementById('jumpToLatestBtn').addEventListener('click', jumpToLatest);
+            if (jumpToLatestBtn) {
+                jumpToLatestBtn.addEventListener('click', jumpToLatest);
+            }
             
             // In-chat search button
-            document.getElementById('chatSearchBtn').addEventListener('click', () => {
-                chatSearchBar.classList.add('active');
-                document.getElementById('inChatSearch').focus();
-            });
-            
-            // Close in-chat search
-            document.getElementById('closeChatSearchBtn').addEventListener('click', () => {
-                chatSearchBar.classList.remove('active');
-                searchResultsDiv.classList.remove('active');
-                removeSearchHighlights();
-            });
-            
-            // In-chat search input
-            document.getElementById('inChatSearch').addEventListener('input', function() {
-                searchInChat(this.value);
-            });
-            
-            // Dismiss offline overlay
-            document.getElementById('dismissOfflineBtn').addEventListener('click', () => {
-                offlineOverlay.classList.remove('active');
-            });
-            
-            // Back to chats button
-            document.getElementById('backToChatsBtn').addEventListener('click', backToChatList);
-            
-            // Back from contacts to chats
-            document.getElementById('backToChatsFromContactsBtn').addEventListener('click', () => {
-                contactsSidebar.classList.add('hidden');
-                sidebar.classList.remove('active');
-            });
-            
-            // New chat button
-            document.getElementById('newChatBtn').addEventListener('click', () => {
-                window.location.href = '../friend.html?startChat=true';
-            });
-            
-            // Multi-send toggle button
-            document.getElementById('multiSendToggleBtn').addEventListener('click', () => {
-                multiSendPanel.classList.add('active');
-                loadMultiSendChats();
-            });
-            
-            // Close multi-send panel
-            document.getElementById('closeMultiSendBtn').addEventListener('click', () => {
-                multiSendPanel.classList.remove('active');
-                multiSendSelectedChats.clear();
-            });
-            
-            // Multi-send button
-            document.getElementById('multiSendBtn').addEventListener('click', () => {
-                const content = document.getElementById('multiSendInput').value.trim();
-                const chatIds = Array.from(multiSendSelectedChats);
-                sendToMultipleChats(content, chatIds);
-            });
-            
-            // Chat search
-            document.getElementById('chatSearch').addEventListener('input', function() {
-                const searchTerm = this.value.toLowerCase();
-                const chatItems = document.querySelectorAll('.chat-item');
-                
-                chatItems.forEach(item => {
-                    const name = item.querySelector('.chat-item-name').textContent.toLowerCase();
-                    const message = item.querySelector('.chat-item-message').textContent.toLowerCase();
-                    
-                    if (name.includes(searchTerm) || message.includes(searchTerm)) {
-                        item.style.display = 'flex';
-                    } else {
-                        item.style.display = 'none';
+            const chatSearchBtn = document.getElementById('chatSearchBtn');
+            if (chatSearchBtn) {
+                chatSearchBtn.addEventListener('click', () => {
+                    if (chatSearchBar) {
+                        chatSearchBar.classList.add('active');
+                        const inChatSearch = document.getElementById('inChatSearch');
+                        if (inChatSearch) inChatSearch.focus();
                     }
                 });
-            });
+            }
+            
+            // Close in-chat search
+            const closeChatSearchBtn = document.getElementById('closeChatSearchBtn');
+            if (closeChatSearchBtn) {
+                closeChatSearchBtn.addEventListener('click', () => {
+                    if (chatSearchBar) chatSearchBar.classList.remove('active');
+                    if (searchResultsDiv) searchResultsDiv.classList.remove('active');
+                    removeSearchHighlights();
+                });
+            }
+            
+            // In-chat search input
+            if (inChatSearch) {
+                inChatSearch.addEventListener('input', function() {
+                    searchInChat(this.value);
+                });
+            }
+            
+            // Dismiss offline overlay
+            const dismissOfflineBtn = document.getElementById('dismissOfflineBtn');
+            if (dismissOfflineBtn) {
+                dismissOfflineBtn.addEventListener('click', () => {
+                    if (offlineOverlay) offlineOverlay.classList.remove('active');
+                });
+            }
+            
+            // Back to chats button
+            const backToChatsBtn = document.getElementById('backToChatsBtn');
+            if (backToChatsBtn) backToChatsBtn.addEventListener('click', backToChatList);
+            
+            // Back from contacts to chats
+            const backToChatsFromContactsBtn = document.getElementById('backToChatsFromContactsBtn');
+            if (backToChatsFromContactsBtn) {
+                backToChatsFromContactsBtn.addEventListener('click', () => {
+                    if (contactsSidebar) contactsSidebar.classList.add('hidden');
+                    if (sidebar) sidebar.classList.remove('active');
+                });
+            }
+            
+            // New chat button
+            const newChatBtn = document.getElementById('newChatBtn');
+            if (newChatBtn) {
+                newChatBtn.addEventListener('click', () => {
+                    window.location.href = '../friend.html?startChat=true';
+                });
+            }
+            
+            // Multi-send toggle button
+            const multiSendToggleBtn = document.getElementById('multiSendToggleBtn');
+            if (multiSendToggleBtn) {
+                multiSendToggleBtn.addEventListener('click', () => {
+                    if (multiSendPanel) {
+                        multiSendPanel.classList.add('active');
+                        loadMultiSendChats();
+                    }
+                });
+            }
+            
+            // Close multi-send panel
+            const closeMultiSendBtn = document.getElementById('closeMultiSendBtn');
+            if (closeMultiSendBtn) {
+                closeMultiSendBtn.addEventListener('click', () => {
+                    if (multiSendPanel) {
+                        multiSendPanel.classList.remove('active');
+                        multiSendSelectedChats.clear();
+                    }
+                });
+            }
+            
+            // Multi-send button
+            const multiSendBtn = document.getElementById('multiSendBtn');
+            if (multiSendBtn) {
+                multiSendBtn.addEventListener('click', () => {
+                    const multiSendInput = document.getElementById('multiSendInput');
+                    const content = multiSendInput ? multiSendInput.value.trim() : '';
+                    const chatIds = Array.from(multiSendSelectedChats);
+                    sendToMultipleChats(content, chatIds);
+                });
+            }
+            
+            // Chat search
+            const chatSearch = document.getElementById('chatSearch');
+            if (chatSearch) {
+                chatSearch.addEventListener('input', function() {
+                    const searchTerm = this.value.toLowerCase();
+                    const chatItems = document.querySelectorAll('.chat-item');
+                    
+                    chatItems.forEach(item => {
+                        const name = item.querySelector('.chat-item-name');
+                        const message = item.querySelector('.chat-item-message');
+                        
+                        if (name && message) {
+                            const nameText = name.textContent.toLowerCase();
+                            const messageText = message.textContent.toLowerCase();
+                            
+                            if (nameText.includes(searchTerm) || messageText.includes(searchTerm)) {
+                                item.style.display = 'flex';
+                            } else {
+                                item.style.display = 'none';
+                            }
+                        }
+                    });
+                });
+            }
             
             // Contact search
             const contactSearch = document.getElementById('contactSearch');
@@ -5106,32 +5291,43 @@ Message ID: ${message.id.substring(0, 8)}...
                     const contactItems = document.querySelectorAll('.contact-item');
                     
                     contactItems.forEach(item => {
-                        const name = item.querySelector('.contact-name').textContent.toLowerCase();
-                        const status = item.querySelector('.contact-status').textContent.toLowerCase();
+                        const name = item.querySelector('.contact-name');
+                        const status = item.querySelector('.contact-status');
                         
-                        if (name.includes(searchTerm) || status.includes(searchTerm)) {
-                            item.style.display = 'flex';
-                        } else {
-                            item.style.display = 'none';
+                        if (name && status) {
+                            const nameText = name.textContent.toLowerCase();
+                            const statusText = status.textContent.toLowerCase();
+                            
+                            if (nameText.includes(searchTerm) || statusText.includes(searchTerm)) {
+                                item.style.display = 'flex';
+                            } else {
+                                item.style.display = 'none';
+                            }
                         }
                     });
                 });
             }
             
             // Multi-send search
-            document.getElementById('multiSendSearch').addEventListener('input', function() {
-                const searchTerm = this.value.toLowerCase();
-                const chatItems = document.querySelectorAll('#multiSendChatsList .chat-item');
-                
-                chatItems.forEach(item => {
-                    const name = item.querySelector('.chat-item-name').textContent.toLowerCase();
-                    if (name.includes(searchTerm)) {
-                        item.style.display = 'flex';
-                    } else {
-                        item.style.display = 'none';
-                    }
+            const multiSendSearch = document.getElementById('multiSendSearch');
+            if (multiSendSearch) {
+                multiSendSearch.addEventListener('input', function() {
+                    const searchTerm = this.value.toLowerCase();
+                    const chatItems = document.querySelectorAll('#multiSendChatsList .chat-item');
+                    
+                    chatItems.forEach(item => {
+                        const name = item.querySelector('.chat-item-name');
+                        if (name) {
+                            const nameText = name.textContent.toLowerCase();
+                            if (nameText.includes(searchTerm)) {
+                                item.style.display = 'flex';
+                            } else {
+                                item.style.display = 'none';
+                            }
+                        }
+                    });
                 });
-            });
+            }
             
             // Chat categories
             document.querySelectorAll('.category-tab').forEach(tab => {
@@ -5149,62 +5345,89 @@ Message ID: ${message.id.substring(0, 8)}...
             });
             
             // Message actions
-            document.querySelectorAll('#messageActions .action-item').forEach(item => {
-                item.addEventListener('click', (e) => {
-                    const action = e.currentTarget.dataset.action;
-                    handleMessageAction(action);
+            const messageActions = document.getElementById('messageActions');
+            if (messageActions) {
+                document.querySelectorAll('#messageActions .action-item').forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        const action = e.currentTarget.dataset.action;
+                        handleMessageAction(action);
+                    });
                 });
-            });
+            }
             
             // Close media viewer
-            document.getElementById('closeMediaViewer').addEventListener('click', () => {
-                mediaViewer.classList.remove('active');
-            });
+            const closeMediaViewer = document.getElementById('closeMediaViewer');
+            if (closeMediaViewer) {
+                closeMediaViewer.addEventListener('click', () => {
+                    if (mediaViewer) mediaViewer.classList.remove('active');
+                });
+            }
             
             // Close thread panel
-            document.getElementById('closeThreadBtn').addEventListener('click', () => {
-                threadPanel.classList.remove('active');
-                currentThread = null;
-            });
+            const closeThreadBtn = document.getElementById('closeThreadBtn');
+            if (closeThreadBtn) {
+                closeThreadBtn.addEventListener('click', () => {
+                    if (threadPanel) threadPanel.classList.remove('active');
+                    currentThread = null;
+                });
+            }
             
             // Close chat info modal
-            document.getElementById('closeChatInfoBtn').addEventListener('click', () => {
-                chatInfoModal.classList.remove('active');
-            });
+            const closeChatInfoBtn = document.getElementById('closeChatInfoBtn');
+            if (closeChatInfoBtn) {
+                closeChatInfoBtn.addEventListener('click', () => {
+                    if (chatInfoModal) chatInfoModal.classList.remove('active');
+                });
+            }
             
             // Report modal actions
-            document.getElementById('cancelReportBtn').addEventListener('click', () => {
-                reportModal.classList.remove('active');
-            });
+            const cancelReportBtn = document.getElementById('cancelReportBtn');
+            if (cancelReportBtn) {
+                cancelReportBtn.addEventListener('click', () => {
+                    if (reportModal) reportModal.classList.remove('active');
+                });
+            }
             
-            document.getElementById('submitReportBtn').addEventListener('click', submitReport);
+            const submitReportBtn = document.getElementById('submitReportBtn');
+            if (submitReportBtn) {
+                submitReportBtn.addEventListener('click', submitReport);
+            }
             
             // Voice call button
-            document.getElementById('voiceCallBtn').addEventListener('click', () => {
-                if (currentFriend && currentChat.type !== 'note') {
-                    window.location.href = `../calls.html?call=${currentFriend.uid}&type=voice`;
-                } else {
-                    showNotification('Please select a chat first', 'warning');
-                }
-            });
+            const voiceCallBtn = document.getElementById('voiceCallBtn');
+            if (voiceCallBtn) {
+                voiceCallBtn.addEventListener('click', () => {
+                    if (currentFriend && currentChat && currentChat.type !== 'note') {
+                        window.location.href = `../calls.html?call=${currentFriend.uid}&type=voice`;
+                    } else {
+                        showNotification('Please select a chat first', 'warning');
+                    }
+                });
+            }
             
             // Video call button
-            document.getElementById('videoCallBtn').addEventListener('click', () => {
-                if (currentFriend && currentChat.type !== 'note') {
-                    window.location.href = `../calls.html?call=${currentFriend.uid}&type=video`;
-                } else {
-                    showNotification('Please select a chat first', 'warning');
-                }
-            });
+            const videoCallBtn = document.getElementById('videoCallBtn');
+            if (videoCallBtn) {
+                videoCallBtn.addEventListener('click', () => {
+                    if (currentFriend && currentChat && currentChat.type !== 'note') {
+                        window.location.href = `../calls.html?call=${currentFriend.uid}&type=video`;
+                    } else {
+                        showNotification('Please select a chat first', 'warning');
+                    }
+                });
+            }
             
             // Chat options button
-            document.getElementById('chatOptionsBtn').addEventListener('click', () => {
-                if (currentChat) {
-                    showChatInfo(currentChat);
-                } else {
-                    showNotification('Please select a chat first', 'warning');
-                }
-            });
+            const chatOptionsBtn = document.getElementById('chatOptionsBtn');
+            if (chatOptionsBtn) {
+                chatOptionsBtn.addEventListener('click', () => {
+                    if (currentChat) {
+                        showChatInfo(currentChat);
+                    } else {
+                        showNotification('Please select a chat first', 'warning');
+                    }
+                });
+            }
             
             // Before unload
             window.addEventListener('beforeunload', () => {

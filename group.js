@@ -224,7 +224,7 @@ async function bootstrapIframe() {
     console.log('=== BOOTSTRAP IFRAME START ===');
     
     try {
-        // 1. Load tokens from localStorage
+        // 1. Load tokens from localStorage using fallback
         const hasToken = loadTokensFromStorage();
         if (!hasToken) {
             console.log('No authentication token found');
@@ -232,7 +232,7 @@ async function bootstrapIframe() {
             return false;
         }
         
-        // 2. Validate token with /api/auth/me
+        // 2. Validate token with /api/auth/me using api.js
         console.log('Validating token with /api/auth/me...');
         const meResponse = await callApi('GET', '/api/auth/me');
         
@@ -280,7 +280,19 @@ async function bootstrapIframe() {
 // Load tokens from localStorage
 function loadTokensFromStorage() {
     try {
+        // Try main token first
         accessToken = localStorage.getItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN);
+        
+        // Fallback to moodchat_token if main token not found
+        if (!accessToken) {
+            accessToken = localStorage.getItem('moodchat_token');
+            if (accessToken) {
+                console.log('Using moodchat_token fallback');
+                localStorage.setItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+            }
+        }
+        
+        // Load refresh token
         refreshToken = localStorage.getItem(LOCAL_STORAGE_KEYS.REFRESH_TOKEN);
         
         if (accessToken) {
@@ -305,7 +317,10 @@ function isTokenExpired(token) {
     
     try {
         // Simple JWT token expiration check
-        const payload = JSON.parse(atob(token.split('.')[1]));
+        const parts = token.split('.');
+        if (parts.length !== 3) return true;
+        
+        const payload = JSON.parse(atob(parts[1]));
         const expirationTime = payload.exp * 1000; // Convert to milliseconds
         const currentTime = Date.now();
         
@@ -363,9 +378,10 @@ async function refreshAccessToken() {
 // Redirect to login page
 function redirectToLogin() {
     console.log('Redirecting to login page...');
-    // Clear tokens
+    // Clear all tokens
     localStorage.removeItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.REFRESH_TOKEN);
+    localStorage.removeItem('moodchat_token');
     localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
     
@@ -407,6 +423,15 @@ async function callApi(method, endpoint, data = null, options = {}) {
     const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     
     try {
+        // Use api.js if available
+        if (window.api && typeof window.api.callApi === 'function') {
+            return await window.api.callApi(method, url, data, {
+                ...options,
+                token: token
+            });
+        }
+        
+        // Fallback to direct fetch if api.js not available
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
@@ -514,18 +539,28 @@ async function initGroupPage() {
     }
     
     // 2. Check mobile
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
+    if (typeof checkMobile === 'function') {
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+    }
     
     // 3. Load cached data instantly
-    loadCachedDataInstantly();
+    if (typeof loadCachedDataInstantly === 'function') {
+        loadCachedDataInstantly();
+    }
     
     // 4. Set up event listeners
-    setupEventListeners();
-    setupGroupInvitesListener();
+    if (typeof setupEventListeners === 'function') {
+        setupEventListeners();
+    }
+    if (typeof setupGroupInvitesListener === 'function') {
+        setupGroupInvitesListener();
+    }
     
     // 5. Initialize app
-    await initializeApp();
+    if (typeof initializeApp === 'function') {
+        await initializeApp();
+    }
     
     console.log('=== GROUP PAGE INITIALIZATION COMPLETE ===');
 }
@@ -542,8 +577,12 @@ function loadCachedDataInstantly() {
             console.log(`✓ Instant: ${groups.length} groups loaded from cache`);
             isLoadedFromLocalStorage = true;
             
-            updateGroupCounts();
-            renderGroupsListInstantly();
+            if (typeof updateGroupCounts === 'function') {
+                updateGroupCounts();
+            }
+            if (typeof renderGroupsListInstantly === 'function') {
+                renderGroupsListInstantly();
+            }
         }
         
         // Load other group data
@@ -567,7 +606,9 @@ function loadCachedDataInstantly() {
         }
         
         // Load unique features data
-        loadUniqueFeaturesData();
+        if (typeof loadUniqueFeaturesData === 'function') {
+            loadUniqueFeaturesData();
+        }
         
         console.log('=== INSTANT CACHE LOAD COMPLETE (GROUPS) ===');
         
@@ -723,7 +764,9 @@ function addGroupItemInstant(groupData, container, type) {
     
     groupItem.addEventListener('click', (e) => {
         if (!e.target.closest('.group-actions')) {
-            showGroupDetails(groupData, type);
+            if (typeof showGroupDetails === 'function') {
+                showGroupDetails(groupData, type);
+            }
         }
     });
     
@@ -732,7 +775,9 @@ function addGroupItemInstant(groupData, container, type) {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const action = btn.dataset.action;
-            handleGroupAction(action, groupData, type, btn);
+            if (typeof handleGroupAction === 'function') {
+                handleGroupAction(action, groupData, type, btn);
+            }
         });
     });
     
@@ -745,25 +790,37 @@ async function initializeApp() {
     showNotification('Groups system ready with unique features', 'success');
     
     // Load friends from API
-    await loadFriends();
+    if (typeof loadFriends === 'function') {
+        await loadFriends();
+    }
     
     // Load groups from API
-    await syncGroupsFromServer();
+    if (typeof syncGroupsFromServer === 'function') {
+        await syncGroupsFromServer();
+    }
     
     // Load group invites from API
-    await syncGroupInvitesFromServer();
+    if (typeof syncGroupInvitesFromServer === 'function') {
+        await syncGroupInvitesFromServer();
+    }
     
     // Start background sync after a delay
     setTimeout(() => {
-        backgroundSyncWithServer();
+        if (typeof backgroundSyncWithServer === 'function') {
+            backgroundSyncWithServer();
+        }
     }, 1000);
     
     // Set up periodic sync
     setInterval(() => {
-        backgroundSyncWithServer();
+        if (typeof backgroundSyncWithServer === 'function') {
+            backgroundSyncWithServer();
+        }
     }, 30000); // Sync every 30 seconds
     
-    processPendingOfflineActions();
+    if (typeof processPendingOfflineActions === 'function') {
+        processPendingOfflineActions();
+    }
     
     console.log('=== FULL GROUP APP INITIALIZATION COMPLETE ===');
 }
@@ -800,11 +857,19 @@ async function backgroundSyncWithServer() {
     console.log('Background sync: Starting server fetch...');
     
     try {
-        const syncPromises = [
-            syncGroupsFromServer(),
-            syncGroupInvitesFromServer(),
-            syncUniqueFeaturesData()
-        ];
+        const syncPromises = [];
+        
+        if (typeof syncGroupsFromServer === 'function') {
+            syncPromises.push(syncGroupsFromServer());
+        }
+        
+        if (typeof syncGroupInvitesFromServer === 'function') {
+            syncPromises.push(syncGroupInvitesFromServer());
+        }
+        
+        if (typeof syncUniqueFeaturesData === 'function') {
+            syncPromises.push(syncUniqueFeaturesData());
+        }
         
         await Promise.allSettled(syncPromises);
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
@@ -916,8 +981,12 @@ async function syncGroupsFromServer() {
             
             const allGroupsSection = document.getElementById('allGroupsSection');
             if (allGroupsSection && allGroupsSection.classList.contains('active')) {
-                updateCurrentSection();
-                updateGroupCounts();
+                if (typeof updateCurrentSection === 'function') {
+                    updateCurrentSection();
+                }
+                if (typeof updateGroupCounts === 'function') {
+                    updateGroupCounts();
+                }
             }
             
             showNotification('Groups list updated', 'success');
@@ -965,117 +1034,8 @@ async function syncGroupInvitesFromServer() {
 }
 
 // =============================================
-// REMAINING FUNCTIONS (UNCHANGED)
+// REMAINING FUNCTIONS
 // =============================================
-
-// [All remaining functions from the original file stay exactly the same]
-// This includes:
-// - calculateGroupPulse()
-// - updateGroupCounts()
-// - updateCurrentSection()
-// - renderAllGroups()
-// - addGroupItem()
-// - handleGroupAction()
-// - openGroupChat()
-// - updateChatHeaderUniqueFeatures()
-// - checkPostingRules()
-// - updateParticipationModeButtons()
-// - loadUniqueFeaturesPanels()
-// - loadGroupNotes()
-// - loadGroupEvents()
-// - generateUniqueEventsForUser()
-// - hashCode()
-// - loadTransparencyLog()
-// - generateInitialTransparencyLog()
-// - analyzeGroupEnergy()
-// - generateSimulatedMessages()
-// - closeGroupChatMobile()
-// - hideAllPanels()
-// - loadGroupChatMessages()
-// - addMessageToChat()
-// - addSystemMessage()
-// - saveMessageToCache()
-// - sendGroupMessage()
-// - toggleSilentMode()
-// - toggleAnonymousMode()
-// - window.reactToMessage()
-// - window.replyToMessage()
-// - window.deleteMessage()
-// - setupTypingListener()
-// - stopTypingIndicator()
-// - adjustTextareaHeight()
-// - formatMessageTime()
-// - openAdminManagement()
-// - loadGroupMembersForManagement()
-// - generateSimulatedMembers()
-// - renderMembersList()
-// - handleMemberAction()
-// - logTransparencyAction()
-// - loadGroupSettingsForManagement()
-// - loadUniqueFeaturesForManagement()
-// - updatePostingRulesUI()
-// - saveGroupSettings()
-// - showFriendSelection()
-// - renderFriendSelection()
-// - updateSelectedFriendsList()
-// - window.removeSelectedFriend()
-// - createGroupOnline()
-// - joinGroupOnline()
-// - leaveGroupOnline()
-// - acceptGroupInvite()
-// - declineGroupInvite()
-// - leaveGroupConfirm()
-// - showGroupDetails()
-// - loadGroupDetails()
-// - showGroupOptions()
-// - viewGroupNotes()
-// - viewGroupEvents()
-// - viewGroupAnalytics()
-// - loadGroupAnalytics()
-// - renderAnalyticsChart()
-// - changePurposeMood()
-// - updatePostingRules()
-// - viewChangeHistory()
-// - showOptionsModal()
-// - shareGroup()
-// - muteGroup()
-// - favoriteGroup()
-// - reportGroup()
-// - blockGroup()
-// - showGroupQRCode()
-// - window.downloadQRCode()
-// - copyInviteLink()
-// - inviteMembers()
-// - editGroupInfo()
-// - manageRoles()
-// - createEvent()
-// - window.saveNewEvent()
-// - createPoll()
-// - window.addPollOption()
-// - window.removePollOption()
-// - window.saveNewPoll()
-// - window.voteOnPoll()
-// - showGroupInviteDetails()
-// - matchesFilters()
-// - matchesSearch()
-// - filterGroupsByType()
-// - searchGroups()
-// - saveGroupsToLocalStorage()
-// - formatTimeAgo()
-// - formatDate()
-// - showNotification()
-// - processPendingOfflineActions()
-// - updateCreateGroupPostingRulesUI()
-// - setupEventListeners()
-// - setupGroupInvitesListener()
-// - checkMobile()
-// - showMobileSection()
-// - renderMyGroups()
-// - renderJoinedGroups()
-// - renderGroupInvites()
-// - addGroupInviteItem()
-// - renderAdminGroups()
-// - startGroupCall()
 
 // Calculate group pulse
 function calculateGroupPulse(groupData) {
@@ -1130,19 +1090,19 @@ function updateCurrentSection() {
         
         switch(sectionId) {
             case 'allGroupsSection':
-                renderAllGroups();
+                if (typeof renderAllGroups === 'function') renderAllGroups();
                 break;
             case 'myGroupsSection':
-                renderMyGroups();
+                if (typeof renderMyGroups === 'function') renderMyGroups();
                 break;
             case 'joinedSection':
-                renderJoinedGroups();
+                if (typeof renderJoinedGroups === 'function') renderJoinedGroups();
                 break;
             case 'invitesSection':
-                renderGroupInvites();
+                if (typeof renderGroupInvites === 'function') renderGroupInvites();
                 break;
             case 'adminSection':
-                renderAdminGroups();
+                if (typeof renderAdminGroups === 'function') renderAdminGroups();
                 break;
         }
     }
@@ -1276,7 +1236,9 @@ function addGroupItem(groupData, container, type) {
     
     groupItem.addEventListener('click', (e) => {
         if (!e.target.closest('.group-actions')) {
-            showGroupDetails(groupData, type);
+            if (typeof showGroupDetails === 'function') {
+                showGroupDetails(groupData, type);
+            }
         }
     });
     
@@ -1296,22 +1258,22 @@ function addGroupItem(groupData, container, type) {
 function handleGroupAction(action, groupData, type, button) {
     switch(action) {
         case 'open-chat':
-            openGroupChat(groupData);
+            if (typeof openGroupChat === 'function') openGroupChat(groupData);
             break;
         case 'info':
-            showGroupDetails(groupData, type);
+            if (typeof showGroupDetails === 'function') showGroupDetails(groupData, type);
             break;
         case 'manage':
-            openAdminManagement(groupData);
+            if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
             break;
         case 'leave':
-            leaveGroupConfirm(groupData);
+            if (typeof leaveGroupConfirm === 'function') leaveGroupConfirm(groupData);
             break;
         case 'accept-invite':
-            acceptGroupInvite(groupData);
+            if (typeof acceptGroupInvite === 'function') acceptGroupInvite(groupData);
             break;
         case 'decline-invite':
-            declineGroupInvite(groupData);
+            if (typeof declineGroupInvite === 'function') declineGroupInvite(groupData);
             break;
         default:
             console.log('Unknown group action:', action);
@@ -1349,7 +1311,9 @@ function openGroupChat(groupData) {
         }
     }
     
-    updateChatHeaderUniqueFeatures(groupData);
+    if (typeof updateChatHeaderUniqueFeatures === 'function') {
+        updateChatHeaderUniqueFeatures(groupData);
+    }
     
     const sidebar = document.getElementById('sidebar');
     const groupChatPanel = document.getElementById('groupChatPanel');
@@ -1371,7 +1335,7 @@ function openGroupChat(groupData) {
             chatHeaderInfo.insertBefore(backBtn, chatHeaderInfo.firstChild);
         }
     } else {
-        hideAllPanels();
+        if (typeof hideAllPanels === 'function') hideAllPanels();
         if (groupChatPanel) groupChatPanel.classList.add('active');
     }
     
@@ -1381,11 +1345,11 @@ function openGroupChat(groupData) {
     if (chatMessages) chatMessages.innerHTML = '';
     if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     
-    loadGroupChatMessages(groupData.id);
-    setupTypingListener(groupData.id);
+    if (typeof loadGroupChatMessages === 'function') loadGroupChatMessages(groupData.id);
+    if (typeof setupTypingListener === 'function') setupTypingListener(groupData.id);
     
-    loadUniqueFeaturesPanels(groupData.id);
-    checkPostingRules(groupData);
+    if (typeof loadUniqueFeaturesPanels === 'function') loadUniqueFeaturesPanels(groupData.id);
+    if (typeof checkPostingRules === 'function') checkPostingRules(groupData);
     
     showNotification(`Opened chat: ${groupData.name}`, 'success');
 }
@@ -1531,7 +1495,9 @@ function checkPostingRules(groupData) {
         anonymousModeBtn.style.display = participationModes.anonymous ? 'block' : 'none';
     }
     
-    updateParticipationModeButtons();
+    if (typeof updateParticipationModeButtons === 'function') {
+        updateParticipationModeButtons();
+    }
 }
 
 // Update participation mode buttons
@@ -1568,10 +1534,10 @@ function updateParticipationModeButtons() {
 
 // Load unique features panels
 function loadUniqueFeaturesPanels(groupId) {
-    loadGroupNotes(groupId);
-    loadGroupEvents(groupId);
-    loadTransparencyLog(groupId);
-    analyzeGroupEnergy(groupId);
+    if (typeof loadGroupNotes === 'function') loadGroupNotes(groupId);
+    if (typeof loadGroupEvents === 'function') loadGroupEvents(groupId);
+    if (typeof loadTransparencyLog === 'function') loadTransparencyLog(groupId);
+    if (typeof analyzeGroupEnergy === 'function') analyzeGroupEnergy(groupId);
 }
 
 // Load group notes
@@ -1627,8 +1593,10 @@ async function loadGroupEvents(groupId) {
         } else {
             // Generate unique events for this user if none exist
             if (events.length === 0 && currentUser) {
-                events = generateUniqueEventsForUser(groupId, currentUser.uid || currentUser.id);
-                localStorage.setItem(cacheKey, JSON.stringify(events));
+                if (typeof generateUniqueEventsForUser === 'function') {
+                    events = generateUniqueEventsForUser(groupId, currentUser.uid || currentUser.id);
+                    localStorage.setItem(cacheKey, JSON.stringify(events));
+                }
             }
         }
         
@@ -1742,8 +1710,10 @@ async function loadTransparencyLog(groupId) {
             log = JSON.parse(cachedLog);
         } else {
             // Generate initial transparency log
-            log = generateInitialTransparencyLog(groupId);
-            localStorage.setItem(cacheKey, JSON.stringify(log));
+            if (typeof generateInitialTransparencyLog === 'function') {
+                log = generateInitialTransparencyLog(groupId);
+                localStorage.setItem(cacheKey, JSON.stringify(log));
+            }
         }
         
         const response = await safeApiCall('get', `groups/${groupId}/transparency`);
@@ -1827,7 +1797,9 @@ async function analyzeGroupEnergy(groupId) {
             messages = response.data;
         } else {
             // Generate simulated message data for demo
-            messages = generateSimulatedMessages(groupId);
+            if (typeof generateSimulatedMessages === 'function') {
+                messages = generateSimulatedMessages(groupId);
+            }
         }
         
         const now = new Date();
@@ -1960,7 +1932,9 @@ async function loadGroupChatMessages(groupId) {
         try {
             const messages = JSON.parse(cachedMessages);
             messages.forEach(message => {
-                addMessageToChat(message, false);
+                if (typeof addMessageToChat === 'function') {
+                    addMessageToChat(message, false);
+                }
             });
         } catch (error) {
             console.error('Error loading cached messages:', error);
@@ -1968,7 +1942,9 @@ async function loadGroupChatMessages(groupId) {
     }
     
     if (chatMessages.children.length === 0) {
-        addSystemMessage(`Welcome to the group chat! Start the conversation.`);
+        if (typeof addSystemMessage === 'function') {
+            addSystemMessage(`Welcome to the group chat! Start the conversation.`);
+        }
     }
     
     const chatMessagesContainer = document.getElementById('chatMessagesContainer');
@@ -1982,8 +1958,12 @@ async function loadGroupChatMessages(groupId) {
         const response = await safeApiCall('get', `groups/${groupId}/messages`);
         if (response && response.success && response.data) {
             response.data.forEach(message => {
-                addMessageToChat(message, true);
-                saveMessageToCache(groupId, message);
+                if (typeof addMessageToChat === 'function') {
+                    addMessageToChat(message, true);
+                }
+                if (typeof saveMessageToCache === 'function') {
+                    saveMessageToCache(groupId, message);
+                }
             });
         }
     } catch (error) {
@@ -2089,7 +2069,7 @@ async function sendGroupMessage() {
     const selectedTopic = messageTopic ? messageTopic.value : '';
     
     chatInput.value = '';
-    adjustTextareaHeight();
+    if (typeof adjustTextareaHeight === 'function') adjustTextareaHeight();
     
     const message = {
         groupId: currentChatGroup.id,
@@ -2108,7 +2088,7 @@ async function sendGroupMessage() {
         id: 'temp_' + Date.now()
     };
     
-    addMessageToChat(tempMessage, true);
+    if (typeof addMessageToChat === 'function') addMessageToChat(tempMessage, true);
     
     try {
         const response = await safeApiCall('post', `groups/${currentChatGroup.id}/messages`, {
@@ -2118,13 +2098,15 @@ async function sendGroupMessage() {
         });
         
         if (response && response.success) {
-            saveMessageToCache(currentChatGroup.id, {
-                ...tempMessage,
-                id: response.data?.id || tempMessage.id
-            });
+            if (typeof saveMessageToCache === 'function') {
+                saveMessageToCache(currentChatGroup.id, {
+                    ...tempMessage,
+                    id: response.data?.id || tempMessage.id
+                });
+            }
             
             if (isAnonymousMode) {
-                toggleAnonymousMode();
+                if (typeof toggleAnonymousMode === 'function') toggleAnonymousMode();
             }
         } else {
             showNotification('Failed to send message', 'error');
@@ -2134,7 +2116,7 @@ async function sendGroupMessage() {
         showNotification('Failed to send message', 'error');
     }
     
-    stopTypingIndicator();
+    if (typeof stopTypingIndicator === 'function') stopTypingIndicator();
 }
 
 // Toggle silent mode
@@ -2158,7 +2140,9 @@ function toggleSilentMode() {
     }
     
     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES, JSON.stringify(currentParticipationMode));
-    updateParticipationModeButtons();
+    if (typeof updateParticipationModeButtons === 'function') {
+        updateParticipationModeButtons();
+    }
 }
 
 // Toggle anonymous mode
@@ -2171,7 +2155,9 @@ function toggleAnonymousMode() {
         showNotification('Anonymous mode disabled', 'success');
     }
     
-    updateParticipationModeButtons();
+    if (typeof updateParticipationModeButtons === 'function') {
+        updateParticipationModeButtons();
+    }
 }
 
 // Message reaction handler
@@ -2268,9 +2254,9 @@ function openAdminManagement(groupData) {
         adminManagementModal.classList.add('active');
     }
     
-    loadGroupMembersForManagement(groupData);
-    loadGroupSettingsForManagement(groupData);
-    loadUniqueFeaturesForManagement(groupData);
+    if (typeof loadGroupMembersForManagement === 'function') loadGroupMembersForManagement(groupData);
+    if (typeof loadGroupSettingsForManagement === 'function') loadGroupSettingsForManagement(groupData);
+    if (typeof loadUniqueFeaturesForManagement === 'function') loadUniqueFeaturesForManagement(groupData);
 }
 
 // Load group members for management
@@ -2289,10 +2275,14 @@ async function loadGroupMembersForManagement(groupData) {
             memberDetails = response.data;
         } else {
             // Generate simulated members for demo
-            memberDetails = generateSimulatedMembers(groupData.id);
+            if (typeof generateSimulatedMembers === 'function') {
+                memberDetails = generateSimulatedMembers(groupData.id);
+            }
         }
         
-        renderMembersList(memberDetails);
+        if (typeof renderMembersList === 'function') {
+            renderMembersList(memberDetails);
+        }
         
     } catch (error) {
         console.error('Error loading members:', error);
@@ -2399,7 +2389,9 @@ function renderMembersList(memberDetails) {
             const action = btn.classList.contains('promote') ? 'promote' : 
                           btn.classList.contains('demote') ? 'demote' : 'remove';
             
-            handleMemberAction(action, memberId, groupData);
+            if (typeof handleMemberAction === 'function') {
+                handleMemberAction(action, memberId, groupData);
+            }
         });
     });
 }
@@ -2411,23 +2403,31 @@ async function handleMemberAction(action, memberId, groupData) {
             case 'promote':
                 await safeApiCall('post', `groups/${groupData.id}/members/${memberId}/promote`);
                 showNotification('Member promoted to admin', 'success');
-                logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
+                if (typeof logTransparencyAction === 'function') {
+                    logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
+                }
                 break;
             case 'demote':
                 await safeApiCall('post', `groups/${groupData.id}/members/${memberId}/demote`);
                 showNotification('Admin demoted to member', 'success');
-                logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
+                if (typeof logTransparencyAction === 'function') {
+                    logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
+                }
                 break;
             case 'remove':
                 if (confirm('Are you sure you want to remove this member from the group?')) {
                     await safeApiCall('delete', `groups/${groupData.id}/members/${memberId}`);
                     showNotification('Member removed from group', 'success');
-                    logTransparencyAction(groupData.id, 'Removed member from group', memberId);
+                    if (typeof logTransparencyAction === 'function') {
+                        logTransparencyAction(groupData.id, 'Removed member from group', memberId);
+                    }
                 }
                 break;
         }
         
-        loadGroupMembersForManagement(groupData);
+        if (typeof loadGroupMembersForManagement === 'function') {
+            loadGroupMembersForManagement(groupData);
+        }
         
     } catch (error) {
         console.error('Error performing member action:', error);
@@ -2496,7 +2496,7 @@ function loadUniqueFeaturesForManagement(groupData) {
     
     const adminPostingMode = document.getElementById('adminPostingMode');
     if (adminPostingMode) adminPostingMode.value = groupData.postingRule || 'everyone';
-    updatePostingRulesUI();
+    if (typeof updatePostingRulesUI === 'function') updatePostingRulesUI();
     
     if (groupData.quietHours) {
         const adminQuietStart = document.getElementById('adminQuietStart');
@@ -2596,11 +2596,17 @@ async function saveGroupSettings(groupData) {
         if (response && response.success) {
             Object.assign(groupData, settings);
             
-            logTransparencyAction(groupData.id, 'Updated group settings');
+            if (typeof logTransparencyAction === 'function') {
+                logTransparencyAction(groupData.id, 'Updated group settings');
+            }
             
             if (currentChatGroup && currentChatGroup.id === groupData.id) {
-                updateChatHeaderUniqueFeatures(groupData);
-                checkPostingRules(groupData);
+                if (typeof updateChatHeaderUniqueFeatures === 'function') {
+                    updateChatHeaderUniqueFeatures(groupData);
+                }
+                if (typeof checkPostingRules === 'function') {
+                    checkPostingRules(groupData);
+                }
             }
             
             showNotification('Group settings saved successfully', 'success');
@@ -2631,7 +2637,9 @@ function showFriendSelection() {
     }
     
     setTimeout(() => {
-        renderFriendSelection();
+        if (typeof renderFriendSelection === 'function') {
+            renderFriendSelection();
+        }
     }, 100);
 }
 
@@ -2692,7 +2700,9 @@ function renderFriendSelection() {
                 selectedFriends.push(friend.id);
             }
             
-            updateSelectedFriendsList();
+            if (typeof updateSelectedFriendsList === 'function') {
+                updateSelectedFriendsList();
+            }
         });
         
         friendSelectionContent.appendChild(friendItem);
@@ -2750,7 +2760,9 @@ function updateSelectedFriendsList() {
 // Remove selected friend
 window.removeSelectedFriend = function(friendId) {
     selectedFriends = selectedFriends.filter(id => id !== friendId);
-    updateSelectedFriendsList();
+    if (typeof updateSelectedFriendsList === 'function') {
+        updateSelectedFriendsList();
+    }
     
     const friendItem = document.querySelector(`.friend-item[data-friend-id="${friendId}"]`);
     if (friendItem) {
@@ -2798,9 +2810,9 @@ async function createGroupOnline(groupData) {
         myGroups.push(newGroup);
         adminGroups.push(newGroup);
         
-        saveGroupsToLocalStorage();
-        updateGroupCounts();
-        updateCurrentSection();
+        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
+        if (typeof updateGroupCounts === 'function') updateGroupCounts();
+        if (typeof updateCurrentSection === 'function') updateCurrentSection();
         
         const inviteLinkInput = document.getElementById('inviteLinkInput');
         const copyInviteLinkBtn = document.getElementById('copyInviteLinkBtn');
@@ -2819,7 +2831,9 @@ async function createGroupOnline(groupData) {
         if (friendSelectionModal) friendSelectionModal.classList.remove('active');
         
         selectedFriends = [];
-        showGroupDetails(newGroup, 'my_group');
+        if (typeof showGroupDetails === 'function') {
+            showGroupDetails(newGroup, 'my_group');
+        }
         
     } catch (error) {
         console.error('Error creating group:', error);
@@ -2849,9 +2863,9 @@ async function joinGroupOnline(groupId) {
         joinedGroups.push(updatedGroup);
         groupInvites = groupInvites.filter(invite => invite.groupId !== groupId);
         
-        saveGroupsToLocalStorage();
-        updateGroupCounts();
-        updateCurrentSection();
+        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
+        if (typeof updateGroupCounts === 'function') updateGroupCounts();
+        if (typeof updateCurrentSection === 'function') updateCurrentSection();
         
         showNotification('Successfully joined the group!', 'success');
         
@@ -2878,9 +2892,9 @@ async function leaveGroupOnline(groupId) {
         joinedGroups = joinedGroups.filter(g => g.id !== groupId);
         adminGroups = adminGroups.filter(g => g.id !== groupId);
         
-        saveGroupsToLocalStorage();
-        updateGroupCounts();
-        updateCurrentSection();
+        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
+        if (typeof updateGroupCounts === 'function') updateGroupCounts();
+        if (typeof updateCurrentSection === 'function') updateCurrentSection();
         
         showNotification('Successfully left the group', 'success');
         
@@ -2931,9 +2945,9 @@ async function declineGroupInvite(inviteData) {
         
         groupInvites = groupInvites.filter(invite => invite.id !== inviteId);
         
-        saveGroupsToLocalStorage();
-        updateGroupCounts();
-        updateCurrentSection();
+        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
+        if (typeof updateGroupCounts === 'function') updateGroupCounts();
+        if (typeof updateCurrentSection === 'function') updateCurrentSection();
         
         showNotification('Invitation declined', 'success');
         
@@ -2973,7 +2987,7 @@ function showGroupDetails(groupData, type) {
         if (groupDetailsPanel) groupDetailsPanel.classList.add('active');
     }
     
-    loadGroupDetails(groupData, type);
+    if (typeof loadGroupDetails === 'function') loadGroupDetails(groupData, type);
 }
 
 // Load group details
@@ -3013,11 +3027,15 @@ async function loadGroupDetails(groupData, type) {
             if (response && response.success && response.data) {
                 realMembers = response.data.slice(0, 5);
             } else {
-                realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
+                if (typeof generateSimulatedMembers === 'function') {
+                    realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
+                }
             }
         } catch (error) {
             console.log('Error loading members:', error);
-            realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
+            if (typeof generateSimulatedMembers === 'function') {
+                realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
+            }
         }
         
         detailsContent.innerHTML = `
@@ -3233,25 +3251,25 @@ async function loadGroupDetails(groupData, type) {
         
         if (openGroupChatBtn) {
             openGroupChatBtn.addEventListener('click', () => {
-                openGroupChat(groupData);
+                if (typeof openGroupChat === 'function') openGroupChat(groupData);
             });
         }
         
         if (manageGroupBtn) {
             manageGroupBtn.addEventListener('click', () => {
-                openAdminManagement(groupData);
+                if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
             });
         }
         
         if (leaveGroupBtn) {
             leaveGroupBtn.addEventListener('click', () => {
-                leaveGroupConfirm(groupData);
+                if (typeof leaveGroupConfirm === 'function') leaveGroupConfirm(groupData);
             });
         }
         
         if (groupOptionsBtn) {
             groupOptionsBtn.addEventListener('click', () => {
-                showGroupOptions(groupData);
+                if (typeof showGroupOptions === 'function') showGroupOptions(groupData);
             });
         }
         
@@ -3301,7 +3319,9 @@ function showGroupOptions(groupData) {
         );
     }
     
-    showOptionsModal('Group Options', options, groupData.name);
+    if (typeof showOptionsModal === 'function') {
+        showOptionsModal('Group Options', options, groupData.name);
+    }
 }
 
 // View group notes
@@ -3312,7 +3332,7 @@ function viewGroupNotes(groupData) {
             groupNotesPanel.style.display = groupNotesPanel.style.display === 'none' ? 'block' : 'none';
         }
     } else {
-        openGroupChat(groupData);
+        if (typeof openGroupChat === 'function') openGroupChat(groupData);
         setTimeout(() => {
             if (groupNotesPanel) groupNotesPanel.style.display = 'block';
         }, 100);
@@ -3327,7 +3347,7 @@ function viewGroupEvents(groupData) {
             eventCountdownPanel.style.display = eventCountdownPanel.style.display === 'none' ? 'block' : 'none';
         }
     } else {
-        openGroupChat(groupData);
+        if (typeof openGroupChat === 'function') openGroupChat(groupData);
         setTimeout(() => {
             if (eventCountdownPanel) eventCountdownPanel.style.display = 'block';
         }, 100);
@@ -3336,11 +3356,11 @@ function viewGroupEvents(groupData) {
 
 // View group analytics
 function viewGroupAnalytics(groupData) {
-    openAdminManagement(groupData);
+    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
     const analyticsTab = document.querySelector('.admin-management-tab[data-tab="analytics"]');
     if (analyticsTab) {
         analyticsTab.click();
-        loadGroupAnalytics(groupData);
+        if (typeof loadGroupAnalytics === 'function') loadGroupAnalytics(groupData);
     }
 }
 
@@ -3387,7 +3407,9 @@ async function loadGroupAnalytics(groupData) {
         // Load chart if available
         const analyticsChart = document.getElementById('analyticsChart');
         if (analyticsChart && window.Chart) {
-            renderAnalyticsChart(analyticsChart, groupData);
+            if (typeof renderAnalyticsChart === 'function') {
+                renderAnalyticsChart(analyticsChart, groupData);
+            }
         }
         
     } catch (error) {
@@ -3443,7 +3465,7 @@ function renderAnalyticsChart(canvas, groupData) {
 
 // Change purpose/mood
 function changePurposeMood(groupData) {
-    openAdminManagement(groupData);
+    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
     const purposeTab = document.querySelector('.admin-management-tab[data-tab="purpose"]');
     if (purposeTab) {
         purposeTab.click();
@@ -3452,7 +3474,7 @@ function changePurposeMood(groupData) {
 
 // Update posting rules
 function updatePostingRules(groupData) {
-    openAdminManagement(groupData);
+    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
     const purposeTab = document.querySelector('.admin-management-tab[data-tab="purpose"]');
     if (purposeTab) {
         purposeTab.click();
@@ -3461,7 +3483,7 @@ function updatePostingRules(groupData) {
 
 // View change history
 function viewChangeHistory(groupData) {
-    openAdminManagement(groupData);
+    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
     const transparencyTab = document.querySelector('.admin-management-tab[data-tab="transparency"]');
     if (transparencyTab) {
         transparencyTab.click();
@@ -3581,9 +3603,9 @@ function blockGroup(groupData) {
         joinedGroups = joinedGroups.filter(g => g.id !== groupData.id);
         adminGroups = adminGroups.filter(g => g.id !== groupData.id);
         
-        saveGroupsToLocalStorage();
-        updateGroupCounts();
-        updateCurrentSection();
+        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
+        if (typeof updateGroupCounts === 'function') updateGroupCounts();
+        if (typeof updateCurrentSection === 'function') updateCurrentSection();
         
         showNotification('Group blocked successfully', 'success');
         
@@ -3660,17 +3682,17 @@ function copyInviteLink(groupData) {
 
 // Invite members
 function inviteMembers(groupData) {
-    showFriendSelection();
+    if (typeof showFriendSelection === 'function') showFriendSelection();
 }
 
 // Edit group info
 function editGroupInfo(groupData) {
-    openAdminManagement(groupData);
+    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
 }
 
 // Manage roles
 function manageRoles(groupData) {
-    openAdminManagement(groupData);
+    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
 }
 
 // Create event
@@ -3802,7 +3824,7 @@ window.saveNewEvent = function() {
     showNotification('Event created successfully!', 'success');
     
     // Reload events if in group chat
-    if (currentChatGroup) {
+    if (currentChatGroup && typeof loadGroupEvents === 'function') {
         loadGroupEvents(currentChatGroup.id);
     }
 };
@@ -4099,7 +4121,7 @@ function matchesSearch(groupData, searchTerm) {
 // Filter groups by type
 function filterGroupsByType(type) {
     currentTypeFilter = type;
-    updateCurrentSection();
+    if (typeof updateCurrentSection === 'function') updateCurrentSection();
     
     document.querySelectorAll('.type-filter-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -4114,7 +4136,7 @@ function filterGroupsByType(type) {
 // Search groups
 function searchGroups(searchTerm) {
     currentSearchTerm = searchTerm.toLowerCase().trim();
-    updateCurrentSection();
+    if (typeof updateCurrentSection === 'function') updateCurrentSection();
 }
 
 // Save groups to local storage
@@ -4228,7 +4250,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (allGroupsSection) allGroupsSection.classList.add('active');
-            updateCurrentSection();
+            if (typeof updateCurrentSection === 'function') updateCurrentSection();
         });
     }
     
@@ -4239,7 +4261,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (myGroupsSection) myGroupsSection.classList.add('active');
-            updateCurrentSection();
+            if (typeof updateCurrentSection === 'function') updateCurrentSection();
         });
     }
     
@@ -4250,7 +4272,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (joinedSection) joinedSection.classList.add('active');
-            updateCurrentSection();
+            if (typeof updateCurrentSection === 'function') updateCurrentSection();
         });
     }
     
@@ -4261,7 +4283,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (invitesSection) invitesSection.classList.add('active');
-            updateCurrentSection();
+            if (typeof updateCurrentSection === 'function') updateCurrentSection();
         });
     }
     
@@ -4272,7 +4294,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (adminSection) adminSection.classList.add('active');
-            updateCurrentSection();
+            if (typeof updateCurrentSection === 'function') updateCurrentSection();
         });
     }
     
@@ -4280,7 +4302,7 @@ function setupEventListeners() {
     document.querySelectorAll('.type-filter-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const type = this.dataset.type;
-            filterGroupsByType(type);
+            if (typeof filterGroupsByType === 'function') filterGroupsByType(type);
         });
     });
     
@@ -4288,7 +4310,7 @@ function setupEventListeners() {
     const groupSearch = document.getElementById('groupSearch');
     if (groupSearch) {
         groupSearch.addEventListener('input', function() {
-            searchGroups(this.value);
+            if (typeof searchGroups === 'function') searchGroups(this.value);
         });
     }
     
@@ -4373,7 +4395,7 @@ function setupEventListeners() {
                 if (fireBadge) fireBadge.style.borderColor = 'var(--primary-color)';
                 
                 selectedFriends = [];
-                updateSelectedFriendsList();
+                if (typeof updateSelectedFriendsList === 'function') updateSelectedFriendsList();
             }
         });
     }
@@ -4389,7 +4411,7 @@ function setupEventListeners() {
     const groupInvitesBtn = document.getElementById('groupInvitesBtn');
     if (groupInvitesBtn) {
         groupInvitesBtn.addEventListener('click', () => {
-            showMobileSection('invites');
+            if (typeof showMobileSection === 'function') showMobileSection('invites');
         });
     }
     
@@ -4414,7 +4436,9 @@ function setupEventListeners() {
             if (tabContent) tabContent.classList.add('active');
             
             if (tabName === 'purpose') {
-                updateCreateGroupPostingRulesUI();
+                if (typeof updateCreateGroupPostingRulesUI === 'function') {
+                    updateCreateGroupPostingRulesUI();
+                }
             }
         });
     });
@@ -4535,7 +4559,9 @@ function setupEventListeners() {
                 scheduledPosting: scheduledPosting
             };
             
-            await createGroupOnline(groupData);
+            if (typeof createGroupOnline === 'function') {
+                await createGroupOnline(groupData);
+            }
         });
     }
     
@@ -4626,7 +4652,7 @@ function setupEventListeners() {
     const addEventBtn = document.getElementById('addEventBtn');
     if (addEventBtn) {
         addEventBtn.addEventListener('click', () => {
-            createEvent(currentChatGroup);
+            if (typeof createEvent === 'function') createEvent(currentChatGroup);
         });
     }
     
@@ -4679,7 +4705,7 @@ function setupEventListeners() {
     const saveAdminSettingsBtn = document.getElementById('saveAdminSettingsBtn');
     if (saveAdminSettingsBtn) {
         saveAdminSettingsBtn.addEventListener('click', () => {
-            if (selectedGroup) {
+            if (selectedGroup && typeof saveGroupSettings === 'function') {
                 saveGroupSettings(selectedGroup);
             }
         });
@@ -4726,7 +4752,7 @@ function setupEventListeners() {
     const acceptInviteBtn = document.getElementById('acceptInviteBtn');
     if (acceptInviteBtn) {
         acceptInviteBtn.addEventListener('click', () => {
-            if (window.currentInvite) {
+            if (window.currentInvite && typeof acceptGroupInvite === 'function') {
                 acceptGroupInvite(window.currentInvite);
             }
         });
@@ -4736,7 +4762,7 @@ function setupEventListeners() {
     const declineInviteBtn = document.getElementById('declineInviteBtn');
     if (declineInviteBtn) {
         declineInviteBtn.addEventListener('click', () => {
-            if (window.currentInvite) {
+            if (window.currentInvite && typeof declineGroupInvite === 'function') {
                 declineGroupInvite(window.currentInvite);
             }
         });
@@ -4825,7 +4851,7 @@ function showMobileSection(section) {
             break;
     }
     
-    updateCurrentSection();
+    if (typeof updateCurrentSection === 'function') updateCurrentSection();
 }
 
 // Render my groups
@@ -4953,7 +4979,7 @@ function addGroupInviteItem(inviteData, container) {
     
     inviteItem.addEventListener('click', (e) => {
         if (!e.target.closest('.group-actions')) {
-            showGroupInviteDetails(inviteData);
+            if (typeof showGroupInviteDetails === 'function') showGroupInviteDetails(inviteData);
         }
     });
     
@@ -4963,9 +4989,9 @@ function addGroupInviteItem(inviteData, container) {
             e.stopPropagation();
             const action = btn.dataset.action;
             if (action === 'accept-invite') {
-                acceptGroupInvite(inviteData);
+                if (typeof acceptGroupInvite === 'function') acceptGroupInvite(inviteData);
             } else if (action === 'decline-invite') {
-                declineGroupInvite(inviteData);
+                if (typeof declineGroupInvite === 'function') declineGroupInvite(inviteData);
             }
         });
     });

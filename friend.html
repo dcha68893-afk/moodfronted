@@ -736,6 +736,19 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
+    <!-- Load api.js first, then initialize the page -->
+    <script type="module">
+        // Import api.js module
+        import * as apiModule from '../js/api.js';
+        
+        // Make apiCall globally available for backward compatibility
+        window.apiCall = apiModule.apiCall;
+        window.apiReady = true;
+        
+        // Now initialize the friends page
+        console.log('API module loaded, initializing friends page...');
+    </script>
+    
     <script>
         // =============================================
         // BOOTSTRAP FUNCTION - SINGLE ENTRY POINT
@@ -1066,8 +1079,14 @@
                 </div>
             `;
             
-            // Start bootstrap process
-            await bootstrapIframe();
+            // Wait for api.js to load
+            const checkApiReady = setInterval(() => {
+                if (window.apiReady) {
+                    clearInterval(checkApiReady);
+                    // Start bootstrap process
+                    bootstrapIframe();
+                }
+            }, 100);
         });
         
         // Load initial data from API

@@ -651,15 +651,20 @@ async function loadFromLocalStorage() {
             console.log('User loaded from cache:', currentUser);
             
             // Update UI
-            document.getElementById('userNamePreview').textContent = currentUser.displayName || 'User';
+            const userNamePreview = document.getElementById('userNamePreview');
+            const userAvatarPreview = document.getElementById('userAvatarPreview');
             
-            if (currentUser.photoURL) {
-                document.getElementById('userAvatarPreview').style.backgroundImage = `url('${currentUser.photoURL}')`;
-            } else {
-                const initials = currentUser.displayName ? 
-                    currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                    'U';
-                document.getElementById('userAvatarPreview').innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+            if (userNamePreview) userNamePreview.textContent = currentUser.displayName || 'User';
+            
+            if (userAvatarPreview) {
+                if (currentUser.photoURL) {
+                    userAvatarPreview.style.backgroundImage = `url('${currentUser.photoURL}')`;
+                } else {
+                    const initials = currentUser.displayName ? 
+                        currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                        'U';
+                    userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+                }
             }
         } catch (e) {
             console.error('Error parsing cached user:', e);
@@ -706,15 +711,20 @@ async function loadUserData() {
             console.log('User loaded from API:', currentUser);
             
             // Update UI
-            document.getElementById('userNamePreview').textContent = currentUser.displayName || 'User';
+            const userNamePreview = document.getElementById('userNamePreview');
+            const userAvatarPreview = document.getElementById('userAvatarPreview');
             
-            if (currentUser.photoURL) {
-                document.getElementById('userAvatarPreview').style.backgroundImage = `url('${currentUser.photoURL}')`;
-            } else {
-                const initials = currentUser.displayName ? 
-                    currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                    'U';
-                document.getElementById('userAvatarPreview').innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+            if (userNamePreview) userNamePreview.textContent = currentUser.displayName || 'User';
+            
+            if (userAvatarPreview) {
+                if (currentUser.photoURL) {
+                    userAvatarPreview.style.backgroundImage = `url('${currentUser.photoURL}')`;
+                } else {
+                    const initials = currentUser.displayName ? 
+                        currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                        'U';
+                    userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+                }
             }
             
             // Save to localStorage as cache
@@ -811,8 +821,10 @@ function initializeUI() {
     }
     
     // Enable buttons
-    document.getElementById('resetSectionBtn').disabled = false;
-    document.getElementById('saveSectionBtn').disabled = false;
+    const resetBtn = document.getElementById('resetSectionBtn');
+    const saveBtn = document.getElementById('saveSectionBtn');
+    if (resetBtn) resetBtn.disabled = false;
+    if (saveBtn) saveBtn.disabled = false;
     updateSaveButton();
 }
 
@@ -823,6 +835,8 @@ function initializeUI() {
 // Build settings menu
 function buildSettingsMenu() {
     const menuContainer = document.getElementById('settingsMenu');
+    if (!menuContainer) return;
+    
     menuContainer.innerHTML = '';
     
     SETTINGS_MENU.forEach(item => {
@@ -870,6 +884,7 @@ function loadSection(sectionId) {
     
     // Load section content
     const contentContainer = document.getElementById('settingsContent');
+    if (!contentContainer) return;
     
     switch(sectionId) {
         case 'profile':
@@ -941,8 +956,11 @@ function loadSection(sectionId) {
 function updateSectionTitle(sectionId) {
     const menuItem = SETTINGS_MENU.find(item => item.id === sectionId);
     if (menuItem) {
-        document.getElementById('contentTitle').textContent = menuItem.title;
-        document.getElementById('contentSubtitle').textContent = getSectionDescription(sectionId);
+        const contentTitle = document.getElementById('contentTitle');
+        const contentSubtitle = document.getElementById('contentSubtitle');
+        
+        if (contentTitle) contentTitle.textContent = menuItem.title;
+        if (contentSubtitle) contentSubtitle.textContent = getSectionDescription(sectionId);
     }
 }
 
@@ -976,6 +994,8 @@ function getSectionDescription(sectionId) {
 // Update save button state
 function updateSaveButton() {
     const saveBtn = document.getElementById('saveSectionBtn');
+    if (!saveBtn) return;
+    
     if (unsavedChanges) {
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
@@ -992,39 +1012,51 @@ function updateSaveButton() {
 // Setup event listeners
 function setupEventListeners() {
     // Back to app button
-    document.getElementById('backToAppBtn').addEventListener('click', () => {
-        if (unsavedChanges) {
-            showConfirmation(
-                'Unsaved Changes',
-                'You have unsaved changes. Are you sure you want to leave?',
-                () => {
-                    // Close iframe by navigating to main app
-                    window.location.href = '/index.html';
-                }
-            );
-        } else {
-            window.location.href = '/index.html';
-        }
-    });
+    const backToAppBtn = document.getElementById('backToAppBtn');
+    if (backToAppBtn) {
+        backToAppBtn.addEventListener('click', () => {
+            if (unsavedChanges) {
+                showConfirmation(
+                    'Unsaved Changes',
+                    'You have unsaved changes. Are you sure you want to leave?',
+                    () => {
+                        // Close iframe by navigating to main app
+                        window.location.href = '/index.html';
+                    }
+                );
+            } else {
+                window.location.href = '/index.html';
+            }
+        });
+    }
     
     // Save section button
-    document.getElementById('saveSectionBtn').addEventListener('click', saveSettings);
+    const saveSectionBtn = document.getElementById('saveSectionBtn');
+    if (saveSectionBtn) {
+        saveSectionBtn.addEventListener('click', saveSettings);
+    }
     
     // Reset section button
-    document.getElementById('resetSectionBtn').addEventListener('click', () => {
-        showConfirmation(
-            'Reset Section',
-            'Are you sure you want to reset all settings in this section to default?',
-            () => {
-                resetCurrentSection();
-            }
-        );
-    });
+    const resetSectionBtn = document.getElementById('resetSectionBtn');
+    if (resetSectionBtn) {
+        resetSectionBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Reset Section',
+                'Are you sure you want to reset all settings in this section to default?',
+                () => {
+                    resetCurrentSection();
+                }
+            );
+        });
+    }
     
     // Search input
-    document.getElementById('settingsSearch').addEventListener('input', function(e) {
-        searchSettings(e.target.value);
-    });
+    const settingsSearch = document.getElementById('settingsSearch');
+    if (settingsSearch) {
+        settingsSearch.addEventListener('input', function(e) {
+            searchSettings(e.target.value);
+        });
+    }
     
     // Modal close buttons
     setupModalListeners();
@@ -1036,7 +1068,10 @@ function setupEventListeners() {
     setupPasswordModalListeners();
     
     // Sessions modal
-    document.getElementById('terminateAllSessionsBtn').addEventListener('click', terminateAllSessions);
+    const terminateAllSessionsBtn = document.getElementById('terminateAllSessionsBtn');
+    if (terminateAllSessionsBtn) {
+        terminateAllSessionsBtn.addEventListener('click', terminateAllSessions);
+    }
     
     // Before unload warning
     window.addEventListener('beforeunload', (e) => {
@@ -1059,9 +1094,13 @@ function setupModalListeners() {
     ];
     
     closeButtons.forEach(btn => {
-        document.getElementById(btn.id).addEventListener('click', () => {
-            document.getElementById(btn.modal).classList.remove('active');
-        });
+        const button = document.getElementById(btn.id);
+        const modal = document.getElementById(btn.modal);
+        if (button && modal) {
+            button.addEventListener('click', () => {
+                modal.classList.remove('active');
+            });
+        }
     });
     
     // Cancel buttons
@@ -1074,28 +1113,52 @@ function setupModalListeners() {
     ];
     
     cancelButtons.forEach(btn => {
-        document.getElementById(btn.id).addEventListener('click', () => {
-            document.getElementById(btn.modal).classList.remove('active');
-        });
+        const button = document.getElementById(btn.id);
+        const modal = document.getElementById(btn.modal);
+        if (button && modal) {
+            button.addEventListener('click', () => {
+                modal.classList.remove('active');
+            });
+        }
     });
 }
 
 // Setup photo modal listeners
 function setupPhotoModalListeners() {
-    document.getElementById('takePhotoBtn').addEventListener('click', takePhoto);
-    document.getElementById('choosePhotoBtn').addEventListener('click', choosePhoto);
-    document.getElementById('removePhotoBtn').addEventListener('click', removePhoto);
-    document.getElementById('savePhotoBtn').addEventListener('click', savePhoto);
+    const takePhotoBtn = document.getElementById('takePhotoBtn');
+    if (takePhotoBtn) {
+        takePhotoBtn.addEventListener('click', takePhoto);
+    }
+    
+    const choosePhotoBtn = document.getElementById('choosePhotoBtn');
+    if (choosePhotoBtn) {
+        choosePhotoBtn.addEventListener('click', choosePhoto);
+    }
+    
+    const removePhotoBtn = document.getElementById('removePhotoBtn');
+    if (removePhotoBtn) {
+        removePhotoBtn.addEventListener('click', removePhoto);
+    }
+    
+    const savePhotoBtn = document.getElementById('savePhotoBtn');
+    if (savePhotoBtn) {
+        savePhotoBtn.addEventListener('click', savePhoto);
+    }
 }
 
 // Setup password modal listeners
 function setupPasswordModalListeners() {
-    document.getElementById('savePasswordBtn').addEventListener('click', changePassword);
+    const savePasswordBtn = document.getElementById('savePasswordBtn');
+    if (savePasswordBtn) {
+        savePasswordBtn.addEventListener('click', changePassword);
+    }
 }
 
 // Initialize color picker
 function initializeColorPicker() {
     const container = document.getElementById('colorPickerContainer');
+    if (!container) return;
+    
     colorPicker = Pickr.create({
         el: container,
         theme: 'nano',
@@ -1193,6 +1256,8 @@ function searchSettings(query) {
     
     // Search in settings
     const contentContainer = document.getElementById('settingsContent');
+    if (!contentContainer) return;
+    
     const results = [];
     
     // Search through all settings
@@ -1261,6 +1326,8 @@ function showNotification(message, type = 'success') {
     const notification = document.getElementById('notification');
     const notificationText = document.getElementById('notificationText');
     
+    if (!notification || !notificationText) return;
+    
     notificationText.textContent = message;
     notification.className = 'notification';
     notification.classList.add(type);
@@ -1273,10 +1340,15 @@ function showNotification(message, type = 'success') {
 
 // Show confirmation dialog
 function showConfirmation(title, message, confirmCallback) {
-    document.getElementById('confirmationTitle').textContent = title;
-    document.getElementById('confirmationMessage').textContent = message;
-    
+    const confirmationTitle = document.getElementById('confirmationTitle');
+    const confirmationMessage = document.getElementById('confirmationMessage');
     const modal = document.getElementById('confirmationModal');
+    
+    if (!confirmationTitle || !confirmationMessage || !modal) return;
+    
+    confirmationTitle.textContent = title;
+    confirmationMessage.textContent = message;
+    
     modal.classList.add('active');
     
     const confirmBtn = document.getElementById('confirmActionBtn');
@@ -1286,8 +1358,13 @@ function showConfirmation(title, message, confirmCallback) {
     };
     
     // Remove old listeners and add new one
-    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
-    document.getElementById('confirmActionBtn').addEventListener('click', newConfirmCallback);
+    if (confirmBtn) {
+        confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+        const newConfirmBtn = document.getElementById('confirmActionBtn');
+        if (newConfirmBtn) {
+            newConfirmBtn.addEventListener('click', newConfirmCallback);
+        }
+    }
 }
 
 // Reset current section
@@ -1305,6 +1382,8 @@ function resetCurrentSection() {
 function updateUserStatus() {
     const statusIndicator = document.getElementById('userStatusIndicator');
     const statusText = document.getElementById('userStatusText');
+    
+    if (!statusIndicator || !statusText) return;
     
     // For now, set to online
     statusIndicator.style.backgroundColor = 'var(--success-color)';
@@ -1465,6 +1544,10 @@ async function loadUserGroups() {
 // Show active sessions
 function showActiveSessions() {
     const sessionsList = document.getElementById('sessionsList');
+    const sessionsModal = document.getElementById('sessionsModal');
+    
+    if (!sessionsList || !sessionsModal) return;
+    
     sessionsList.innerHTML = '';
     
     // Add current session
@@ -1509,12 +1592,16 @@ function showActiveSessions() {
         });
     });
     
-    document.getElementById('sessionsModal').classList.add('active');
+    sessionsModal.classList.add('active');
 }
 
 // Show blocked users
 function showBlockedUsers() {
     const blockedUsersList = document.getElementById('blockedUsersList');
+    const blockedUsersModal = document.getElementById('blockedUsersModal');
+    
+    if (!blockedUsersList || !blockedUsersModal) return;
+    
     blockedUsersList.innerHTML = '';
     
     if (blockedUsers.length === 0) {
@@ -1546,7 +1633,7 @@ function showBlockedUsers() {
         });
     }
     
-    document.getElementById('blockedUsersModal').classList.add('active');
+    blockedUsersModal.classList.add('active');
 }
 
 // Terminate session
@@ -1610,14 +1697,20 @@ function removePhoto() {
             userSettings.profile.photoUrl = '';
             if (currentUser) {
                 currentUser.photoURL = '';
-                document.getElementById('userAvatarPreview').style.backgroundImage = '';
-                const initials = currentUser.displayName ? 
-                    currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                    'U';
-                document.getElementById('userAvatarPreview').innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+                const userAvatarPreview = document.getElementById('userAvatarPreview');
+                if (userAvatarPreview) {
+                    userAvatarPreview.style.backgroundImage = '';
+                    const initials = currentUser.displayName ? 
+                        currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                        'U';
+                    userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+                }
             }
             showNotification('Profile photo removed', 'success');
-            document.getElementById('changePhotoModal').classList.remove('active');
+            const changePhotoModal = document.getElementById('changePhotoModal');
+            if (changePhotoModal) {
+                changePhotoModal.classList.remove('active');
+            }
         }
     );
 }
@@ -1625,27 +1718,33 @@ function removePhoto() {
 // Save photo
 function savePhoto() {
     showNotification('Profile photo saved', 'success');
-    document.getElementById('changePhotoModal').classList.remove('active');
+    const changePhotoModal = document.getElementById('changePhotoModal');
+    if (changePhotoModal) {
+        changePhotoModal.classList.remove('active');
+    }
 }
 
 // Change password
 async function changePassword() {
-    const currentPassword = document.getElementById('currentPassword').value;
-    const newPassword = document.getElementById('newPassword').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
+    const currentPassword = document.getElementById('currentPassword');
+    const newPassword = document.getElementById('newPassword');
+    const confirmPassword = document.getElementById('confirmPassword');
     const passwordError = document.getElementById('passwordError');
+    const changePasswordModal = document.getElementById('changePasswordModal');
+    
+    if (!currentPassword || !newPassword || !confirmPassword || !passwordError || !changePasswordModal) return;
     
     // Reset error
     passwordError.style.display = 'none';
     
     // Validation
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if (!currentPassword.value || !newPassword.value || !confirmPassword.value) {
         passwordError.textContent = 'All fields are required';
         passwordError.style.display = 'block';
         return;
     }
     
-    if (newPassword !== confirmPassword) {
+    if (newPassword.value !== confirmPassword.value) {
         passwordError.textContent = 'New passwords do not match';
         passwordError.style.display = 'block';
         return;
@@ -1653,7 +1752,7 @@ async function changePassword() {
     
     // Password requirements
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passwordRegex.test(newPassword)) {
+    if (!passwordRegex.test(newPassword.value)) {
         passwordError.textContent = 'Password does not meet requirements';
         passwordError.style.display = 'block';
         return;
@@ -1662,17 +1761,17 @@ async function changePassword() {
     try {
         console.log('Changing password via API...');
         await makeAuthenticatedRequest('POST', '/api/auth/change-password', {
-            currentPassword,
-            newPassword
+            currentPassword: currentPassword.value,
+            newPassword: newPassword.value
         });
         
         showNotification('Password changed successfully', 'success');
-        document.getElementById('changePasswordModal').classList.remove('active');
+        changePasswordModal.classList.remove('active');
         
         // Clear form
-        document.getElementById('currentPassword').value = '';
-        document.getElementById('newPassword').value = '';
-        document.getElementById('confirmPassword').value = '';
+        currentPassword.value = '';
+        newPassword.value = '';
+        confirmPassword.value = '';
         
     } catch (error) {
         console.error('Error changing password:', error);
@@ -1683,6 +1782,8 @@ async function changePassword() {
 
 // Edit mood color
 function editMoodColor(mood) {
+    if (!colorPicker) return;
+    
     const currentColor = userSettings.mood.moodColors[mood];
     colorPicker.setColor(currentColor);
     colorPicker.show();
@@ -1959,9 +2060,15 @@ function loadProfileSection(container) {
     `;
     
     // Add event listeners for profile section
-    document.getElementById('changePhotoBtn').addEventListener('click', () => {
-        document.getElementById('changePhotoModal').classList.add('active');
-    });
+    const changePhotoBtn = document.getElementById('changePhotoBtn');
+    if (changePhotoBtn) {
+        changePhotoBtn.addEventListener('click', () => {
+            const changePhotoModal = document.getElementById('changePhotoModal');
+            if (changePhotoModal) {
+                changePhotoModal.classList.add('active');
+            }
+        });
+    }
     
     // Input change listeners
     const inputs = ['displayNameInput', 'usernameInput', 'bioInput', 'phoneNumberInput', 'emailInput', 'moodTextInput'];
@@ -1976,7 +2083,10 @@ function loadProfileSection(container) {
                 
                 // Update user name in sidebar if display name changes
                 if (id === 'displayNameInput' && currentUser) {
-                    document.getElementById('userNamePreview').textContent = element.value || 'User';
+                    const userNamePreview = document.getElementById('userNamePreview');
+                    if (userNamePreview) {
+                        userNamePreview.textContent = element.value || 'User';
+                    }
                 }
             });
         }
@@ -2250,13 +2360,22 @@ function loadSecuritySection(container) {
     `;
     
     // Add event listeners for security section
-    document.getElementById('changePasswordBtn').addEventListener('click', () => {
-        document.getElementById('changePasswordModal').classList.add('active');
-    });
+    const changePasswordBtn = document.getElementById('changePasswordBtn');
+    if (changePasswordBtn) {
+        changePasswordBtn.addEventListener('click', () => {
+            const changePasswordModal = document.getElementById('changePasswordModal');
+            if (changePasswordModal) {
+                changePasswordModal.classList.add('active');
+            }
+        });
+    }
     
-    document.getElementById('viewSessionsBtn').addEventListener('click', () => {
-        showActiveSessions();
-    });
+    const viewSessionsBtn = document.getElementById('viewSessionsBtn');
+    if (viewSessionsBtn) {
+        viewSessionsBtn.addEventListener('click', () => {
+            showActiveSessions();
+        });
+    }
     
     // Toggle change listeners
     const toggles = ['twoFactorAuthToggle', 'loginNotificationsToggle', 'enhancedTimeoutToggle', 
@@ -2547,9 +2666,12 @@ function loadPrivacySection(container) {
     `;
     
     // Add event listeners for privacy section
-    document.getElementById('manageBlockedBtn').addEventListener('click', () => {
-        showBlockedUsers();
-    });
+    const manageBlockedBtn = document.getElementById('manageBlockedBtn');
+    if (manageBlockedBtn) {
+        manageBlockedBtn.addEventListener('click', () => {
+            showBlockedUsers();
+        });
+    }
     
     // Select change listeners
     const selects = ['whoCanAddMeSelect', 'canMessageMeSelect', 'canForwardMessagesSelect', 
@@ -2815,19 +2937,22 @@ function loadChatSection(container) {
     `;
     
     // Add event listeners for chat section
-    document.getElementById('changeWallpaperBtn').addEventListener('click', () => {
-        // In a real app, this would open a wallpaper selection dialog
-        showNotification('Select a wallpaper from your device or choose from defaults', 'info');
-        
-        // Simulate wallpaper selection
-        const wallpapers = ['default', 'gradient', 'pattern', 'solid', 'custom'];
-        const currentIndex = wallpapers.indexOf(settings.chatWallpaper);
-        const nextIndex = (currentIndex + 1) % wallpapers.length;
-        userSettings.chat.chatWallpaper = wallpapers[nextIndex];
-        unsavedChanges = true;
-        updateSaveButton();
-        showNotification(`Wallpaper set to ${wallpapers[nextIndex]}`, 'success');
-    });
+    const changeWallpaperBtn = document.getElementById('changeWallpaperBtn');
+    if (changeWallpaperBtn) {
+        changeWallpaperBtn.addEventListener('click', () => {
+            // In a real app, this would open a wallpaper selection dialog
+            showNotification('Select a wallpaper from your device or choose from defaults', 'info');
+            
+            // Simulate wallpaper selection
+            const wallpapers = ['default', 'gradient', 'pattern', 'solid', 'custom'];
+            const currentIndex = wallpapers.indexOf(settings.chatWallpaper);
+            const nextIndex = (currentIndex + 1) % wallpapers.length;
+            userSettings.chat.chatWallpaper = wallpapers[nextIndex];
+            unsavedChanges = true;
+            updateSaveButton();
+            showNotification(`Wallpaper set to ${wallpapers[nextIndex]}`, 'success');
+        });
+    }
     
     // Select change listeners
     const selects = ['mediaAutoDownloadSelect', 'messageHistorySelect', 'disappearingMessagesSelect'];
@@ -3846,10 +3971,13 @@ function loadStatusSection(container) {
     `;
     
     // Add event listeners for status section
-    document.getElementById('hideFromUsersBtn').addEventListener('click', () => {
-        // In a real app, this would open a user selection dialog
-        showNotification('Select users to hide your status from', 'info');
-    });
+    const hideFromUsersBtn = document.getElementById('hideFromUsersBtn');
+    if (hideFromUsersBtn) {
+        hideFromUsersBtn.addEventListener('click', () => {
+            // In a real app, this would open a user selection dialog
+            showNotification('Select users to hide your status from', 'info');
+        });
+    }
     
     // Select change listeners
     const selects = ['whoCanViewMyStatusSelect', 'autoExpireStatusSelect', 'replyPermissionsSelect', 'statusCacheSelect'];
@@ -4114,17 +4242,23 @@ function loadNotificationsSection(container) {
     `;
     
     // Add event listeners for notifications section
-    document.getElementById('allowMessagesFromBtn').addEventListener('click', () => {
-        // In a real app, this would open a contact selection dialog
-        showNotification('Select contacts allowed during Do Not Disturb', 'info');
-    });
+    const allowMessagesFromBtn = document.getElementById('allowMessagesFromBtn');
+    if (allowMessagesFromBtn) {
+        allowMessagesFromBtn.addEventListener('click', () => {
+            // In a real app, this would open a contact selection dialog
+            showNotification('Select contacts allowed during Do Not Disturb', 'info');
+        });
+    }
     
     // Select change listener
-    document.getElementById('scheduleSelect').addEventListener('change', function() {
-        userSettings.notifications.schedule = this.value;
-        unsavedChanges = true;
-        updateSaveButton();
-    });
+    const scheduleSelect = document.getElementById('scheduleSelect');
+    if (scheduleSelect) {
+        scheduleSelect.addEventListener('change', function() {
+            userSettings.notifications.schedule = this.value;
+            unsavedChanges = true;
+            updateSaveButton();
+        });
+    }
     
     // Toggle change listeners
     const toggles = ['messageNotificationsToggle', 'groupNotificationsToggle', 'friendRequestNotificationsToggle',
@@ -4449,17 +4583,25 @@ function loadAppearanceSection(container) {
     });
     
     // Color picker
-    document.getElementById('accentColorPicker').addEventListener('click', function() {
-        colorPicker.show();
-    });
+    const accentColorPicker = document.getElementById('accentColorPicker');
+    if (accentColorPicker) {
+        accentColorPicker.addEventListener('click', function() {
+            if (colorPicker) {
+                colorPicker.show();
+            }
+        });
+    }
     
     // Font size slider
-    document.getElementById('fontSizeSlider').addEventListener('input', function() {
-        userSettings.appearance.fontSize = parseInt(this.value);
-        unsavedChanges = true;
-        updateSaveButton();
-        applyFontSize(this.value);
-    });
+    const fontSizeSlider = document.getElementById('fontSizeSlider');
+    if (fontSizeSlider) {
+        fontSizeSlider.addEventListener('input', function() {
+            userSettings.appearance.fontSize = parseInt(this.value);
+            unsavedChanges = true;
+            updateSaveButton();
+            applyFontSize(this.value);
+        });
+    }
     
     // Select change listeners
     const selects = ['languageSelect', 'timeFormatSelect', 'dateFormatSelect', 'buttonStylesSelect'];
@@ -4610,32 +4752,41 @@ function loadStorageSection(container) {
     `;
     
     // Add event listeners for storage section
-    document.getElementById('clearChatCacheBtn').addEventListener('click', () => {
-        showConfirmation(
-            'Clear Chat Cache',
-            'Are you sure you want to clear all chat cache? This will remove temporary chat data but not your messages.',
-            () => {
-                clearChatCache();
-            }
-        );
-    });
+    const clearChatCacheBtn = document.getElementById('clearChatCacheBtn');
+    if (clearChatCacheBtn) {
+        clearChatCacheBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Clear Chat Cache',
+                'Are you sure you want to clear all chat cache? This will remove temporary chat data but not your messages.',
+                () => {
+                    clearChatCache();
+                }
+            );
+        });
+    }
     
-    document.getElementById('clearMediaCacheBtn').addEventListener('click', () => {
-        showConfirmation(
-            'Clear Media Cache',
-            'Are you sure you want to clear all media cache? This will remove downloaded media files but they can be re-downloaded.',
-            () => {
-                clearMediaCache();
-            }
-        );
-    });
+    const clearMediaCacheBtn = document.getElementById('clearMediaCacheBtn');
+    if (clearMediaCacheBtn) {
+        clearMediaCacheBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Clear Media Cache',
+                'Are you sure you want to clear all media cache? This will remove downloaded media files but they can be re-downloaded.',
+                () => {
+                    clearMediaCache();
+                }
+            );
+        });
+    }
     
     // Select change listener
-    document.getElementById('autoClearCacheSelect').addEventListener('change', function() {
-        userSettings.storage.autoClearCache = this.value;
-        unsavedChanges = true;
-        updateSaveButton();
-    });
+    const autoClearCacheSelect = document.getElementById('autoClearCacheSelect');
+    if (autoClearCacheSelect) {
+        autoClearCacheSelect.addEventListener('change', function() {
+            userSettings.storage.autoClearCache = this.value;
+            unsavedChanges = true;
+            updateSaveButton();
+        });
+    }
 }
 
 // MOOD SETTINGS SECTION (24 features) - FULLY IMPLEMENTED
@@ -5887,17 +6038,27 @@ function loadSafetySection(container) {
                         </button>
                     </div>
                 </div>
-                
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-user-check section-icon"></i> Always Visible To</h3>
+                <div class="section-description">
+                    Users who can always see your online status
+                </div>
+            </div>
+            <div class="section-body">
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Always Visible To</div>
                         <div class="setting-description">
-                            Always show online status to specific contacts
+                            Select users who can always see you online
                         </div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="alwaysVisibleToBtn">
-                            <i class="fas fa-eye"></i> Select
+                            <i class="fas fa-user-check"></i> Select
                         </button>
                     </div>
                 </div>
@@ -5906,9 +6067,9 @@ function loadSafetySection(container) {
         
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-shield-alt section-icon"></i> Enhanced Security</h3>
+                <h3><i class="fas fa-cog section-icon"></i> Safety Features</h3>
                 <div class="section-description">
-                    Additional security features
+                    Enhanced safety and privacy features
                 </div>
             </div>
             <div class="section-body">
@@ -5940,6 +6101,7 @@ function loadSafetySection(container) {
                             <option value="5min" ${settings.lockScreenAfter === '5min' ? 'selected' : ''}>5 Minutes</option>
                             <option value="15min" ${settings.lockScreenAfter === '15min' ? 'selected' : ''}>15 Minutes</option>
                             <option value="30min" ${settings.lockScreenAfter === '30min' ? 'selected' : ''}>30 Minutes</option>
+                            <option value="never" ${settings.lockScreenAfter === 'never' ? 'selected' : ''}>Never</option>
                         </select>
                     </div>
                 </div>
@@ -5956,6 +6118,8 @@ function loadSafetySection(container) {
                             <option value="1hr" ${settings.logoutAfter === '1hr' ? 'selected' : ''}>1 Hour</option>
                             <option value="4hr" ${settings.logoutAfter === '4hr' ? 'selected' : ''}>4 Hours</option>
                             <option value="8hr" ${settings.logoutAfter === '8hr' ? 'selected' : ''}>8 Hours</option>
+                            <option value="24hr" ${settings.logoutAfter === '24hr' ? 'selected' : ''}>24 Hours</option>
+                            <option value="never" ${settings.logoutAfter === 'never' ? 'selected' : ''}>Never</option>
                         </select>
                     </div>
                 </div>
@@ -5994,13 +6158,19 @@ function loadSafetySection(container) {
     `;
     
     // Add event listeners for safety section
-    document.getElementById('hideFromContactsBtn').addEventListener('click', () => {
-        showNotification('Select contacts to hide from while invisible', 'info');
-    });
+    const hideFromContactsBtn = document.getElementById('hideFromContactsBtn');
+    if (hideFromContactsBtn) {
+        hideFromContactsBtn.addEventListener('click', () => {
+            showNotification('Select contacts to hide from while invisible', 'info');
+        });
+    }
     
-    document.getElementById('alwaysVisibleToBtn').addEventListener('click', () => {
-        showNotification('Select contacts who can always see your online status', 'info');
-    });
+    const alwaysVisibleToBtn = document.getElementById('alwaysVisibleToBtn');
+    if (alwaysVisibleToBtn) {
+        alwaysVisibleToBtn.addEventListener('click', () => {
+            showNotification('Select contacts who can always see your online status', 'info');
+        });
+    }
     
     // Select change listeners
     const selects = ['invisibleDurationSelect', 'safetyLockScreenAfterSelect', 'safetyLogoutAfterSelect'];
@@ -6040,7 +6210,7 @@ function loadAdvancedSection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-cogs section-icon"></i> Advanced Features</h3>
                 <div class="section-description">
-                    Developer and advanced user settings
+                    Developer and advanced user options
                 </div>
             </div>
             <div class="section-body">
@@ -6063,7 +6233,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Intranet Support</div>
                         <div class="setting-description">
-                            Enable local network communication
+                            Enable support for local network communication
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6078,7 +6248,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Low Bandwidth Mode</div>
                         <div class="setting-description">
-                            Reduce data usage for slow connections
+                            Optimize for slower internet connections
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6093,7 +6263,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Debug Mode</div>
                         <div class="setting-description">
-                            Enable debugging and logging
+                            Enable debugging and logging features
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6108,7 +6278,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Data Saver</div>
                         <div class="setting-description">
-                            Reduce data usage for all operations
+                            Reduce data usage by limiting media quality
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6123,8 +6293,7 @@ function loadAdvancedSection(container) {
     `;
     
     // Toggle change listeners
-    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle', 
-                   'debugModeToggle', 'dataSaverToggle'];
+    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle', 'debugModeToggle', 'dataSaverToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6147,7 +6316,7 @@ function loadBackupSection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-cloud-upload-alt section-icon"></i> Backup Settings</h3>
                 <div class="section-description">
-                    Configure automatic backups
+                    Configure automatic backups for your data
                 </div>
             </div>
             <div class="section-body">
@@ -6170,7 +6339,7 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Frequency</div>
                         <div class="setting-description">
-                            How often to backup your data
+                            How often to create backups
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6186,14 +6355,13 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Location</div>
                         <div class="setting-description">
-                            Where to store backups
+                            Where to store your backups
                         </div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="backupLocationSelect">
                             <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud</option>
                             <option value="local" ${settings.backupLocation === 'local' ? 'selected' : ''}>Local Device</option>
-                            <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both</option>
                         </select>
                     </div>
                 </div>
@@ -6226,12 +6394,12 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Create Backup Now</div>
                         <div class="setting-description">
-                            Manually create a backup
+                            Manually create a backup of your data
                         </div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="createBackupBtn">
-                            <i class="fas fa-save"></i> Backup Now
+                            <i class="fas fa-cloud-upload-alt"></i> Backup Now
                         </button>
                     </div>
                 </div>
@@ -6240,12 +6408,12 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Restore from Backup</div>
                         <div class="setting-description">
-                            Restore your data from a backup
+                            Restore your data from a previous backup
                         </div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="restoreBackupBtn">
-                            <i class="fas fa-history"></i> Restore
+                            <i class="fas fa-cloud-download-alt"></i> Restore
                         </button>
                     </div>
                 </div>
@@ -6254,25 +6422,36 @@ function loadBackupSection(container) {
     `;
     
     // Add event listeners for backup section
-    document.getElementById('createBackupBtn').addEventListener('click', () => {
-        showNotification('Creating backup...', 'info');
-        setTimeout(() => {
-            showNotification('Backup created successfully', 'success');
-        }, 2000);
-    });
+    const createBackupBtn = document.getElementById('createBackupBtn');
+    if (createBackupBtn) {
+        createBackupBtn.addEventListener('click', () => {
+            showNotification('Creating backup...', 'info');
+            setTimeout(() => {
+                userSettings.backup.lastBackup = new Date().toISOString();
+                userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024;
+                unsavedChanges = true;
+                updateSaveButton();
+                loadSection('backup');
+                showNotification('Backup created successfully', 'success');
+            }, 1500);
+        });
+    }
     
-    document.getElementById('restoreBackupBtn').addEventListener('click', () => {
-        showConfirmation(
-            'Restore from Backup',
-            'Are you sure you want to restore from backup? This will overwrite your current data.',
-            () => {
-                showNotification('Restoring from backup...', 'info');
-                setTimeout(() => {
-                    showNotification('Restore completed successfully', 'success');
-                }, 2000);
-            }
-        );
-    });
+    const restoreBackupBtn = document.getElementById('restoreBackupBtn');
+    if (restoreBackupBtn) {
+        restoreBackupBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Restore from Backup',
+                'Are you sure you want to restore from backup? This will overwrite your current settings.',
+                () => {
+                    showNotification('Restoring from backup...', 'info');
+                    setTimeout(() => {
+                        showNotification('Settings restored from backup', 'success');
+                    }, 1500);
+                }
+            );
+        });
+    }
     
     // Select change listeners
     const selects = ['backupFrequencySelect', 'backupLocationSelect'];
@@ -6289,11 +6468,14 @@ function loadBackupSection(container) {
     });
     
     // Toggle change listener
-    document.getElementById('autoBackupToggle').addEventListener('change', function() {
-        userSettings.backup.autoBackup = this.checked;
-        unsavedChanges = true;
-        updateSaveButton();
-    });
+    const autoBackupToggle = document.getElementById('autoBackupToggle');
+    if (autoBackupToggle) {
+        autoBackupToggle.addEventListener('change', () => {
+            userSettings.backup.autoBackup = autoBackupToggle.checked;
+            unsavedChanges = true;
+            updateSaveButton();
+        });
+    }
 }
 
 // DANGER SECTION (7 features) - FULLY IMPLEMENTED
@@ -6301,48 +6483,48 @@ function loadDangerSection(container) {
     const settings = userSettings.danger || DEFAULT_SETTINGS.danger;
     
     container.innerHTML = `
-        <div class="settings-section danger-zone">
+        <div class="settings-section danger-section">
             <div class="section-header">
                 <h3><i class="fas fa-exclamation-triangle section-icon"></i> Danger Zone</h3>
                 <div class="section-description">
-                    Irreversible actions - proceed with caution
+                    Irreversible actions - proceed with extreme caution
                 </div>
             </div>
             <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Export All Data</div>
-                        <div class="setting-description">
-                            Download a copy of all your data
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Export Your Data</div>
+                        <div class="danger-description">
+                            Download a copy of all your data including messages, contacts, and settings
                         </div>
                     </div>
-                    <div class="setting-control">
-                        <button class="setting-button danger" id="exportDataBtn">
+                    <div class="danger-control">
+                        <button class="danger-button secondary" id="exportDataBtn">
                             <i class="fas fa-download"></i> Export Data
                         </button>
                     </div>
                 </div>
                 
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Last Export</div>
-                        <div class="setting-description">
-                            When your data was last exported
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Last Export</div>
+                        <div class="danger-description">
+                            When you last exported your data
                         </div>
                     </div>
-                    <div class="setting-control">
-                        <div class="setting-value">${settings.lastExport ? new Date(settings.lastExport).toLocaleString() : 'Never'}</div>
+                    <div class="danger-control">
+                        <div class="danger-value">${settings.lastExport ? new Date(settings.lastExport).toLocaleString() : 'Never exported'}</div>
                     </div>
                 </div>
                 
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Export Format</div>
-                        <div class="setting-description">
-                            Format for exported data
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Export Format</div>
+                        <div class="danger-description">
+                            Choose the format for your data export
                         </div>
                     </div>
-                    <div class="setting-control">
+                    <div class="danger-control">
                         <select class="setting-dropdown" id="exportFormatSelect">
                             <option value="json" ${settings.exportFormat === 'json' ? 'selected' : ''}>JSON</option>
                             <option value="csv" ${settings.exportFormat === 'csv' ? 'selected' : ''}>CSV</option>
@@ -6353,119 +6535,172 @@ function loadDangerSection(container) {
                 
                 <div class="danger-divider"></div>
                 
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Request Account Deletion</div>
-                        <div class="setting-description">
-                            Permanently delete your account and all data
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Deactivate Account</div>
+                        <div class="danger-description">
+                            Temporarily disable your account. You can reactivate it later by logging in.
                         </div>
                     </div>
-                    <div class="setting-control">
-                        <button class="setting-button danger" id="deleteAccountBtn">
-                            <i class="fas fa-trash"></i> Delete Account
+                    <div class="danger-control">
+                        <button class="danger-button warning" id="deactivateAccountBtn">
+                            <i class="fas fa-user-slash"></i> Deactivate
                         </button>
                     </div>
                 </div>
                 
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Account Deletion Status</div>
-                        <div class="setting-description">
-                            Current status of deletion request
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Delete Account</div>
+                        <div class="danger-description">
+                            Permanently delete your account and all associated data. This action cannot be undone.
                         </div>
                     </div>
-                    <div class="setting-control">
-                        <div class="setting-value">${settings.accountDeletionRequested ? 'Pending' : 'Not Requested'}</div>
+                    <div class="danger-control">
+                        <button class="danger-button danger" id="deleteAccountBtn">
+                            <i class="fas fa-trash-alt"></i> Delete Account
+                        </button>
                     </div>
                 </div>
                 
+                ${settings.accountDeletionRequested ? `
                 <div class="danger-warning">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <span>Warning: These actions are irreversible. Once deleted, your data cannot be recovered.</span>
+                    <div class="danger-warning-icon">
+                        <i class="fas fa-exclamation-circle"></i>
+                    </div>
+                    <div class="danger-warning-content">
+                        <div class="danger-warning-title">Account Deletion Scheduled</div>
+                        <div class="danger-warning-description">
+                            Your account is scheduled for deletion on ${settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleDateString() : 'unknown date'}. 
+                            You can cancel this request within the next 30 days.
+                        </div>
+                        <button class="danger-warning-button" id="cancelDeletionBtn">Cancel Deletion</button>
+                    </div>
                 </div>
+                ` : ''}
             </div>
         </div>
     `;
     
     // Add event listeners for danger section
-    document.getElementById('exportDataBtn').addEventListener('click', () => {
-        showConfirmation(
-            'Export All Data',
-            'This will create and download a copy of all your data. This may take a few minutes.',
-            () => {
-                showNotification('Exporting data...', 'info');
-                setTimeout(() => {
-                    showNotification('Data exported successfully', 'success');
-                    userSettings.danger.lastExport = new Date().toISOString();
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    loadSection('danger');
-                }, 2000);
-            }
-        );
-    });
-    
-    document.getElementById('deleteAccountBtn').addEventListener('click', () => {
-        showConfirmation(
-            'Delete Account',
-            'Are you absolutely sure? This will permanently delete your account and all associated data. This action cannot be undone.',
-            () => {
-                showConfirmation(
-                    'Final Warning',
-                    'This is your last chance to cancel. All your messages, contacts, photos, and settings will be permanently deleted.',
-                    () => {
-                        showNotification('Account deletion requested. You will receive a confirmation email.', 'warning');
-                        userSettings.danger.accountDeletionRequested = true;
-                        userSettings.danger.deletionScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days from now
+    const exportDataBtn = document.getElementById('exportDataBtn');
+    if (exportDataBtn) {
+        exportDataBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Export Data',
+                'This will create a download of all your data including messages, contacts, and settings. Continue?',
+                () => {
+                    showNotification('Preparing data export...', 'info');
+                    setTimeout(() => {
+                        userSettings.danger.lastExport = new Date().toISOString();
+                        userSettings.danger.dataExportRequested = true;
                         unsavedChanges = true;
                         updateSaveButton();
                         loadSection('danger');
-                    }
-                );
-            }
-        );
-    });
+                        showNotification('Data export prepared. Click to download.', 'success');
+                    }, 2000);
+                }
+            );
+        });
+    }
+    
+    const deactivateAccountBtn = document.getElementById('deactivateAccountBtn');
+    if (deactivateAccountBtn) {
+        deactivateAccountBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Deactivate Account',
+                'Your account will be temporarily disabled. You can reactivate it by logging in. Continue?',
+                () => {
+                    showNotification('Account deactivation requested', 'info');
+                }
+            );
+        });
+    }
+    
+    const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+    if (deleteAccountBtn) {
+        deleteAccountBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Delete Account',
+                'This will permanently delete your account and all associated data. This action cannot be undone. Are you absolutely sure?',
+                () => {
+                    showConfirmation(
+                        'Final Confirmation',
+                        'This is your last chance to cancel. Your account will be permanently deleted in 30 days. Continue?',
+                        () => {
+                            userSettings.danger.accountDeletionRequested = true;
+                            userSettings.danger.deletionScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+                            unsavedChanges = true;
+                            updateSaveButton();
+                            loadSection('danger');
+                            showNotification('Account deletion scheduled. You can cancel within 30 days.', 'warning');
+                        }
+                    );
+                }
+            );
+        });
+    }
+    
+    const cancelDeletionBtn = document.getElementById('cancelDeletionBtn');
+    if (cancelDeletionBtn) {
+        cancelDeletionBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Cancel Deletion',
+                'Cancel your account deletion request?',
+                () => {
+                    userSettings.danger.accountDeletionRequested = false;
+                    userSettings.danger.deletionScheduled = null;
+                    unsavedChanges = true;
+                    updateSaveButton();
+                    loadSection('danger');
+                    showNotification('Account deletion cancelled', 'success');
+                }
+            );
+        });
+    }
     
     // Select change listener
-    document.getElementById('exportFormatSelect').addEventListener('change', function() {
-        userSettings.danger.exportFormat = this.value;
-        unsavedChanges = true;
-        updateSaveButton();
-    });
+    const exportFormatSelect = document.getElementById('exportFormatSelect');
+    if (exportFormatSelect) {
+        exportFormatSelect.addEventListener('change', () => {
+            userSettings.danger.exportFormat = exportFormatSelect.value;
+            unsavedChanges = true;
+            updateSaveButton();
+        });
+    }
 }
 
 // =============================================
-// INITIALIZE APPLICATION
+// INITIALIZE THE SETTINGS IFRAME
 // =============================================
 
-// Wait for DOM to be ready
+// Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('Settings page loaded, starting bootstrap...');
+    console.log('Settings iframe DOM loaded');
     
-    // Start bootstrap process
+    // Run bootstrap and initialize
     const success = await bootstrapIframe();
     
     if (!success) {
         console.error('Failed to bootstrap settings iframe');
-        // Show error message to user
-        document.getElementById('settingsContent').innerHTML = `
-            <div class="settings-section">
-                <div class="section-header">
-                    <h3>Error Loading Settings</h3>
-                    <div class="section-description">
-                        Unable to load settings. Please check your authentication and try again.
+        const contentContainer = document.getElementById('settingsContent');
+        if (contentContainer) {
+            contentContainer.innerHTML = `
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-exclamation-triangle section-icon"></i> Initialization Failed</h3>
+                        <div class="section-description">
+                            Unable to load settings system
+                        </div>
+                    </div>
+                    <div class="section-body">
+                        <p>Failed to initialize the settings system. Please try refreshing the page or contact support.</p>
+                        <button class="setting-button primary" onclick="location.reload()">
+                            <i class="fas fa-redo"></i> Refresh Page
+                        </button>
                     </div>
                 </div>
-                <div class="section-body">
-                    <button class="setting-button primary" onclick="location.reload()">
-                        <i class="fas fa-redo"></i> Reload Page
-                    </button>
-                </div>
-            </div>
-        `;
+            `;
+        }
     }
 });
-
-// =============================================
-// END OF SETTINGS.JS
-// =============================================
