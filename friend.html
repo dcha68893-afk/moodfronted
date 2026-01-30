@@ -218,6 +218,11 @@
             0% { top: 0; }
             100% { top: 100%; }
         }
+        
+        /* Background loader - hidden from user */
+        .background-loader {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -355,9 +360,11 @@
                     <!-- All Friends Section -->
                     <div class="friends-section active" id="allFriendsSection">
                         <div class="friends-list" id="allFriendsList">
-                            <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                                <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i>
+                            <!-- Initial empty state - will be populated in background -->
+                            <div class="empty-state">
+                                <i class="fas fa-user-friends"></i>
                                 <p>Loading friends...</p>
+                                <p class="subtext">Please wait while we load your friends</p>
                             </div>
                         </div>
                     </div>
@@ -365,14 +372,14 @@
                     <!-- Contacts Section -->
                     <div class="friends-section" id="contactsSection">
                         <div class="friends-list" id="contactsList">
-                            <!-- Contacts will be loaded here -->
+                            <!-- Contacts will be loaded in background -->
                         </div>
                     </div>
                     
                     <!-- Friends Section -->
                     <div class="friends-section" id="friendsSection">
                         <div class="friends-list" id="friendsList">
-                            <!-- Approved friends will be loaded here -->
+                            <!-- Approved friends will be loaded in background -->
                         </div>
                     </div>
                     
@@ -383,7 +390,7 @@
                             <span class="section-count" id="requestsSectionCount">0</span>
                         </div>
                         <div class="friends-list" id="requestsList">
-                            <!-- Friend requests will be loaded here -->
+                            <!-- Friend requests will be loaded in background -->
                         </div>
                         
                         <div class="section-title" style="margin-top: 20px;">
@@ -391,28 +398,28 @@
                             <span class="section-count" id="sentRequestsCount">0</span>
                         </div>
                         <div class="friends-list" id="sentRequestsList">
-                            <!-- Sent friend requests will be loaded here -->
+                            <!-- Sent friend requests will be loaded in background -->
                         </div>
                     </div>
                     
                     <!-- Temporary Friends Section -->
                     <div class="friends-section" id="temporarySection">
                         <div class="friends-list" id="temporaryList">
-                            <!-- Temporary friends will be loaded here -->
+                            <!-- Temporary friends will be loaded in background -->
                         </div>
                     </div>
                     
                     <!-- Pinned Friends Section -->
                     <div class="friends-section" id="pinnedSection">
                         <div class="friends-list" id="pinnedList">
-                            <!-- Pinned friends will be loaded here -->
+                            <!-- Pinned friends will be loaded in background -->
                         </div>
                     </div>
                     
                     <!-- Muted Friends Section -->
                     <div class="friends-section" id="mutedSection">
                         <div class="friends-list" id="mutedList">
-                            <!-- Muted friends will be loaded here -->
+                            <!-- Muted friends will be loaded in background -->
                         </div>
                     </div>
                 </div>
@@ -550,7 +557,7 @@
                 <div class="add-friend-tab-content" id="qrTab">
                     <div class="qr-container">
                         <div class="qr-code" id="qrCodeContainer">
-                            <!-- QR code will be generated here -->
+                            <!-- QR code will be generated in background -->
                         </div>
                         <div class="qr-instructions">
                             Share this QR code with friends. When they scan it, they can send you a friend request.
@@ -622,7 +629,6 @@
                         </div>
                         
                         <div id="groupMembersList" style="max-height: 300px; overflow-y: auto; margin-top: 20px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
-                            <!-- Group members will appear here -->
                             <div style="text-align: center; padding: 30px; color: var(--text-secondary);">
                                 <i class="fas fa-users" style="font-size: 32px; margin-bottom: 10px;"></i>
                                 <p>Select a group to view members</p>
@@ -654,7 +660,6 @@
                         <div class="all-users-container">
                             <div class="all-users-title">All Knecta Users</div>
                             <div class="all-users-list" id="allUsersList">
-                                <!-- All users will be loaded here -->
                                 <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
                                     <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i>
                                     <p>Loading users...</p>
@@ -741,17 +746,17 @@
         // Import api.js module
         import * as apiModule from '../js/api.js';
         
-        // Make apiCall globally available for backward compatibility
+        // Make apiCall globally available
         window.apiCall = apiModule.apiCall;
         window.apiReady = true;
         
-        // Now initialize the friends page
-        console.log('API module loaded, initializing friends page...');
+        // Initialize page silently in background
+        console.log('API module loaded - Starting silent initialization');
     </script>
     
     <script>
         // =============================================
-        // BOOTSTRAP FUNCTION - SINGLE ENTRY POINT
+        // SILENT BACKGROUND INITIALIZATION
         // =============================================
         
         // Global variables
@@ -777,13 +782,14 @@
         let apiReady = false;
         let scanningActive = false;
         let qrCodeScanner = null;
+        let isInitialized = false;
+        let initializationStarted = false;
         
-        // Token management variables
+        // Token management
         let accessToken = null;
         let refreshToken = null;
-        let isRefreshingToken = false;
         
-        // Friend categories with colors and icons
+        // Friend categories
         const friendCategories = {
             'acquaintance': {
                 name: 'Acquaintance',
@@ -878,38 +884,112 @@
         };
         
         // =============================================
-        // SINGLE BOOTSTRAP FUNCTION
+        // SILENT INITIALIZATION FUNCTION
         // =============================================
         
-        async function bootstrapIframe() {
-            console.log('=== BOOTSTRAPPING FRIENDS PAGE ===');
+        async function silentInitialize() {
+            if (initializationStarted) return;
+            initializationStarted = true;
+            
+            console.log('=== STARTING SILENT INITIALIZATION ===');
             
             try {
-                // 1. Get token from localStorage
+                // 1. Wait for api.js to be ready (no console spam)
+                await waitForApiSilently();
+                
+                // 2. Check authentication in background
+                const isAuthenticated = await checkAuthenticationSilently();
+                
+                if (!isAuthenticated) {
+                    // Silently redirect to login if not authenticated
+                    setTimeout(() => {
+                        window.location.href = '../login.html';
+                    }, 100);
+                    return false;
+                }
+                
+                // 3. Load cached data instantly (no waiting)
+                loadCachedDataInstantly();
+                
+                // 4. Setup UI immediately
+                setupEventListeners();
+                
+                // 5. Generate QR code in background
+                setTimeout(generateUniqueQRCode, 100);
+                
+                // 6. Start background data loading
+                setTimeout(loadInitialDataInBackground, 300);
+                
+                // 7. Load all users in background
+                setTimeout(fetchAllUsersFromBackend, 1000);
+                
+                apiReady = true;
+                isInitialized = true;
+                
+                console.log('=== SILENT INITIALIZATION COMPLETE ===');
+                return true;
+                
+            } catch (error) {
+                console.error('Silent initialization error:', error);
+                // Even if there's an error, still show cached data
+                loadCachedDataInstantly();
+                setupEventListeners();
+                apiReady = false;
+                isInitialized = true;
+                return false;
+            }
+        }
+        
+        // Wait for API silently without console spam
+        async function waitForApiSilently() {
+            return new Promise((resolve) => {
+                let checkCount = 0;
+                const maxChecks = 50; // Max 5 seconds
+                
+                const checkApi = () => {
+                    checkCount++;
+                    
+                    if (window.apiCall && typeof window.apiCall === 'function') {
+                        resolve();
+                        return;
+                    }
+                    
+                    if (checkCount >= maxChecks) {
+                        console.log('API not available after timeout');
+                        resolve(); // Resolve anyway to continue
+                        return;
+                    }
+                    
+                    setTimeout(checkApi, 100);
+                };
+                
+                checkApi();
+            });
+        }
+        
+        // Check authentication silently
+        async function checkAuthenticationSilently() {
+            try {
+                // Get token from localStorage
                 const tokens = getTokensFromStorage();
                 accessToken = tokens.accessToken;
-                refreshToken = tokens.refreshToken;
                 
                 if (!accessToken) {
-                    console.error('No access token found');
-                    redirectToLogin('Please login to continue');
+                    console.log('No access token found');
                     return false;
                 }
                 
-                // 2. Verify token by calling /api/auth/me
-                console.log('Verifying authentication...');
-                const userResponse = await callApi('/api/auth/me');
+                // Verify token silently
+                const userResponse = await callApiSilently('/api/auth/me');
                 
                 if (!userResponse || !userResponse.user) {
-                    console.error('Authentication failed');
-                    redirectToLogin('Session expired. Please login again.');
+                    console.log('Authentication failed');
                     return false;
                 }
                 
-                // 3. Store user data
+                // Store user data
                 currentUser = userResponse.user;
                 userData = currentUser;
-                console.log('User authenticated:', currentUser.id, currentUser.username);
                 
                 // Save to cache
                 localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
@@ -923,334 +1003,217 @@
                 
                 localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
                 
-                // 4. Generate QR code
-                generateUniqueQRCode();
-                
-                // 5. Setup UI
-                setupEventListeners();
-                
-                // 6. Load cached data instantly for offline display
-                loadCachedDataInstantly();
-                
-                // 7. Load real data from API
-                await loadInitialData();
-                
-                // 8. Load all users in background
-                setTimeout(() => {
-                    fetchAllUsersFromBackend();
-                }, 1000);
-                
-                apiReady = true;
-                showNotification('Connected to server', 'success');
-                console.log('=== FRIENDS PAGE BOOTSTRAPPED SUCCESSFULLY ===');
-                
                 return true;
                 
             } catch (error) {
-                console.error('Bootstrap error:', error);
-                
-                if (error.status === 401 || error.status === 403) {
-                    redirectToLogin('Session expired. Please login again.');
-                } else {
-                    showNotification('Connection error. Using offline mode.', 'warning');
-                    loadCachedDataInstantly();
-                    setupEventListeners();
-                    apiReady = false;
-                }
-                
+                console.log('Authentication check error:', error);
                 return false;
             }
         }
         
-        // =============================================
-        // API HELPER FUNCTIONS
-        // =============================================
-        
-        // Get tokens from localStorage
-        function getTokensFromStorage() {
+        // Silent API call wrapper
+        async function callApiSilently(endpoint, options = {}) {
             try {
-                // Try multiple possible storage locations
-                const possibleTokenKeys = [
-                    'moodchat_token',
-                    'accessToken',
-                    'token',
-                    'knecta_token'
-                ];
-                
-                for (const key of possibleTokenKeys) {
-                    const token = localStorage.getItem(key);
-                    if (token) {
-                        accessToken = token;
-                        break;
-                    }
-                }
-                
-                refreshToken = localStorage.getItem('refreshToken') || 
-                              localStorage.getItem('refresh_token');
-                
-                return { accessToken, refreshToken };
-            } catch (error) {
-                console.error('Error getting tokens from storage:', error);
-                return { accessToken: null, refreshToken: null };
-            }
-        }
-        
-        // API call wrapper that uses api.js
-        async function callApi(endpoint, options = {}) {
-            try {
-                // Ensure api.js is loaded
                 if (typeof window.apiCall === 'function') {
                     return await window.apiCall(endpoint, options);
                 }
                 
-                // Fallback to direct fetch if api.js not available
+                // Fallback to direct fetch
                 const tokens = getTokensFromStorage();
                 if (!tokens.accessToken) {
-                    throw { status: 401, message: 'No access token' };
+                    throw { status: 401 };
                 }
-                
-                const defaultHeaders = {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${tokens.accessToken}`
-                };
                 
                 const response = await fetch(endpoint, {
                     ...options,
                     headers: {
-                        ...defaultHeaders,
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${tokens.accessToken}`,
                         ...(options.headers || {})
                     }
                 });
                 
                 if (!response.ok) {
-                    if (response.status === 401 || response.status === 403) {
-                        // Clear tokens and redirect
-                        clearAuthTokens();
-                        throw { status: response.status, message: 'Authentication failed' };
-                    }
-                    throw new Error(`API Error: ${response.status}`);
+                    throw new Error(`HTTP ${response.status}`);
                 }
                 
                 return await response.json();
                 
             } catch (error) {
-                console.error('API call error:', error);
                 throw error;
             }
         }
         
-        // Clear authentication tokens
-        function clearAuthTokens() {
-            const tokenKeys = [
-                'moodchat_token',
-                'accessToken',
-                'token',
-                'knecta_token',
-                'refreshToken',
-                'refresh_token'
-            ];
-            
-            tokenKeys.forEach(key => {
-                localStorage.removeItem(key);
-                sessionStorage.removeItem(key);
-            });
-        }
-        
-        // Redirect to login page
-        function redirectToLogin(message = 'Please login to continue') {
-            showNotification(message, 'error');
-            setTimeout(() => {
-                window.location.href = '../login.html';
-            }, 1500);
-        }
-        
         // =============================================
-        // INITIALIZATION
+        // BACKGROUND DATA LOADING
         // =============================================
         
-        document.addEventListener('DOMContentLoaded', async function() {
-            console.log('Friends page loaded - Starting bootstrap');
-            
-            // Show loading state
-            allFriendsList.innerHTML = `
-                <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i>
-                    <p>Loading friends...</p>
-                </div>
-            `;
-            
-            // Wait for api.js to load
-            const checkApiReady = setInterval(() => {
-                if (window.apiReady) {
-                    clearInterval(checkApiReady);
-                    // Start bootstrap process
-                    bootstrapIframe();
-                }
-            }, 100);
-        });
-        
-        // Load initial data from API
-        async function loadInitialData() {
+        async function loadInitialDataInBackground() {
             try {
-                console.log('Loading initial data from API...');
-                
                 // Load friends
-                try {
-                    const friendsResponse = await callApi('/api/friends');
-                    
-                    if (friendsResponse && friendsResponse.friends) {
-                        friends = friendsResponse.friends;
-                        console.log('Loaded friends from API:', friends.length);
-                        
-                        // Sort by online status first, then name
-                        friends.sort((a, b) => {
-                            if (a.online !== b.online) return b.online ? 1 : -1;
-                            return (a.displayName || '').localeCompare(b.displayName || '');
-                        });
-                        
-                        // Update counts
-                        document.getElementById('friendsCount').textContent = friends.length;
-                        updateFriendCounts();
-                        
-                        // Save to cache
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                    }
-                } catch (friendsError) {
-                    console.error('Error loading friends:', friendsError);
-                }
+                await loadFriendsFromBackend();
                 
                 // Load friend requests
-                try {
-                    const requestsResponse = await callApi('/api/friend-requests/incoming');
-                    
-                    if (requestsResponse && requestsResponse.requests) {
-                        friendRequests = requestsResponse.requests;
-                        document.getElementById('requestsCount').textContent = friendRequests.length;
-                        document.getElementById('requestsSectionCount').textContent = friendRequests.length;
-                        console.log('Loaded friend requests:', friendRequests.length);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
-                    }
-                } catch (requestsError) {
-                    console.error('Error loading friend requests:', requestsError);
-                }
+                await loadFriendRequestsFromBackend();
                 
                 // Load sent requests
-                try {
-                    const sentResponse = await callApi('/api/friend-requests/sent');
-                    
-                    if (sentResponse && sentResponse.requests) {
-                        sentRequests = sentResponse.requests;
-                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                        console.log('Loaded sent requests:', sentRequests.length);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
-                    }
-                } catch (sentError) {
-                    console.error('Error loading sent requests:', sentError);
-                }
+                await loadSentRequestsFromBackend();
                 
                 // Load pinned friends
-                try {
-                    const pinnedResponse = await callApi('/api/friends/pinned');
-                    
-                    if (pinnedResponse && pinnedResponse.friends) {
-                        pinnedFriends = pinnedResponse.friends;
-                        document.getElementById('pinnedCount').textContent = pinnedFriends.length;
-                        document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
-                        console.log('Loaded pinned friends:', pinnedFriends.length);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-                    }
-                } catch (pinnedError) {
-                    console.error('Error loading pinned friends:', pinnedError);
-                }
+                await loadPinnedFriendsFromBackend();
                 
                 // Load muted friends
-                try {
-                    const mutedResponse = await callApi('/api/friends/muted');
-                    
-                    if (mutedResponse && mutedResponse.friends) {
-                        mutedFriends = mutedResponse.friends;
-                        document.getElementById('mutedCount').textContent = mutedFriends.length;
-                        console.log('Loaded muted friends:', mutedFriends.length);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-                    }
-                } catch (mutedError) {
-                    console.error('Error loading muted friends:', mutedError);
-                }
+                await loadMutedFriendsFromBackend();
                 
                 // Load contacts
-                try {
-                    const contactsResponse = await callApi('/api/contacts/synced');
-                    
-                    if (contactsResponse && contactsResponse.contacts) {
-                        contacts = contactsResponse.contacts;
-                        document.getElementById('contactsCount').textContent = contacts.length;
-                        console.log('Loaded contacts:', contacts.length);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                    }
-                } catch (contactsError) {
-                    console.error('Error loading contacts:', contactsError);
-                }
+                await loadContactsFromBackend();
                 
                 // Load groups
-                try {
-                    const groupsResponse = await callApi('/api/groups/user');
-                    
-                    if (groupsResponse && groupsResponse.groups) {
-                        groups = groupsResponse.groups;
-                        console.log('Loaded groups:', groups.length);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
-                    }
-                } catch (groupsError) {
-                    console.error('Error loading groups:', groupsError);
-                }
+                await loadGroupsFromBackend();
                 
-                // Update UI
+                // Update UI silently
                 updateCurrentSection();
                 
-                showNotification('Data loaded successfully from server', 'success');
-                
             } catch (error) {
-                console.error('Error loading initial data:', error);
-                showNotification('Error loading data from server', 'error');
+                console.log('Background data loading error:', error);
             }
         }
         
-        // Load cached data instantly for offline use
+        // Individual data loading functions
+        async function loadFriendsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/friends');
+                
+                if (response && response.friends) {
+                    friends = response.friends;
+                    
+                    // Sort by online status first, then name
+                    friends.sort((a, b) => {
+                        if (a.online !== b.online) return b.online ? 1 : -1;
+                        return (a.displayName || '').localeCompare(b.displayName || '');
+                    });
+                    
+                    // Update counts
+                    document.getElementById('friendsCount').textContent = friends.length;
+                    updateFriendCounts();
+                    
+                    // Save to cache
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        async function loadFriendRequestsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/friend-requests/incoming');
+                
+                if (response && response.requests) {
+                    friendRequests = response.requests;
+                    document.getElementById('requestsCount').textContent = friendRequests.length;
+                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        async function loadSentRequestsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/friend-requests/sent');
+                
+                if (response && response.requests) {
+                    sentRequests = response.requests;
+                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        async function loadPinnedFriendsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/friends/pinned');
+                
+                if (response && response.friends) {
+                    pinnedFriends = response.friends;
+                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        async function loadMutedFriendsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/friends/muted');
+                
+                if (response && response.friends) {
+                    mutedFriends = response.friends;
+                    document.getElementById('mutedCount').textContent = mutedFriends.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        async function loadContactsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/contacts/synced');
+                
+                if (response && response.contacts) {
+                    contacts = response.contacts;
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        async function loadGroupsFromBackend() {
+            try {
+                const response = await callApiSilently('/api/groups/user');
+                
+                if (response && response.groups) {
+                    groups = response.groups;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        
+        // =============================================
+        // INSTANT UI RENDERING
+        // =============================================
+        
+        // Load cached data instantly for immediate UI display
         function loadCachedDataInstantly() {
-            console.log('Loading cached data instantly...');
-            
             try {
                 // Load user from cache
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
-                    console.log('Loaded user from cache:', currentUser.id);
-                } else {
-                    currentUser = {
-                        id: 'local_user_' + Date.now(),
-                        displayName: 'Local User',
-                        email: '',
-                        photoURL: '',
-                        username: 'user_' + Math.random().toString(36).substr(2, 9)
-                    };
                 }
                 
                 // Load user profile
                 const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
                 if (cachedProfile) {
                     userData = JSON.parse(cachedProfile);
-                } else {
-                    userData = currentUser;
                 }
                 
                 // Load friends
                 const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
                 if (friendsData) {
                     friends = JSON.parse(friendsData);
-                    console.log('Loaded friends from cache:', friends.length);
                     updateFriendCounts();
-                    
-                    // Render friends immediately
                     renderFriendsListInstantly();
                 }
                 
@@ -1294,7 +1257,6 @@
                 const allUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
                 if (allUsersData) {
                     allUsers = JSON.parse(allUsersData);
-                    console.log('Loaded all users from cache:', allUsers.length);
                 }
                 
                 // Load mutual friends cache
@@ -1313,10 +1275,8 @@
                 const notesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
                 if (notesData) window.privateNotes = JSON.parse(notesData);
                 
-                console.log('Cached data loaded successfully');
-                
             } catch (error) {
-                console.error('Error loading cached data:', error);
+                // Silently handle errors
             }
         }
         
@@ -1324,6 +1284,7 @@
         function renderFriendsListInstantly() {
             if (!allFriendsList) return;
             
+            // Clear any loading placeholders
             allFriendsList.innerHTML = '';
             
             // Combine all friends, contacts, and pinned friends for display
@@ -1356,7 +1317,7 @@
             allFriendsList.classList.add('instant-load');
         }
         
-        // Add friend item instantly (for offline cache display)
+        // Add friend item instantly (for immediate display)
         function addFriendItemInstant(friendData, container, type) {
             const friendItem = document.createElement('div');
             friendItem.className = 'friend-item';
@@ -1457,11 +1418,837 @@
             container.appendChild(friendItem);
         }
         
+        // =============================================
+        // EVENT LISTENERS SETUP
+        // =============================================
+        
+        function setupEventListeners() {
+            // Close mutual friends modal
+            document.getElementById('closeMutualFriendsModal').addEventListener('click', () => {
+                mutualFriendsModal.classList.remove('active');
+            });
+            
+            // Camera scanner event listeners
+            document.getElementById('closeCameraBtn').addEventListener('click', () => {
+                stopCameraScanner();
+                cameraScannerModal.classList.remove('active');
+            });
+            
+            document.getElementById('toggleCameraBtn').addEventListener('click', toggleCamera);
+            document.getElementById('toggleFlashBtn').addEventListener('click', toggleFlash);
+            
+            // Category tabs
+            const categoryTabs = {
+                'allTab': 'allFriendsSection',
+                'contactsTab': 'contactsSection',
+                'friendsTab': 'friendsSection',
+                'requestsTab': 'requestsSection',
+                'temporaryTab': 'temporarySection',
+                'pinnedTab': 'pinnedSection',
+                'mutedTab': 'mutedSection'
+            };
+            
+            Object.keys(categoryTabs).forEach(tabId => {
+                document.getElementById(tabId).addEventListener('click', function() {
+                    document.querySelectorAll('.category-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    document.querySelectorAll('.friends-section').forEach(section => {
+                        section.classList.remove('active');
+                    });
+                    
+                    const sectionId = categoryTabs[tabId];
+                    document.getElementById(sectionId).classList.add('active');
+                    updateCurrentSection();
+                });
+            });
+            
+            // Category filter buttons
+            document.querySelectorAll('.category-filter-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const category = this.dataset.category;
+                    filterFriendsByCategory(category);
+                });
+            });
+            
+            // Search input
+            document.getElementById('friendSearch').addEventListener('input', function() {
+                searchFriends(this.value);
+            });
+            
+            // Add friend button
+            document.getElementById('addFriendBtn').addEventListener('click', () => {
+                addFriendModal.classList.add('active');
+                document.querySelector('.add-friend-tab[data-tab="methods"]').click();
+            });
+            
+            // Start New Chat button
+            document.getElementById('startNewChatBtn').addEventListener('click', () => {
+                showStartChatModal();
+            });
+            
+            // Quick action buttons
+            document.getElementById('syncContactsBtn').addEventListener('click', () => {
+                simulateContactSync();
+            });
+            
+            document.getElementById('scanQRBtn').addEventListener('click', () => {
+                addFriendModal.classList.add('active');
+                document.querySelector('.add-friend-tab[data-tab="qr"]').click();
+            });
+            
+            document.getElementById('discoverBtn').addEventListener('click', () => {
+                addFriendModal.classList.add('active');
+                document.querySelector('.add-friend-tab[data-tab="nearby"]').click();
+            });
+            
+            // Add friend modal tabs
+            document.querySelectorAll('.add-friend-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabName = this.dataset.tab;
+                    
+                    document.querySelectorAll('.add-friend-tab').forEach(t => {
+                        t.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    document.querySelectorAll('.add-friend-tab-content').forEach(content => {
+                        content.classList.remove('active');
+                    });
+                    
+                    const tabContent = document.getElementById(`${tabName}Tab`);
+                    if (tabContent) {
+                        tabContent.classList.add('active');
+                        
+                        if (tabName === 'all-users') {
+                            renderAllUsersList();
+                        }
+                    }
+                });
+            });
+            
+            // Scan QR button in modal
+            document.getElementById('scanQRBtnModal').addEventListener('click', () => {
+                cameraScannerModal.classList.add('active');
+                startCameraScanner();
+            });
+            
+            // All users search input
+            const allUsersSearch = document.getElementById('allUsersSearch');
+            if (allUsersSearch) {
+                allUsersSearch.addEventListener('input', () => {
+                    renderAllUsersList();
+                });
+            }
+            
+            // Send friend request button
+            document.getElementById('sendFriendRequestBtn').addEventListener('click', async () => {
+                const activeTab = document.querySelector('.add-friend-tab.active');
+                if (!activeTab) return;
+                
+                const activeTabName = activeTab.dataset.tab;
+                
+                if (activeTabName === 'username') {
+                    const usernameInput = document.getElementById('usernameInput').value.trim();
+                    
+                    if (!usernameInput) {
+                        showNotification('Please enter a username', 'error');
+                        return;
+                    }
+                    
+                    if (!usernameInput.startsWith('@')) {
+                        showNotification('Username must start with @', 'error');
+                        return;
+                    }
+                    
+                    try {
+                        const response = await callApiSilently(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        
+                        if (!response || !response.user) {
+                            showNotification('User not found', 'error');
+                            return;
+                        }
+                        
+                        const userData = response.user;
+                        
+                        if (userData.id === currentUser.id) {
+                            showNotification('You cannot add yourself as a friend', 'warning');
+                            return;
+                        }
+                        
+                        const category = document.getElementById('friendCategorySelect').value || 'friend';
+                        const note = document.getElementById('friendNote').value.trim();
+                        const isBusiness = category === 'business';
+                        
+                        sendFriendRequest(userData.id, category, note, false, null, isBusiness);
+                        
+                    } catch (error) {
+                        showNotification('Error searching for user', 'error');
+                    }
+                    
+                } else if (activeTabName === 'all-users') {
+                    showNotification('Please select a user from the list and click the "Add Friend" button next to their name', 'info');
+                } else {
+                    showNotification('Please select a method and enter required information', 'warning');
+                }
+            });
+            
+            // Close modals
+            document.getElementById('closeAddFriendModal').addEventListener('click', () => {
+                addFriendModal.classList.remove('active');
+            });
+            
+            document.getElementById('cancelAddFriendBtn').addEventListener('click', () => {
+                addFriendModal.classList.remove('active');
+            });
+            
+            // Start Chat Modal event listeners
+            document.getElementById('closeStartChatModal').addEventListener('click', () => {
+                startChatModal.classList.remove('active');
+            });
+            
+            document.getElementById('cancelStartChatBtn').addEventListener('click', () => {
+                startChatModal.classList.remove('active');
+            });
+            
+            document.getElementById('confirmStartChatBtn').addEventListener('click', () => {
+                if (window.selectedChatFriend) {
+                    const userId = window.selectedChatFriend.id;
+                    const userName = window.selectedChatFriend.displayName || 'User';
+                    navigateToChat(userId, userName);
+                    startChatModal.classList.remove('active');
+                }
+            });
+            
+            const searchChatUser = document.getElementById('searchChatUser');
+            if (searchChatUser) {
+                searchChatUser.addEventListener('input', function() {
+                    searchChatFriends(this.value);
+                });
+            }
+            
+            // Back button
+            document.getElementById('backBtn').addEventListener('click', () => {
+                friendDetailsPanel.classList.remove('active');
+                selectedFriend = null;
+            });
+            
+            // Friend request modal buttons
+            document.getElementById('declineRequestBtn').addEventListener('click', () => {
+                friendRequestModal.classList.remove('active');
+                showNotification('Friend request declined', 'info');
+            });
+            
+            document.getElementById('acceptRequestBtn').addEventListener('click', async function() {
+                const userId = this.dataset.userId;
+                const userName = this.dataset.userName;
+                const qrData = this.dataset.qrData ? JSON.parse(this.dataset.qrData) : null;
+                
+                if (qrData && qrData.userId) {
+                    sendFriendRequest(qrData.userId);
+                    friendRequestModal.classList.remove('active');
+                } else if (userId) {
+                    acceptFriendRequestOnline(null, userId);
+                }
+            });
+            
+            // Window resize
+            window.addEventListener('resize', checkMobile);
+            
+            // Before unload
+            window.addEventListener('beforeunload', () => {
+                saveFriendsToLocalStorage();
+                stopCameraScanner();
+            });
+            
+            // Initial mobile check
+            checkMobile();
+        }
+        
+        // =============================================
+        // UTILITY FUNCTIONS
+        // =============================================
+        
+        // Get tokens from localStorage
+        function getTokensFromStorage() {
+            try {
+                let accessToken = null;
+                let refreshToken = null;
+                
+                // Try multiple possible storage locations
+                const possibleTokenKeys = [
+                    'moodchat_token',
+                    'accessToken',
+                    'token',
+                    'knecta_token'
+                ];
+                
+                for (const key of possibleTokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token) {
+                        accessToken = token;
+                        break;
+                    }
+                }
+                
+                refreshToken = localStorage.getItem('refreshToken') || 
+                              localStorage.getItem('refresh_token');
+                
+                return { accessToken, refreshToken };
+            } catch (error) {
+                return { accessToken: null, refreshToken: null };
+            }
+        }
+        
+        // API call wrapper that uses api.js
+        async function callApi(endpoint, options = {}) {
+            try {
+                // Ensure api.js is loaded
+                if (typeof window.apiCall === 'function') {
+                    return await window.apiCall(endpoint, options);
+                }
+                
+                // Fallback to direct fetch if api.js not available
+                const tokens = getTokensFromStorage();
+                if (!tokens.accessToken) {
+                    throw { status: 401 };
+                }
+                
+                const response = await fetch(endpoint, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${tokens.accessToken}`,
+                        ...(options.headers || {})
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                return await response.json();
+                
+            } catch (error) {
+                throw error;
+            }
+        }
+        
+        // Clear authentication tokens
+        function clearAuthTokens() {
+            const tokenKeys = [
+                'moodchat_token',
+                'accessToken',
+                'token',
+                'knecta_token',
+                'refreshToken',
+                'refresh_token'
+            ];
+            
+            tokenKeys.forEach(key => {
+                localStorage.removeItem(key);
+                sessionStorage.removeItem(key);
+            });
+        }
+        
+        // Update friend counts
+        function updateFriendCounts() {
+            document.getElementById('totalFriends').textContent = friends.length;
+            
+            const onlineCount = friends.filter(f => f.online).length;
+            document.getElementById('onlineFriends').textContent = onlineCount;
+            
+            document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+        }
+        
+        // Update current section
+        function updateCurrentSection() {
+            updateFriendCounts();
+            
+            const activeSection = document.querySelector('.friends-section.active');
+            if (activeSection) {
+                const sectionId = activeSection.id;
+                
+                switch(sectionId) {
+                    case 'allFriendsSection':
+                        allFriendsList.innerHTML = '';
+                        
+                        const allToDisplay = [
+                            ...pinnedFriends,
+                            ...friends,
+                            ...contacts,
+                            ...temporaryFriends
+                        ];
+                        
+                        if (allToDisplay.length === 0) {
+                            allFriendsList.innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-user-friends"></i>
+                                    <p>No friends yet</p>
+                                    <p class="subtext">Add friends to start connecting</p>
+                                </div>
+                            `;
+                        } else {
+                            allToDisplay.forEach(item => {
+                                const type = pinnedFriends.some(f => f.id === item.id) ? 'pinned' :
+                                           friends.some(f => f.id === item.id) ? 'friend' : 'contact';
+                                addFriendItem(item, allFriendsList, type);
+                            });
+                        }
+                        break;
+                        
+                    case 'contactsSection':
+                        renderContacts();
+                        break;
+                        
+                    case 'friendsSection':
+                        renderFriends();
+                        break;
+                        
+                    case 'requestsSection':
+                        renderFriendRequests();
+                        renderSentRequests();
+                        break;
+                        
+                    case 'temporarySection':
+                        renderTemporaryFriends();
+                        break;
+                        
+                    case 'pinnedSection':
+                        renderPinnedFriends();
+                        break;
+                        
+                    case 'mutedSection':
+                        renderMutedFriends();
+                        break;
+                }
+            }
+        }
+        
+        // Render contacts
+        function renderContacts() {
+            contactsList.innerHTML = '';
+            
+            if (contacts.length === 0) {
+                contactsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-address-book"></i>
+                        <p>No contacts found</p>
+                        <p class="subtext">Sync your phone contacts to find friends</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            contacts.forEach(contact => {
+                addFriendItem(contact, contactsList, 'contact');
+            });
+        }
+        
+        // Add friend item to list
+        function addFriendItem(friendData, container, type) {
+            if (currentCategoryFilter !== 'all' && friendData.category !== currentCategoryFilter) {
+                if (currentCategoryFilter === 'pinned' && !pinnedFriends.some(f => f.id === friendData.id)) {
+                    return;
+                }
+                if (currentCategoryFilter === 'muted' && !mutedFriends.some(f => f.id === friendData.id)) {
+                    return;
+                }
+                if (!['pinned', 'muted'].includes(currentCategoryFilter) && friendData.category !== currentCategoryFilter) {
+                    return;
+                }
+            }
+            
+            if (currentSearchTerm && !matchesSearch(friendData, currentSearchTerm)) {
+                return;
+            }
+            
+            const friendId = friendData.id;
+            const existingItem = container.querySelector(`[data-user-id="${friendId}"]`);
+            if (existingItem) {
+                existingItem.remove();
+            }
+            
+            const friendItem = document.createElement('div');
+            friendItem.className = 'friend-item';
+            friendItem.dataset.userId = friendId;
+            friendItem.dataset.type = type;
+            
+            const initials = friendData.displayName ? 
+                friendData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                'U';
+            
+            let statusClass = 'offline';
+            let statusText = 'Offline';
+            
+            if (friendData.online) {
+                statusClass = 'online';
+                statusText = 'Online now';
+            } else if (friendData.lastSeen) {
+                const lastSeen = new Date(friendData.lastSeen);
+                const minutesAgo = Math.floor((new Date() - lastSeen) / 60000);
+                
+                if (minutesAgo < 5) {
+                    statusClass = 'online';
+                    statusText = 'Online now';
+                } else if (minutesAgo < 15) {
+                    statusClass = 'away';
+                    statusText = 'Recently';
+                } else {
+                    statusText = `Last seen ${formatTimeAgo(lastSeen)}`;
+                }
+            }
+            
+            const lastInteraction = getLastInteraction(friendId);
+            if (lastInteraction) {
+                statusText = lastInteraction;
+            }
+            
+            const mutualCount = mutualFriendsCache[friendId] || 0;
+            const category = friendData.category || 'friend';
+            const categoryInfo = friendCategories[category];
+            const isPinned = pinnedFriends.some(f => f.id === friendId);
+            const isMuted = mutedFriends.some(f => f.id === friendId);
+            
+            friendItem.innerHTML = `
+                <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}')"` : ''}>
+                    ${friendData.photoURL ? '' : `<span>${initials}</span>`}
+                    <div class="friend-status ${statusClass}"></div>
+                    ${isPinned ? '<div class="friend-category-badge pinned" title="Pinned Friend"><i class="fas fa-thumbtack"></i></div>' : 
+                     isMuted ? '<div class="friend-category-badge muted" title="Muted Friend"><i class="fas fa-volume-mute"></i></div>' :
+                     categoryInfo ? `<div class="friend-category-badge ${category}" title="${categoryInfo.name}"><i class="${categoryInfo.icon}"></i></div>` : ''}
+                </div>
+                <div class="friend-info">
+                    <div class="friend-name">
+                        <span class="friend-name-text">${escapeHtml(friendData.displayName || 'Unknown User')}</span>
+                        <span class="friend-details">
+                            ${friendData.isTemporary ? '<span class="temp-friend-badge"><i class="fas fa-clock"></i> Temp</span>' : ''}
+                            ${friendData.isBusiness ? '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>' : ''}
+                            ${isPinned ? '<span class="temp-friend-badge"><i class="fas fa-thumbtack"></i> Pinned</span>' : ''}
+                            ${isMuted ? '<span class="temp-friend-badge"><i class="fas fa-volume-mute"></i> Muted</span>' : ''}
+                        </span>
+                    </div>
+                    <div class="friend-details">
+                        ${friendData.username ? `<span class="friend-username">${escapeHtml(friendData.username)}</span>` : ''}
+                        ${mutualCount > 0 ? `<span class="mutual-friends" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}"><i class="fas fa-users"></i> ${mutualCount} mutual</span>` : ''}
+                        <span>${statusText}</span>
+                        ${friendData.trustScore ? `<span class="trust-score ${getTrustScoreClass(friendData.trustScore)}"><i class="fas fa-shield-alt"></i> ${friendData.trustScore}/10</span>` : ''}
+                    </div>
+                </div>
+                <div class="friend-actions">
+                    ${type === 'contact' ? `
+                        <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Chat">
+                            <i class="fas fa-comments"></i>
+                        </button>
+                        <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Call">
+                            <i class="fas fa-phone"></i>
+                        </button>
+                        <button class="friend-action-btn success" data-action="add" title="Add as Friend">
+                            <i class="fas fa-user-plus"></i>
+                        </button>
+                    ` : ''}
+                    
+                    ${type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary' ? `
+                        <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Chat">
+                            <i class="fas fa-comments"></i>
+                        </button>
+                        <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Call">
+                            <i class="fas fa-phone"></i>
+                        </button>
+                        <button class="friend-action-btn" data-action="more" title="More options">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+            
+            friendItem.addEventListener('click', (e) => {
+                if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
+                    showFriendDetails(friendData, type);
+                }
+            });
+            
+            const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
+            actionButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const action = btn.dataset.action;
+                    handleFriendAction(action, friendData, type, btn);
+                });
+            });
+            
+            const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
+            if (mutualFriendsElement) {
+                mutualFriendsElement.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const userId = mutualFriendsElement.dataset.userId;
+                    const userName = mutualFriendsElement.dataset.userName;
+                    showMutualFriends(userId, userName);
+                });
+            }
+            
+            container.appendChild(friendItem);
+        }
+        
+        // Render friends
+        function renderFriends() {
+            friendsList.innerHTML = '';
+            
+            if (friends.length === 0) {
+                friendsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-friends"></i>
+                        <p>No friends yet</p>
+                        <p class="subtext">Add friends to start connecting</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const sortedFriends = [...friends].sort((a, b) => {
+                const aPinned = pinnedFriends.some(f => f.id === a.id);
+                const bPinned = pinnedFriends.some(f => f.id === b.id);
+                
+                if (aPinned !== bPinned) return bPinned ? 1 : -1;
+                if (a.online !== b.online) return b.online ? 1 : -1;
+                return (a.displayName || '').localeCompare(b.displayName || '');
+            });
+            
+            sortedFriends.forEach(friend => {
+                addFriendItem(friend, friendsList, 'friend');
+            });
+        }
+        
+        // Render friend requests
+        function renderFriendRequests() {
+            requestsList.innerHTML = '';
+            
+            if (friendRequests.length === 0) {
+                requestsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>No friend requests</p>
+                        <p class="subtext">When someone sends you a request, it will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            friendRequests.forEach(request => {
+                addFriendRequestItem(request, requestsList, 'incoming');
+            });
+        }
+        
+        // Render sent requests
+        function renderSentRequests() {
+            sentRequestsList.innerHTML = '';
+            
+            if (sentRequests.length === 0) {
+                sentRequestsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-paper-plane"></i>
+                        <p>No sent requests</p>
+                        <p class="subtext">Your sent friend requests will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            sentRequests.forEach(request => {
+                addFriendRequestItem(request, sentRequestsList, 'sent');
+            });
+        }
+        
+        // Add friend request item
+        function addFriendRequestItem(requestData, container, type) {
+            const requestItem = document.createElement('div');
+            requestItem.className = 'friend-item';
+            requestItem.dataset.requestId = requestData.id;
+            requestItem.dataset.type = type + '_request';
+            
+            const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
+            const userId = userData.id;
+            
+            const initials = userData.displayName ? 
+                userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                'U';
+            
+            const mutualCount = mutualFriendsCache[userId] || 0;
+            
+            requestItem.innerHTML = `
+                <div class="friend-avatar" ${userData.photoURL ? `style="background-image: url('${escapeHtml(userData.photoURL)}')"` : ''}>
+                    ${userData.photoURL ? '' : `<span>${initials}</span>`}
+                </div>
+                <div class="friend-info">
+                    <div class="friend-name">
+                        <span class="friend-name-text">${escapeHtml(userData.displayName || 'Unknown User')}</span>
+                        <div style="font-size: 12px; color: ${type === 'incoming' ? 'var(--success-color)' : 'var(--primary-color)'}; margin-top: 3px;">
+                            ${type === 'incoming' ? 'Incoming Request' : 'Sent Request'}
+                        </div>
+                    </div>
+                    <div class="friend-details">
+                        ${userData.username ? `<span class="friend-username">${escapeHtml(userData.username)}</span>` : ''}
+                        ${mutualCount > 0 ? `<span class="mutual-friends" data-user-id="${userId}" data-user-name="${escapeHtml(userData.displayName || 'User')}"><i class="fas fa-users"></i> ${mutualCount} mutual</span>` : ''}
+                        <span>${type === 'incoming' ? 'Received ' : 'Sent '}${formatTimeAgo(new Date(requestData.createdAt || requestData.timestamp || Date.now()))}</span>
+                    </div>
+                    ${requestData.note ? `<div style="font-size: 13px; color: var(--text-secondary); margin-top: 5px; font-style: italic;">"${escapeHtml(requestData.note)}"</div>` : ''}
+                </div>
+                <div class="friend-actions">
+                    ${type === 'incoming' ? `
+                        <button class="friend-action-btn success" data-action="accept" title="Accept">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <button class="friend-action-btn danger" data-action="decline" title="Decline">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    ` : ''}
+                    
+                    ${type === 'sent' ? `
+                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+            
+            requestItem.addEventListener('click', (e) => {
+                if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
+                    showFriendRequestProfile(requestData);
+                }
+            });
+            
+            const actionButtons = requestItem.querySelectorAll('.friend-action-btn');
+            actionButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const action = btn.dataset.action;
+                    handleRequestAction(action, requestData, btn);
+                });
+            });
+            
+            const mutualFriendsElement = requestItem.querySelector('.mutual-friends');
+            if (mutualFriendsElement) {
+                mutualFriendsElement.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const userId = mutualFriendsElement.dataset.userId;
+                    const userName = mutualFriendsElement.dataset.userName;
+                    showMutualFriends(userId, userName);
+                });
+            }
+            
+            container.appendChild(requestItem);
+        }
+        
+        // Handle friend actions
+        function handleFriendAction(action, friendData, type, button) {
+            const userId = button.dataset.userId;
+            const userName = button.dataset.userName;
+            
+            switch(action) {
+                case 'start-chat':
+                    navigateToChat(userId, userName);
+                    break;
+                    
+                case 'call':
+                    navigateToCall(userId, userName);
+                    break;
+                    
+                case 'add':
+                    sendFriendRequest(friendData.id);
+                    break;
+                    
+                case 'more':
+                    showFriendOptions(friendData);
+                    break;
+                    
+                case 'accept':
+                    acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.senderId || friendData.id);
+                    break;
+                    
+                case 'decline':
+                    declineFriendRequest(friendData);
+                    break;
+                    
+                case 'cancel':
+                    cancelFriendRequest(friendData);
+                    break;
+                    
+                case 'view-profile':
+                    showFriendRequestProfile(friendData);
+                    break;
+                    
+                default:
+                    console.log('Unknown action:', action);
+            }
+        }
+        
+        // Handle request actions
+        function handleRequestAction(action, requestData, button) {
+            switch(action) {
+                case 'accept':
+                    acceptFriendRequestOnline(requestData.id, requestData.senderId);
+                    break;
+                    
+                case 'decline':
+                    declineFriendRequest(requestData);
+                    break;
+                    
+                case 'cancel':
+                    cancelFriendRequest(requestData);
+                    break;
+                    
+                case 'view-profile':
+                    showFriendRequestProfile(requestData);
+                    break;
+            }
+        }
+        
+        // Filter friends by category
+        function filterFriendsByCategory(category) {
+            currentCategoryFilter = category;
+            updateCurrentSection();
+            
+            document.querySelectorAll('.category-filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            const activeBtn = document.querySelector(`.category-filter-btn[data-category="${category}"]`);
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+            }
+        }
+        
+        // Search friends
+        function searchFriends(searchTerm) {
+            currentSearchTerm = searchTerm.toLowerCase().trim();
+            updateCurrentSection();
+        }
+        
+        // Check if friend matches search
+        function matchesSearch(friendData, searchTerm) {
+            if (!searchTerm) return true;
+            
+            const searchIn = [
+                friendData.displayName || '',
+                friendData.username || '',
+                friendData.email || '',
+                friendData.phoneNumber || ''
+            ].join(' ').toLowerCase();
+            
+            return searchIn.includes(searchTerm);
+        }
+        
         // Fetch all users from backend
         async function fetchAllUsersFromBackend() {
             try {
-                console.log('Fetching all users from backend...');
-                
                 // Check for cached data first
                 const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
                 const lastSync = localStorage.getItem('all_users_last_sync');
@@ -1470,13 +2257,11 @@
                 // Use cache if it's less than 2 minutes old
                 if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 2 * 60 * 1000) {
                     allUsers = JSON.parse(cachedAllUsers);
-                    console.log(`Using cached all users: ${allUsers.length} users`);
-                    renderAllUsersList();
                     return;
                 }
                 
                 // Fetch from backend API
-                const response = await callApi('/api/users/all?limit=100');
+                const response = await callApiSilently('/api/users/all?limit=100');
                 
                 if (response && response.users) {
                     // Filter out current user from the list
@@ -1485,8 +2270,6 @@
                         const userId = user.id;
                         return userId !== currentUserId;
                     });
-                    
-                    console.log(`Fetched ${allUsers.length} users from backend (excluding current user)`);
                     
                     // Sort users: online first, then alphabetical
                     allUsers.sort((a, b) => {
@@ -1497,26 +2280,13 @@
                     // Cache the results
                     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE, JSON.stringify(allUsers));
                     localStorage.setItem('all_users_last_sync', Date.now().toString());
-                    
-                    // Render the list
-                    renderAllUsersList();
-                    
-                } else {
-                    console.log('No users data received from backend');
-                    showNotification('Could not load users list', 'warning');
                 }
                 
             } catch (error) {
-                console.error('Error fetching all users:', error);
-                
-                // Try to use cached data as fallback
+                // Use cached data as fallback
                 const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
                 if (cachedAllUsers) {
                     allUsers = JSON.parse(cachedAllUsers);
-                    console.log(`Using cached all users as fallback: ${allUsers.length} users`);
-                    renderAllUsersList();
-                } else {
-                    showNotification('Could not load users list', 'error');
                 }
             }
         }
@@ -1671,742 +2441,147 @@
         
         // Navigation functions
         function navigateToChat(userId, userName) {
-            console.log('Navigating to chat with:', userId, userName);
             const encodedName = encodeURIComponent(userName);
             window.location.href = `../message.html?user=${userId}&name=${encodedName}`;
         }
         
         function navigateToCall(userId, userName, callType = 'voice') {
-            console.log('Navigating to call with:', userId, userName, callType);
             const encodedName = encodeURIComponent(userName);
             window.location.href = `../calls.html?user=${userId}&name=${encodedName}&type=${callType}`;
         }
         
-        // Camera functions - REAL IMPLEMENTATION
-        async function startCameraScanner() {
+        // Send friend request
+        async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             try {
-                const videoElement = document.getElementById('cameraVideo');
-                const canvasElement = document.getElementById('scannerCanvas');
-                if (!videoElement || !canvasElement) {
-                    showNotification('Camera elements not found', 'error');
-                    return;
-                }
-                
-                if (cameraStream) {
-                    cameraStream.getTracks().forEach(track => track.stop());
-                }
-                
-                const constraints = {
-                    video: {
-                        facingMode: currentCamera,
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    },
-                    audio: false
+                const requestData = {
+                    receiverId: friendId,
+                    category: category,
+                    note: note,
+                    isTemporary: isTemporary,
+                    duration: duration,
+                    isBusiness: isBusiness
                 };
                 
-                cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
-                videoElement.srcObject = cameraStream;
+                const response = await callApi('/api/friend-requests/send', {
+                    method: 'POST',
+                    body: JSON.stringify(requestData)
+                });
                 
-                // Start real QR code scanning
-                startRealQRCodeScanning(videoElement, canvasElement);
-                showNotification('Camera started successfully', 'success');
-                
-            } catch (error) {
-                console.error('Error accessing camera:', error);
-                const cameraContainer = document.querySelector('.camera-container');
-                if (cameraContainer) {
-                    cameraContainer.innerHTML = `
-                        <div class="no-camera-message">
-                            <i class="fas fa-video-slash"></i>
-                            <h3>Camera Access Required</h3>
-                            <p>Please allow camera access to scan QR codes.</p>
-                            <p style="font-size: 14px; margin-top: 10px;">${error.message || 'Unknown error'}</p>
-                        </div>
-                    `;
-                }
-                showNotification('Could not access camera', 'error');
-            }
-        }
-        
-        // REAL QR Code scanning using jsQR library
-        function startRealQRCodeScanning(videoElement, canvasElement) {
-            console.log('Starting REAL QR code scanning...');
-            
-            const canvas = canvasElement;
-            const context = canvas.getContext('2d');
-            scanningActive = true;
-            
-            function scanFrame() {
-                if (!scanningActive || !cameraScannerModal.classList.contains('active')) {
-                    return;
-                }
-                
-                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-                    canvas.width = videoElement.videoWidth;
-                    canvas.height = videoElement.videoHeight;
+                if (response && response.success) {
+                    // Refresh sent requests
+                    const sentResponse = await callApi('/api/friend-requests/sent');
                     
-                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                    
-                    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                    
-                    // Use jsQR library for real QR code detection
-                    try {
-                        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                            inversionAttempts: "dontInvert",
-                        });
-                        
-                        if (code) {
-                            // Draw rectangle around QR code
-                            drawQRCodeRect(code.location, context);
-                            
-                            // Process the QR code data
-                            processScannedQRCodeReal(code.data);
-                            return; // Stop scanning after successful detection
-                        }
-                    } catch (error) {
-                        console.error('QR code detection error:', error);
+                    if (sentResponse && sentResponse.requests) {
+                        sentRequests = sentResponse.requests;
+                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                     }
-                }
-                
-                requestAnimationFrame(scanFrame);
-            }
-            
-            function drawQRCodeRect(location, ctx) {
-                ctx.beginPath();
-                ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
-                ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
-                ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
-                ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
-                ctx.lineTo(location.topLeftCorner.x, location.topLeftCorner.y);
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = "#00FF00";
-                ctx.stroke();
-            }
-            
-            scanFrame();
-        }
-        
-        function processScannedQRCodeReal(qrData) {
-            try {
-                console.log('QR Code detected:', qrData);
-                
-                // Parse QR code data (expected JSON format)
-                let parsedData;
-                try {
-                    parsedData = JSON.parse(qrData);
-                } catch (e) {
-                    // If not JSON, treat as plain text
-                    parsedData = { data: qrData };
-                }
-                
-                // Validate QR code data structure
-                if (!parsedData.type || parsedData.type !== 'knecta_friend_request') {
-                    showNotification('Invalid QR code format', 'error');
-                    return;
-                }
-                
-                if (!parsedData.userId) {
-                    showNotification('QR code missing user ID', 'error');
-                    return;
-                }
-                
-                // Show the friend request modal with real data
-                showFriendRequestFromQRReal(parsedData);
-                
-                // Stop scanning
-                stopCameraScanner();
-                cameraScannerModal.classList.remove('active');
-                
-                showNotification('QR code scanned successfully!', 'success');
-                
-            } catch (error) {
-                console.error('Error processing QR code:', error);
-                showNotification('Error processing QR code', 'error');
-            }
-        }
-        
-        function showFriendRequestFromQRReal(qrData) {
-            // Try to get user info from backend
-            fetchUserInfoFromQR(qrData.userId).then(userInfo => {
-                document.getElementById('requestAvatar').innerHTML = `
-                    <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-                        ${userInfo.displayName ? userInfo.displayName.charAt(0).toUpperCase() : 'U'}
-                    </div>
-                `;
-                
-                document.getElementById('requestName').textContent = userInfo.displayName || qrData.displayName || 'QR Code User';
-                document.getElementById('requestUsername').textContent = userInfo.username || qrData.username || '@unknown';
-                document.getElementById('mutualCount').textContent = '0';
-                
-                const acceptBtn = document.getElementById('acceptRequestBtn');
-                acceptBtn.dataset.userId = qrData.userId;
-                acceptBtn.dataset.userName = userInfo.displayName || qrData.displayName || 'User';
-                acceptBtn.dataset.qrData = JSON.stringify(qrData);
-                
-                friendRequestModal.classList.add('active');
-            }).catch(error => {
-                // Fallback to QR data if user info fetch fails
-                document.getElementById('requestAvatar').innerHTML = `
-                    <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-                        ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
-                    </div>
-                `;
-                
-                document.getElementById('requestName').textContent = qrData.displayName || 'QR Code User';
-                document.getElementById('requestUsername').textContent = qrData.username || '@unknown';
-                document.getElementById('mutualCount').textContent = '0';
-                
-                const acceptBtn = document.getElementById('acceptRequestBtn');
-                acceptBtn.dataset.userId = qrData.userId;
-                acceptBtn.dataset.userName = qrData.displayName || 'User';
-                acceptBtn.dataset.qrData = JSON.stringify(qrData);
-                
-                friendRequestModal.classList.add('active');
-            });
-        }
-        
-        // fetchUserInfoFromQR
-        async function fetchUserInfoFromQR(userId) {
-            try {
-                const response = await callApi(`/api/users/${userId}`);
-                
-                if (response && response.user) {
-                    return response.user;
-                }
-                throw new Error('User not found');
-            } catch (error) {
-                console.error('Error fetching user info:', error);
-                throw error;
-            }
-        }
-        
-        function stopCameraScanner() {
-            scanningActive = false;
-            
-            if (cameraStream) {
-                cameraStream.getTracks().forEach(track => track.stop());
-                cameraStream = null;
-            }
-            
-            const videoElement = document.getElementById('cameraVideo');
-            if (videoElement) {
-                videoElement.srcObject = null;
-            }
-            
-            console.log('Camera scanner stopped');
-        }
-        
-        async function toggleCamera() {
-            currentCamera = currentCamera === 'environment' ? 'user' : 'environment';
-            await startCameraScanner();
-        }
-        
-        function toggleFlash() {
-            if (!cameraStream) return;
-            
-            const track = cameraStream.getVideoTracks()[0];
-            if (!track || !track.getCapabilities) {
-                showNotification('Flash not supported on this device', 'warning');
-                return;
-            }
-            
-            const capabilities = track.getCapabilities();
-            if (!capabilities.torch) {
-                showNotification('Flash not supported on this camera', 'warning');
-                return;
-            }
-            
-            flashOn = !flashOn;
-            track.applyConstraints({
-                advanced: [{ torch: flashOn }]
-            });
-            
-            const flashBtn = document.getElementById('toggleFlashBtn');
-            if (flashBtn) {
-                flashBtn.innerHTML = flashOn ? 
-                    '<i class="fas fa-lightbulb"></i> Flash On' : 
-                    '<i class="far fa-lightbulb"></i> Flash Off';
-                flashBtn.style.backgroundColor = flashOn ? 'var(--warning-color)' : 'var(--primary-color)';
-            }
-            
-            showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
-        }
-        
-        // Generate unique QR code for current user - REAL IMPLEMENTATION
-        function generateUniqueQRCode() {
-            try {
-                const qrContainer = document.getElementById('qrCodeContainer');
-                if (!qrContainer) return;
-                
-                qrContainer.innerHTML = '';
-                
-                if (typeof QRCode === 'undefined') {
-                    console.error('QRCode library not loaded');
-                    qrContainer.innerHTML = `
-                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                            <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 15px;"></i>
-                            <p>QR code library not available</p>
-                            <p style="font-size: 12px; margin-top: 10px;">Refresh page to try again</p>
-                        </div>
-                    `;
-                    return;
-                }
-                
-                // Get current user data
-                const user = currentUser || userData;
-                if (!user) {
-                    console.error('No user data available for QR code generation');
-                    return;
-                }
-                
-                // Generate QR data with unique user information
-                const qrData = JSON.stringify({
-                    type: 'knecta_friend_request',
-                    userId: user.id,
-                    username: user.username || ('user_' + Math.random().toString(36).substr(2, 9)),
-                    displayName: user.displayName || 'Knecta User',
-                    timestamp: Date.now(),
-                    app: 'Knecta Chat',
-                    version: '1.0',
-                    // Add verification hash
-                    hash: generateVerificationHash(user.id, user.username || '')
-                });
-                
-                try {
-                    new QRCode(qrContainer, {
-                        text: qrData,
-                        width: 200,
-                        height: 200,
-                        colorDark: '#0084ff',
-                        colorLight: '#ffffff',
-                        correctLevel: QRCode.CorrectLevel.H
-                    });
-                    console.log('Unique QR code generated successfully for user:', user.id);
                     
-                    // Store the QR code data for later verification
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
+                    // Refresh all users
+                    fetchAllUsersFromBackend();
                     
-                } catch (qrError) {
-                    console.error('QR code generation error:', qrError);
-                    qrContainer.innerHTML = `
-                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                            <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
-                            <p>Your unique QR code</p>
-                            <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
-                            <p style="font-size: 10px; margin-top: 5px;">User: ${user.username || user.id}</p>
-                        </div>
-                    `;
-                }
-                
-            } catch (error) {
-                console.error('Error in generateUniqueQRCode:', error);
-                const qrContainer = document.getElementById('qrCodeContainer');
-                if (qrContainer) {
-                    qrContainer.innerHTML = `
-                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                            <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
-                            <p>Your QR Code</p>
-                        </div>
-                    `;
-                }
-            }
-        }
-        
-        // Generate verification hash for QR code security
-        function generateVerificationHash(userId, username) {
-            const secret = 'knecta_secret_2024'; // In real app, use server-side secret
-            const data = userId + username + Date.now();
-            let hash = 0;
-            for (let i = 0; i < data.length; i++) {
-                const char = data.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash;
-            }
-            return Math.abs(hash).toString(16);
-        }
-        
-        // Render contacts
-        function renderContacts() {
-            contactsList.innerHTML = '';
-            
-            if (contacts.length === 0) {
-                contactsList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-address-book"></i>
-                        <p>No contacts found</p>
-                        <p class="subtext">Sync your phone contacts to find friends</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            contacts.forEach(contact => {
-                addFriendItem(contact, contactsList, 'contact');
-            });
-        }
-        
-        // Render friends
-        function renderFriends() {
-            friendsList.innerHTML = '';
-            
-            if (friends.length === 0) {
-                friendsList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-user-friends"></i>
-                        <p>No friends yet</p>
-                        <p class="subtext">Add friends to start connecting</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            const sortedFriends = [...friends].sort((a, b) => {
-                const aPinned = pinnedFriends.some(f => f.id === a.id);
-                const bPinned = pinnedFriends.some(f => f.id === b.id);
-                
-                if (aPinned !== bPinned) return bPinned ? 1 : -1;
-                if (a.online !== b.online) return b.online ? 1 : -1;
-                return (a.displayName || '').localeCompare(b.displayName || '');
-            });
-            
-            sortedFriends.forEach(friend => {
-                addFriendItem(friend, friendsList, 'friend');
-            });
-        }
-        
-        // Render friend requests
-        function renderFriendRequests() {
-            requestsList.innerHTML = '';
-            
-            if (friendRequests.length === 0) {
-                requestsList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-inbox"></i>
-                        <p>No friend requests</p>
-                        <p class="subtext">When someone sends you a request, it will appear here</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            friendRequests.forEach(request => {
-                addFriendRequestItem(request, requestsList, 'incoming');
-            });
-        }
-        
-        // Render sent requests
-        function renderSentRequests() {
-            sentRequestsList.innerHTML = '';
-            
-            if (sentRequests.length === 0) {
-                sentRequestsList.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-paper-plane"></i>
-                        <p>No sent requests</p>
-                        <p class="subtext">Your sent friend requests will appear here</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            sentRequests.forEach(request => {
-                addFriendRequestItem(request, sentRequestsList, 'sent');
-            });
-        }
-        
-        // Add friend item to list
-        function addFriendItem(friendData, container, type) {
-            if (currentCategoryFilter !== 'all' && friendData.category !== currentCategoryFilter) {
-                if (currentCategoryFilter === 'pinned' && !pinnedFriends.some(f => f.id === friendData.id)) {
-                    return;
-                }
-                if (currentCategoryFilter === 'muted' && !mutedFriends.some(f => f.id === friendData.id)) {
-                    return;
-                }
-                if (!['pinned', 'muted'].includes(currentCategoryFilter) && friendData.category !== currentCategoryFilter) {
-                    return;
-                }
-            }
-            
-            if (currentSearchTerm && !matchesSearch(friendData, currentSearchTerm)) {
-                return;
-            }
-            
-            const friendId = friendData.id;
-            const existingItem = container.querySelector(`[data-user-id="${friendId}"]`);
-            if (existingItem) {
-                existingItem.remove();
-            }
-            
-            const friendItem = document.createElement('div');
-            friendItem.className = 'friend-item';
-            friendItem.dataset.userId = friendId;
-            friendItem.dataset.type = type;
-            
-            const initials = friendData.displayName ? 
-                friendData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                'U';
-            
-            let statusClass = 'offline';
-            let statusText = 'Offline';
-            
-            if (friendData.online) {
-                statusClass = 'online';
-                statusText = 'Online now';
-            } else if (friendData.lastSeen) {
-                const lastSeen = new Date(friendData.lastSeen);
-                const minutesAgo = Math.floor((new Date() - lastSeen) / 60000);
-                
-                if (minutesAgo < 5) {
-                    statusClass = 'online';
-                    statusText = 'Online now';
-                } else if (minutesAgo < 15) {
-                    statusClass = 'away';
-                    statusText = 'Recently';
+                    // Update UI
+                    updateCurrentSection();
+                    
+                    showNotification('Friend request sent successfully', 'success');
+                    addFriendModal.classList.remove('active');
                 } else {
-                    statusText = `Last seen ${formatTimeAgo(lastSeen)}`;
+                    showNotification('Failed to send friend request', 'error');
                 }
-            }
-            
-            const lastInteraction = getLastInteraction(friendId);
-            if (lastInteraction) {
-                statusText = lastInteraction;
-            }
-            
-            const mutualCount = mutualFriendsCache[friendId] || 0;
-            const category = friendData.category || 'friend';
-            const categoryInfo = friendCategories[category];
-            const isPinned = pinnedFriends.some(f => f.id === friendId);
-            const isMuted = mutedFriends.some(f => f.id === friendId);
-            
-            friendItem.innerHTML = `
-                <div class="friend-avatar" ${friendData.photoURL ? `style="background-image: url('${escapeHtml(friendData.photoURL)}')"` : ''}>
-                    ${friendData.photoURL ? '' : `<span>${initials}</span>`}
-                    <div class="friend-status ${statusClass}"></div>
-                    ${isPinned ? '<div class="friend-category-badge pinned" title="Pinned Friend"><i class="fas fa-thumbtack"></i></div>' : 
-                     isMuted ? '<div class="friend-category-badge muted" title="Muted Friend"><i class="fas fa-volume-mute"></i></div>' :
-                     categoryInfo ? `<div class="friend-category-badge ${category}" title="${categoryInfo.name}"><i class="${categoryInfo.icon}"></i></div>` : ''}
-                </div>
-                <div class="friend-info">
-                    <div class="friend-name">
-                        <span class="friend-name-text">${escapeHtml(friendData.displayName || 'Unknown User')}</span>
-                        <span class="friend-details">
-                            ${friendData.isTemporary ? '<span class="temp-friend-badge"><i class="fas fa-clock"></i> Temp</span>' : ''}
-                            ${friendData.isBusiness ? '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>' : ''}
-                            ${isPinned ? '<span class="temp-friend-badge"><i class="fas fa-thumbtack"></i> Pinned</span>' : ''}
-                            ${isMuted ? '<span class="temp-friend-badge"><i class="fas fa-volume-mute"></i> Muted</span>' : ''}
-                        </span>
-                    </div>
-                    <div class="friend-details">
-                        ${friendData.username ? `<span class="friend-username">${escapeHtml(friendData.username)}</span>` : ''}
-                        ${mutualCount > 0 ? `<span class="mutual-friends" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}"><i class="fas fa-users"></i> ${mutualCount} mutual</span>` : ''}
-                        <span>${statusText}</span>
-                        ${friendData.trustScore ? `<span class="trust-score ${getTrustScoreClass(friendData.trustScore)}"><i class="fas fa-shield-alt"></i> ${friendData.trustScore}/10</span>` : ''}
-                    </div>
-                </div>
-                <div class="friend-actions">
-                    ${type === 'contact' ? `
-                        <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Chat">
-                            <i class="fas fa-comments"></i>
-                        </button>
-                        <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Call">
-                            <i class="fas fa-phone"></i>
-                        </button>
-                        <button class="friend-action-btn success" data-action="add" title="Add as Friend">
-                            <i class="fas fa-user-plus"></i>
-                        </button>
-                    ` : ''}
-                    
-                    ${type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary' ? `
-                        <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Chat">
-                            <i class="fas fa-comments"></i>
-                        </button>
-                        <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${escapeHtml(friendData.displayName || 'User')}" title="Start Call">
-                            <i class="fas fa-phone"></i>
-                        </button>
-                        <button class="friend-action-btn" data-action="more" title="More options">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
-                    ` : ''}
-                </div>
-            `;
-            
-            friendItem.addEventListener('click', (e) => {
-                if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
-                    showFriendDetails(friendData, type);
-                }
-            });
-            
-            const actionButtons = friendItem.querySelectorAll('.friend-action-btn');
-            actionButtons.forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const action = btn.dataset.action;
-                    handleFriendAction(action, friendData, type, btn);
-                });
-            });
-            
-            const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
-            if (mutualFriendsElement) {
-                mutualFriendsElement.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const userId = mutualFriendsElement.dataset.userId;
-                    const userName = mutualFriendsElement.dataset.userName;
-                    showMutualFriends(userId, userName);
-                });
-            }
-            
-            container.appendChild(friendItem);
-        }
-        
-        // Add friend request item
-        function addFriendRequestItem(requestData, container, type) {
-            const requestItem = document.createElement('div');
-            requestItem.className = 'friend-item';
-            requestItem.dataset.requestId = requestData.id;
-            requestItem.dataset.type = type + '_request';
-            
-            const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
-            const userId = userData.id;
-            
-            const initials = userData.displayName ? 
-                userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                'U';
-            
-            const mutualCount = mutualFriendsCache[userId] || 0;
-            
-            requestItem.innerHTML = `
-                <div class="friend-avatar" ${userData.photoURL ? `style="background-image: url('${escapeHtml(userData.photoURL)}')"` : ''}>
-                    ${userData.photoURL ? '' : `<span>${initials}</span>`}
-                </div>
-                <div class="friend-info">
-                    <div class="friend-name">
-                        <span class="friend-name-text">${escapeHtml(userData.displayName || 'Unknown User')}</span>
-                        <div style="font-size: 12px; color: ${type === 'incoming' ? 'var(--success-color)' : 'var(--primary-color)'}; margin-top: 3px;">
-                            ${type === 'incoming' ? 'Incoming Request' : 'Sent Request'}
-                        </div>
-                    </div>
-                    <div class="friend-details">
-                        ${userData.username ? `<span class="friend-username">${escapeHtml(userData.username)}</span>` : ''}
-                        ${mutualCount > 0 ? `<span class="mutual-friends" data-user-id="${userId}" data-user-name="${escapeHtml(userData.displayName || 'User')}"><i class="fas fa-users"></i> ${mutualCount} mutual</span>` : ''}
-                        <span>${type === 'incoming' ? 'Received ' : 'Sent '}${formatTimeAgo(new Date(requestData.createdAt || requestData.timestamp || Date.now()))}</span>
-                    </div>
-                    ${requestData.note ? `<div style="font-size: 13px; color: var(--text-secondary); margin-top: 5px; font-style: italic;">"${escapeHtml(requestData.note)}"</div>` : ''}
-                </div>
-                <div class="friend-actions">
-                    ${type === 'incoming' ? `
-                        <button class="friend-action-btn success" data-action="accept" title="Accept">
-                            <i class="fas fa-check"></i>
-                        </button>
-                        <button class="friend-action-btn danger" data-action="decline" title="Decline">
-                            <i class="fas fa-times"></i>
-                        </button>
-                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                    ` : ''}
-                    
-                    ${type === 'sent' ? `
-                        <button class="friend-action-btn danger" data-action="cancel" title="Cancel Request">
-                            <i class="fas fa-times"></i>
-                        </button>
-                        <button class="friend-action-btn" data-action="view-profile" title="View Profile">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                    ` : ''}
-                </div>
-            `;
-            
-            requestItem.addEventListener('click', (e) => {
-                if (!e.target.closest('.friend-actions') && !e.target.closest('.mutual-friends')) {
-                    showFriendRequestProfile(requestData);
-                }
-            });
-            
-            const actionButtons = requestItem.querySelectorAll('.friend-action-btn');
-            actionButtons.forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const action = btn.dataset.action;
-                    handleRequestAction(action, requestData, btn);
-                });
-            });
-            
-            const mutualFriendsElement = requestItem.querySelector('.mutual-friends');
-            if (mutualFriendsElement) {
-                mutualFriendsElement.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const userId = mutualFriendsElement.dataset.userId;
-                    const userName = mutualFriendsElement.dataset.userName;
-                    showMutualFriends(userId, userName);
-                });
-            }
-            
-            container.appendChild(requestItem);
-        }
-        
-        // Handle friend actions
-        function handleFriendAction(action, friendData, type, button) {
-            const userId = button.dataset.userId;
-            const userName = button.dataset.userName;
-            
-            switch(action) {
-                case 'start-chat':
-                    navigateToChat(userId, userName);
-                    break;
-                    
-                case 'call':
-                    navigateToCall(userId, userName);
-                    break;
-                    
-                case 'add':
-                    sendFriendRequest(friendData.id);
-                    break;
-                    
-                case 'more':
-                    showFriendOptions(friendData);
-                    break;
-                    
-                case 'accept':
-                    acceptFriendRequestOnline(friendData.id || friendData.requestId, friendData.senderId || friendData.id);
-                    break;
-                    
-                case 'decline':
-                    declineFriendRequest(friendData);
-                    break;
-                    
-                case 'cancel':
-                    cancelFriendRequest(friendData);
-                    break;
-                    
-                case 'view-profile':
-                    showFriendRequestProfile(friendData);
-                    break;
-                    
-                default:
-                    console.log('Unknown action:', action);
+                
+            } catch (error) {
+                showNotification('Failed to send friend request', 'error');
             }
         }
         
-        // Handle request actions
-        function handleRequestAction(action, requestData, button) {
-            switch(action) {
-                case 'accept':
-                    acceptFriendRequestOnline(requestData.id, requestData.senderId);
-                    break;
+        // Accept friend request
+        async function acceptFriendRequestOnline(requestId, friendId) {
+            try {
+                const response = await callApi(`/api/friend-requests/${requestId}/accept`, {
+                    method: 'POST'
+                });
+                
+                if (response && response.success) {
+                    // Refresh data
+                    loadInitialDataInBackground();
+                    fetchAllUsersFromBackend();
                     
-                case 'decline':
-                    declineFriendRequest(requestData);
-                    break;
+                    showNotification('Friend request accepted', 'success');
+                    friendRequestModal.classList.remove('active');
+                } else {
+                    showNotification('Failed to accept friend request', 'error');
+                }
+                
+            } catch (error) {
+                showNotification('Failed to accept friend request', 'error');
+            }
+        }
+        
+        // Decline friend request
+        async function declineFriendRequest(requestData) {
+            try {
+                const response = await callApi(`/api/friend-requests/${requestData.id}/decline`, {
+                    method: 'POST'
+                });
+                
+                if (response && response.success) {
+                    // Refresh friend requests
+                    const requestsResponse = await callApi('/api/friend-requests/incoming');
                     
-                case 'cancel':
-                    cancelFriendRequest(requestData);
-                    break;
+                    if (requestsResponse && requestsResponse.requests) {
+                        friendRequests = requestsResponse.requests;
+                        document.getElementById('requestsCount').textContent = friendRequests.length;
+                        document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                    }
                     
-                case 'view-profile':
-                    showFriendRequestProfile(requestData);
-                    break;
+                    // Refresh all users
+                    fetchAllUsersFromBackend();
+                    
+                    // Update UI
+                    updateCurrentSection();
+                    
+                    showNotification('Friend request declined', 'success');
+                    friendRequestModal.classList.remove('active');
+                } else {
+                    showNotification('Failed to decline friend request', 'error');
+                }
+                
+            } catch (error) {
+                showNotification('Failed to decline friend request', 'error');
+            }
+        }
+        
+        // Cancel friend request
+        async function cancelFriendRequest(requestData) {
+            try {
+                const response = await callApi(`/api/friend-requests/${requestData.id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response && response.success) {
+                    // Refresh sent requests
+                    const sentResponse = await callApi('/api/friend-requests/sent');
+                    
+                    if (sentResponse && sentResponse.requests) {
+                        sentRequests = sentResponse.requests;
+                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                    }
+                    
+                    // Refresh all users
+                    fetchAllUsersFromBackend();
+                    
+                    // Update UI
+                    updateCurrentSection();
+                    
+                    showNotification('Friend request cancelled', 'success');
+                } else {
+                    showNotification('Failed to cancel friend request', 'error');
+                }
+                
+            } catch (error) {
+                showNotification('Failed to cancel friend request', 'error');
             }
         }
         
@@ -2429,7 +2604,6 @@
                 }
                 
             } catch (error) {
-                console.error('Error loading mutual friends:', error);
                 showNotification('Error loading mutual friends', 'error');
             }
         }
@@ -2480,285 +2654,12 @@
             mutualFriendsModal.classList.add('active');
         }
         
-        // Send friend request
-        async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
-            try {
-                const requestData = {
-                    receiverId: friendId,
-                    category: category,
-                    note: note,
-                    isTemporary: isTemporary,
-                    duration: duration,
-                    isBusiness: isBusiness
-                };
-                
-                const response = await callApi('/api/friend-requests/send', {
-                    method: 'POST',
-                    body: JSON.stringify(requestData)
-                });
-                
-                if (response && response.success) {
-                    // Refresh sent requests
-                    const sentResponse = await callApi('/api/friend-requests/sent');
-                    
-                    if (sentResponse && sentResponse.requests) {
-                        sentRequests = sentResponse.requests;
-                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
-                    }
-                    
-                    // Refresh all users
-                    await fetchAllUsersFromBackend();
-                    
-                    // Update UI
-                    updateCurrentSection();
-                    
-                    showNotification('Friend request sent successfully', 'success');
-                    addFriendModal.classList.remove('active');
-                } else {
-                    showNotification('Failed to send friend request', 'error');
-                }
-                
-            } catch (error) {
-                console.error('Error sending friend request:', error);
-                showNotification('Failed to send friend request', 'error');
-            }
-        }
-        
-        // Accept friend request
-        async function acceptFriendRequestOnline(requestId, friendId) {
-            try {
-                const response = await callApi(`/api/friend-requests/${requestId}/accept`, {
-                    method: 'POST'
-                });
-                
-                if (response && response.success) {
-                    // Refresh data
-                    await loadInitialData();
-                    await fetchAllUsersFromBackend();
-                    
-                    showNotification('Friend request accepted', 'success');
-                    friendRequestModal.classList.remove('active');
-                } else {
-                    showNotification('Failed to accept friend request', 'error');
-                }
-                
-            } catch (error) {
-                console.error('Error accepting friend request:', error);
-                showNotification('Failed to accept friend request', 'error');
-            }
-        }
-        
-        // Decline friend request
-        async function declineFriendRequest(requestData) {
-            try {
-                const response = await callApi(`/api/friend-requests/${requestData.id}/decline`, {
-                    method: 'POST'
-                });
-                
-                if (response && response.success) {
-                    // Refresh friend requests
-                    const requestsResponse = await callApi('/api/friend-requests/incoming');
-                    
-                    if (requestsResponse && requestsResponse.requests) {
-                        friendRequests = requestsResponse.requests;
-                        document.getElementById('requestsCount').textContent = friendRequests.length;
-                        document.getElementById('requestsSectionCount').textContent = friendRequests.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
-                    }
-                    
-                    // Refresh all users
-                    await fetchAllUsersFromBackend();
-                    
-                    // Update UI
-                    updateCurrentSection();
-                    
-                    showNotification('Friend request declined', 'success');
-                    friendRequestModal.classList.remove('active');
-                } else {
-                    showNotification('Failed to decline friend request', 'error');
-                }
-                
-            } catch (error) {
-                console.error('Error declining friend request:', error);
-                showNotification('Failed to decline friend request', 'error');
-            }
-        }
-        
-        // Cancel friend request
-        async function cancelFriendRequest(requestData) {
-            try {
-                const response = await callApi(`/api/friend-requests/${requestData.id}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response && response.success) {
-                    // Refresh sent requests
-                    const sentResponse = await callApi('/api/friend-requests/sent');
-                    
-                    if (sentResponse && sentResponse.requests) {
-                        sentRequests = sentResponse.requests;
-                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
-                    }
-                    
-                    // Refresh all users
-                    await fetchAllUsersFromBackend();
-                    
-                    // Update UI
-                    updateCurrentSection();
-                    
-                    showNotification('Friend request cancelled', 'success');
-                } else {
-                    showNotification('Failed to cancel friend request', 'error');
-                }
-                
-            } catch (error) {
-                console.error('Error cancelling friend request:', error);
-                showNotification('Failed to cancel friend request', 'error');
-            }
-        }
-        
         // Show friend details
         function showFriendDetails(friendData, type) {
             selectedFriend = friendData;
             document.querySelector('.friend-details-title').textContent = 'Friend Details';
             friendDetailsPanel.classList.add('active');
             loadFriendDetails(friendData, type);
-        }
-        
-        // Show friend request profile
-        function showFriendRequestProfile(requestData) {
-            const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
-            const userId = userData.id;
-            
-            const profileModal = document.createElement('div');
-            profileModal.className = 'add-friend-modal active';
-            profileModal.innerHTML = `
-                <div class="add-friend-container friend-request-profile">
-                    <div class="add-friend-header">
-                        <h3>${requestData.type === 'incoming_request' || requestData.status === 'pending' ? 'Friend Request' : 'Sent Request'}</h3>
-                        <button class="add-friend-btn close-profile-modal">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                    <div style="padding: 25px;">
-                        <div style="text-align: center; margin-bottom: 30px;">
-                            <div class="friend-profile-avatar" ${userData.photoURL ? `style="background-image: url('${escapeHtml(userData.photoURL)}'); width: 100px; height: 100px;"` : 'style="width: 100px; height: 100px;"'}>
-                                ${userData.photoURL ? '' : `<span style="color: white; font-size: 36px;">${userData.displayName ? userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 'U'}</span>`}
-                            </div>
-                            <div class="friend-profile-name" style="font-size: 20px; margin-top: 15px;">${escapeHtml(userData.displayName || 'Unknown User')}</div>
-                            <div class="friend-profile-username">${escapeHtml(userData.username || 'No username')}</div>
-                            <div style="margin-top: 10px; padding: 6px 12px; background-color: ${requestData.type === 'incoming_request' ? 'rgba(52, 199, 89, 0.1)' : 'rgba(0, 132, 255, 0.1)'}; color: ${requestData.type === 'incoming_request' ? 'var(--success-color)' : 'var(--primary-color)'}; border-radius: 20px; font-size: 14px; display: inline-block;">
-                                ${requestData.type === 'incoming_request' ? 'Incoming Friend Request' : 'Sent Friend Request'}
-                            </div>
-                            ${userData.bio ? `<div style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">${escapeHtml(userData.bio)}</div>` : ''}
-                        </div>
-                        
-                        <div class="friend-info-section">
-                            <div class="info-section-title">
-                                <i class="fas fa-info-circle"></i>
-                                <span>Request Information</span>
-                            </div>
-                            
-                            ${userData.email ? `
-                            <div class="info-item">
-                                <span class="info-label">Email:</span>
-                                <span class="info-value">${escapeHtml(userData.email)}</span>
-                            </div>
-                            ` : ''}
-                            
-                            <div class="info-item">
-                                <span class="info-label">Request Date:</span>
-                                <span class="info-value">${formatDate(new Date(requestData.createdAt || requestData.timestamp || Date.now()))}</span>
-                            </div>
-                            
-                            <div class="info-item">
-                                <span class="info-label">Mutual Friends:</span>
-                                <span class="info-value">
-                                    <span class="mutual-friends" data-user-id="${userId}" data-user-name="${escapeHtml(userData.displayName || 'User')}" style="cursor: pointer;">
-                                        <i class="fas fa-users"></i> ${mutualFriendsCache[userId] || 0} mutual
-                                    </span>
-                                </span>
-                            </div>
-                            
-                            ${requestData.note ? `
-                            <div class="info-item">
-                                <span class="info-label">Request Note:</span>
-                                <span class="info-value">"${escapeHtml(requestData.note)}"</span>
-                            </div>
-                            ` : ''}
-                            
-                            ${requestData.category ? `
-                            <div class="info-item">
-                                <span class="info-label">Category:</span>
-                                <span class="info-value">
-                                    <div class="category-display ${requestData.category}">
-                                        <i class="${friendCategories[requestData.category]?.icon || 'fas fa-user'}"></i>
-                                        ${friendCategories[requestData.category]?.name || requestData.category}
-                                    </div>
-                                </span>
-                            </div>
-                            ` : ''}
-                        </div>
-                        
-                        <div class="request-actions">
-                            <button class="action-btn secondary close-profile-btn" style="flex: 1;">
-                                <i class="fas fa-times"></i> Close
-                            </button>
-                            ${requestData.type === 'incoming_request' || requestData.status === 'pending' ? `
-                            <button class="action-btn danger decline-profile-btn" style="flex: 1;">
-                                <i class="fas fa-times"></i> Decline
-                            </button>
-                            <button class="action-btn success accept-profile-btn" style="flex: 1;">
-                                <i class="fas fa-check"></i> Accept
-                            </button>
-                            ` : `
-                            <button class="action-btn danger cancel-profile-btn" style="flex: 1;">
-                                <i class="fas fa-times"></i> Cancel Request
-                            </button>
-                            `}
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(profileModal);
-            
-            profileModal.querySelector('.close-profile-modal').addEventListener('click', () => {
-                document.body.removeChild(profileModal);
-            });
-            
-            profileModal.querySelector('.close-profile-btn').addEventListener('click', () => {
-                document.body.removeChild(profileModal);
-            });
-            
-            const mutualFriendsElement = profileModal.querySelector('.mutual-friends');
-            if (mutualFriendsElement) {
-                mutualFriendsElement.addEventListener('click', () => {
-                    const userId = mutualFriendsElement.dataset.userId;
-                    const userName = mutualFriendsElement.dataset.userName;
-                    showMutualFriends(userId, userName);
-                    document.body.removeChild(profileModal);
-                });
-            }
-            
-            if (requestData.type === 'incoming_request' || requestData.status === 'pending') {
-                profileModal.querySelector('.decline-profile-btn').addEventListener('click', () => {
-                    declineFriendRequest(requestData);
-                    document.body.removeChild(profileModal);
-                });
-                
-                profileModal.querySelector('.accept-profile-btn').addEventListener('click', () => {
-                    acceptFriendRequestOnline(requestData.id, userId);
-                    document.body.removeChild(profileModal);
-                });
-            } else {
-                profileModal.querySelector('.cancel-profile-btn').addEventListener('click', () => {
-                    cancelFriendRequest(requestData);
-                    document.body.removeChild(profileModal);
-                });
-            }
         }
         
         // Load friend details
@@ -2777,7 +2678,7 @@
                             detailedData = { ...detailedData, ...response.user };
                         }
                     } catch (error) {
-                        console.error('Error fetching user details:', error);
+                        // Silently fail
                     }
                 }
                 
@@ -3097,7 +2998,6 @@
                 }
                 
             } catch (error) {
-                console.error('Error loading friend details:', error);
                 detailsContent.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-exclamation-triangle"></i>
@@ -3105,6 +3005,140 @@
                         <p class="subtext">Please try again later</p>
                     </div>
                 `;
+            }
+        }
+        
+        // Show friend request profile
+        function showFriendRequestProfile(requestData) {
+            const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
+            const userId = userData.id;
+            
+            const profileModal = document.createElement('div');
+            profileModal.className = 'add-friend-modal active';
+            profileModal.innerHTML = `
+                <div class="add-friend-container friend-request-profile">
+                    <div class="add-friend-header">
+                        <h3>${requestData.type === 'incoming_request' || requestData.status === 'pending' ? 'Friend Request' : 'Sent Request'}</h3>
+                        <button class="add-friend-btn close-profile-modal">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <div class="friend-profile-avatar" ${userData.photoURL ? `style="background-image: url('${escapeHtml(userData.photoURL)}'); width: 100px; height: 100px;"` : 'style="width: 100px; height: 100px;"'}>
+                                ${userData.photoURL ? '' : `<span style="color: white; font-size: 36px;">${userData.displayName ? userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 'U'}</span>`}
+                            </div>
+                            <div class="friend-profile-name" style="font-size: 20px; margin-top: 15px;">${escapeHtml(userData.displayName || 'Unknown User')}</div>
+                            <div class="friend-profile-username">${escapeHtml(userData.username || 'No username')}</div>
+                            <div style="margin-top: 10px; padding: 6px 12px; background-color: ${requestData.type === 'incoming_request' ? 'rgba(52, 199, 89, 0.1)' : 'rgba(0, 132, 255, 0.1)'}; color: ${requestData.type === 'incoming_request' ? 'var(--success-color)' : 'var(--primary-color)'}; border-radius: 20px; font-size: 14px; display: inline-block;">
+                                ${requestData.type === 'incoming_request' ? 'Incoming Friend Request' : 'Sent Friend Request'}
+                            </div>
+                            ${userData.bio ? `<div style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">${escapeHtml(userData.bio)}</div>` : ''}
+                        </div>
+                        
+                        <div class="friend-info-section">
+                            <div class="info-section-title">
+                                <i class="fas fa-info-circle"></i>
+                                <span>Request Information</span>
+                            </div>
+                            
+                            ${userData.email ? `
+                            <div class="info-item">
+                                <span class="info-label">Email:</span>
+                                <span class="info-value">${escapeHtml(userData.email)}</span>
+                            </div>
+                            ` : ''}
+                            
+                            <div class="info-item">
+                                <span class="info-label">Request Date:</span>
+                                <span class="info-value">${formatDate(new Date(requestData.createdAt || requestData.timestamp || Date.now()))}</span>
+                            </div>
+                            
+                            <div class="info-item">
+                                <span class="info-label">Mutual Friends:</span>
+                                <span class="info-value">
+                                    <span class="mutual-friends" data-user-id="${userId}" data-user-name="${escapeHtml(userData.displayName || 'User')}" style="cursor: pointer;">
+                                        <i class="fas fa-users"></i> ${mutualFriendsCache[userId] || 0} mutual
+                                    </span>
+                                </span>
+                            </div>
+                            
+                            ${requestData.note ? `
+                            <div class="info-item">
+                                <span class="info-label">Request Note:</span>
+                                <span class="info-value">"${escapeHtml(requestData.note)}"</span>
+                            </div>
+                            ` : ''}
+                            
+                            ${requestData.category ? `
+                            <div class="info-item">
+                                <span class="info-label">Category:</span>
+                                <span class="info-value">
+                                    <div class="category-display ${requestData.category}">
+                                        <i class="${friendCategories[requestData.category]?.icon || 'fas fa-user'}"></i>
+                                        ${friendCategories[requestData.category]?.name || requestData.category}
+                                    </div>
+                                </span>
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div class="request-actions">
+                            <button class="action-btn secondary close-profile-btn" style="flex: 1;">
+                                <i class="fas fa-times"></i> Close
+                            </button>
+                            ${requestData.type === 'incoming_request' || requestData.status === 'pending' ? `
+                            <button class="action-btn danger decline-profile-btn" style="flex: 1;">
+                                <i class="fas fa-times"></i> Decline
+                            </button>
+                            <button class="action-btn success accept-profile-btn" style="flex: 1;">
+                                <i class="fas fa-check"></i> Accept
+                            </button>
+                            ` : `
+                            <button class="action-btn danger cancel-profile-btn" style="flex: 1;">
+                                <i class="fas fa-times"></i> Cancel Request
+                            </button>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(profileModal);
+            
+            profileModal.querySelector('.close-profile-modal').addEventListener('click', () => {
+                document.body.removeChild(profileModal);
+            });
+            
+            profileModal.querySelector('.close-profile-btn').addEventListener('click', () => {
+                document.body.removeChild(profileModal);
+            });
+            
+            const mutualFriendsElement = profileModal.querySelector('.mutual-friends');
+            if (mutualFriendsElement) {
+                mutualFriendsElement.addEventListener('click', () => {
+                    const userId = mutualFriendsElement.dataset.userId;
+                    const userName = mutualFriendsElement.dataset.userName;
+                    showMutualFriends(userId, userName);
+                    document.body.removeChild(profileModal);
+                });
+            }
+            
+            if (requestData.type === 'incoming_request' || requestData.status === 'pending') {
+                profileModal.querySelector('.decline-profile-btn').addEventListener('click', () => {
+                    declineFriendRequest(requestData);
+                    document.body.removeChild(profileModal);
+                });
+                
+                profileModal.querySelector('.accept-profile-btn').addEventListener('click', () => {
+                    acceptFriendRequestOnline(requestData.id, userId);
+                    document.body.removeChild(profileModal);
+                });
+            } else {
+                profileModal.querySelector('.cancel-profile-btn').addEventListener('click', () => {
+                    cancelFriendRequest(requestData);
+                    document.body.removeChild(profileModal);
+                });
             }
         }
         
@@ -3237,7 +3271,6 @@
                 updateFriendCounts();
                 
             } catch (error) {
-                console.error('Error toggling pin:', error);
                 showNotification('Failed to update pin status', 'error');
             }
         }
@@ -3272,7 +3305,6 @@
                 updateFriendCounts();
                 
             } catch (error) {
-                console.error('Error toggling mute:', error);
                 showNotification('Failed to update mute status', 'error');
             }
         }
@@ -3289,7 +3321,6 @@
                 showNotification('Note saved', 'success');
                 
             } catch (error) {
-                console.error('Error saving note:', error);
                 showNotification('Failed to save note', 'error');
             }
         }
@@ -3317,115 +3348,6 @@
             if (daysAgo < 7) return `${daysAgo}d ago`;
             
             return `${Math.floor(daysAgo / 7)}w ago`;
-        }
-        
-        // Update friend counts
-        function updateFriendCounts() {
-            document.getElementById('totalFriends').textContent = friends.length;
-            
-            const onlineCount = friends.filter(f => f.online).length;
-            document.getElementById('onlineFriends').textContent = onlineCount;
-            
-            document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
-        }
-        
-        // Update current section
-        function updateCurrentSection() {
-            updateFriendCounts();
-            
-            const activeSection = document.querySelector('.friends-section.active');
-            if (activeSection) {
-                const sectionId = activeSection.id;
-                
-                switch(sectionId) {
-                    case 'allFriendsSection':
-                        allFriendsList.innerHTML = '';
-                        
-                        const allToDisplay = [
-                            ...pinnedFriends,
-                            ...friends,
-                            ...contacts,
-                            ...temporaryFriends
-                        ];
-                        
-                        if (allToDisplay.length === 0) {
-                            allFriendsList.innerHTML = `
-                                <div class="empty-state">
-                                    <i class="fas fa-user-friends"></i>
-                                    <p>No friends yet</p>
-                                    <p class="subtext">Add friends to start connecting</p>
-                                </div>
-                            `;
-                        } else {
-                            allToDisplay.forEach(item => {
-                                const type = pinnedFriends.some(f => f.id === item.id) ? 'pinned' :
-                                           friends.some(f => f.id === item.id) ? 'friend' : 'contact';
-                                addFriendItem(item, allFriendsList, type);
-                            });
-                        }
-                        break;
-                        
-                    case 'contactsSection':
-                        renderContacts();
-                        break;
-                        
-                    case 'friendsSection':
-                        renderFriends();
-                        break;
-                        
-                    case 'requestsSection':
-                        renderFriendRequests();
-                        renderSentRequests();
-                        break;
-                        
-                    case 'temporarySection':
-                        renderTemporaryFriends();
-                        break;
-                        
-                    case 'pinnedSection':
-                        renderPinnedFriends();
-                        break;
-                        
-                    case 'mutedSection':
-                        renderMutedFriends();
-                        break;
-                }
-            }
-        }
-        
-        // Filter friends by category
-        function filterFriendsByCategory(category) {
-            currentCategoryFilter = category;
-            updateCurrentSection();
-            
-            document.querySelectorAll('.category-filter-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            const activeBtn = document.querySelector(`.category-filter-btn[data-category="${category}"]`);
-            if (activeBtn) {
-                activeBtn.classList.add('active');
-            }
-        }
-        
-        // Search friends
-        function searchFriends(searchTerm) {
-            currentSearchTerm = searchTerm.toLowerCase().trim();
-            updateCurrentSection();
-        }
-        
-        // Check if friend matches search
-        function matchesSearch(friendData, searchTerm) {
-            if (!searchTerm) return true;
-            
-            const searchIn = [
-                friendData.displayName || '',
-                friendData.username || '',
-                friendData.email || '',
-                friendData.phoneNumber || ''
-            ].join(' ').toLowerCase();
-            
-            return searchIn.includes(searchTerm);
         }
         
         // Show notification
@@ -3534,294 +3456,6 @@
             });
         }
         
-        // Utility functions
-        function escapeHtml(text) {
-            if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function formatTimeAgo(date) {
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-            
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
-            return `${Math.floor(diffDays / 7)}w ago`;
-        }
-        
-        function formatDate(date) {
-            return date.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
-        }
-        
-        function getTrustScoreClass(score) {
-            if (score >= 8) return 'high';
-            if (score >= 5) return 'medium';
-            return 'low';
-        }
-        
-        function checkMobile() {
-            isMobile = window.innerWidth <= 768;
-            if (isMobile) {
-                document.body.classList.add('mobile');
-            } else {
-                document.body.classList.remove('mobile');
-            }
-        }
-        
-        // Setup event listeners
-        function setupEventListeners() {
-            // Close mutual friends modal
-            document.getElementById('closeMutualFriendsModal').addEventListener('click', () => {
-                mutualFriendsModal.classList.remove('active');
-            });
-            
-            // Camera scanner event listeners
-            document.getElementById('closeCameraBtn').addEventListener('click', () => {
-                stopCameraScanner();
-                cameraScannerModal.classList.remove('active');
-            });
-            
-            document.getElementById('toggleCameraBtn').addEventListener('click', toggleCamera);
-            document.getElementById('toggleFlashBtn').addEventListener('click', toggleFlash);
-            
-            // Category tabs
-            const categoryTabs = {
-                'allTab': 'allFriendsSection',
-                'contactsTab': 'contactsSection',
-                'friendsTab': 'friendsSection',
-                'requestsTab': 'requestsSection',
-                'temporaryTab': 'temporarySection',
-                'pinnedTab': 'pinnedSection',
-                'mutedTab': 'mutedSection'
-            };
-            
-            Object.keys(categoryTabs).forEach(tabId => {
-                document.getElementById(tabId).addEventListener('click', function() {
-                    document.querySelectorAll('.category-btn').forEach(btn => {
-                        btn.classList.remove('active');
-                    });
-                    this.classList.add('active');
-                    
-                    document.querySelectorAll('.friends-section').forEach(section => {
-                        section.classList.remove('active');
-                    });
-                    
-                    const sectionId = categoryTabs[tabId];
-                    document.getElementById(sectionId).classList.add('active');
-                    updateCurrentSection();
-                });
-            });
-            
-            // Category filter buttons
-            document.querySelectorAll('.category-filter-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const category = this.dataset.category;
-                    filterFriendsByCategory(category);
-                });
-            });
-            
-            // Search input
-            document.getElementById('friendSearch').addEventListener('input', function() {
-                searchFriends(this.value);
-            });
-            
-            // Add friend button
-            document.getElementById('addFriendBtn').addEventListener('click', () => {
-                addFriendModal.classList.add('active');
-                document.querySelector('.add-friend-tab[data-tab="methods"]').click();
-            });
-            
-            // Start New Chat button
-            document.getElementById('startNewChatBtn').addEventListener('click', () => {
-                showStartChatModal();
-            });
-            
-            // Quick action buttons
-            document.getElementById('syncContactsBtn').addEventListener('click', () => {
-                simulateContactSync();
-            });
-            
-            document.getElementById('scanQRBtn').addEventListener('click', () => {
-                addFriendModal.classList.add('active');
-                document.querySelector('.add-friend-tab[data-tab="qr"]').click();
-            });
-            
-            document.getElementById('discoverBtn').addEventListener('click', () => {
-                addFriendModal.classList.add('active');
-                document.querySelector('.add-friend-tab[data-tab="nearby"]').click();
-            });
-            
-            // Add friend modal tabs
-            document.querySelectorAll('.add-friend-tab').forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const tabName = this.dataset.tab;
-                    
-                    document.querySelectorAll('.add-friend-tab').forEach(t => {
-                        t.classList.remove('active');
-                    });
-                    this.classList.add('active');
-                    
-                    document.querySelectorAll('.add-friend-tab-content').forEach(content => {
-                        content.classList.remove('active');
-                    });
-                    
-                    const tabContent = document.getElementById(`${tabName}Tab`);
-                    if (tabContent) {
-                        tabContent.classList.add('active');
-                        
-                        if (tabName === 'all-users') {
-                            renderAllUsersList();
-                        }
-                    }
-                });
-            });
-            
-            // Scan QR button in modal
-            document.getElementById('scanQRBtnModal').addEventListener('click', () => {
-                cameraScannerModal.classList.add('active');
-                startCameraScanner();
-            });
-            
-            // All users search input
-            document.getElementById('allUsersSearch').addEventListener('input', () => {
-                renderAllUsersList();
-            });
-            
-            // Send friend request button
-            document.getElementById('sendFriendRequestBtn').addEventListener('click', async () => {
-                const activeTab = document.querySelector('.add-friend-tab.active');
-                if (!activeTab) return;
-                
-                const activeTabName = activeTab.dataset.tab;
-                
-                if (activeTabName === 'username') {
-                    const usernameInput = document.getElementById('usernameInput').value.trim();
-                    
-                    if (!usernameInput) {
-                        showNotification('Please enter a username', 'error');
-                        return;
-                    }
-                    
-                    if (!usernameInput.startsWith('@')) {
-                        showNotification('Username must start with @', 'error');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await callApi(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
-                        
-                        if (!response || !response.user) {
-                            showNotification('User not found', 'error');
-                            return;
-                        }
-                        
-                        const userData = response.user;
-                        
-                        if (userData.id === currentUser.id) {
-                            showNotification('You cannot add yourself as a friend', 'warning');
-                            return;
-                        }
-                        
-                        const category = document.getElementById('friendCategorySelect').value || 'friend';
-                        const note = document.getElementById('friendNote').value.trim();
-                        const isBusiness = category === 'business';
-                        
-                        sendFriendRequest(userData.id, category, note, false, null, isBusiness);
-                        
-                    } catch (error) {
-                        console.error('Error searching for user:', error);
-                        showNotification('Error searching for user', 'error');
-                    }
-                    
-                } else if (activeTabName === 'all-users') {
-                    showNotification('Please select a user from the list and click the "Add Friend" button next to their name', 'info');
-                } else {
-                    showNotification('Please select a method and enter required information', 'warning');
-                }
-            });
-            
-            // Close modals
-            document.getElementById('closeAddFriendModal').addEventListener('click', () => {
-                addFriendModal.classList.remove('active');
-            });
-            
-            document.getElementById('cancelAddFriendBtn').addEventListener('click', () => {
-                addFriendModal.classList.remove('active');
-            });
-            
-            // Start Chat Modal event listeners
-            document.getElementById('closeStartChatModal').addEventListener('click', () => {
-                startChatModal.classList.remove('active');
-            });
-            
-            document.getElementById('cancelStartChatBtn').addEventListener('click', () => {
-                startChatModal.classList.remove('active');
-            });
-            
-            document.getElementById('confirmStartChatBtn').addEventListener('click', () => {
-                if (window.selectedChatFriend) {
-                    const userId = window.selectedChatFriend.id;
-                    const userName = window.selectedChatFriend.displayName || 'User';
-                    navigateToChat(userId, userName);
-                    startChatModal.classList.remove('active');
-                }
-            });
-            
-            document.getElementById('searchChatUser').addEventListener('input', function() {
-                searchChatFriends(this.value);
-            });
-            
-            // Back button
-            document.getElementById('backBtn').addEventListener('click', () => {
-                friendDetailsPanel.classList.remove('active');
-                selectedFriend = null;
-            });
-            
-            // Friend request modal buttons
-            document.getElementById('declineRequestBtn').addEventListener('click', () => {
-                friendRequestModal.classList.remove('active');
-                showNotification('Friend request declined', 'info');
-            });
-            
-            document.getElementById('acceptRequestBtn').addEventListener('click', async function() {
-                const userId = this.dataset.userId;
-                const userName = this.dataset.userName;
-                const qrData = this.dataset.qrData ? JSON.parse(this.dataset.qrData) : null;
-                
-                if (qrData && qrData.userId) {
-                    // This came from a QR code scan
-                    sendFriendRequest(qrData.userId);
-                    friendRequestModal.classList.remove('active');
-                } else if (userId) {
-                    // This is a regular friend request
-                    acceptFriendRequestOnline(null, userId);
-                }
-            });
-            
-            // Window resize
-            window.addEventListener('resize', checkMobile);
-            
-            // Before unload
-            window.addEventListener('beforeunload', () => {
-                saveFriendsToLocalStorage();
-                stopCameraScanner();
-            });
-            
-            // Initial mobile check
-            checkMobile();
-        }
-        
         // Save friends to local storage
         function saveFriendsToLocalStorage() {
             try {
@@ -3833,9 +3467,8 @@
                 localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-                console.log('Friends saved to local storage');
             } catch (error) {
-                console.error('Error saving friends to local storage:', error);
+                // Silently fail
             }
         }
         
@@ -3871,7 +3504,6 @@
                 }
                 
             } catch (error) {
-                console.error('Error syncing contacts:', error);
                 showNotification('Error syncing contacts', 'error');
             }
         }
@@ -3937,7 +3569,6 @@
                         showNotification('Category updated successfully', 'success');
                     }
                 } catch (error) {
-                    console.error('Error updating category:', error);
                     showNotification('Failed to update category', 'error');
                 }
                 
@@ -3985,7 +3616,6 @@
                 }
                 
             } catch (error) {
-                console.error('Error removing friend:', error);
                 showNotification('Failed to remove friend', 'error');
             }
         }
@@ -4022,7 +3652,6 @@
                 }
                 
             } catch (error) {
-                console.error('Error blocking user:', error);
                 showNotification('Failed to block user', 'error');
             }
         }
@@ -4071,7 +3700,386 @@
             });
         }
         
-        console.log('Friends system initialized with bootstrap pattern');
+        // Camera functions
+        async function startCameraScanner() {
+            try {
+                const videoElement = document.getElementById('cameraVideo');
+                const canvasElement = document.getElementById('scannerCanvas');
+                if (!videoElement || !canvasElement) {
+                    showNotification('Camera elements not found', 'error');
+                    return;
+                }
+                
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach(track => track.stop());
+                }
+                
+                const constraints = {
+                    video: {
+                        facingMode: currentCamera,
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                };
+                
+                cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = cameraStream;
+                
+                // Start real QR code scanning
+                startRealQRCodeScanning(videoElement, canvasElement);
+                showNotification('Camera started successfully', 'success');
+                
+            } catch (error) {
+                const cameraContainer = document.querySelector('.camera-container');
+                if (cameraContainer) {
+                    cameraContainer.innerHTML = `
+                        <div class="no-camera-message">
+                            <i class="fas fa-video-slash"></i>
+                            <h3>Camera Access Required</h3>
+                            <p>Please allow camera access to scan QR codes.</p>
+                        </div>
+                    `;
+                }
+                showNotification('Could not access camera', 'error');
+            }
+        }
+        
+        // REAL QR Code scanning using jsQR library
+        function startRealQRCodeScanning(videoElement, canvasElement) {
+            const canvas = canvasElement;
+            const context = canvas.getContext('2d');
+            scanningActive = true;
+            
+            function scanFrame() {
+                if (!scanningActive || !cameraScannerModal.classList.contains('active')) {
+                    return;
+                }
+                
+                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                    canvas.width = videoElement.videoWidth;
+                    canvas.height = videoElement.videoHeight;
+                    
+                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    
+                    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    // Use jsQR library for real QR code detection
+                    try {
+                        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                            inversionAttempts: "dontInvert",
+                        });
+                        
+                        if (code) {
+                            // Draw rectangle around QR code
+                            drawQRCodeRect(code.location, context);
+                            
+                            // Process the QR code data
+                            processScannedQRCodeReal(code.data);
+                            return; // Stop scanning after successful detection
+                        }
+                    } catch (error) {
+                        // Silently fail
+                    }
+                }
+                
+                requestAnimationFrame(scanFrame);
+            }
+            
+            function drawQRCodeRect(location, ctx) {
+                ctx.beginPath();
+                ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
+                ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
+                ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
+                ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
+                ctx.lineTo(location.topLeftCorner.x, location.topLeftCorner.y);
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = "#00FF00";
+                ctx.stroke();
+            }
+            
+            scanFrame();
+        }
+        
+        function processScannedQRCodeReal(qrData) {
+            try {
+                // Parse QR code data (expected JSON format)
+                let parsedData;
+                try {
+                    parsedData = JSON.parse(qrData);
+                } catch (e) {
+                    // If not JSON, treat as plain text
+                    parsedData = { data: qrData };
+                }
+                
+                // Validate QR code data structure
+                if (!parsedData.type || parsedData.type !== 'knecta_friend_request') {
+                    showNotification('Invalid QR code format', 'error');
+                    return;
+                }
+                
+                if (!parsedData.userId) {
+                    showNotification('QR code missing user ID', 'error');
+                    return;
+                }
+                
+                // Show the friend request modal with real data
+                showFriendRequestFromQRReal(parsedData);
+                
+                // Stop scanning
+                stopCameraScanner();
+                cameraScannerModal.classList.remove('active');
+                
+                showNotification('QR code scanned successfully!', 'success');
+                
+            } catch (error) {
+                showNotification('Error processing QR code', 'error');
+            }
+        }
+        
+        function showFriendRequestFromQRReal(qrData) {
+            // Try to get user info from backend
+            fetchUserInfoFromQR(qrData.userId).then(userInfo => {
+                document.getElementById('requestAvatar').innerHTML = `
+                    <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                        ${userInfo.displayName ? userInfo.displayName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                `;
+                
+                document.getElementById('requestName').textContent = userInfo.displayName || qrData.displayName || 'QR Code User';
+                document.getElementById('requestUsername').textContent = userInfo.username || qrData.username || '@unknown';
+                document.getElementById('mutualCount').textContent = '0';
+                
+                const acceptBtn = document.getElementById('acceptRequestBtn');
+                acceptBtn.dataset.userId = qrData.userId;
+                acceptBtn.dataset.userName = userInfo.displayName || qrData.displayName || 'User';
+                acceptBtn.dataset.qrData = JSON.stringify(qrData);
+                
+                friendRequestModal.classList.add('active');
+            }).catch(error => {
+                // Fallback to QR data if user info fetch fails
+                document.getElementById('requestAvatar').innerHTML = `
+                    <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                        ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                `;
+                
+                document.getElementById('requestName').textContent = qrData.displayName || 'QR Code User';
+                document.getElementById('requestUsername').textContent = qrData.username || '@unknown';
+                document.getElementById('mutualCount').textContent = '0';
+                
+                const acceptBtn = document.getElementById('acceptRequestBtn');
+                acceptBtn.dataset.userId = qrData.userId;
+                acceptBtn.dataset.userName = qrData.displayName || 'User';
+                acceptBtn.dataset.qrData = JSON.stringify(qrData);
+                
+                friendRequestModal.classList.add('active');
+            });
+        }
+        
+        async function fetchUserInfoFromQR(userId) {
+            try {
+                const response = await callApi(`/api/users/${userId}`);
+                
+                if (response && response.user) {
+                    return response.user;
+                }
+                throw new Error('User not found');
+            } catch (error) {
+                throw error;
+            }
+        }
+        
+        function stopCameraScanner() {
+            scanningActive = false;
+            
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+            
+            const videoElement = document.getElementById('cameraVideo');
+            if (videoElement) {
+                videoElement.srcObject = null;
+            }
+        }
+        
+        async function toggleCamera() {
+            currentCamera = currentCamera === 'environment' ? 'user' : 'environment';
+            await startCameraScanner();
+        }
+        
+        function toggleFlash() {
+            if (!cameraStream) return;
+            
+            const track = cameraStream.getVideoTracks()[0];
+            if (!track || !track.getCapabilities) {
+                showNotification('Flash not supported on this device', 'warning');
+                return;
+            }
+            
+            const capabilities = track.getCapabilities();
+            if (!capabilities.torch) {
+                showNotification('Flash not supported on this camera', 'warning');
+                return;
+            }
+            
+            flashOn = !flashOn;
+            track.applyConstraints({
+                advanced: [{ torch: flashOn }]
+            });
+            
+            const flashBtn = document.getElementById('toggleFlashBtn');
+            if (flashBtn) {
+                flashBtn.innerHTML = flashOn ? 
+                    '<i class="fas fa-lightbulb"></i> Flash On' : 
+                    '<i class="far fa-lightbulb"></i> Flash Off';
+                flashBtn.style.backgroundColor = flashOn ? 'var(--warning-color)' : 'var(--primary-color)';
+            }
+            
+            showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
+        }
+        
+        // Generate unique QR code for current user
+        function generateUniqueQRCode() {
+            try {
+                const qrContainer = document.getElementById('qrCodeContainer');
+                if (!qrContainer) return;
+                
+                qrContainer.innerHTML = '';
+                
+                if (typeof QRCode === 'undefined') {
+                    qrContainer.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
+                            <p>Your unique QR code</p>
+                            <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Get current user data
+                const user = currentUser || userData;
+                if (!user) {
+                    return;
+                }
+                
+                // Generate QR data with unique user information
+                const qrData = JSON.stringify({
+                    type: 'knecta_friend_request',
+                    userId: user.id,
+                    username: user.username || ('user_' + Math.random().toString(36).substr(2, 9)),
+                    displayName: user.displayName || 'Knecta User',
+                    timestamp: Date.now(),
+                    app: 'Knecta Chat',
+                    version: '1.0',
+                    hash: generateVerificationHash(user.id, user.username || '')
+                });
+                
+                try {
+                    new QRCode(qrContainer, {
+                        text: qrData,
+                        width: 200,
+                        height: 200,
+                        colorDark: '#0084ff',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                    
+                    // Store the QR code data for later verification
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
+                    
+                } catch (qrError) {
+                    qrContainer.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
+                            <p>Your unique QR code</p>
+                            <p style="font-size: 12px; margin-top: 10px;">Scan to add as friend</p>
+                            <p style="font-size: 10px; margin-top: 5px;">User: ${user.username || user.id}</p>
+                        </div>
+                    `;
+                }
+                
+            } catch (error) {
+                const qrContainer = document.getElementById('qrCodeContainer');
+                if (qrContainer) {
+                    qrContainer.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <p>Your QR Code</p>
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        // Generate verification hash for QR code security
+        function generateVerificationHash(userId, username) {
+            const secret = 'knecta_secret_2024';
+            const data = userId + username + Date.now();
+            let hash = 0;
+            for (let i = 0; i < data.length; i++) {
+                const char = data.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash).toString(16);
+        }
+        
+        // Utility functions
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function formatTimeAgo(date) {
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return `${Math.floor(diffDays / 7)}w ago`;
+        }
+        
+        function formatDate(date) {
+            return date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        }
+        
+        function getTrustScoreClass(score) {
+            if (score >= 8) return 'high';
+            if (score >= 5) return 'medium';
+            return 'low';
+        }
+        
+        function checkMobile() {
+            isMobile = window.innerWidth <= 768;
+            if (isMobile) {
+                document.body.classList.add('mobile');
+            } else {
+                document.body.classList.remove('mobile');
+            }
+        }
+        
+        // =============================================
+        // INITIALIZE ON PAGE LOAD
+        // =============================================
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Start silent initialization in background
+            setTimeout(silentInitialize, 100);
+        });
     </script>
 </body>
 </html>

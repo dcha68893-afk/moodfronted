@@ -66,7 +66,7 @@ function handleAuthStateChange(user) {
         loadUserPosts(user.uid);
     } else {
         console.log('❌ No user signed in, redirecting to login...');
-        window.location.href = 'login.html';
+        window.location.href = 'index.html';
     }
 }
 
@@ -230,7 +230,7 @@ async function handleLogout() {
         console.log('✅ User signed out successfully');
         
         // Redirect to login page
-        window.location.href = 'login.html';
+        window.location.href = 'index.html';
         
     } catch (error) {
         console.error('❌ Logout error:', error);

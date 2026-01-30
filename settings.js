@@ -17,6 +17,9 @@ let userGroups = [];
 let accessToken = null;
 let refreshToken = null;
 
+// ADDED: Authentication ready flag
+let authReady = false;
+
 // Default settings structure (222 features organized by section)
 const DEFAULT_SETTINGS = {
     // PROFILE SECTION (22 features)
@@ -461,25 +464,34 @@ async function bootstrapIframe() {
     console.log('=== SETTINGS IFRAME BOOTSTRAP START ===');
     
     try {
-        // Step 1: Load tokens from localStorage
-        updateLoadingStatus('Loading authentication...', 10);
-        accessToken = localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
-        refreshToken = localStorage.getItem('moodchat_refresh_token') || localStorage.getItem('refreshToken');
+        // Step 1: Wait for authentication to be ready
+        updateLoadingStatus('Waiting for authentication...', 10);
         
-        if (!accessToken) {
-            console.error('No access token found in localStorage');
-            throw new Error('Authentication required');
+        // Check if api.js is loaded and wait for auth if needed
+        if (typeof api === 'undefined') {
+            console.error('api.js not loaded');
+            throw new Error('API library not available');
+        }
+        
+        // Wait for auth to be ready using api.js mechanism
+        if (typeof api.waitForAuth === 'function') {
+            await api.waitForAuth();
+            authReady = true;
+        } else {
+            // Fallback: check for token directly
+            accessToken = localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+            refreshToken = localStorage.getItem('moodchat_refresh_token') || localStorage.getItem('refreshToken');
+            
+            if (!accessToken) {
+                console.error('No access token found in localStorage');
+                throw new Error('Authentication required');
+            }
+            authReady = true;
         }
         
         // Step 2: Verify token by calling /api/auth/me
         updateLoadingStatus('Verifying authentication...', 30);
         console.log('Calling /api/auth/me to verify token...');
-        
-        // Use api.js for all API calls
-        if (typeof api === 'undefined') {
-            console.error('api.js not loaded');
-            throw new Error('API library not available');
-        }
         
         const userData = await api.get('/api/auth/me');
         
@@ -535,7 +547,7 @@ function handleAuthError() {
         localStorage.removeItem('knecta_user_settings');
         
         // Redirect to login page
-        window.location.href = '/login.html';
+        window.location.href = '/index.html';
     }, 2000);
 }
 
@@ -545,6 +557,16 @@ async function makeAuthenticatedRequest(method, endpoint, data = null) {
         // Use api.js for all API calls
         if (typeof api === 'undefined') {
             throw new Error('API library not available');
+        }
+        
+        // Ensure auth is ready before making requests
+        if (!authReady) {
+            if (typeof api.waitForAuth === 'function') {
+                await api.waitForAuth();
+                authReady = true;
+            } else {
+                throw new Error('Authentication not ready');
+            }
         }
         
         let result;
@@ -5945,19 +5967,16 @@ function loadPersonalizationSection(container) {
                 unsavedChanges = true;
                 updateSaveButton();
                 
-                // Update shortcut previews
-                if (property.startsWith('shortcut')) {
-                    const previews = document.querySelectorAll('.shortcut-preview');
-                    const shortcutIndex = parseInt(property.replace('shortcut', '')) - 1;
-                    if (previews[shortcutIndex]) {
-                        const iconElement = previews[shortcutIndex].querySelector('.shortcut-icon i');
-                        const nameElement = previews[shortcutIndex].querySelector('.shortcut-name');
-                        if (iconElement) {
-                            iconElement.className = `fas fa-${getShortcutIcon(element.value)}`;
-                        }
-                        if (nameElement) {
-                            nameElement.textContent = getShortcutName(element.value);
-                        }
+                // Update shortcut previews if shortcut changed
+                if (id.includes('shortcut')) {
+                    const shortcutNumber = id.replace('shortcut', '').replace('Select', '');
+                    const shortcutKey = `shortcut${shortcutNumber}`;
+                    const shortcutPreview = document.querySelectorAll('.shortcut-preview')[parseInt(shortcutNumber) - 1];
+                    if (shortcutPreview) {
+                        const icon = shortcutPreview.querySelector('.shortcut-icon i');
+                        const name = shortcutPreview.querySelector('.shortcut-name');
+                        if (icon) icon.className = `fas fa-${getShortcutIcon(element.value)}`;
+                        if (name) name.textContent = getShortcutName(element.value);
                     }
                 }
             });
@@ -5965,7 +5984,7 @@ function loadPersonalizationSection(container) {
     });
     
     // Toggle change listeners
-    const toggles = ['personalizationMoodBasedLayoutsToggle', 'personalizationCustomIconsToggle', 'quickAccessToggle'];
+    const toggles = ['quickAccessToggle', 'personalizationMoodBasedLayoutsToggle', 'personalizationCustomIconsToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -5996,7 +6015,7 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Invisible Mode</div>
                         <div class="setting-description">
-                            Temporarily appear offline to others
+                            Temporarily hide your online status and activity
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6019,8 +6038,7 @@ function loadSafetySection(container) {
                             <option value="30min" ${settings.invisibleDuration === '30min' ? 'selected' : ''}>30 Minutes</option>
                             <option value="1hr" ${settings.invisibleDuration === '1hr' ? 'selected' : ''}>1 Hour</option>
                             <option value="4hr" ${settings.invisibleDuration === '4hr' ? 'selected' : ''}>4 Hours</option>
-                            <option value="8hr" ${settings.invisibleDuration === '8hr' ? 'selected' : ''}>8 Hours</option>
-                            <option value="untilDisabled" ${settings.invisibleDuration === 'untilDisabled' ? 'selected' : ''}>Until Disabled</option>
+                            <option value="untilTurnedOff" ${settings.invisibleDuration === 'untilTurnedOff' ? 'selected' : ''}>Until Turned Off</option>
                         </select>
                     </div>
                 </div>
@@ -6029,31 +6047,21 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Hide from Specific Contacts</div>
                         <div class="setting-description">
-                            Hide from specific contacts while invisible
+                            Hide from specific users even when visible
                         </div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="hideFromContactsBtn">
-                            <i class="fas fa-users"></i> Select
+                            <i class="fas fa-user-slash"></i> Select
                         </button>
                     </div>
                 </div>
-            </div>
-        </div>
-        
-        <div class="settings-section">
-            <div class="section-header">
-                <h3><i class="fas fa-user-check section-icon"></i> Always Visible To</h3>
-                <div class="section-description">
-                    Users who can always see your online status
-                </div>
-            </div>
-            <div class="section-body">
+                
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Always Visible To</div>
                         <div class="setting-description">
-                            Select users who can always see you online
+                            Always show online status to specific users
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6067,9 +6075,95 @@ function loadSafetySection(container) {
         
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-cog section-icon"></i> Safety Features</h3>
+                <h3><i class="fas fa-smile section-icon"></i> Mood Privacy Rules</h3>
                 <div class="section-description">
-                    Enhanced safety and privacy features
+                    Privacy rules based on your mood
+                </div>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Mood Privacy Rules</div>
+                        <div class="setting-description">
+                            Adjust privacy settings based on your mood
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="safetyMoodPrivacyRulesToggle" ${settings.moodPrivacyRules ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Tired Mood Rule</div>
+                        <div class="setting-description">
+                            Special privacy rules when tired
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="tiredMoodRuleToggle" ${settings.tiredMoodRule ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Stressed Mood Rule</div>
+                        <div class="setting-description">
+                            Special privacy rules when stressed
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="stressedMoodRuleToggle" ${settings.stressedMoodRule ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Happy Mood Rule</div>
+                        <div class="setting-description">
+                            Special privacy rules when happy
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="happyMoodRuleToggle" ${settings.happyMoodRule ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Rule Duration</div>
+                        <div class="setting-description">
+                            How long mood rules stay active
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="safetyRuleDurationSelect">
+                            <option value="2hr" ${settings.ruleDuration === '2hr' ? 'selected' : ''}>2 Hours</option>
+                            <option value="6hr" ${settings.ruleDuration === '6hr' ? 'selected' : ''}>6 Hours</option>
+                            <option value="24hr" ${settings.ruleDuration === '24hr' ? 'selected' : ''}>24 Hours</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-lock section-icon"></i> Enhanced Security</h3>
+                <div class="section-description">
+                    Additional security features
                 </div>
             </div>
             <div class="section-body">
@@ -6101,7 +6195,6 @@ function loadSafetySection(container) {
                             <option value="5min" ${settings.lockScreenAfter === '5min' ? 'selected' : ''}>5 Minutes</option>
                             <option value="15min" ${settings.lockScreenAfter === '15min' ? 'selected' : ''}>15 Minutes</option>
                             <option value="30min" ${settings.lockScreenAfter === '30min' ? 'selected' : ''}>30 Minutes</option>
-                            <option value="never" ${settings.lockScreenAfter === 'never' ? 'selected' : ''}>Never</option>
                         </select>
                     </div>
                 </div>
@@ -6119,7 +6212,6 @@ function loadSafetySection(container) {
                             <option value="4hr" ${settings.logoutAfter === '4hr' ? 'selected' : ''}>4 Hours</option>
                             <option value="8hr" ${settings.logoutAfter === '8hr' ? 'selected' : ''}>8 Hours</option>
                             <option value="24hr" ${settings.logoutAfter === '24hr' ? 'selected' : ''}>24 Hours</option>
-                            <option value="never" ${settings.logoutAfter === 'never' ? 'selected' : ''}>Never</option>
                         </select>
                     </div>
                 </div>
@@ -6161,19 +6253,19 @@ function loadSafetySection(container) {
     const hideFromContactsBtn = document.getElementById('hideFromContactsBtn');
     if (hideFromContactsBtn) {
         hideFromContactsBtn.addEventListener('click', () => {
-            showNotification('Select contacts to hide from while invisible', 'info');
+            showNotification('Select contacts to hide from', 'info');
         });
     }
     
     const alwaysVisibleToBtn = document.getElementById('alwaysVisibleToBtn');
     if (alwaysVisibleToBtn) {
         alwaysVisibleToBtn.addEventListener('click', () => {
-            showNotification('Select contacts who can always see your online status', 'info');
+            showNotification('Select contacts to always be visible to', 'info');
         });
     }
     
     // Select change listeners
-    const selects = ['invisibleDurationSelect', 'safetyLockScreenAfterSelect', 'safetyLogoutAfterSelect'];
+    const selects = ['invisibleDurationSelect', 'safetyRuleDurationSelect', 'safetyLockScreenAfterSelect', 'safetyLogoutAfterSelect'];
     selects.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6187,7 +6279,9 @@ function loadSafetySection(container) {
     });
     
     // Toggle change listeners
-    const toggles = ['invisibleModeToggle', 'safetyEnhancedTimeoutToggle', 'safetyBiometricBypassToggle', 'safetyTimeoutWarningsToggle'];
+    const toggles = ['invisibleModeToggle', 'safetyMoodPrivacyRulesToggle', 'tiredMoodRuleToggle',
+                   'stressedMoodRuleToggle', 'happyMoodRuleToggle', 'safetyEnhancedTimeoutToggle',
+                   'safetyBiometricBypassToggle', 'safetyTimeoutWarningsToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6210,7 +6304,7 @@ function loadAdvancedSection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-cogs section-icon"></i> Advanced Features</h3>
                 <div class="section-description">
-                    Developer and advanced user options
+                    Developer and power user settings
                 </div>
             </div>
             <div class="section-body">
@@ -6233,7 +6327,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Intranet Support</div>
                         <div class="setting-description">
-                            Enable support for local network communication
+                            Enable communication within local network
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6248,7 +6342,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Low Bandwidth Mode</div>
                         <div class="setting-description">
-                            Optimize for slower internet connections
+                            Optimize for slow connections
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6263,7 +6357,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Debug Mode</div>
                         <div class="setting-description">
-                            Enable debugging and logging features
+                            Enable debugging features and logs
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6278,7 +6372,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Data Saver</div>
                         <div class="setting-description">
-                            Reduce data usage by limiting media quality
+                            Reduce data usage
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6290,10 +6384,43 @@ function loadAdvancedSection(container) {
                 </div>
             </div>
         </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-server section-icon"></i> Proxy Settings</h3>
+                <div class="section-description">
+                    Configure network proxy settings
+                </div>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Proxy Configuration</div>
+                        <div class="setting-description">
+                            Configure proxy server settings
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="configureProxyBtn">
+                            <i class="fas fa-network-wired"></i> Configure
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     `;
     
+    // Add event listeners for advanced section
+    const configureProxyBtn = document.getElementById('configureProxyBtn');
+    if (configureProxyBtn) {
+        configureProxyBtn.addEventListener('click', () => {
+            showNotification('Proxy configuration would open here', 'info');
+        });
+    }
+    
     // Toggle change listeners
-    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle', 'debugModeToggle', 'dataSaverToggle'];
+    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle',
+                   'debugModeToggle', 'dataSaverToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6310,13 +6437,14 @@ function loadAdvancedSection(container) {
 // BACKUP SECTION (11 features) - FULLY IMPLEMENTED
 function loadBackupSection(container) {
     const settings = userSettings.backup || DEFAULT_SETTINGS.backup;
+    const lastBackup = settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never';
     
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
                 <h3><i class="fas fa-cloud-upload-alt section-icon"></i> Backup Settings</h3>
                 <div class="section-description">
-                    Configure automatic backups for your data
+                    Configure automatic backups
                 </div>
             </div>
             <div class="section-body">
@@ -6355,13 +6483,14 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Location</div>
                         <div class="setting-description">
-                            Where to store your backups
+                            Where to store backups
                         </div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="backupLocationSelect">
                             <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud</option>
-                            <option value="local" ${settings.backupLocation === 'local' ? 'selected' : ''}>Local Device</option>
+                            <option value="device" ${settings.backupLocation === 'device' ? 'selected' : ''}>This Device</option>
+                            <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both</option>
                         </select>
                     </div>
                 </div>
@@ -6374,7 +6503,7 @@ function loadBackupSection(container) {
                         </div>
                     </div>
                     <div class="setting-control">
-                        <div class="setting-value">${settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never'}</div>
+                        <div class="setting-value">${lastBackup}</div>
                     </div>
                 </div>
                 
@@ -6389,17 +6518,27 @@ function loadBackupSection(container) {
                         <div class="setting-value">${formatStorageSize(settings.backupSize)}</div>
                     </div>
                 </div>
-                
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-download section-icon"></i> Manual Backup</h3>
+                <div class="section-description">
+                    Create manual backups and restore data
+                </div>
+            </div>
+            <div class="section-body">
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Create Backup Now</div>
                         <div class="setting-description">
-                            Manually create a backup of your data
+                            Create a manual backup immediately
                         </div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="createBackupBtn">
-                            <i class="fas fa-cloud-upload-alt"></i> Backup Now
+                            <i class="fas fa-save"></i> Backup Now
                         </button>
                     </div>
                 </div>
@@ -6408,12 +6547,12 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Restore from Backup</div>
                         <div class="setting-description">
-                            Restore your data from a previous backup
+                            Restore your data from a backup
                         </div>
                     </div>
                     <div class="setting-control">
                         <button class="setting-button" id="restoreBackupBtn">
-                            <i class="fas fa-cloud-download-alt"></i> Restore
+                            <i class="fas fa-history"></i> Restore
                         </button>
                     </div>
                 </div>
@@ -6425,15 +6564,19 @@ function loadBackupSection(container) {
     const createBackupBtn = document.getElementById('createBackupBtn');
     if (createBackupBtn) {
         createBackupBtn.addEventListener('click', () => {
-            showNotification('Creating backup...', 'info');
-            setTimeout(() => {
-                userSettings.backup.lastBackup = new Date().toISOString();
-                userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024;
-                unsavedChanges = true;
-                updateSaveButton();
-                loadSection('backup');
-                showNotification('Backup created successfully', 'success');
-            }, 1500);
+            showConfirmation(
+                'Create Backup',
+                'Are you sure you want to create a backup now? This may take a few minutes.',
+                () => {
+                    // Simulate backup creation
+                    userSettings.backup.lastBackup = new Date().toISOString();
+                    userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024;
+                    unsavedChanges = true;
+                    updateSaveButton();
+                    loadSection('backup'); // Reload to show updated backup info
+                    showNotification('Backup created successfully', 'success');
+                }
+            );
         });
     }
     
@@ -6442,12 +6585,9 @@ function loadBackupSection(container) {
         restoreBackupBtn.addEventListener('click', () => {
             showConfirmation(
                 'Restore from Backup',
-                'Are you sure you want to restore from backup? This will overwrite your current settings.',
+                'Are you sure you want to restore from backup? This will replace your current data.',
                 () => {
-                    showNotification('Restoring from backup...', 'info');
-                    setTimeout(() => {
-                        showNotification('Settings restored from backup', 'success');
-                    }, 1500);
+                    showNotification('Restore process would start here', 'info');
                 }
             );
         });
@@ -6470,170 +6610,95 @@ function loadBackupSection(container) {
     // Toggle change listener
     const autoBackupToggle = document.getElementById('autoBackupToggle');
     if (autoBackupToggle) {
-        autoBackupToggle.addEventListener('change', () => {
-            userSettings.backup.autoBackup = autoBackupToggle.checked;
+        autoBackupToggle.addEventListener('change', function() {
+            userSettings.backup.autoBackup = this.checked;
             unsavedChanges = true;
             updateSaveButton();
         });
     }
 }
 
-// DANGER SECTION (7 features) - FULLY IMPLEMENTED
+// DANGER ZONE SECTION (7 features) - FULLY IMPLEMENTED
 function loadDangerSection(container) {
     const settings = userSettings.danger || DEFAULT_SETTINGS.danger;
+    const deletionScheduled = settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleString() : 'Not scheduled';
+    const lastExport = settings.lastExport ? new Date(settings.lastExport).toLocaleString() : 'Never';
     
     container.innerHTML = `
-        <div class="settings-section danger-section">
-            <div class="section-header">
-                <h3><i class="fas fa-exclamation-triangle section-icon"></i> Danger Zone</h3>
-                <div class="section-description">
-                    Irreversible actions - proceed with extreme caution
-                </div>
+        <div class="danger-zone">
+            <div class="danger-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Danger Zone</h3>
+                <p class="danger-warning">These actions are irreversible. Proceed with caution.</p>
             </div>
-            <div class="section-body">
-                <div class="danger-item">
-                    <div class="danger-info">
-                        <div class="danger-label">Export Your Data</div>
-                        <div class="danger-description">
-                            Download a copy of all your data including messages, contacts, and settings
-                        </div>
+            
+            <div class="danger-section">
+                <h4>Account Deletion</h4>
+                <p>Permanently delete your account and all associated data.</p>
+                <div class="danger-info">
+                    <div class="danger-item">
+                        <span class="danger-label">Deletion Requested:</span>
+                        <span class="danger-value">${settings.accountDeletionRequested ? 'Yes' : 'No'}</span>
                     </div>
-                    <div class="danger-control">
-                        <button class="danger-button secondary" id="exportDataBtn">
-                            <i class="fas fa-download"></i> Export Data
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="danger-item">
-                    <div class="danger-info">
-                        <div class="danger-label">Last Export</div>
-                        <div class="danger-description">
-                            When you last exported your data
-                        </div>
-                    </div>
-                    <div class="danger-control">
-                        <div class="danger-value">${settings.lastExport ? new Date(settings.lastExport).toLocaleString() : 'Never exported'}</div>
+                    <div class="danger-item">
+                        <span class="danger-label">Scheduled for:</span>
+                        <span class="danger-value">${deletionScheduled}</span>
                     </div>
                 </div>
-                
-                <div class="danger-item">
-                    <div class="danger-info">
-                        <div class="danger-label">Export Format</div>
-                        <div class="danger-description">
-                            Choose the format for your data export
-                        </div>
+                <button class="danger-button delete-account-btn" id="deleteAccountBtn">
+                    <i class="fas fa-trash-alt"></i> Delete Account
+                </button>
+            </div>
+            
+            <div class="danger-section">
+                <h4>Data Export</h4>
+                <p>Export all your data in a portable format.</p>
+                <div class="danger-info">
+                    <div class="danger-item">
+                        <span class="danger-label">Last Export:</span>
+                        <span class="danger-value">${lastExport}</span>
                     </div>
-                    <div class="danger-control">
-                        <select class="setting-dropdown" id="exportFormatSelect">
-                            <option value="json" ${settings.exportFormat === 'json' ? 'selected' : ''}>JSON</option>
-                            <option value="csv" ${settings.exportFormat === 'csv' ? 'selected' : ''}>CSV</option>
-                            <option value="xml" ${settings.exportFormat === 'xml' ? 'selected' : ''}>XML</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="danger-divider"></div>
-                
-                <div class="danger-item">
-                    <div class="danger-info">
-                        <div class="danger-label">Deactivate Account</div>
-                        <div class="danger-description">
-                            Temporarily disable your account. You can reactivate it later by logging in.
-                        </div>
-                    </div>
-                    <div class="danger-control">
-                        <button class="danger-button warning" id="deactivateAccountBtn">
-                            <i class="fas fa-user-slash"></i> Deactivate
-                        </button>
+                    <div class="danger-item">
+                        <span class="danger-label">Export Format:</span>
+                        <span class="danger-value">${settings.exportFormat.toUpperCase()}</span>
                     </div>
                 </div>
-                
-                <div class="danger-item">
-                    <div class="danger-info">
-                        <div class="danger-label">Delete Account</div>
-                        <div class="danger-description">
-                            Permanently delete your account and all associated data. This action cannot be undone.
-                        </div>
-                    </div>
-                    <div class="danger-control">
-                        <button class="danger-button danger" id="deleteAccountBtn">
-                            <i class="fas fa-trash-alt"></i> Delete Account
-                        </button>
-                    </div>
+                <button class="danger-button export-data-btn" id="exportDataBtn">
+                    <i class="fas fa-file-export"></i> Export My Data
+                </button>
+            </div>
+            
+            <div class="danger-section">
+                <h4>Clear All Data</h4>
+                <p>Remove all your messages, contacts, and settings from this device.</p>
+                <div class="danger-warning-text">
+                    <i class="fas fa-exclamation-circle"></i>
+                    This does not delete your account, only local data.
                 </div>
-                
-                ${settings.accountDeletionRequested ? `
-                <div class="danger-warning">
-                    <div class="danger-warning-icon">
-                        <i class="fas fa-exclamation-circle"></i>
-                    </div>
-                    <div class="danger-warning-content">
-                        <div class="danger-warning-title">Account Deletion Scheduled</div>
-                        <div class="danger-warning-description">
-                            Your account is scheduled for deletion on ${settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleDateString() : 'unknown date'}. 
-                            You can cancel this request within the next 30 days.
-                        </div>
-                        <button class="danger-warning-button" id="cancelDeletionBtn">Cancel Deletion</button>
-                    </div>
-                </div>
-                ` : ''}
+                <button class="danger-button clear-data-btn" id="clearAllDataBtn">
+                    <i class="fas fa-broom"></i> Clear All Local Data
+                </button>
             </div>
         </div>
     `;
     
-    // Add event listeners for danger section
-    const exportDataBtn = document.getElementById('exportDataBtn');
-    if (exportDataBtn) {
-        exportDataBtn.addEventListener('click', () => {
-            showConfirmation(
-                'Export Data',
-                'This will create a download of all your data including messages, contacts, and settings. Continue?',
-                () => {
-                    showNotification('Preparing data export...', 'info');
-                    setTimeout(() => {
-                        userSettings.danger.lastExport = new Date().toISOString();
-                        userSettings.danger.dataExportRequested = true;
-                        unsavedChanges = true;
-                        updateSaveButton();
-                        loadSection('danger');
-                        showNotification('Data export prepared. Click to download.', 'success');
-                    }, 2000);
-                }
-            );
-        });
-    }
-    
-    const deactivateAccountBtn = document.getElementById('deactivateAccountBtn');
-    if (deactivateAccountBtn) {
-        deactivateAccountBtn.addEventListener('click', () => {
-            showConfirmation(
-                'Deactivate Account',
-                'Your account will be temporarily disabled. You can reactivate it by logging in. Continue?',
-                () => {
-                    showNotification('Account deactivation requested', 'info');
-                }
-            );
-        });
-    }
-    
+    // Add event listeners for danger zone
     const deleteAccountBtn = document.getElementById('deleteAccountBtn');
     if (deleteAccountBtn) {
         deleteAccountBtn.addEventListener('click', () => {
             showConfirmation(
                 'Delete Account',
-                'This will permanently delete your account and all associated data. This action cannot be undone. Are you absolutely sure?',
+                'Are you absolutely sure? This will permanently delete your account, all messages, contacts, and data. This action cannot be undone.',
                 () => {
                     showConfirmation(
-                        'Final Confirmation',
-                        'This is your last chance to cancel. Your account will be permanently deleted in 30 days. Continue?',
+                        'Final Warning',
+                        'This is your last chance to cancel. All your data will be permanently deleted in 30 days. You can cancel during this period.',
                         () => {
                             userSettings.danger.accountDeletionRequested = true;
                             userSettings.danger.deletionScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
                             unsavedChanges = true;
                             updateSaveButton();
                             loadSection('danger');
-                            showNotification('Account deletion scheduled. You can cancel within 30 days.', 'warning');
+                            showNotification('Account deletion scheduled. You have 30 days to cancel.', 'warning');
                         }
                     );
                 }
@@ -6641,66 +6706,89 @@ function loadDangerSection(container) {
         });
     }
     
-    const cancelDeletionBtn = document.getElementById('cancelDeletionBtn');
-    if (cancelDeletionBtn) {
-        cancelDeletionBtn.addEventListener('click', () => {
+    const exportDataBtn = document.getElementById('exportDataBtn');
+    if (exportDataBtn) {
+        exportDataBtn.addEventListener('click', () => {
             showConfirmation(
-                'Cancel Deletion',
-                'Cancel your account deletion request?',
+                'Export Data',
+                'This will create a downloadable file containing all your messages, contacts, and settings. It may take several minutes.',
                 () => {
-                    userSettings.danger.accountDeletionRequested = false;
-                    userSettings.danger.deletionScheduled = null;
+                    userSettings.danger.dataExportRequested = true;
+                    userSettings.danger.lastExport = new Date().toISOString();
                     unsavedChanges = true;
                     updateSaveButton();
                     loadSection('danger');
-                    showNotification('Account deletion cancelled', 'success');
+                    showNotification('Data export started. You will be notified when ready.', 'success');
                 }
             );
         });
     }
     
-    // Select change listener
-    const exportFormatSelect = document.getElementById('exportFormatSelect');
-    if (exportFormatSelect) {
-        exportFormatSelect.addEventListener('change', () => {
-            userSettings.danger.exportFormat = exportFormatSelect.value;
-            unsavedChanges = true;
-            updateSaveButton();
+    const clearAllDataBtn = document.getElementById('clearAllDataBtn');
+    if (clearAllDataBtn) {
+        clearAllDataBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Clear All Local Data',
+                'This will remove all your messages, contacts, and settings from this device. Your account will remain active.',
+                () => {
+                    showConfirmation(
+                        'Confirm Clear Data',
+                        'Are you sure? This cannot be undone and you will need to re-download your data.',
+                        () => {
+                            // Clear local storage
+                            localStorage.removeItem('knecta_current_user');
+                            localStorage.removeItem('knecta_user_settings');
+                            
+                            // Reset settings to default
+                            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+                            currentUser = { displayName: 'User' };
+                            
+                            unsavedChanges = true;
+                            updateSaveButton();
+                            loadSection('danger');
+                            showNotification('Local data cleared. Restart the app to see changes.', 'success');
+                        }
+                    );
+                }
+            );
         });
     }
 }
 
 // =============================================
-// INITIALIZE THE SETTINGS IFRAME
+// INITIALIZATION - ENTRY POINT
 // =============================================
 
 // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', function() {
     console.log('Settings iframe DOM loaded');
     
-    // Run bootstrap and initialize
-    const success = await bootstrapIframe();
-    
-    if (!success) {
-        console.error('Failed to bootstrap settings iframe');
-        const contentContainer = document.getElementById('settingsContent');
-        if (contentContainer) {
-            contentContainer.innerHTML = `
-                <div class="settings-section">
-                    <div class="section-header">
-                        <h3><i class="fas fa-exclamation-triangle section-icon"></i> Initialization Failed</h3>
-                        <div class="section-description">
-                            Unable to load settings system
-                        </div>
-                    </div>
-                    <div class="section-body">
-                        <p>Failed to initialize the settings system. Please try refreshing the page or contact support.</p>
-                        <button class="setting-button primary" onclick="location.reload()">
-                            <i class="fas fa-redo"></i> Refresh Page
-                        </button>
-                    </div>
-                </div>
-            `;
+    // Start the bootstrap process
+    bootstrapIframe().then(success => {
+        if (success) {
+            console.log('Settings iframe initialized successfully');
+        } else {
+            console.error('Settings iframe initialization failed');
         }
-    }
+    }).catch(error => {
+        console.error('Settings iframe bootstrap error:', error);
+        showNotification('Failed to initialize settings', 'error');
+    });
 });
+
+// =============================================
+// EXPORT FUNCTIONS FOR GLOBAL ACCESS
+// =============================================
+
+// Export functions that might be called from parent window
+if (typeof window !== 'undefined') {
+    window.settingsSystem = {
+        bootstrapIframe,
+        loadSection,
+        saveSettings,
+        showNotification,
+        showConfirmation,
+        getCurrentUser: () => currentUser,
+        getUserSettings: () => userSettings
+    };
+}

@@ -407,12 +407,29 @@ async function bootstrapIframe() {
     console.log('=== BOOTSTRAP IFRAME START ===');
     
     try {
+        // First, wait for api.js to be ready
+        if (!window.knectaAPI) {
+            console.log('Waiting for api.js to load...');
+            await waitForApiJs();
+        }
+        
         // Check if jQuery is available for spectrum.min.js dependencies
         if (typeof jQuery === 'undefined') {
             console.error('jQuery is not loaded. Status system cannot initialize.');
             errorUI.classList.add('active');
             document.getElementById('errorTitle').textContent = 'jQuery Error';
             document.getElementById('errorMessage').textContent = 'Required library (jQuery) is not loaded. Please refresh the page.';
+            return false;
+        }
+        
+        // Wait for authentication to be ready via api.js
+        console.log('Waiting for authentication to be ready...');
+        try {
+            await window.knectaAPI.waitForAuthReady();
+            console.log('Authentication is ready');
+        } catch (authError) {
+            console.error('Authentication wait failed:', authError);
+            handleAuthError('Authentication service unavailable');
             return false;
         }
         
@@ -463,8 +480,10 @@ async function bootstrapIframe() {
             // Show loading state
             showNotification('Connecting to server...', 'info');
             
-            // Initialize status system
-            await initializeStatusSystem();
+            // Initialize status system (but don't block UI)
+            setTimeout(() => {
+                initializeStatusSystem();
+            }, 100);
             
             console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
             return true;
@@ -511,7 +530,9 @@ async function bootstrapIframe() {
                             setupEventListeners();
                             initializeUIComponents();
                             showNotification('Connecting to server...', 'info');
-                            await initializeStatusSystem();
+                            setTimeout(() => {
+                                initializeStatusSystem();
+                            }, 100);
                             return true;
                         }
                     }
@@ -530,6 +551,34 @@ async function bootstrapIframe() {
         handleAuthError('Failed to initialize. Please try again.');
         return false;
     }
+}
+
+// Wait for api.js to load
+function waitForApiJs() {
+    return new Promise((resolve, reject) => {
+        let attempts = 0;
+        const maxAttempts = 50; // 5 seconds max wait
+        
+        const checkApi = () => {
+            attempts++;
+            
+            if (window.knectaAPI) {
+                console.log('api.js loaded successfully');
+                resolve();
+                return;
+            }
+            
+            if (attempts >= maxAttempts) {
+                console.error('api.js failed to load after maximum attempts');
+                reject(new Error('api.js failed to load'));
+                return;
+            }
+            
+            setTimeout(checkApi, 100);
+        };
+        
+        checkApi();
+    });
 }
 
 // Read tokens from localStorage with fallback logic
@@ -589,20 +638,28 @@ function readTokensFromStorage() {
     return tokenData;
 }
 
-// Initialize the application
+// Initialize the application with proper iframe handling
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('Status page loaded');
     
-    // Bootstrap the iframe
-    const success = await bootstrapIframe();
+    // Immediately show UI (don't wait for auth)
+    loadCachedDataInstantly();
     
-    if (!success) {
-        console.error('Bootstrap failed');
-        return;
-    }
+    // Setup basic event listeners that don't require auth
+    setupBasicEventListeners();
     
-    // Clear any error UI
-    errorUI.classList.remove('active');
+    // Start bootstrap process in background
+    setTimeout(async () => {
+        const success = await bootstrapIframe();
+        
+        if (!success) {
+            console.error('Bootstrap failed');
+            return;
+        }
+        
+        // Clear any error UI
+        errorUI.classList.remove('active');
+    }, 500); // Small delay to ensure DOM is ready
 });
 
 // =============================================
@@ -633,7 +690,7 @@ function handleAuthError(message) {
             });
             
             // Redirect to login page
-            const loginUrl = '/login.html';
+            const loginUrl = '/index.html';
             if (window.top !== window.self) {
                 window.top.location.href = loginUrl;
             } else {
@@ -848,7 +905,10 @@ function loadCachedDataInstantly() {
         const streakData = localStorage.getItem(LOCAL_STORAGE_KEYS.STREAK);
         if (streakData) {
             streakCount = parseInt(streakData);
-            document.getElementById('streakCount').textContent = streakCount;
+            const streakElement = document.getElementById('streakCount');
+            if (streakElement) {
+                streakElement.textContent = streakCount;
+            }
         }
         
         // Load last post date
@@ -3550,8 +3610,8 @@ function formatTimeAgo(date) {
     return `${Math.floor(diffDays / 7)}w ago`;
 }
 
-// Setup event listeners
-function setupEventListeners() {
+// Setup basic event listeners (don't require auth)
+function setupBasicEventListeners() {
     // Create status button
     const createStatusBtn = document.getElementById('createStatusBtn');
     if (createStatusBtn) {
@@ -3571,6 +3631,26 @@ function setupEventListeners() {
             createStatusModal.classList.remove('active');
         });
     }
+    
+    // Close notification
+    const closeNotificationBtn = document.getElementById('closeNotificationBtn');
+    if (closeNotificationBtn) {
+        closeNotificationBtn.addEventListener('click', () => {
+            notification.classList.remove('active');
+        });
+    }
+    
+    // Window resize
+    window.addEventListener('resize', () => {
+        isMobile = window.innerWidth <= 768;
+    });
+}
+
+// Setup event listeners
+function setupEventListeners() {
+    // Create status button (already handled in basic)
+    
+    // Close create status modal (already handled in basic)
     
     // Create status tabs
     document.querySelectorAll('.create-status-tab').forEach(tab => {
@@ -4411,18 +4491,9 @@ function setupEventListeners() {
         });
     }
     
-    // Close notification
-    const closeNotificationBtn = document.getElementById('closeNotificationBtn');
-    if (closeNotificationBtn) {
-        closeNotificationBtn.addEventListener('click', () => {
-            notification.classList.remove('active');
-        });
-    }
+    // Close notification (already handled in basic)
     
-    // Window resize
-    window.addEventListener('resize', () => {
-        isMobile = window.innerWidth <= 768;
-    });
+    // Window resize (already handled in basic)
     
     // Before unload
     window.addEventListener('beforeunload', () => {

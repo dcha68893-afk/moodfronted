@@ -16,6 +16,8 @@
 // NEW: CRITICAL FIX - Authentication state timing issues permanently resolved
 // NEW: CRITICAL FIX - AbortError no longer blocks API readiness when token exists
 // NEW: CRITICAL FIX - Authoritative Auth Source Implementation
+// NEW: AUTOMATIC ENVIRONMENT DETECTION - Dynamically switches between localhost and Render
+// CRITICAL FIX - Public auth endpoints never require tokens, protected endpoints always require tokens
 // ============================================================================
 // CRITICAL IMPROVEMENTS APPLIED:
 // 1. SINGLE internal fetch function with comprehensive input validation
@@ -48,77 +50,141 @@
 // 28. NEW CRITICAL FIX: Authentication state timing issues permanently resolved with validateAuth()
 // 29. NEW CRITICAL FIX: AbortError no longer blocks API readiness when token exists
 // 30. NEW CRITICAL FIX: Authoritative Auth Source - Single backend URL, token always read from localStorage
+// 31. NEW FEATURE: Automatic environment detection - uses localhost when running locally, Render when deployed
+// 32. NEW CRITICAL FIX: Public auth endpoints never require tokens, protected endpoints always require tokens
 // ============================================================================
 
 // ============================================================================
-// SINGLE SOURCE OF TRUTH - AUTHORITATIVE AUTH SOURCE
+// SINGLE SOURCE OF TRUTH - AUTHORITATIVE AUTH SOURCE WITH ENVIRONMENT DETECTION
 // ============================================================================
-// CRITICAL FIX 1: Define ONE backend base URL constant
-// ALWAYS use this constant for ALL API requests
-// NEVER allow relative /api/... paths
-const BACKEND_BASE_URL = "https://moodchat-fy56.onrender.com";
+// CRITICAL FIX 1: Define backend base URL based on current environment
+// AUTOMATIC DETECTION: Use localhost when running locally, Render when deployed
+// This allows testing locally without changing code
+
+// Function to determine the appropriate backend URL based on current environment
+function determineBackendUrl() {
+  const currentHostname = window.location.hostname;
+  const currentProtocol = window.location.protocol;
+  const currentPort = window.location.port;
+  
+  console.log(`🔧 [ENV] Current environment detection:`);
+  console.log(`🔧 [ENV] Hostname: ${currentHostname}`);
+  console.log(`🔧 [ENV] Protocol: ${currentProtocol}`);
+  console.log(`🔧 [ENV] Port: ${currentPort}`);
+  
+  // Check if we're running locally
+  const isLocalhost = currentHostname === 'localhost' || 
+                     currentHostname === '127.0.0.1' || 
+                     currentHostname.startsWith('192.168.') ||
+                     currentHostname.startsWith('10.0.') ||
+                     currentHostname === '[::1]' ||
+                     (currentHostname === '' && (currentPort === '3000' || currentPort === '8080' || currentPort === '5500'));
+  
+  // Check if we're on a local development server (like Live Server)
+  const isLocalDevelopment = currentHostname.includes('local') || 
+                           currentPort === '3000' || 
+                           currentPort === '8080' ||
+                           currentPort === '5500' ||
+                           currentPort === '3001' ||
+                           currentPort === '4000';
+  
+  // Check if we're on Render
+  const isRenderDeployment = currentHostname.includes('render.com') ||
+                           currentHostname.includes('onrender.com') ||
+                           currentHostname.includes('moodchat') ||
+                           currentHostname.includes('vercel.app') ||
+                           currentHostname.includes('netlify.app');
+  
+  // Determine the appropriate backend URL
+  let backendUrl;
+  
+  if (isLocalhost || isLocalDevelopment) {
+    // Use localhost for local development
+    backendUrl = "http://localhost:4000";
+    console.log(`🔧 [ENV] Detected LOCAL development environment`);
+    console.log(`🔧 [ENV] Using LOCAL backend: ${backendUrl}`);
+  } else if (isRenderDeployment) {
+    // Use Render backend for production
+    backendUrl = "https://moodchat-fy56.onrender.com";
+    console.log(`🔧 [ENV] Detected RENDER deployment environment`);
+    console.log(`🔧 [ENV] Using RENDER backend: ${backendUrl}`);
+  } else {
+    // Default to Render backend for unknown environments
+    backendUrl = "https://moodchat-fy56.onrender.com";
+    console.log(`🔧 [ENV] Detected UNKNOWN environment, defaulting to RENDER backend`);
+    console.log(`🔧 [ENV] Using RENDER backend: ${backendUrl}`);
+  }
+  
+  // Store the detected environment for reference
+  window.__ENVIRONMENT = {
+    isLocalhost: isLocalhost,
+    isLocalDevelopment: isLocalDevelopment,
+    isRenderDeployment: isRenderDeployment,
+    detectedBackendUrl: backendUrl,
+    currentHostname: currentHostname,
+    currentPort: currentPort,
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log(`🔧 [ENV] Environment detection complete: ${isLocalhost ? 'LOCALHOST' : isRenderDeployment ? 'RENDER' : 'UNKNOWN'}`);
+  console.log(`🔧 [ENV] Final backend URL: ${backendUrl}`);
+  
+  return backendUrl;
+}
+
+// Determine backend URL dynamically
+const BACKEND_BASE_URL = determineBackendUrl();
 const BASE_API_URL = BACKEND_BASE_URL + "/api";
 
 // ============================================================================
-// SINGLE SOURCE OF TRUTH - NETWORK STATE (COMPLETELY SEPARATE FROM AUTH)
+// CRITICAL FIX: PUBLIC VS PROTECTED ENDPOINTS
 // ============================================================================
+
 /**
- * GLOBAL NETWORK STATE - Declared ONLY ONCE here
- * Network state is COMPLETELY SEPARATE from authentication state
- * Backend reachability is determined ONLY by:
- * 1. Successful fetch (any HTTP status means backend is reachable)
- * 2. Network errors (Failed to fetch, timeout, DNS failure)
- * 3. Server unreachable errors
- * NEVER by authentication status (401, 403, etc.)
+ * PUBLIC ENDPOINTS - NEVER require tokens
+ * These endpoints MUST work without any Authorization header
  */
-let isOnline = navigator.onLine;
-let isBackendReachable = null;
+const PUBLIC_ENDPOINTS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/verify',
+  '/auth/refresh'
+];
 
-// Initialize global network state
-window.AppNetwork = {
-  isOnline: isOnline,
-  isBackendReachable: isBackendReachable,
-  lastChecked: new Date().toISOString(),
+/**
+ * Check if an endpoint is public (no token required)
+ * @param {string} endpoint - The API endpoint
+ * @returns {boolean} True if public, false if protected
+ */
+function isPublicEndpoint(endpoint) {
+  if (!endpoint || typeof endpoint !== 'string') return false;
   
-  // Update methods
-  updateOnlineStatus: function(status) {
-    isOnline = status;
-    this.isOnline = status;
-    this.lastChecked = new Date().toISOString();
-    console.log(`🔧 [NETWORK] Online status changed to: ${status}`);
-    
-    // Dispatch network change event
-    try {
-      window.dispatchEvent(new CustomEvent('network-state-changed', {
-        detail: { isOnline: status, isBackendReachable: isBackendReachable }
-      }));
-    } catch (e) {
-      console.log('🔧 [NETWORK] Could not dispatch event:', e.message);
-    }
-  },
+  // Normalize the endpoint
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
   
-  updateBackendStatus: function(status) {
-    // CRITICAL FIX: Only update if status is explicitly true or false
-    // Don't update on null or undefined
-    if (status === true || status === false) {
-      isBackendReachable = status;
-      this.isBackendReachable = status;
-      this.lastChecked = new Date().toISOString();
-      console.log(`🔧 [NETWORK] Backend reachable changed to: ${status}`);
-    }
-  }
-};
+  // Check against public endpoints list
+  return PUBLIC_ENDPOINTS.some(publicEndpoint => 
+    normalizedEndpoint === publicEndpoint || 
+    normalizedEndpoint.startsWith(publicEndpoint + '/')
+  );
+}
 
-// Listen for online/offline events
-window.addEventListener('online', () => {
-  window.AppNetwork.updateOnlineStatus(true);
-});
-
-window.addEventListener('offline', () => {
-  window.AppNetwork.updateOnlineStatus(false);
-  // CRITICAL: When offline, backend cannot be reachable
-  window.AppNetwork.updateBackendStatus(false);
-});
+/**
+ * Check if an endpoint is a status endpoint (special handling)
+ * @param {string} endpoint - The API endpoint
+ * @returns {boolean} True if status endpoint, false otherwise
+ */
+function isStatusEndpoint(endpoint) {
+  if (!endpoint || typeof endpoint !== 'string') return false;
+  
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+  
+  return normalizedEndpoint === '/status' || 
+         normalizedEndpoint.startsWith('/status?') ||
+         normalizedEndpoint.startsWith('/status/');
+}
 
 // ============================================================================
 // CRITICAL FIX 2: AUTHORITATIVE TOKEN HELPER FUNCTION
@@ -187,21 +253,96 @@ function getValidToken() {
 }
 
 // ============================================================================
-// CRITICAL FIX 3: UPDATED getAuthHeaders() FUNCTION
+// SINGLE SOURCE OF TRUTH - NETWORK STATE (COMPLETELY SEPARATE FROM AUTH)
+// ============================================================================
+/**
+ * GLOBAL NETWORK STATE - Declared ONLY ONCE here
+ * Network state is COMPLETELY SEPARATE from authentication state
+ * Backend reachability is determined ONLY by:
+ * 1. Successful fetch (any HTTP status means backend is reachable)
+ * 2. Network errors (Failed to fetch, timeout, DNS failure)
+ * 3. Server unreachable errors
+ * NEVER by authentication status (401, 403, etc.)
+ */
+let isOnline = navigator.onLine;
+let isBackendReachable = null;
+
+// Initialize global network state
+window.AppNetwork = {
+  isOnline: isOnline,
+  isBackendReachable: isBackendReachable,
+  lastChecked: new Date().toISOString(),
+  
+  // Update methods
+  updateOnlineStatus: function(status) {
+    isOnline = status;
+    this.isOnline = status;
+    this.lastChecked = new Date().toISOString();
+    console.log(`🔧 [NETWORK] Online status changed to: ${status}`);
+    
+    // Dispatch network change event
+    try {
+      window.dispatchEvent(new CustomEvent('network-state-changed', {
+        detail: { isOnline: status, isBackendReachable: isBackendReachable }
+      }));
+    } catch (e) {
+      console.log('🔧 [NETWORK] Could not dispatch event:', e.message);
+    }
+  },
+  
+  updateBackendStatus: function(status) {
+    // CRITICAL FIX: Only update if status is explicitly true or false
+    // Don't update on null or undefined
+    if (status === true || status === false) {
+      isBackendReachable = status;
+      this.isBackendReachable = status;
+      this.lastChecked = new Date().toISOString();
+      console.log(`🔧 [NETWORK] Backend reachable changed to: ${status}`);
+    }
+  }
+};
+
+// Listen for online/offline events
+window.addEventListener('online', () => {
+  window.AppNetwork.updateOnlineStatus(true);
+});
+
+window.addEventListener('offline', () => {
+  window.AppNetwork.updateOnlineStatus(false);
+  // CRITICAL: When offline, backend cannot be reachable
+  window.AppNetwork.updateBackendStatus(false);
+});
+
+// ============================================================================
+// CRITICAL FIX 3: UPDATED getAuthHeaders() FUNCTION WITH PUBLIC ENDPOINT CHECK
 // ============================================================================
 /**
  * getAuthHeaders() - Helper function to get authentication headers
  * Uses getValidToken() for authoritative token retrieval
- * @returns {object} Headers object with Authorization if token exists
+ * @param {string} endpoint - The API endpoint to determine if auth is needed
+ * @returns {object} Headers object with Authorization if token exists and endpoint requires it
  */
-function getAuthHeaders() {
+function getAuthHeaders(endpoint) {
+  // Check if this is a public endpoint
+  if (isPublicEndpoint(endpoint)) {
+    console.log(`🔐 [AUTH] Public endpoint "${endpoint}" - NO Authorization header needed`);
+    return {};
+  }
+  
+  // Check if this is a status endpoint (special case)
+  if (isStatusEndpoint(endpoint)) {
+    console.log(`🔐 [AUTH] Status endpoint "${endpoint}" - NO Authorization header needed`);
+    return {};
+  }
+  
+  // For protected endpoints, get the token
   const token = getValidToken();
   if (token) {
-    console.log('🔐 [AUTH] Authorization header created with token');
+    console.log(`🔐 [AUTH] Protected endpoint "${endpoint}" - Authorization header created with token`);
     return { 'Authorization': `Bearer ${token}` };
   }
   
-  console.log('🔐 [AUTH] No token available, proceeding without Authorization header');
+  console.log(`🔐 [AUTH] Protected endpoint "${endpoint}" - No token available`);
   return {};
 }
 
@@ -258,8 +399,8 @@ window.addEventListener('storage', (event) => {
 });
 
 // Environment logging for debugging
-console.log(`🔧 [API] Authoritative Auth Source Implementation:`);
-console.log(`🔧 [API] Backend Base URL: ${BACKEND_BASE_URL}`);
+console.log(`🔧 [API] Authoritative Auth Source Implementation with Environment Detection:`);
+console.log(`🔧 [API] Detected Backend Base URL: ${BACKEND_BASE_URL}`);
 console.log(`🔧 [API] API Base URL: ${BASE_API_URL}`);
 console.log(`🔧 [API] CRITICAL: ALL API calls will use: ${BASE_API_URL}`);
 console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, BackendReachable=${window.AppNetwork.isBackendReachable}`);
@@ -869,7 +1010,7 @@ function _sanitizeEndpoint(endpoint) {
     console.error(`❌ [API] CRITICAL ERROR: Endpoint "${endpoint}" is an HTTP method!`);
     console.error(`❌ [API] This means the API is being called with swapped arguments`);
     console.error(`❌ [API] Correct usage: api('/auth/login', { method: 'POST', body: {...} })`);
-    console.error(`❌ [API] NOT: api('POST', '/auth/login', {...})`);
+    console.error(`❌ [API] NOT: api('POST', '/auth/login') or api({ method: 'POST' }, '/auth/login')`);
     return '/'; // Return root to prevent complete failure
   }
   
@@ -937,26 +1078,31 @@ function _safeFetch(fullUrl, options = {}) {
   // Normalize method - ABSOLUTELY CRITICAL
   const normalizedMethod = _normalizeHttpMethod(options.method || 'GET');
   
+  // Extract endpoint from full URL for public endpoint check
+  const endpoint = fullUrl.replace(BASE_API_URL, '').replace(BACKEND_BASE_URL + '/api', '');
+  
+  // CRITICAL FIX: PUBLIC VS PROTECTED ENDPOINT HANDLING
+  const isPublic = isPublicEndpoint(endpoint);
+  const isStatus = isStatusEndpoint(endpoint);
+  
+  console.log(`🔐 [AUTH] Endpoint analysis: "${endpoint}"`);
+  console.log(`🔐 [AUTH] Is public endpoint: ${isPublic}`);
+  console.log(`🔐 [AUTH] Is status endpoint: ${isStatus}`);
+  
   // AUTHORIZATION HEADER ENFORCEMENT - USING getAuthHeaders() HELPER
   // This always reads token directly from localStorage using getValidToken()
-  const authHeaders = getAuthHeaders();
+  const authHeaders = getAuthHeaders(endpoint);
   
-  // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
-  // This is the key fix to prevent auth errors from affecting network state
-  const isStatusEndpoint = fullUrl.includes('/api/status') && 
-                           !fullUrl.includes('/status/') && 
-                           !fullUrl.includes('/statuses');
-  
-  // Build headers - SPECIAL HANDLING FOR /api/status
+  // Build headers - SPECIAL HANDLING FOR PUBLIC ENDPOINTS AND STATUS
   let headers = {
     'Content-Type': 'application/json'
   };
   
-  // CRITICAL: Only add Authorization header if NOT /api/status endpoint
-  if (!isStatusEndpoint) {
+  // CRITICAL: Only add Authorization header if NOT public endpoint and NOT status endpoint
+  if (!isPublic && !isStatus) {
     headers = {
       ...headers,
-      ...authHeaders, // Add Authorization header if token exists
+      ...authHeaders, // Add Authorization header if token exists and endpoint is protected
       ...options.headers
     };
     
@@ -969,12 +1115,16 @@ function _safeFetch(fullUrl, options = {}) {
       console.log(`🔐 [AUTH] Token from getValidToken() injected into headers for ${normalizedMethod} ${fullUrl}`);
     }
   } else {
-    // For /api/status endpoint, use only provided headers (never add auth)
+    // For public endpoints and status endpoint, use only provided headers (never add auth)
     headers = {
       ...headers,
       ...options.headers
     };
-    console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
+    if (isPublic) {
+      console.log(`🔧 [NETWORK] Public endpoint detected, NO Authorization header will be added`);
+    } else if (isStatus) {
+      console.log(`🔧 [NETWORK] Status endpoint detected, NO Authorization header will be added`);
+    }
   }
   
   // Auto-attach Authorization header for authenticated requests
@@ -982,7 +1132,7 @@ function _safeFetch(fullUrl, options = {}) {
   const isAuthEndpoint = fullUrl.includes('/auth/') && 
                         (fullUrl.includes('/auth/login') || fullUrl.includes('/auth/register'));
   
-  const skipAuth = options.auth === false || isAuthEndpoint || isStatusEndpoint;
+  const skipAuth = options.auth === false || isAuthEndpoint || isStatus || isPublic;
   
   if (!skipAuth && (headers['Authorization'] || headers['authorization'])) {
     console.log(`🔐 [AUTH] Authorization header attached to ${normalizedMethod} ${fullUrl}`);
@@ -1016,7 +1166,8 @@ function _safeFetch(fullUrl, options = {}) {
   console.log(`🔧 [API] Safe fetch: ${normalizedMethod} ${fullUrl}`);
   console.log(`🔧 [API] Headers:`, Object.keys(headers));
   console.log(`🔧 [API] Authorization Header: ${headers['Authorization'] ? 'Present' : 'Not present'}`);
-  console.log(`🔧 [API] Is Status Endpoint: ${isStatusEndpoint ? 'YES (no auth)' : 'NO'}`);
+  console.log(`🔧 [API] Is Public Endpoint: ${isPublic ? 'YES (no auth)' : 'NO'}`);
+  console.log(`🔧 [API] Is Status Endpoint: ${isStatus ? 'YES (no auth)' : 'NO'}`);
   console.log(`🔧 [API] Token source: localStorage via getValidToken()`);
   
   // PERFORM THE FETCH
@@ -1109,9 +1260,9 @@ function _safeFetch(fullUrl, options = {}) {
         // HTTP errors (400, 401, 403, 500, etc.) mean backend IS reachable
         // Only network errors (no response) mean backend is unreachable
         // SPECIAL CASE: For /api/status endpoint, we handle differently
-        if (isStatusEndpoint) {
+        if (isStatus) {
           // For status endpoint, any response (even non-200) means backend is reachable
-          console.log(`🔧 [NETWORK] /api/status endpoint response ${status} - backend IS reachable`);
+          console.log(`🔧 [NETWORK] Status endpoint response ${status} - backend IS reachable`);
           window.AppNetwork.updateBackendStatus(true);
         } else {
           // For all other endpoints
@@ -1273,31 +1424,32 @@ const globalApiFunction = function(endpoint, options = {}) {
   // CRITICAL FIX: Use getValidToken() for token retrieval
   const token = getValidToken();
   
-  // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
-  const isStatusEndpoint = safeEndpoint === '/status' || safeEndpoint.startsWith('/status?');
+  // CRITICAL FIX: Check if this is a public endpoint
+  const isPublic = isPublicEndpoint(safeEndpoint);
+  const isStatus = isStatusEndpoint(safeEndpoint);
   
   // Initialize headers if not present
   if (!safeOptions.headers) {
     safeOptions.headers = {};
   }
   
-  // Inject Authorization header if token exists AND NOT status endpoint
-  if (token && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
+  // CRITICAL FIX: PUBLIC VS PROTECTED ENDPOINT HANDLING
+  // Inject Authorization header only for protected endpoints (not public, not status)
+  if (!isPublic && !isStatus && token && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization']) {
     safeOptions.headers['Authorization'] = `Bearer ${token}`;
     console.log(`🔐 [AUTH] Token from getValidToken() injected into options for ${safeEndpoint}`);
-  } else if (isStatusEndpoint) {
-    console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
+  } else if (isPublic) {
+    console.log(`🔧 [NETWORK] Public endpoint "${safeEndpoint}" detected, NO Authorization header will be added`);
+  } else if (isStatus) {
+    console.log(`🔧 [NETWORK] Status endpoint "${safeEndpoint}" detected, NO Authorization header will be added`);
   }
   
-  // CRITICAL FIX: If token is required but missing, reject immediately
-  // Skip for auth endpoints and status endpoint
-  const requiresAuth = !isStatusEndpoint && 
-                       !safeEndpoint.includes('/auth/login') && 
-                       !safeEndpoint.includes('/auth/register') &&
-                       safeOptions.auth !== false;
+  // CRITICAL FIX: Token requirement check ONLY for protected endpoints
+  // Public endpoints and status endpoints NEVER require tokens
+  const requiresAuth = !isPublic && !isStatus && safeOptions.auth !== false;
   
   if (requiresAuth && !token) {
-    console.error(`❌ [AUTH] Token required for ${safeEndpoint} but no token found`);
+    console.error(`❌ [AUTH] Token required for protected endpoint "${safeEndpoint}" but no token found`);
     return Promise.resolve({
       ok: false,
       success: false,
@@ -1317,12 +1469,12 @@ const globalApiFunction = function(endpoint, options = {}) {
 };
 
 // ============================================================================
-// MAIN API OBJECT - WITH AUTHORITATIVE AUTH SOURCE
+// MAIN API OBJECT - WITH AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION
 // ============================================================================
 
 const apiObject = {
   _singleton: true,
-  _version: '20.0.0', // Updated version for authoritative auth source
+  _version: '20.2.0', // Updated version for public/protected endpoint fix
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -1330,18 +1482,90 @@ const apiObject = {
   _authValidationInProgress: false,
   
   /**
-   * Configuration object with SINGLE backend URL
+   * Configuration object with dynamic backend URL
    */
   _config: {
-    BACKEND_URL: BACKEND_BASE_URL,               // SINGLE backend base URL
-    API_BASE_URL: BASE_API_URL,                  // SINGLE API base URL
+    BACKEND_URL: BACKEND_BASE_URL,               // DYNAMIC backend base URL
+    API_BASE_URL: BASE_API_URL,                  // DYNAMIC API base URL
     STORAGE_PREFIX: 'moodchat_',
     MAX_RETRIES: 3,
     RETRY_DELAY: 1000,
     SESSION_CHECK_INTERVAL: 300000,
     STATUS_FETCH_TIMEOUT: 8000,
     AUTH_VALIDATION_TIMEOUT: AUTH_VALIDATION_TIMEOUT,
-    AUTH_CACHE_DURATION: AUTH_CACHE_DURATION
+    AUTH_CACHE_DURATION: AUTH_CACHE_DURATION,
+    PUBLIC_ENDPOINTS: PUBLIC_ENDPOINTS
+  },
+  
+  // ============================================================================
+  // ENVIRONMENT DETECTION METHODS
+  // ============================================================================
+  
+  /**
+   * Get current environment information
+   * @returns {object} Environment details
+   */
+  getEnvironmentInfo: function() {
+    return {
+      currentHostname: window.location.hostname,
+      currentPort: window.location.port,
+      currentProtocol: window.location.protocol,
+      isLocalhost: window.__ENVIRONMENT?.isLocalhost || false,
+      isLocalDevelopment: window.__ENVIRONMENT?.isLocalDevelopment || false,
+      isRenderDeployment: window.__ENVIRONMENT?.isRenderDeployment || false,
+      detectedBackendUrl: BACKEND_BASE_URL,
+      apiBaseUrl: BASE_API_URL,
+      timestamp: new Date().toISOString()
+    };
+  },
+  
+  /**
+   * Force switch to a specific backend URL
+   * @param {string} url - The backend URL to use
+   */
+  setBackendUrl: function(url) {
+    if (!url || typeof url !== 'string') {
+      console.error('❌ [API] Invalid backend URL:', url);
+      return false;
+    }
+    
+    // Update the configuration
+    this._config.BACKEND_URL = url;
+    this._config.API_BASE_URL = url + '/api';
+    
+    console.log(`🔧 [API] Backend URL manually set to: ${url}`);
+    console.log(`🔧 [API] API Base URL: ${this._config.API_BASE_URL}`);
+    
+    // Dispatch environment change event
+    window.dispatchEvent(new CustomEvent('backend-url-changed', {
+      detail: { 
+        backendUrl: url, 
+        apiBaseUrl: this._config.API_BASE_URL,
+        timestamp: new Date().toISOString()
+      }
+    }));
+    
+    return true;
+  },
+  
+  /**
+   * Reset to auto-detected backend URL
+   */
+  resetBackendUrl: function() {
+    const originalBackendUrl = BACKEND_BASE_URL;
+    const originalApiBaseUrl = BASE_API_URL;
+    
+    this._config.BACKEND_URL = originalBackendUrl;
+    this._config.API_BASE_URL = originalApiBaseUrl;
+    
+    console.log(`🔧 [API] Backend URL reset to auto-detected: ${originalBackendUrl}`);
+    console.log(`🔧 [API] API Base URL: ${originalApiBaseUrl}`);
+    
+    return {
+      backendUrl: originalBackendUrl,
+      apiBaseUrl: originalApiBaseUrl,
+      autoDetected: true
+    };
   },
   
   // ============================================================================
@@ -1380,10 +1604,33 @@ const apiObject = {
    * getAuthHeaders() - Public method to get authentication headers
    * Can be used by other parts of the application
    * Uses getValidToken() for authoritative token retrieval
-   * @returns {object} Headers object with Authorization if token exists
+   * @param {string} endpoint - The API endpoint to determine if auth is needed
+   * @returns {object} Headers object with Authorization if token exists and endpoint requires it
    */
-  getAuthHeaders: function() {
-    return getAuthHeaders();
+  getAuthHeaders: function(endpoint) {
+    return getAuthHeaders(endpoint);
+  },
+  
+  // ============================================================================
+  // PUBLIC VS PROTECTED ENDPOINT CHECK METHODS
+  // ============================================================================
+  
+  /**
+   * Check if an endpoint is public (no token required)
+   * @param {string} endpoint - The API endpoint
+   * @returns {boolean} True if public, false if protected
+   */
+  isPublicEndpoint: function(endpoint) {
+    return isPublicEndpoint(endpoint);
+  },
+  
+  /**
+   * Check if an endpoint is a status endpoint (special handling)
+   * @param {string} endpoint - The API endpoint
+   * @returns {boolean} True if status endpoint, false otherwise
+   */
+  isStatusEndpoint: function(endpoint) {
+    return isStatusEndpoint(endpoint);
   },
   
   // ============================================================================
@@ -1474,15 +1721,21 @@ const apiObject = {
   get: async function(url) {
     console.log(`🔧 [API] api.get() called for: ${url}`);
     
+    // Check if this is a public endpoint
+    const isPublic = isPublicEndpoint(url);
+    const isStatus = isStatusEndpoint(url);
+    
     // Use getValidToken() for authoritative token retrieval
     const token = getValidToken();
     
     console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
+    console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
     
     try {
-      // Ensure accessToken is injected
+      // Ensure accessToken is injected ONLY for protected endpoints
       const headers = {};
-      if (token) {
+      if (!isPublic && !isStatus && token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
@@ -1525,15 +1778,21 @@ const apiObject = {
   post: async function(url, data) {
     console.log(`🔧 [API] api.post() called for: ${url}`);
     
+    // Check if this is a public endpoint
+    const isPublic = isPublicEndpoint(url);
+    const isStatus = isStatusEndpoint(url);
+    
     // Use getValidToken() for authoritative token retrieval
     const token = getValidToken();
     
     console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
+    console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
     
     try {
-      // Ensure accessToken is injected
+      // Ensure accessToken is injected ONLY for protected endpoints
       const headers = {};
-      if (token) {
+      if (!isPublic && !isStatus && token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
@@ -1577,15 +1836,21 @@ const apiObject = {
   put: async function(url, data) {
     console.log(`🔧 [API] api.put() called for: ${url}`);
     
+    // Check if this is a public endpoint
+    const isPublic = isPublicEndpoint(url);
+    const isStatus = isStatusEndpoint(url);
+    
     // Use getValidToken() for authoritative token retrieval
     const token = getValidToken();
     
     console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
+    console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
     
     try {
-      // Ensure accessToken is injected
+      // Ensure accessToken is injected ONLY for protected endpoints
       const headers = {};
-      if (token) {
+      if (!isPublic && !isStatus && token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
@@ -1628,15 +1893,21 @@ const apiObject = {
   delete: async function(url) {
     console.log(`🔧 [API] api.delete() called for: ${url}`);
     
+    // Check if this is a public endpoint
+    const isPublic = isPublicEndpoint(url);
+    const isStatus = isStatusEndpoint(url);
+    
     // Use getValidToken() for authoritative token retrieval
     const token = getValidToken();
     
     console.log(`🔧 [API] Token from getValidToken(): ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
+    console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
+    console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
     
     try {
-      // Ensure accessToken is injected
+      // Ensure accessToken is injected ONLY for protected endpoints
       const headers = {};
-      if (token) {
+      if (!isPublic && !isStatus && token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
@@ -2551,8 +2822,8 @@ const apiObject = {
     
     try {
       console.log(`🔐 [AUTH] Login attempt for email: ${email}`);
-      console.log(`🔐 [AUTH] Using SINGLE backend URL: ${BACKEND_BASE_URL}`);
-      console.log(`🔐 [AUTH] Using SINGLE API URL: ${BASE_API_URL}`);
+      console.log(`🔐 [AUTH] Using dynamically detected backend URL: ${BACKEND_BASE_URL}`);
+      console.log(`🔐 [AUTH] Using dynamically detected API URL: ${BASE_API_URL}`);
       
       // Proper JSON body for login - STRICT: Use correct endpoint format
       const requestData = { 
@@ -2561,6 +2832,7 @@ const apiObject = {
       };
       
       // USE THE CORE FETCH FUNCTION WITH STRICT CONTRACT
+      // Note: /auth/login is a PUBLIC endpoint, so no token required
       const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/login`, {
         method: 'POST',
         body: requestData,
@@ -2714,8 +2986,8 @@ const apiObject = {
     
     try {
       console.log('🔐 [AUTH] Register attempt');
-      console.log(`🔐 [AUTH] Using SINGLE backend URL: ${BACKEND_BASE_URL}`);
-      console.log(`🔐 [AUTH] Using SINGLE API URL: ${BASE_API_URL}`);
+      console.log(`🔐 [AUTH] Using dynamically detected backend URL: ${BACKEND_BASE_URL}`);
+      console.log(`🔐 [AUTH] Using dynamically detected API URL: ${BASE_API_URL}`);
       
       // Proper JSON body for register - STRICT: Use correct endpoint format
       const registerPayload = {
@@ -2752,6 +3024,7 @@ const apiObject = {
       }
       
       // USE THE CORE FETCH FUNCTION WITH STRICT CONTRACT
+      // Note: /auth/register is a PUBLIC endpoint, so no token required
       const result = await _safeFetch(`${BACKEND_BASE_URL}/api/auth/register`, {
         method: 'POST',
         body: registerPayload,
@@ -3008,7 +3281,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // BACKEND HEALTH CHECK - HARDENED WITH AUTHORITATIVE AUTH
+  // BACKEND HEALTH CHECK - HARDENED WITH AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION
   // ============================================================================
   
   checkBackendHealth: async function() {
@@ -3028,9 +3301,9 @@ const apiObject = {
       };
     }
     
-    console.log('🔧 [API] Checking backend health with AUTHORITATIVE AUTH...');
-    console.log(`🔧 [API] Using SINGLE backend URL: ${BACKEND_BASE_URL}`);
-    console.log(`🔧 [API] Using SINGLE API URL: ${BASE_API_URL}`);
+    console.log('🔧 [API] Checking backend health with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION...');
+    console.log(`🔧 [API] Using dynamically detected backend URL: ${BACKEND_BASE_URL}`);
+    console.log(`🔧 [API] Using dynamically detected API URL: ${BASE_API_URL}`);
     
     // Use getValidToken() for authoritative token retrieval
     const token = getValidToken();
@@ -3670,6 +3943,7 @@ const apiObject = {
       apiAvailable: this._apiAvailable,
       globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
       authoritativeToken: token ? `Present (${token.substring(0, 20)}...)` : 'Not found',
+      environment: this.getEnvironmentInfo(),
       authState: {
         hasToken: !!token,
         hasUser: !!user,
@@ -3703,31 +3977,42 @@ const apiObject = {
         singleBackendUrl: true,
         tokenAlwaysFromLocalStorage: true,
         getValidTokenFunction: true,
-        auto401403Handling: true
+        auto401403Handling: true,
+        environmentDetection: true
+      },
+      publicEndpoints: {
+        list: PUBLIC_ENDPOINTS,
+        isPublicEndpointFunction: true
       }
     };
   },
   
   // ============================================================================
-  // ENHANCED INITIALIZATION WITH AUTHORITATIVE AUTH SOURCE
+  // ENHANCED INITIALIZATION WITH AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION
   // ============================================================================
   
   initialize: async function() {
-    console.log('🔧 [API] ⚡ MoodChat API v20.0.0 (AUTHORITATIVE AUTH SOURCE) initializing...');
-    console.log('🔧 [API] 🔗 SINGLE Backend URL:', BACKEND_BASE_URL);
-    console.log('🔧 [API] 🔗 SINGLE API Base URL:', BASE_API_URL);
+    console.log('🔧 [API] ⚡ MoodChat API v20.2.0 (AUTHORITATIVE AUTH SOURCE WITH ENVIRONMENT DETECTION) initializing...');
+    console.log('🔧 [API] 🔗 DYNAMIC Backend URL Detection:');
+    console.log('🔧 [API] 🔗 Detected Backend URL:', BACKEND_BASE_URL);
+    console.log('🔧 [API] 🔗 Detected API Base URL:', BASE_API_URL);
     console.log('🔧 [API] 🌐 Network State - Online:', window.AppNetwork.isOnline, 'Backend Reachable:', window.AppNetwork.isBackendReachable);
-    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: AUTHORITATIVE AUTH SOURCE');
-    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: SINGLE backend URL: ' + BACKEND_BASE_URL);
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: AUTHORITATIVE AUTH SOURCE WITH ENVIRONMENT DETECTION');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: DYNAMIC backend URL detection based on current environment');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Localhost detection for development, Render for production');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token ALWAYS read from localStorage using getValidToken()');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Token priority: 1. accessToken, 2. moodchat_token');
     console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: Automatic 401/403 handling with localStorage clearing and login redirect');
+    console.log('🔧 [API] 🔐 CRITICAL IMPROVEMENT: PUBLIC ENDPOINTS never require tokens, PROTECTED endpoints always require tokens');
     console.log('🔧 [API] ✅ getValidToken() function implemented');
+    console.log('🔧 [API] ✅ Environment detection implemented');
+    console.log('🔧 [API] ✅ PUBLIC/PROTECTED endpoint detection implemented');
     console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
     console.log('🔧 [API] ✅ Token ALWAYS retrieved from localStorage before each API call');
     console.log('🔧 [API] ✅ 401/403 responses clear localStorage and redirect to login');
-    console.log('🔧 [API] ✅ Token missing = Immediate rejection (no fake success)');
-    console.log('🔧 [API] ✅ validateAuth() function implemented');
+    console.log('🔧 [API] ✅ Token missing = Immediate rejection for protected endpoints only');
+    console.log('🔧 [API] ✅ Public endpoints (/auth/login, /auth/register) work without tokens');
+    console.log('🔧 [API] ✅ Protected endpoints require tokens');
     console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
     console.log('🔧 [API] ✅ AbortError does NOT block API readiness');
     console.log('🔧 [API] ✅ Token existence = API availability (even with AbortError)');
@@ -3740,6 +4025,10 @@ const apiObject = {
     console.log('🔧 [API] ✅ Network/Auth separation preserved');
     console.log('🔧 [API] ✅ iframe API exposure preserved');
     
+    // Log environment details
+    const envInfo = this.getEnvironmentInfo();
+    console.log('🔧 [API] 📊 Environment Details:', envInfo);
+    
     // Initialize global access token with authoritative checking
     updateGlobalAccessToken();
     
@@ -3747,7 +4036,8 @@ const apiObject = {
     const token = getValidToken();
     if (token) {
       console.log('🔐 [AUTH] Token found via getValidToken():', token.substring(0, 20) + '...');
-      console.log('🔐 [AUTH] Token will be automatically injected into all API calls (except /api/status)');
+      console.log('🔐 [AUTH] Token will be automatically injected into all protected API calls');
+      console.log('🔐 [AUTH] Public endpoints will NEVER require tokens');
       console.log('🔐 [AUTH] Token persists across page refreshes');
       console.log('🔐 [AUTH] IMPORTANT: Token is ALWAYS read directly from localStorage via getValidToken()');
       
@@ -3761,7 +4051,8 @@ const apiObject = {
       this._apiAvailable = true;
     } else {
       console.log('🔐 [AUTH] No token found via getValidToken()');
-      console.log('🔐 [AUTH] API calls without authentication will proceed normally');
+      console.log('🔐 [AUTH] Public endpoints will work normally without tokens');
+      console.log('🔐 [AUTH] Protected endpoints will fail with 401 error');
       console.log('🔐 [AUTH] /api/status endpoint will NEVER include Authorization header');
       this._apiAvailable = false;
     }
@@ -3821,13 +4112,14 @@ const apiObject = {
       }
     }
     
-    // Initial health check with AUTHORITATIVE AUTH
+    // Initial health check with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION
     setTimeout(async () => {
       try {
         const health = await this.checkBackendHealth();
         console.log('🔧 [API] 📶 Backend status:', health.message);
         console.log('🔧 [API] 🌐 Network reachable:', health.reachable);
         console.log('🔧 [API] 🔐 Auth status:', health.isAuthError ? 'Auth issue (not network)' : 'OK');
+        console.log('🔧 [API] 🌍 Environment:', envInfo.isLocalhost ? 'LOCALHOST (Development)' : envInfo.isRenderDeployment ? 'RENDER (Production)' : 'UNKNOWN');
         
         // Enhanced auth diagnostics with authoritative auth info
         const token = getValidToken();
@@ -3837,7 +4129,9 @@ const apiObject = {
         const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
         const tokenInAccessToken = localStorage.getItem('accessToken');
         
-        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with AUTHORITATIVE AUTH:');
+        console.log('🔧 [API] 🔐 Enhanced Auth Diagnostics with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION:');
+        console.log('🔧 [API]   Environment:', envInfo.isLocalhost ? 'LOCALHOST' : envInfo.isRenderDeployment ? 'RENDER' : 'UNKNOWN');
+        console.log('🔧 [API]   Backend URL:', BACKEND_BASE_URL);
         console.log('🔧 [API]   Token via getValidToken():', token ? `Present (${token.substring(0, 20)}...)` : 'Not found');
         console.log('🔧 [API]   Token in moodchat_token:', tokenInMoodchatToken ? 'YES' : 'NO');
         console.log('🔧 [API]   Token in accessToken:', tokenInAccessToken ? 'YES' : 'NO');
@@ -3848,12 +4142,15 @@ const apiObject = {
         console.log('🔧 [API]   Auth last checked:', _authLastChecked ? new Date(_authLastChecked).toISOString() : 'Never');
         console.log('🔧 [API]   Token ALWAYS read from localStorage via getValidToken(): YES');
         console.log('🔧 [API]   401/403 auto-handling: YES (clears localStorage, redirects to login)');
-        console.log('🔧 [API]   Token missing = immediate rejection: YES');
-        console.log('🔧 [API]   SINGLE backend URL: ' + BACKEND_BASE_URL);
+        console.log('🔧 [API]   Token missing = immediate rejection for protected endpoints: YES');
+        console.log('🔧 [API]   Public endpoints work without tokens: YES');
+        console.log('🔧 [API]   Protected endpoints require tokens: YES');
+        console.log('🔧 [API]   Environment detection: ACTIVE');
         console.log('🔧 [API]   Timing fix active: YES');
         console.log('🔧 [API]   AbortError fix active: YES (does not block API)');
         console.log('🔧 [API]   validateAuth() available: YES');
         console.log('🔧 [API]   getValidToken() available: YES');
+        console.log('🔧 [API]   isPublicEndpoint() available: YES');
         console.log('🔧 [API]   API Available:', this.isApiAvailable());
         console.log('🔧 [API]   window.currentUser:', window.currentUser ? 'Set' : 'Not set');
         console.log('🔧 [API] 💾 Device ID:', this.getDeviceId());
@@ -3899,6 +4196,7 @@ const apiObject = {
   _dispatchReadyEvents: function() {
     const token = getValidToken();
     const user = _getCurrentUserFromStorage();
+    const envInfo = this.getEnvironmentInfo();
     
     // Check token persistence
     const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
@@ -3909,13 +4207,16 @@ const apiObject = {
       timestamp: new Date().toISOString(),
       backendUrl: BACKEND_BASE_URL,
       apiBaseUrl: BASE_API_URL,
+      environment: envInfo,
       globalAccessToken: accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not set',
       authoritativeToken: token ? `Present (${token.substring(0, 20)}...)` : 'Not found',
       apiAvailable: this._apiAvailable,
       networkAuthSeparated: true,
       authTimingFix: true,
-      authoritativeAuthSource: true, // NEW: Indicates authoritative auth source
+      authoritativeAuthSource: true,
+      environmentDetection: true,
       abortErrorFix: true,
+      publicEndpointFix: true,
       tokenPersistence: {
         moodchatTokenKey: tokenInMoodchatToken ? 'Present' : 'Missing',
         accessTokenKey: tokenInAccessToken ? 'Present' : 'Missing',
@@ -3936,9 +4237,10 @@ const apiObject = {
       },
       features: {
         validateAuthFunction: true,
-        getValidTokenFunction: true, // NEW: Authoritative token retrieval
+        getValidTokenFunction: true,
+        environmentDetection: true,
         authTimingFix: true,
-        authoritativeAuthSource: true, // NEW
+        authoritativeAuthSource: true,
         abortErrorFix: true,
         preventsTimingIssues: true,
         preservesAuthState: true,
@@ -3951,9 +4253,8 @@ const apiObject = {
         crossTabSync: true,
         centralizedAuthHeaders: true,
         strictAuthValidation: true,
-        singleBackendUrl: true, // NEW: Single backend URL
         auto401403Handling: true,
-        tokenMissingRejection: true, // NEW: Token missing = immediate rejection
+        tokenMissingRejection: true,
         http500Fix: true,
         apiMethods: true,
         getAuthHeaders: true,
@@ -3974,7 +4275,9 @@ const apiObject = {
         callMethods: true,
         settingsMethods: true,
         toolsMethods: true,
-        statusEndpointNoAuth: true
+        statusEndpointNoAuth: true,
+        publicEndpointDetection: true,
+        protectedEndpointRequirement: true
       }
     };
     
@@ -3983,21 +4286,24 @@ const apiObject = {
     events.forEach(eventName => {
       try {
         window.dispatchEvent(new CustomEvent(eventName, { detail: eventDetail }));
-        console.log(`🔧 [API] Dispatched ${eventName} event with AUTHORITATIVE AUTH info`);
+        console.log(`🔧 [API] Dispatched ${eventName} event with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION info`);
       } catch (e) {
         console.log(`🔧 [API] Could not dispatch ${eventName}:`, e.message);
       }
     });
     
     setTimeout(() => {
-      console.log('🔧 [API] API synchronization ready with AUTHORITATIVE AUTH SOURCE');
+      console.log('🔧 [API] API synchronization ready with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
       console.log('🔧 [API] ✅ getValidToken() function implemented');
-      console.log('🔧 [API] ✅ SINGLE backend URL: ' + BACKEND_BASE_URL);
+      console.log('🔧 [API] ✅ Environment detection: ACTIVE');
+      console.log('🔧 [API] ✅ Detected Backend URL: ' + BACKEND_BASE_URL);
       console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
       console.log('🔧 [API] ✅ Token ALWAYS read from localStorage before each API call');
       console.log('🔧 [API] ✅ Token priority: 1. accessToken, 2. moodchat_token');
       console.log('🔧 [API] ✅ 401/403 responses automatically clear localStorage and redirect to login');
-      console.log('🔧 [API] ✅ Token missing = Immediate rejection (no fake success)');
+      console.log('🔧 [API] ✅ Token missing = Immediate rejection for protected endpoints only');
+      console.log('🔧 [API] ✅ Public endpoints (/auth/login, /auth/register) work without tokens');
+      console.log('🔧 [API] ✅ Protected endpoints require tokens');
       console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
       console.log('🔧 [API] ✅ AbortError does NOT block API readiness');
       console.log('🔧 [API] ✅ Token existence = API availability (even with AbortError)');
@@ -4015,7 +4321,7 @@ const apiObject = {
       console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation: ACTIVE');
       console.log('🔧 [API] ✅ window.currentUser maintained across sessions: ACTIVE');
       console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs: ACTIVE');
-      console.log('🔧 [API] ✅ Authorization header injection in all API calls (except /api/status): ACTIVE');
+      console.log('🔧 [API] ✅ Authorization header injection in all protected API calls: ACTIVE');
       console.log('🔧 [API] ✅ Enhanced 401/403 handling - clears localStorage and redirects to login: ACTIVE');
       console.log('🔧 [API] ✅ window.currentUser preserved: ACTIVE');
       console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods: ACTIVE');
@@ -4036,8 +4342,10 @@ const apiObject = {
       console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
       console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
       console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
-      console.log('🔧 [API] 🔗 SINGLE Backend URL: ' + BACKEND_BASE_URL);
-      console.log('🔧 [API] 🔗 SINGLE API Base URL: ' + BASE_API_URL);
+      console.log('🔧 [API] 🔗 DYNAMIC Backend URL Detection: ACTIVE');
+      console.log('🔧 [API] 🔗 Detected Environment: ' + (envInfo.isLocalhost ? 'LOCALHOST (Development)' : envInfo.isRenderDeployment ? 'RENDER (Production)' : 'UNKNOWN'));
+      console.log('🔧 [API] 🔗 Detected Backend URL: ' + BACKEND_BASE_URL);
+      console.log('🔧 [API] 🔗 Detected API Base URL: ' + BASE_API_URL);
       console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
       console.log('🔧 [API] 🔐 Token via getValidToken(): ' + (token ? token.substring(0, 20) + '...' : 'None'));
       console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
@@ -4045,36 +4353,44 @@ const apiObject = {
       console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
         ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
       console.log('🔧 [API] 🔐 AUTHORITATIVE AUTH SOURCE: ACTIVE');
+      console.log('🔧 [API] 🔐 ENVIRONMENT DETECTION: ACTIVE');
       console.log('🔧 [API] 🔐 TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE');
+      console.log('🔧 [API] 🔐 PUBLIC ENDPOINTS NEVER REQUIRE TOKENS: ACTIVE');
+      console.log('🔧 [API] 🔐 PROTECTED ENDPOINTS ALWAYS REQUIRE TOKENS: ACTIVE');
       console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS LOCALSTORAGE, REDIRECTS TO LOGIN)');
-      console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH:');
-      console.log('🔧 [API] 1. ALL API calls use SINGLE backend URL: ' + BACKEND_BASE_URL);
-      console.log('🔧 [API] 2. Token ALWAYS read from localStorage via getValidToken()');
-      console.log('🔧 [API] 3. Token priority: 1. accessToken, 2. moodchat_token');
-      console.log('🔧 [API] 4. Token missing = Immediate rejection (no fake success)');
-      console.log('🔧 [API] 5. Simulate 401 response - localStorage should be cleared and redirect to login');
-      console.log('🔧 [API] 6. Call api.validateAuth() - should handle timing properly');
-      console.log('🔧 [API] 7. Call api.isLoggedIn() - should never return false before validation completes');
-      console.log('🔧 [API] 8. Simulate network delay - auth state should be preserved');
-      console.log('🔧 [API] 9. Simulate AbortError - API readiness should NOT be blocked');
-      console.log('🔧 [API] 10. Verify tokens are cleared on 401/403 with localStorage clearing');
-      console.log('🔧 [API] 11. All existing API calls continue to work unchanged');
-      console.log('🔧 [API] 12. Token storage in both moodchat_token and accessToken works');
-      console.log('🔧 [API] 13. Authorization headers are injected correctly');
-      console.log('🔧 [API] 14. /api/status endpoint has no Authorization header');
-      console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE');
+      console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH WITH ENVIRONMENT DETECTION:');
+      console.log('🔧 [API] 1. Environment detection automatically selects backend URL');
+      console.log('🔧 [API] 2. Localhost: Uses http://localhost:4000');
+      console.log('🔧 [API] 3. Render: Uses https://moodchat-fy56.onrender.com');
+      console.log('🔧 [API] 4. Token ALWAYS read from localStorage via getValidToken()');
+      console.log('🔧 [API] 5. Token priority: 1. accessToken, 2. moodchat_token');
+      console.log('🔧 [API] 6. Public endpoints (/auth/login, /auth/register) work without tokens');
+      console.log('🔧 [API] 7. Protected endpoints require tokens and fail with 401 if missing');
+      console.log('🔧 [API] 8. Simulate 401 response - localStorage should be cleared and redirect to login');
+      console.log('🔧 [API] 9. Call api.validateAuth() - should handle timing properly');
+      console.log('🔧 [API] 10. Call api.isLoggedIn() - should never return false before validation completes');
+      console.log('🔧 [API] 11. Simulate network delay - auth state should be preserved');
+      console.log('🔧 [API] 12. Simulate AbortError - API readiness should NOT be blocked');
+      console.log('🔧 [API] 13. Verify tokens are cleared on 401/403 with localStorage clearing');
+      console.log('🔧 [API] 14. All existing API calls continue to work unchanged');
+      console.log('🔧 [API] 15. Token storage in both moodchat_token and accessToken works');
+      console.log('🔧 [API] 16. Authorization headers are injected correctly for protected endpoints');
+      console.log('🔧 [API] 17. No Authorization headers for public endpoints');
+      console.log('🔧 [API] 18. /api/status endpoint has no Authorization header');
+      console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
     }, 1000);
   },
   
   // ============================================================================
-  // ENHANCED DIAGNOSTICS WITH AUTHORITATIVE AUTH CHECK
+  // ENHANCED DIAGNOSTICS WITH AUTHORITATIVE AUTH CHECK AND ENVIRONMENT DETECTION
   // ============================================================================
   
   diagnose: async function() {
-    console.log('🔧 [API] Running enhanced diagnostics with AUTHORITATIVE AUTH check...');
+    console.log('🔧 [API] Running enhanced diagnostics with AUTHORITATIVE AUTH check AND ENVIRONMENT DETECTION...');
     
     const token = getValidToken();
     const user = _getCurrentUserFromStorage();
+    const envInfo = this.getEnvironmentInfo();
     
     // Check token persistence
     const tokenInMoodchatToken = localStorage.getItem('moodchat_token');
@@ -4104,14 +4420,17 @@ const apiObject = {
         storageKey: TOKEN_STORAGE_KEY,
         legacyToken: localStorage.getItem('token') ? 'Present' : 'Missing'
       },
+      environment: envInfo,
       authoritativeAuth: {
-        singleBackendUrl: BACKEND_BASE_URL,
+        backendUrl: BACKEND_BASE_URL,
         apiBaseUrl: BASE_API_URL,
         getValidTokenFunction: 'IMPLEMENTED',
         tokenRetrievalPriority: '1. accessToken, 2. moodchat_token',
         tokenAlwaysFromLocalStorage: 'YES',
-        tokenMissingRejection: 'YES',
-        auto401403Handling: 'YES'
+        tokenMissingRejection: 'YES (protected endpoints only)',
+        auto401403Handling: 'YES',
+        environmentDetection: 'ACTIVE',
+        publicEndpointDetection: 'ACTIVE'
       },
       tokenPersistence: {
         moodchatToken: tokenInMoodchatToken ? 'Present' : 'Missing',
@@ -4149,6 +4468,7 @@ const apiObject = {
         validateAuthFunction: 'ACTIVE',
         getValidTokenFunction: 'ACTIVE',
         authoritativeAuthSource: 'ACTIVE',
+        environmentDetection: 'ACTIVE',
         authTimingFix: 'ACTIVE',
         abortErrorFix: 'ACTIVE',
         exponentialBackoffRetry: 'ACTIVE',
@@ -4160,9 +4480,8 @@ const apiObject = {
         crossTabSync: 'ACTIVE',
         centralizedAuthHeaders: 'ACTIVE',
         strictAuthValidation: 'ACTIVE',
-        singleBackendUrl: 'ACTIVE',
         auto401403Handling: 'ENHANCED (with redirect)',
-        tokenMissingRejection: 'ACTIVE',
+        tokenMissingRejection: 'ACTIVE (protected only)',
         http500Fix: 'ACTIVE',
         apiMethods: 'ACTIVE',
         getAuthHeaders: 'ACTIVE',
@@ -4174,7 +4493,9 @@ const apiObject = {
         logoutFunction: 'ACTIVE',
         getCurrentUserFunction: 'ACTIVE',
         exposedIframeMethods: 'ACTIVE',
-        statusEndpointNoAuth: 'ACTIVE'
+        statusEndpointNoAuth: 'ACTIVE',
+        publicEndpointDetection: 'ACTIVE',
+        protectedEndpointRequirement: 'ACTIVE'
       },
       exposedMethods: {
         getMessages: 'EXPOSED',
@@ -4214,28 +4535,28 @@ const apiObject = {
       options.headers = {};
     }
     
-    // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
-    const isStatusEndpoint = endpoint === '/status' || endpoint.startsWith('/status?');
+    // CRITICAL FIX: Check if this is a public endpoint or status endpoint
+    const isPublic = isPublicEndpoint(endpoint);
+    const isStatus = isStatusEndpoint(endpoint);
     
     // Use getValidToken() for authoritative token retrieval
     const token = getValidToken();
     
-    if (token && !options.headers['Authorization'] && !options.headers['authorization'] && !isStatusEndpoint) {
+    if (!isPublic && !isStatus && token && !options.headers['Authorization'] && !options.headers['authorization']) {
       options.headers['Authorization'] = `Bearer ${token}`;
       console.log(`🔐 [AUTH] Token from getValidToken() injected into request for ${endpoint}`);
-    } else if (isStatusEndpoint) {
-      console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
+    } else if (isPublic) {
+      console.log(`🔧 [NETWORK] Public endpoint "${endpoint}" detected, NO Authorization header will be added`);
+    } else if (isStatus) {
+      console.log(`🔧 [NETWORK] Status endpoint "${endpoint}" detected, NO Authorization header will be added`);
     }
     
-    // CRITICAL FIX: If token is required but missing, reject immediately
-    // Skip for auth endpoints and status endpoint
-    const requiresAuth = !isStatusEndpoint && 
-                       !endpoint.includes('/auth/login') && 
-                       !endpoint.includes('/auth/register') &&
-                       options.auth !== false;
+    // CRITICAL FIX: Token requirement check ONLY for protected endpoints
+    // Public endpoints and status endpoints NEVER require tokens
+    const requiresAuth = !isPublic && !isStatus && options.auth !== false;
     
     if (requiresAuth && !token) {
-      console.error(`❌ [AUTH] Token required for ${endpoint} but no token found via getValidToken()`);
+      console.error(`❌ [AUTH] Token required for protected endpoint "${endpoint}" but no token found via getValidToken()`);
       return Promise.resolve({
         ok: false,
         success: false,
@@ -4271,7 +4592,7 @@ const apiObject = {
 };
 
 // ============================================================================
-// CRITICAL FIX: GLOBAL API SETUP WITH AUTHORITATIVE AUTH
+// CRITICAL FIX: GLOBAL API SETUP WITH AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION
 // ============================================================================
 
 // Create the global API function with authoritative auth
@@ -4283,29 +4604,29 @@ const globalApi = function(endpoint, options = {}) {
     safeOptions.headers = {};
   }
   
-  // CRITICAL FIX: /api/status endpoint MUST NEVER include Authorization header
-  const isStatusEndpoint = endpoint === '/status' || endpoint.startsWith('/status?');
+  // CRITICAL FIX: Check if this is a public endpoint or status endpoint
+  const isPublic = isPublicEndpoint(endpoint);
+  const isStatus = isStatusEndpoint(endpoint);
   
   // Use getValidToken() for authoritative token retrieval
   const token = getValidToken();
   
-  // Inject Authorization header if token exists AND NOT status endpoint
-  if (token && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization'] && !isStatusEndpoint) {
+  // Inject Authorization header ONLY for protected endpoints (not public, not status)
+  if (!isPublic && !isStatus && token && !safeOptions.headers['Authorization'] && !safeOptions.headers['authorization']) {
     safeOptions.headers['Authorization'] = `Bearer ${token}`;
     console.log(`🔐 [AUTH] Token from getValidToken() injected into globalApi call for ${endpoint}`);
-  } else if (isStatusEndpoint) {
-    console.log(`🔧 [NETWORK] /api/status endpoint detected, NO Authorization header will be added`);
+  } else if (isPublic) {
+    console.log(`🔧 [NETWORK] Public endpoint "${endpoint}" detected, NO Authorization header will be added`);
+  } else if (isStatus) {
+    console.log(`🔧 [NETWORK] Status endpoint "${endpoint}" detected, NO Authorization header will be added`);
   }
   
-  // CRITICAL FIX: If token is required but missing, reject immediately
-  // Skip for auth endpoints and status endpoint
-  const requiresAuth = !isStatusEndpoint && 
-                     !endpoint.includes('/auth/login') && 
-                     !endpoint.includes('/auth/register') &&
-                     safeOptions.auth !== false;
+  // CRITICAL FIX: Token requirement check ONLY for protected endpoints
+  // Public endpoints and status endpoints NEVER require tokens
+  const requiresAuth = !isPublic && !isStatus && safeOptions.auth !== false;
   
   if (requiresAuth && !token) {
-    console.error(`❌ [AUTH] Token required for ${endpoint} but no token found via getValidToken()`);
+    console.error(`❌ [AUTH] Token required for protected endpoint "${endpoint}" but no token found via getValidToken()`);
     return Promise.resolve({
       ok: false,
       success: false,
@@ -4336,6 +4657,8 @@ if (!window.MOODCHAT_API) {
 window.getValidToken = getValidToken;
 window.getAuthHeaders = getAuthHeaders;
 window.validateAuth = validateAuth;
+window.isPublicEndpoint = isPublicEndpoint;
+window.isStatusEndpoint = isStatusEndpoint;
 
 // Expose accessToken globally for debugging and persistence verification
 window.__accessToken = accessToken;
@@ -4346,18 +4669,27 @@ window.updateGlobalAccessToken = updateGlobalAccessToken;
 // Expose handleUnauthorizedAccess for testing
 window.handleUnauthorizedAccess = handleUnauthorizedAccess;
 
-console.log('🔧 [API] Starting enhanced initialization with AUTHORITATIVE AUTH...');
-console.log(`🔧 [API] SINGLE backend URL: ${BACKEND_BASE_URL}`);
-console.log(`🔧 [API] SINGLE API URL: ${BASE_API_URL}`);
+// Expose environment detection function
+window.determineBackendUrl = determineBackendUrl;
+
+// Expose public endpoints list for debugging
+window.PUBLIC_ENDPOINTS = PUBLIC_ENDPOINTS;
+
+console.log('🔧 [API] Starting enhanced initialization with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION...');
+console.log(`🔧 [API] DYNAMIC Backend URL Detection: ${BACKEND_BASE_URL}`);
+console.log(`🔧 [API] DYNAMIC API URL: ${BASE_API_URL}`);
 console.log(`🔧 [API] Token via getValidToken(): ${getValidToken() ? `Present (${getValidToken().substring(0, 20)}...)` : 'Not found'}`);
 console.log(`🔧 [API] Token in moodchat_token key: ${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}`);
 console.log(`🔧 [API] Token in accessToken key: ${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
 console.log(`🔧 [API] Token persistence: ${localStorage.getItem('moodchat_token') && localStorage.getItem('accessToken') ? 'DOUBLE STORED' : 'PARTIAL'}`);
 console.log(`🔧 [API] AUTHORITATIVE AUTH SOURCE: ACTIVE`);
+console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
+console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
 console.log(`🔧 [API] TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE`);
 console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE (clears localStorage, redirects to login)`);
 console.log(`🔧 [API] validateAuth() function: AVAILABLE`);
 console.log(`🔧 [API] getValidToken() function: AVAILABLE`);
+console.log(`🔧 [API] isPublicEndpoint() function: AVAILABLE`);
 console.log(`🔧 [API] NEVER logs out due to timing: ENABLED`);
 console.log(`🔧 [API] NETWORK/AUTH SEPARATION: ACTIVE`);
 
@@ -4464,6 +4796,8 @@ exposedMethods.forEach(methodName => {
       console.log(`🔧 [API] Token from getValidToken() in fallback: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
       console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+      console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
+      console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
       console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
       
       return Promise.resolve({
@@ -4495,6 +4829,8 @@ setTimeout(() => {
       console.log(`🔧 [API] Token from getValidToken() in fallback API: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
       console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+      console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
+      console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
       console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
       
       return Promise.resolve({
@@ -4524,6 +4860,8 @@ setTimeout(() => {
         console.log(`🔧 [API] Token from getValidToken() in fallback method: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
         console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
         console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+        console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
+        console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
         console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
         
         return Promise.resolve({
@@ -4555,6 +4893,8 @@ if (!window.api) {
     console.log(`🔧 [API] Token from getValidToken() in emergency API: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
     console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
     console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+    console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
+    console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
     console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
     
     return Promise.resolve({
@@ -4585,6 +4925,8 @@ if (!window.api) {
       console.log(`🔧 [API] Token from getValidToken() in emergency method: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
       console.log(`🔧 [API] Token persistence check: moodchat_token=${localStorage.getItem('moodchat_token') ? 'YES' : 'NO'}, accessToken=${localStorage.getItem('accessToken') ? 'YES' : 'NO'}`);
       console.log(`🔧 [API] AUTHORITATIVE AUTH: ACTIVE`);
+      console.log(`🔧 [API] ENVIRONMENT DETECTION: ACTIVE`);
+      console.log(`🔧 [API] PUBLIC ENDPOINT DETECTION: ACTIVE`);
       console.log(`🔧 [API] 401/403 AUTO-HANDLING: ACTIVE`);
       
       return Promise.resolve({
@@ -4601,32 +4943,42 @@ if (!window.api) {
   window.api = emergencyApi;
 }
 
-// Global API state with AUTHORITATIVE AUTH info
+// Global API state with AUTHORITATIVE AUTH AND ENVIRONMENT DETECTION info
 window.__MOODCHAT_API_EVENTS = [];
 window.__MOODCHAT_API_INSTANCE = window.api;
 window.__MOODCHAT_API_READY = true;
 window.MOODCHAT_API_READY = true;
 window.__ACCESS_TOKEN = accessToken; // Expose access token globally
+window.__ENVIRONMENT = window.__ENVIRONMENT || determineBackendUrl(); // Expose environment info
 window.__TOKEN_PERSISTENCE = {
   moodchat_token: localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING',
   accessToken: localStorage.getItem('accessToken') ? 'PRESENT' : 'MISSING',
   timestamp: new Date().toISOString()
 };
 window.__AUTH_TIMING_FIX = true; // Indicates auth timing fix is active
-window.__AUTHORITATIVE_AUTH = true; // NEW: Indicates authoritative auth source
+window.__AUTHORITATIVE_AUTH = true; // Indicates authoritative auth source
+window.__ENVIRONMENT_DETECTION = true; // Indicates environment detection is active
 window.__ABORT_ERROR_FIX = true; // Indicates AbortError fix is active
 window.__VALIDATE_AUTH = validateAuth; // Expose validateAuth globally
-window.__GET_VALID_TOKEN = getValidToken; // NEW: Expose getValidToken globally
+window.__GET_VALID_TOKEN = getValidToken; // Expose getValidToken globally
 window.__HANDLE_UNAUTHORIZED_ACCESS = handleUnauthorizedAccess; // Expose unauthorized handler
+window.__DETERMINE_BACKEND_URL = determineBackendUrl; // Expose environment detection function
+window.__IS_PUBLIC_ENDPOINT = isPublicEndpoint; // Expose public endpoint detection
+window.__IS_STATUS_ENDPOINT = isStatusEndpoint; // Expose status endpoint detection
+window.__PUBLIC_ENDPOINTS = PUBLIC_ENDPOINTS; // Expose public endpoints list
 
-console.log('🔧 [API] ENHANCED Backend API integration complete with AUTHORITATIVE AUTH SOURCE');
+console.log('🔧 [API] ENHANCED Backend API integration complete with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');
 console.log('🔧 [API] ✅ getValidToken() function implemented');
-console.log('🔧 [API] ✅ SINGLE backend URL: ' + BACKEND_BASE_URL);
+console.log('🔧 [API] ✅ Environment detection implemented');
+console.log('🔧 [API] ✅ PUBLIC/PROTECTED endpoint detection implemented');
+console.log('🔧 [API] ✅ DYNAMIC backend URL: ' + BACKEND_BASE_URL);
 console.log('🔧 [API] ✅ ALL API calls use: ' + BASE_API_URL);
 console.log('🔧 [API] ✅ Token ALWAYS read from localStorage before each API call');
 console.log('🔧 [API] ✅ Token priority: 1. accessToken, 2. moodchat_token');
 console.log('🔧 [API] ✅ 401/403 responses automatically clear localStorage and redirect to login');
-console.log('🔧 [API] ✅ Token missing = Immediate rejection (no fake success)');
+console.log('🔧 [API] ✅ Token missing = Immediate rejection for protected endpoints only');
+console.log('🔧 [API] ✅ Public endpoints (/auth/login, /auth/register) work without tokens');
+console.log('🔧 [API] ✅ Protected endpoints require tokens');
 console.log('🔧 [API] ✅ NEVER marks user as logged out due to timing or network delays');
 console.log('🔧 [API] ✅ AbortError does NOT block API readiness');
 console.log('🔧 [API] ✅ Token existence = API availability (even with AbortError)');
@@ -4644,7 +4996,7 @@ console.log('🔧 [API] ✅ Automatic token retrieval from localStorage: ALWAYS 
 console.log('🔧 [API] ✅ Token persists across page refreshes, browser reloads, and navigation: ACTIVE');
 console.log('🔧 [API] ✅ window.currentUser maintained across sessions: ACTIVE');
 console.log('🔧 [API] ✅ Automatic token synchronization across browser tabs: ACTIVE');
-console.log('🔧 [API] ✅ Authorization header injection in all API calls (except /api/status): ACTIVE');
+console.log('🔧 [API] ✅ Authorization header injection in all protected API calls: ACTIVE');
 console.log('🔧 [API] ✅ Enhanced 401/403 handling - clears localStorage and redirects to login: ACTIVE');
 console.log('🔧 [API] ✅ window.currentUser preserved: ACTIVE');
 console.log('🔧 [API] ✅ Works with GET, POST, PUT, DELETE methods: ACTIVE');
@@ -4665,8 +5017,10 @@ console.log('🔧 [API] ✅ Auto 401 handling');
 console.log('🔧 [API] ✅ Token stored in moodchat_token key as requested: VERIFIED');
 console.log('🔧 [API] ✅ Token stored in accessToken key for global variable: VERIFIED');
 console.log('🔧 [API] ✅ API Availability tracking: ACTIVE');
-console.log('🔧 [API] 🔗 SINGLE Backend URL: ' + BACKEND_BASE_URL);
-console.log('🔧 [API] 🔗 SINGLE API Base URL: ' + BASE_API_URL);
+console.log('🔧 [API] 🔗 DYNAMIC Backend URL Detection: ACTIVE');
+console.log('🔧 [API] 🔗 Detected Environment: ' + (window.__ENVIRONMENT.isLocalhost ? 'LOCALHOST (Development)' : window.__ENVIRONMENT.isRenderDeployment ? 'RENDER (Production)' : 'UNKNOWN'));
+console.log('🔧 [API] 🔗 Detected Backend URL: ' + BACKEND_BASE_URL);
+console.log('🔧 [API] 🔗 Detected API Base URL: ' + BASE_API_URL);
 console.log('🔧 [API] 🔐 Current Global Token: ' + (accessToken ? accessToken.substring(0, 20) + '...' : 'None'));
 console.log('🔧 [API] 🔐 Token via getValidToken(): ' + (getValidToken() ? getValidToken().substring(0, 20) + '...' : 'None'));
 console.log('🔧 [API] 🔐 Token in moodchat_token: ' + (localStorage.getItem('moodchat_token') ? 'PRESENT' : 'MISSING'));
@@ -4674,21 +5028,29 @@ console.log('🔧 [API] 🔐 Token in accessToken: ' + (localStorage.getItem('ac
 console.log('🔧 [API] 🔐 Token Persistence Score: ' + 
   ((localStorage.getItem('moodchat_token') ? 1 : 0) + (localStorage.getItem('accessToken') ? 1 : 0)) + '/2');
 console.log('🔧 [API] 🔐 AUTHORITATIVE AUTH SOURCE: ACTIVE');
+console.log('🔧 [API] 🔐 ENVIRONMENT DETECTION: ACTIVE');
+console.log('🔧 [API] 🔐 PUBLIC ENDPOINT DETECTION: ACTIVE');
 console.log('🔧 [API] 🔐 TOKEN ALWAYS FROM LOCALSTORAGE: ACTIVE');
+console.log('🔧 [API] 🔐 PUBLIC ENDPOINTS NEVER REQUIRE TOKENS: ACTIVE');
+console.log('🔧 [API] 🔐 PROTECTED ENDPOINTS ALWAYS REQUIRE TOKENS: ACTIVE');
 console.log('🔧 [API] 🔐 401/403 AUTO-HANDLING: ACTIVE (CLEARS LOCALSTORAGE, REDIRECTS TO LOGIN)');
-console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH:');
-console.log('🔧 [API] 1. ALL API calls use SINGLE backend URL: ' + BACKEND_BASE_URL);
-console.log('🔧 [API] 2. Token ALWAYS read from localStorage via getValidToken()');
-console.log('🔧 [API] 3. Token priority: 1. accessToken, 2. moodchat_token');
-console.log('🔧 [API] 4. Token missing = Immediate rejection (no fake success)');
-console.log('🔧 [API] 5. Simulate 401 response - localStorage should be cleared and redirect to login');
-console.log('🔧 [API] 6. Call api.validateAuth() - should handle timing properly');
-console.log('🔧 [API] 7. Call api.isLoggedIn() - should never return false before validation completes');
-console.log('🔧 [API] 8. Simulate network delay - auth state should be preserved');
-console.log('🔧 [API] 9. Simulate AbortError - API readiness should NOT be blocked');
-console.log('🔧 [API] 10. Verify tokens are cleared on 401/403 with localStorage clearing');
-console.log('🔧 [API] 11. All existing API calls continue to work unchanged');
-console.log('🔧 [API] 12. Token storage in both moodchat_token and accessToken works');
-console.log('🔧 [API] 13. Authorization headers are injected correctly');
-console.log('🔧 [API] 14. /api/status endpoint has no Authorization header');
-console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE');
+console.log('🔧 [API] 🔐 TESTING INSTRUCTIONS FOR AUTHORITATIVE AUTH WITH ENVIRONMENT DETECTION:');
+console.log('🔧 [API] 1. Environment detection automatically selects backend URL');
+console.log('🔧 [API] 2. Localhost: Uses http://localhost:4000');
+console.log('🔧 [API] 3. Render: Uses https://moodchat-fy56.onrender.com');
+console.log('🔧 [API] 4. Token ALWAYS read from localStorage via getValidToken()');
+console.log('🔧 [API] 5. Token priority: 1. accessToken, 2. moodchat_token');
+console.log('🔧 [API] 6. Public endpoints (/auth/login, /auth/register) work without tokens');
+console.log('🔧 [API] 7. Protected endpoints require tokens and fail with 401 if missing');
+console.log('🔧 [API] 8. Simulate 401 response - localStorage should be cleared and redirect to login');
+console.log('🔧 [API] 9. Call api.validateAuth() - should handle timing properly');
+console.log('🔧 [API] 10. Call api.isLoggedIn() - should never return false before validation completes');
+console.log('🔧 [API] 11. Simulate network delay - auth state should be preserved');
+console.log('🔧 [API] 12. Simulate AbortError - API readiness should NOT be blocked');
+console.log('🔧 [API] 13. Verify tokens are cleared on 401/403 with localStorage clearing');
+console.log('🔧 [API] 14. All existing API calls continue to work unchanged');
+console.log('🔧 [API] 15. Token storage in both moodchat_token and accessToken works');
+console.log('🔧 [API] 16. Authorization headers are injected correctly for protected endpoints');
+console.log('🔧 [API] 17. No Authorization headers for public endpoints');
+console.log('🔧 [API] 18. /api/status endpoint has no Authorization header');
+console.log('🔧 [API] ⚡ Ready for production with AUTHORITATIVE AUTH SOURCE AND ENVIRONMENT DETECTION');

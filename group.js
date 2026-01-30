@@ -216,6 +216,87 @@ let accessToken = null;
 let refreshToken = null;
 let isTokenValid = false;
 
+// Authentication wait state
+let authReady = false;
+let authCheckInterval = null;
+
+// =============================================
+// AUTHENTICATION WAIT SYSTEM - IFRAME FIX
+// =============================================
+
+function waitForAuth() {
+    return new Promise((resolve, reject) => {
+        console.log('⏳ Groups iframe: Waiting for authentication...');
+        
+        // Check if auth is already ready via api.js
+        if (window.api && window.api.isAuthReady && window.api.isAuthReady()) {
+            console.log('✅ Groups iframe: Auth already ready via api.js');
+            authReady = true;
+            resolve(true);
+            return;
+        }
+        
+        // Method 1: Check for existing token
+        const token = localStorage.getItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN) || localStorage.getItem('moodchat_token');
+        if (token) {
+            console.log('✅ Groups iframe: Token found in localStorage');
+            authReady = true;
+            resolve(true);
+            return;
+        }
+        
+        // Method 2: Wait for api.js auth signal
+        let attempts = 0;
+        const maxAttempts = 30; // 30 * 200ms = 6 seconds max wait
+        
+        const checkAuth = () => {
+            attempts++;
+            
+            // Check if window.api is available
+            if (window.api && window.api.isAuthReady && window.api.isAuthReady()) {
+                console.log(`✅ Groups iframe: Auth ready via api.js after ${attempts} attempts`);
+                clearInterval(authCheckInterval);
+                authReady = true;
+                resolve(true);
+                return;
+            }
+            
+            // Check for token directly
+            const currentToken = localStorage.getItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN) || localStorage.getItem('moodchat_token');
+            if (currentToken) {
+                console.log(`✅ Groups iframe: Token found after ${attempts} attempts`);
+                clearInterval(authCheckInterval);
+                authReady = true;
+                resolve(true);
+                return;
+            }
+            
+            // Check if user data exists
+            const userData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+            if (userData) {
+                console.log(`✅ Groups iframe: User data found after ${attempts} attempts`);
+                clearInterval(authCheckInterval);
+                authReady = true;
+                resolve(true);
+                return;
+            }
+            
+            if (attempts >= maxAttempts) {
+                console.log('❌ Groups iframe: Auth timeout after maximum attempts');
+                clearInterval(authCheckInterval);
+                authReady = false;
+                reject(new Error('Authentication timeout'));
+            }
+        };
+        
+        // Start checking
+        authCheckInterval = setInterval(checkAuth, 200);
+        
+        // Initial check
+        setTimeout(checkAuth, 100);
+    });
+}
+
 // =============================================
 // BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
 // =============================================
@@ -224,7 +305,21 @@ async function bootstrapIframe() {
     console.log('=== BOOTSTRAP IFRAME START ===');
     
     try {
-        // 1. Load tokens from localStorage using fallback
+        // 1. Wait for authentication to be ready
+        await waitForAuth();
+        
+        if (!authReady) {
+            console.log('❌ Groups iframe: Authentication not ready');
+            setTimeout(() => {
+                if (window.location.pathname.includes('groups.html') || window.location.pathname.includes('group.html')) {
+                    console.log('Redirecting to login from groups iframe...');
+                    redirectToLogin();
+                }
+            }, 1000);
+            return false;
+        }
+        
+        // 2. Load tokens from localStorage using fallback
         const hasToken = loadTokensFromStorage();
         if (!hasToken) {
             console.log('No authentication token found');
@@ -232,17 +327,37 @@ async function bootstrapIframe() {
             return false;
         }
         
-        // 2. Validate token with /api/auth/me using api.js
+        // 3. Validate token with /api/auth/me using api.js
         console.log('Validating token with /api/auth/me...');
         const meResponse = await callApi('GET', '/api/auth/me');
         
         if (!meResponse || !meResponse.success) {
             console.log('Token validation failed:', meResponse?.error);
+            
+            // Try to use cached user data as fallback
+            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+            if (cachedUser) {
+                console.log('Using cached user data as fallback');
+                try {
+                    currentUser = JSON.parse(cachedUser);
+                    userData = {
+                        displayName: currentUser.displayName || currentUser.name || 'User',
+                        username: currentUser.username || null,
+                        email: currentUser.email || null,
+                        photoURL: currentUser.photoURL || currentUser.avatar || null
+                    };
+                    console.log('Fallback user loaded:', currentUser.uid || currentUser.id);
+                    return true;
+                } catch (e) {
+                    console.error('Failed to parse cached user:', e);
+                }
+            }
+            
             redirectToLogin();
             return false;
         }
         
-        // 3. Set current user from API response
+        // 4. Set current user from API response
         currentUser = meResponse.data;
         userData = {
             displayName: currentUser.displayName || currentUser.name || 'User',
@@ -253,7 +368,7 @@ async function bootstrapIframe() {
         
         console.log('User authenticated:', currentUser.id || currentUser._id || currentUser.uid);
         
-        // 4. Save user to localStorage
+        // 5. Save user to localStorage
         localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
             uid: currentUser.id || currentUser._id || currentUser.uid,
             displayName: currentUser.displayName || currentUser.name,
@@ -268,7 +383,26 @@ async function bootstrapIframe() {
         
     } catch (error) {
         console.error('Bootstrap error:', error);
-        redirectToLogin();
+        
+        // Try to use cached data as last resort
+        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        if (cachedUser) {
+            try {
+                currentUser = JSON.parse(cachedUser);
+                userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
+                console.log('Using cached user due to bootstrap error');
+                return true;
+            } catch (e) {
+                console.error('Failed to use cached user:', e);
+            }
+        }
+        
+        // Only redirect if we're on a group page
+        if (window.location.pathname.includes('groups.html') || window.location.pathname.includes('group.html')) {
+            setTimeout(() => {
+                redirectToLogin();
+            }, 1500);
+        }
         return false;
     }
 }
@@ -519,7 +653,7 @@ async function safeApiCall(method, endpoint, data = null) {
 }
 
 // =============================================
-// MAIN INITIALIZATION
+// MAIN INITIALIZATION - UPDATED FOR IFRAME
 // =============================================
 
 async function initGroupPage() {
@@ -531,25 +665,12 @@ async function initGroupPage() {
     isPageInitialized = true;
     console.log('=== GROUP PAGE INITIALIZATION START ===');
     
-    // 1. Bootstrap the iframe
-    const isAuthenticated = await bootstrapIframe();
-    if (!isAuthenticated) {
-        console.log('Authentication failed, stopping initialization');
-        return;
-    }
+    // 1. Load cached data INSTANTLY for immediate UI display
+    console.log('Loading cached data instantly...');
+    loadCachedDataInstantly();
     
-    // 2. Check mobile
-    if (typeof checkMobile === 'function') {
-        checkMobile();
-        window.addEventListener('resize', checkMobile);
-    }
-    
-    // 3. Load cached data instantly
-    if (typeof loadCachedDataInstantly === 'function') {
-        loadCachedDataInstantly();
-    }
-    
-    // 4. Set up event listeners
+    // 2. Set up event listeners immediately
+    console.log('Setting up event listeners...');
     if (typeof setupEventListeners === 'function') {
         setupEventListeners();
     }
@@ -557,12 +678,57 @@ async function initGroupPage() {
         setupGroupInvitesListener();
     }
     
-    // 5. Initialize app
-    if (typeof initializeApp === 'function') {
-        await initializeApp();
+    // 3. Check mobile
+    if (typeof checkMobile === 'function') {
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
     }
     
-    console.log('=== GROUP PAGE INITIALIZATION COMPLETE ===');
+    // 4. Start authentication in background (non-blocking)
+    console.log('Starting background authentication...');
+    setTimeout(async () => {
+        try {
+            const isAuthenticated = await bootstrapIframe();
+            if (!isAuthenticated) {
+                console.log('Background authentication failed, using cached data only');
+                return;
+            }
+            
+            console.log('Background authentication successful, starting full app initialization...');
+            
+            // 5. Initialize app with real data
+            if (typeof initializeApp === 'function') {
+                await initializeApp();
+            }
+            
+            // 6. Start background sync after a delay
+            setTimeout(() => {
+                if (typeof backgroundSyncWithServer === 'function') {
+                    backgroundSyncWithServer();
+                }
+            }, 2000);
+            
+            // 7. Set up periodic sync
+            setInterval(() => {
+                if (typeof backgroundSyncWithServer === 'function') {
+                    backgroundSyncWithServer();
+                }
+            }, 30000); // Sync every 30 seconds
+            
+            if (typeof processPendingOfflineActions === 'function') {
+                processPendingOfflineActions();
+            }
+            
+            console.log('=== GROUP PAGE INITIALIZATION COMPLETE ===');
+            
+        } catch (error) {
+            console.error('Error in background initialization:', error);
+            // Continue with cached data
+            showNotification('Using cached data. Some features may be limited.', 'info');
+        }
+    }, 500); // Delay to ensure UI is rendered first
+    
+    console.log('=== GROUP PAGE UI READY (CACHED DATA) ===');
 }
 
 // Load cached data INSTANTLY on page load
@@ -573,36 +739,89 @@ function loadCachedDataInstantly() {
         // Load groups
         const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
         if (groupsData) {
-            groups = JSON.parse(groupsData);
-            console.log(`✓ Instant: ${groups.length} groups loaded from cache`);
-            isLoadedFromLocalStorage = true;
-            
-            if (typeof updateGroupCounts === 'function') {
-                updateGroupCounts();
+            try {
+                groups = JSON.parse(groupsData);
+                console.log(`✓ Instant: ${groups.length} groups loaded from cache`);
+                isLoadedFromLocalStorage = true;
+                
+                if (typeof updateGroupCounts === 'function') {
+                    updateGroupCounts();
+                }
+                if (typeof renderGroupsListInstantly === 'function') {
+                    renderGroupsListInstantly();
+                }
+            } catch (e) {
+                console.error('Error parsing groups cache:', e);
+                groups = [];
             }
-            if (typeof renderGroupsListInstantly === 'function') {
-                renderGroupsListInstantly();
-            }
+        } else {
+            console.log('No groups found in cache');
+            groups = [];
         }
         
         // Load other group data
         const myGroupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_GROUPS);
-        if (myGroupsData) myGroups = JSON.parse(myGroupsData);
+        if (myGroupsData) {
+            try {
+                myGroups = JSON.parse(myGroupsData);
+            } catch (e) {
+                console.error('Error parsing myGroups cache:', e);
+                myGroups = [];
+            }
+        }
         
         const joinedData = localStorage.getItem(LOCAL_STORAGE_KEYS.JOINED_GROUPS);
-        if (joinedData) joinedGroups = JSON.parse(joinedData);
+        if (joinedData) {
+            try {
+                joinedGroups = JSON.parse(joinedData);
+            } catch (e) {
+                console.error('Error parsing joinedGroups cache:', e);
+                joinedGroups = [];
+            }
+        }
         
         const invitesData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_INVITES);
-        if (invitesData) groupInvites = JSON.parse(invitesData);
+        if (invitesData) {
+            try {
+                groupInvites = JSON.parse(invitesData);
+            } catch (e) {
+                console.error('Error parsing groupInvites cache:', e);
+                groupInvites = [];
+            }
+        }
         
         const adminData = localStorage.getItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS);
-        if (adminData) adminGroups = JSON.parse(adminData);
+        if (adminData) {
+            try {
+                adminGroups = JSON.parse(adminData);
+            } catch (e) {
+                console.error('Error parsing adminGroups cache:', e);
+                adminGroups = [];
+            }
+        }
         
         // Load friends
         const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cachedFriends) {
-            friends = JSON.parse(cachedFriends);
-            console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
+            try {
+                friends = JSON.parse(cachedFriends);
+                console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
+            } catch (e) {
+                console.error('Error parsing friends cache:', e);
+                friends = [];
+            }
+        }
+        
+        // Load user data from cache for immediate display
+        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        if (cachedUser) {
+            try {
+                currentUser = JSON.parse(cachedUser);
+                userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
+                console.log('✓ Instant: User data loaded from cache');
+            } catch (e) {
+                console.error('Error parsing user cache:', e);
+            }
         }
         
         // Load unique features data
@@ -622,37 +841,53 @@ function loadUniqueFeaturesData() {
     try {
         const cachedPurposes = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_PURPOSES);
         if (cachedPurposes) {
-            const purposes = JSON.parse(cachedPurposes);
-            groups.forEach(group => {
-                if (purposes[group.id]) {
-                    group.purpose = purposes[group.id];
-                }
-            });
+            try {
+                const purposes = JSON.parse(cachedPurposes);
+                groups.forEach(group => {
+                    if (purposes[group.id]) {
+                        group.purpose = purposes[group.id];
+                    }
+                });
+            } catch (e) {
+                console.error('Error parsing purposes cache:', e);
+            }
         }
         
         const cachedMoods = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_MOODS);
         if (cachedMoods) {
-            const moods = JSON.parse(cachedMoods);
-            groups.forEach(group => {
-                if (moods[group.id]) {
-                    group.mood = moods[group.id];
-                }
-            });
+            try {
+                const moods = JSON.parse(cachedMoods);
+                groups.forEach(group => {
+                    if (moods[group.id]) {
+                        group.mood = moods[group.id];
+                    }
+                });
+            } catch (e) {
+                console.error('Error parsing moods cache:', e);
+            }
         }
         
         const cachedRules = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_POSTING_RULES);
         if (cachedRules) {
-            const rules = JSON.parse(cachedRules);
-            groups.forEach(group => {
-                if (rules[group.id]) {
-                    group.postingRule = rules[group.id];
-                }
-            });
+            try {
+                const rules = JSON.parse(cachedRules);
+                groups.forEach(group => {
+                    if (rules[group.id]) {
+                        group.postingRule = rules[group.id];
+                    }
+                });
+            } catch (e) {
+                console.error('Error parsing rules cache:', e);
+            }
         }
         
         const cachedModes = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES);
         if (cachedModes) {
-            currentParticipationMode = JSON.parse(cachedModes);
+            try {
+                currentParticipationMode = JSON.parse(cachedModes);
+            } catch (e) {
+                console.error('Error parsing modes cache:', e);
+            }
         }
         
         console.log('✓ Instant: Unique features data loaded from cache');
@@ -804,30 +1039,15 @@ async function initializeApp() {
         await syncGroupInvitesFromServer();
     }
     
-    // Start background sync after a delay
-    setTimeout(() => {
-        if (typeof backgroundSyncWithServer === 'function') {
-            backgroundSyncWithServer();
-        }
-    }, 1000);
-    
-    // Set up periodic sync
-    setInterval(() => {
-        if (typeof backgroundSyncWithServer === 'function') {
-            backgroundSyncWithServer();
-        }
-    }, 30000); // Sync every 30 seconds
-    
-    if (typeof processPendingOfflineActions === 'function') {
-        processPendingOfflineActions();
-    }
-    
     console.log('=== FULL GROUP APP INITIALIZATION COMPLETE ===');
 }
 
 // Load friends from API
 async function loadFriends() {
-    if (!currentUser) return;
+    if (!currentUser) {
+        console.log('loadFriends: No current user, skipping');
+        return;
+    }
     
     try {
         const response = await safeApiCall('get', 'friends/list');
@@ -835,14 +1055,20 @@ async function loadFriends() {
             friends = response.data;
             localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
             console.log(`Loaded ${friends.length} friends from API`);
+        } else {
+            console.log('Failed to load friends from API:', response?.error);
         }
     } catch (error) {
         console.error('Error loading friends:', error);
         // Load from cache as fallback
         const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cachedFriends) {
-            friends = JSON.parse(cachedFriends);
-            console.log(`Loaded ${friends.length} friends from cache`);
+            try {
+                friends = JSON.parse(cachedFriends);
+                console.log(`Loaded ${friends.length} friends from cache`);
+            } catch (e) {
+                console.error('Error parsing cached friends:', e);
+            }
         }
     }
 }
@@ -1034,7 +1260,7 @@ async function syncGroupInvitesFromServer() {
 }
 
 // =============================================
-// REMAINING FUNCTIONS
+// REMAINING FUNCTIONS (PRESERVED)
 // =============================================
 
 // Calculate group pulse
@@ -1582,7 +1808,11 @@ async function loadGroupEvents(groupId) {
         
         let events = [];
         if (cachedEvents) {
-            events = JSON.parse(cachedEvents);
+            try {
+                events = JSON.parse(cachedEvents);
+            } catch (e) {
+                console.error('Error parsing cached events:', e);
+            }
         }
         
         // Try to get events from API
@@ -1707,7 +1937,11 @@ async function loadTransparencyLog(groupId) {
         
         let log = [];
         if (cachedLog) {
-            log = JSON.parse(cachedLog);
+            try {
+                log = JSON.parse(cachedLog);
+            } catch (e) {
+                console.error('Error parsing transparency log:', e);
+            }
         } else {
             // Generate initial transparency log
             if (typeof generateInitialTransparencyLog === 'function') {

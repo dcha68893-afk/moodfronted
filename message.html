@@ -244,14 +244,11 @@
     </style>
 </head>
 <body>
-    <!-- NEW: API Loading Overlay - Shows while waiting for parent auth -->
-    <div class="api-loading-overlay" id="apiLoadingOverlay">
+    <!-- NEW: API Loading Overlay - Shows only when explicitly needed -->
+    <div class="api-loading-overlay hidden" id="apiLoadingOverlay">
         <div class="api-loading-spinner"></div>
-        <div class="api-loading-text">Connecting to chat service...</div>
-        <div class="api-loading-subtext">Authenticating user and loading data. Please wait a moment.</div>
-        <div class="api-loading-subtext" style="margin-top: 10px; font-size: 12px; color: #888;" id="apiStatusText">
-            Initializing...
-        </div>
+        <div class="api-loading-text">Loading chat system...</div>
+        <div class="api-loading-subtext">This will only take a moment</div>
     </div>
     
     <!-- NEW: Auth Error Overlay -->
@@ -472,6 +469,10 @@
             
             <div class="chats-list" id="chatsList">
                 <!-- Chats will be loaded here -->
+                <div class="loading-state">
+                    <div class="loading-spinner"></div>
+                    <div>Loading chats...</div>
+                </div>
             </div>
         </div>
         
@@ -538,6 +539,11 @@
             
             <div class="messages-container" id="messagesContainer">
                 <!-- Messages will be loaded here -->
+                <div class="empty-chat">
+                    <i class="fas fa-comments empty-chat-icon"></i>
+                    <div class="empty-chat-title">No chat selected</div>
+                    <div class="empty-chat-message">Select a chat from the sidebar to start messaging</div>
+                </div>
             </div>
             
             <div class="input-area">
@@ -728,9 +734,8 @@
     
     <script type="module">
         // =============================================
-        // COMPLETE CHAT SYSTEM WITH DIRECT TOKEN ACCESS
+        // COMPLETE CHAT SYSTEM WITH BACKGROUND AUTH
         // =============================================
-        // MODIFIED: DIRECT TOKEN ACCESS FROM LOCALSTORAGE
         
         // Global variables
         let currentUser = null;
@@ -773,6 +778,8 @@
         let accessToken = null;
         let refreshToken = null;
         let tokenRefreshInProgress = false;
+        let isInitialized = false;
+        let isAuthChecking = false;
         
         // Local Storage Keys for tokens
         const TOKEN_STORAGE_KEYS = {
@@ -850,200 +857,278 @@
         const authErrorLoginBtn = document.getElementById('authErrorLoginBtn');
         
         // =============================================
-        // BOOTSTRAP FUNCTION - NO PARENT DEPENDENCY
+        // BACKGROUND AUTHENTICATION SYSTEM
         // =============================================
         
         /**
-         * Bootstrap the iframe - independent authentication
-         * Reads tokens from localStorage, validates via api.js
-         * Only proceeds after successful authentication
+         * Initialize the app immediately without waiting for auth
          */
-        async function bootstrapIframe() {
-            console.log('Starting iframe bootstrap...');
-            updateApiStatus('Checking authentication...');
+        function initializeAppImmediately() {
+            console.log('Initializing chat UI immediately...');
             
-            // Show loading overlay
-            apiLoadingOverlay.classList.remove('hidden');
-            authErrorOverlay.classList.add('hidden');
+            // Show UI immediately
+            if (sidebar) sidebar.classList.add('active');
+            if (chatPanel) chatPanel.classList.add('hidden');
+            
+            // Set initial chat list state
+            if (chatsList) {
+                chatsList.innerHTML = `
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <div>Loading chats...</div>
+                    </div>
+                `;
+            }
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Initialize emoji picker
+            initEmojiPicker();
+            
+            // Start background auth check
+            startBackgroundAuthCheck();
+            
+            console.log('Chat UI initialized successfully');
+        }
+        
+        /**
+         * Start background authentication check
+         */
+        async function startBackgroundAuthCheck() {
+            if (isAuthChecking) return;
+            
+            isAuthChecking = true;
+            console.log('Starting background authentication check...');
             
             try {
-                // Step 1: Load tokens from localStorage
-                const tokensLoaded = loadTokens();
-                
-                if (!tokensLoaded || !accessToken) {
-                    console.error('No authentication tokens found in localStorage');
-                    showAuthError('Authentication Required', 'Please login to access the chat system.', true);
-                    return false;
+                // Check if we have cached user data first
+                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                if (cachedUser) {
+                    try {
+                        currentUser = JSON.parse(cachedUser);
+                        console.log('Found cached user, proceeding with UI...');
+                        await proceedWithInitialization();
+                        return;
+                    } catch (e) {
+                        console.log('Cached user data invalid, checking API...');
+                    }
                 }
                 
-                // Step 2: Validate token by calling api.js
-                updateApiStatus('Validating user session...');
+                // Wait for api.js to be available
+                await waitForApiReady();
                 
-                // Use api.js if available
-                if (!window.api) {
-                    console.error('api.js not loaded');
-                    showAuthError('System Error', 'API service not available. Please refresh.', false);
-                    return false;
+                // Check authentication with API
+                if (window.api && typeof window.api.isAuthenticated === 'function') {
+                    const isAuthenticated = await window.api.isAuthenticated();
+                    if (isAuthenticated) {
+                        console.log('API authentication successful');
+                        await loadUserFromAPI();
+                        await proceedWithInitialization();
+                        return;
+                    }
                 }
                 
-                if (typeof window.api.getCurrentUser !== 'function') {
-                    console.error('api.getCurrentUser not available');
-                    showAuthError('System Error', 'API service not properly loaded. Please refresh.', false);
-                    return false;
-                }
-                
-                let userData;
-                try {
-                    // Use api.js to validate user
-                    userData = await window.api.getCurrentUser();
-                } catch (apiError) {
-                    console.error('API validation error:', apiError);
-                    
-                    // Try token refresh if available
-                    if (refreshToken) {
-                        updateApiStatus('Session expired, attempting refresh...');
-                        const refreshed = await attemptTokenRefresh();
-                        if (!refreshed) {
-                            showAuthError('Session Expired', 'Your session has expired. Please login again.', true);
-                            return false;
+                // Try to get user via getCurrentUser
+                if (window.api && typeof window.api.getCurrentUser === 'function') {
+                    try {
+                        const userData = await window.api.getCurrentUser();
+                        if (userData && userData.user) {
+                            console.log('Got user data from API');
+                            currentUser = userData.user;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                            await proceedWithInitialization();
+                            return;
                         }
-                        // Retry validation with new token
-                        userData = await window.api.getCurrentUser();
-                    } else {
-                        showAuthError('Authentication Failed', 'Could not validate your session. Please login again.', true);
-                        return false;
+                    } catch (error) {
+                        console.log('Could not get user from API:', error);
                     }
                 }
                 
-                if (!userData || !userData.user) {
-                    console.error('Invalid user data returned from API');
-                    showAuthError('Authentication Failed', 'Invalid user data received. Please login again.', true);
-                    return false;
+                // Check localStorage tokens as fallback
+                const tokensLoaded = loadTokens();
+                if (tokensLoaded && accessToken) {
+                    console.log('Found tokens in localStorage');
+                    
+                    // Try to validate with API
+                    try {
+                        if (window.api && typeof window.api.getCurrentUser === 'function') {
+                            const userData = await window.api.getCurrentUser();
+                            if (userData && userData.user) {
+                                currentUser = userData.user;
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                                console.log('Token validation successful');
+                                await proceedWithInitialization();
+                                return;
+                            }
+                        }
+                    } catch (error) {
+                        console.log('Token validation failed:', error);
+                    }
                 }
                 
-                // Step 3: Store user data
-                currentUser = userData.user;
-                console.log('User authenticated successfully:', currentUser.uid);
-                
-                // Save to localStorage for consistency
-                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_DATA, JSON.stringify(currentUser));
-                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_ID, currentUser.uid);
-                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_NAME, currentUser.displayName || currentUser.name || 'User');
-                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_EMAIL, currentUser.email || '');
-                
-                // Step 4: Hide loading, show success
-                updateApiStatus('Authentication successful');
+                // No authentication found, show error after a delay
                 setTimeout(() => {
-                    apiLoadingOverlay.classList.add('hidden');
-                }, 500);
-                
-                return true;
+                    if (!currentUser) {
+                        showAuthError('Authentication Required', 'Please login to access the chat system.', true);
+                    }
+                }, 2000);
                 
             } catch (error) {
-                console.error('Bootstrap failed:', error);
-                showAuthError('System Error', 'An error occurred during initialization. Please try again.', true);
-                return false;
+                console.error('Background auth check error:', error);
+            } finally {
+                isAuthChecking = false;
             }
         }
         
         /**
-         * Attempt to refresh the access token using api.js
+         * Wait for api.js to be ready
          */
-        async function attemptTokenRefresh() {
-            if (!refreshToken) {
-                return false;
-            }
-            
-            try {
-                updateApiStatus('Refreshing token...');
-                
-                if (!window.api || typeof window.api.refreshToken !== 'function') {
-                    console.error('api.refreshToken not available');
-                    return false;
+        async function waitForApiReady() {
+            return new Promise((resolve) => {
+                if (window.api) {
+                    resolve(true);
+                    return;
                 }
                 
-                const data = await window.api.refreshToken(refreshToken);
+                let attempts = 0;
+                const maxAttempts = 30;
                 
-                if (data && data.accessToken) {
-                    accessToken = data.accessToken;
-                    localStorage.setItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+                const checkApi = () => {
+                    attempts++;
                     
-                    if (data.refreshToken) {
-                        refreshToken = data.refreshToken;
-                        localStorage.setItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+                    if (window.api) {
+                        console.log('API ready after', attempts, 'attempts');
+                        resolve(true);
+                        return;
                     }
                     
-                    console.log('Token refreshed successfully');
-                    return true;
+                    if (attempts >= maxAttempts) {
+                        console.log('API not ready after maximum attempts');
+                        resolve(false);
+                        return;
+                    }
+                    
+                    setTimeout(checkApi, 100);
+                };
+                
+                checkApi();
+            });
+        }
+        
+        /**
+         * Load user from API
+         */
+        async function loadUserFromAPI() {
+            try {
+                if (window.api && typeof window.api.getCurrentUser === 'function') {
+                    const userData = await window.api.getCurrentUser();
+                    if (userData && userData.user) {
+                        currentUser = userData.user;
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                        localStorage.setItem(TOKEN_STORAGE_KEYS.USER_DATA, JSON.stringify(currentUser));
+                        return true;
+                    }
                 }
-                
-                console.error('Token refresh failed');
                 return false;
-                
             } catch (error) {
-                console.error('Error refreshing token:', error);
+                console.error('Error loading user from API:', error);
                 return false;
             }
         }
         
         /**
-         * Load tokens from localStorage with fallback logic
+         * Load tokens from localStorage
          */
         function loadTokens() {
             try {
-                // Try multiple possible storage keys
-                const possibleAccessTokenKeys = [
-                    'accessToken',
-                    'knecta_access_token',
-                    'moodchat_token',
-                    'auth_token',
-                    'token'
-                ];
+                accessToken = localStorage.getItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN);
+                refreshToken = localStorage.getItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN);
                 
-                const possibleRefreshTokenKeys = [
-                    'refreshToken',
-                    'knecta_refresh_token',
-                    'refresh_token'
-                ];
-                
-                // Find access token
-                for (const key of possibleAccessTokenKeys) {
-                    const token = localStorage.getItem(key);
-                    if (token && token.startsWith('eyJ')) { // JWT tokens start with eyJ
-                        accessToken = token;
-                        console.log('Found access token in key:', key);
-                        break;
-                    }
+                if (!accessToken) {
+                    // Try alternative keys
+                    accessToken = localStorage.getItem('knecta_access_token') || 
+                                 localStorage.getItem('moodchat_token') || 
+                                 localStorage.getItem('auth_token');
                 }
                 
-                // Find refresh token
-                for (const key of possibleRefreshTokenKeys) {
-                    const token = localStorage.getItem(key);
-                    if (token) {
-                        refreshToken = token;
-                        console.log('Found refresh token in key:', key);
-                        break;
-                    }
-                }
-                
-                // Set in standard keys for consistency
                 if (accessToken) {
                     localStorage.setItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
                 }
+                
                 if (refreshToken) {
                     localStorage.setItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
                 }
                 
-                console.log('Tokens loaded:', {
-                    accessTokenPresent: !!accessToken,
-                    refreshTokenPresent: !!refreshToken
-                });
-                
                 return !!accessToken;
-                
             } catch (error) {
                 console.error('Error loading tokens:', error);
                 return false;
+            }
+        }
+        
+        /**
+         * Proceed with initialization after authentication
+         */
+        async function proceedWithInitialization() {
+            if (isInitialized) return;
+            
+            console.log('Proceeding with full initialization...');
+            
+            try {
+                // Load initial data
+                await Promise.all([
+                    loadContacts(),
+                    loadChats(),
+                    loadUserSettings()
+                ]);
+                
+                // Load additional data
+                loadChatThemes();
+                loadMessageDrafts();
+                loadScheduledMessages();
+                loadOfflineQueue();
+                
+                // Check for auto-load parameters from URL
+                const urlUser = getUserFromURL();
+                if (urlUser) {
+                    await openChatPanel(urlUser.userId, urlUser.username, urlUser.userAvatar);
+                } else {
+                    // Check for active chat session
+                    const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+                    if (chatSession) {
+                        const session = JSON.parse(chatSession);
+                        await loadChatByFriendId(session.friendId);
+                    }
+                }
+                
+                updateChatCategoryBadges();
+                
+                // Start background sync
+                startBackgroundSync();
+                
+                // Check for offline messages to sync
+                checkOfflineQueue();
+                
+                // Check for scheduled messages
+                checkScheduledMessages();
+                
+                // Setup scroll detection
+                setupScrollDetection();
+                
+                // Check network status
+                updateNetworkStatus();
+                
+                isInitialized = true;
+                
+                // Show success notification
+                setTimeout(() => {
+                    showNotification('Chat system ready', 'success');
+                }, 1000);
+                
+            } catch (error) {
+                console.error('Error in full initialization:', error);
+                showNotification('Error loading chat data', 'error');
             }
         }
         
@@ -1052,6 +1137,11 @@
          */
         function showAuthError(title, message, showLoginButton = true) {
             console.error('Auth error:', title, '-', message);
+            
+            // Only show if not already showing
+            if (authErrorOverlay && !authErrorOverlay.classList.contains('hidden')) {
+                return;
+            }
             
             // Update error overlay
             if (authErrorTitle) authErrorTitle.textContent = title;
@@ -1066,9 +1156,13 @@
                 }
             }
             
-            // Switch to error overlay
-            if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
-            if (authErrorOverlay) authErrorOverlay.classList.remove('hidden');
+            // Show error overlay with fade-in
+            if (authErrorOverlay) {
+                authErrorOverlay.classList.remove('hidden');
+                setTimeout(() => {
+                    authErrorOverlay.style.opacity = '1';
+                }, 10);
+            }
         }
         
         /**
@@ -1081,37 +1175,19 @@
             localStorage.removeItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN);
             localStorage.removeItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN);
             localStorage.removeItem(TOKEN_STORAGE_KEYS.USER_DATA);
+            localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
             
             // Redirect
-            window.location.href = '../login.html';
-        }
-        
-        /**
-         * Update API status text
-         */
-        function updateApiStatus(message) {
-            console.log('API Status:', message);
-            if (apiStatusText) {
-                apiStatusText.textContent = message;
-            }
+            window.location.href = '../index.html';
         }
         
         // =============================================
-        // API CALL FUNCTIONS WITH TOKEN AUTH
+        // API CALL FUNCTIONS
         // =============================================
         
-        // Generic API request function with token handling
+        // Generic API request function
         async function makeApiRequest(endpoint, options = {}) {
             try {
-                // Ensure we have a valid token
-                if (!accessToken) {
-                    const tokensLoaded = loadTokens();
-                    if (!tokensLoaded) {
-                        throw new Error('Authentication required');
-                    }
-                }
-                
-                // Use api.js if available
                 if (!window.api) {
                     throw new Error('API service not available');
                 }
@@ -1143,7 +1219,6 @@
             } catch (error) {
                 console.error('API request error:', error);
                 
-                // If it's an auth error, show error overlay
                 if (error.message.includes('Authentication') || error.message.includes('401')) {
                     showAuthError('Authentication Error', 'Please login to continue.', true);
                 }
@@ -1154,90 +1229,63 @@
         
         // API methods for chat functionality
         const api = {
-            // Get current user
             getCurrentUser: async function() {
                 try {
                     if (window.api && typeof window.api.getCurrentUser === 'function') {
                         const data = await window.api.getCurrentUser();
-                        
                         if (data && data.user) {
                             return data;
                         }
                     }
-                    
                     throw new Error('Failed to get user data');
-                    
                 } catch (error) {
                     console.error('Error getting current user:', error);
-                    
-                    // Fallback to localStorage
-                    const userData = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_DATA);
-                    if (userData) {
-                        const parsed = JSON.parse(userData);
-                        if (parsed && parsed.uid) {
-                            return { user: parsed };
-                        }
-                    }
-                    
                     throw error;
                 }
             },
             
-            // Get chats
             getChats: async function() {
                 try {
                     const data = await makeApiRequest('/api/chats');
                     return data;
                 } catch (error) {
                     console.error('Error getting chats:', error);
-                    
-                    // Fallback to localStorage
                     const cachedChats = localStorage.getItem(LOCAL_STORAGE_KEYS.CHATS);
                     if (cachedChats) {
                         return { chats: JSON.parse(cachedChats) };
                     }
-                    
                     return { chats: [] };
                 }
             },
             
-            // Get contacts
             getContacts: async function() {
                 try {
                     const data = await makeApiRequest('/api/contacts');
                     return data;
                 } catch (error) {
                     console.error('Error getting contacts:', error);
-                    
-                    // Fallback to localStorage
                     const cachedContacts = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
                     if (cachedContacts) {
                         return { contacts: JSON.parse(cachedContacts) };
                     }
-                    
                     return { contacts: [] };
                 }
             },
             
-            // Get chat messages
             getChatMessages: async function(chatId) {
                 try {
                     const data = await makeApiRequest(`/api/chats/${chatId}/messages`);
                     return data;
                 } catch (error) {
                     console.error(`Error getting messages for chat ${chatId}:`, error);
-                    
-                    // Fallback to localStorage
                     const cachedMessages = localStorage.getItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${chatId}`);
                     if (cachedMessages) {
                         return { messages: JSON.parse(cachedMessages) };
                     }
-                    
                     return { messages: [] };
                 }
             },
             
-            // Send message
             sendMessage: async function(chatId, messageData) {
                 try {
                     const data = await makeApiRequest(`/api/chats/${chatId}/messages`, {
@@ -1248,13 +1296,9 @@
                     if (data && data.message) {
                         return data.message;
                     }
-                    
                     throw new Error('Failed to send message');
-                    
                 } catch (error) {
                     console.error('Error sending message:', error);
-                    
-                    // Return local message for offline mode
                     return {
                         ...messageData,
                         id: 'local_' + Date.now(),
@@ -1264,151 +1308,121 @@
                 }
             },
             
-            // Edit message
             editMessage: async function(messageId, updateData) {
                 try {
                     const data = await makeApiRequest(`/api/messages/${messageId}`, {
                         method: 'PUT',
                         body: JSON.stringify(updateData)
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error editing message:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Delete message
             deleteMessage: async function(messageId) {
                 try {
                     const data = await makeApiRequest(`/api/messages/${messageId}`, {
                         method: 'DELETE'
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error deleting message:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Add reaction
             addReaction: async function(messageId, reactionData) {
                 try {
                     const data = await makeApiRequest(`/api/messages/${messageId}/reactions`, {
                         method: 'POST',
                         body: JSON.stringify(reactionData)
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error adding reaction:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Mark chat as read
             markChatAsRead: async function(chatId) {
                 try {
                     const data = await makeApiRequest(`/api/chats/${chatId}/read`, {
                         method: 'POST'
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error marking chat as read:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Send typing indicator
             sendTypingIndicator: async function(chatId, isTyping) {
                 try {
                     if (!navigator.onLine) return false;
-                    
                     const data = await makeApiRequest(`/api/chats/${chatId}/typing`, {
                         method: 'POST',
                         body: JSON.stringify({ typing: isTyping })
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error sending typing indicator:', error);
                     return false;
                 }
             },
             
-            // Submit report
             submitReport: async function(reportData) {
                 try {
                     const data = await makeApiRequest('/api/reports', {
                         method: 'POST',
                         body: JSON.stringify(reportData)
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error submitting report:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Vote in poll
             voteInPoll: async function(messageId, voteData) {
                 try {
                     const data = await makeApiRequest(`/api/messages/${messageId}/vote`, {
                         method: 'POST',
                         body: JSON.stringify(voteData)
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error voting in poll:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Clear chat history
             clearChatHistory: async function(chatId) {
                 try {
                     const data = await makeApiRequest(`/api/chats/${chatId}/clear`, {
                         method: 'DELETE'
                     });
-                    
                     return data.success || false;
-                    
                 } catch (error) {
                     console.error('Error clearing chat history:', error);
-                    return true; // Assume success for offline
+                    return true;
                 }
             },
             
-            // Get user by ID
             getUser: async function(userId) {
                 try {
                     const data = await makeApiRequest(`/api/users/${userId}`);
-                    
                     if (data && data.user) {
                         return data.user;
                     }
-                    
                     return null;
-                    
                 } catch (error) {
                     console.error(`Error getting user ${userId}:`, error);
                     return null;
                 }
             },
             
-            // Create chat
             createChat: async function(friendId) {
                 try {
                     const data = await makeApiRequest('/api/chats', {
@@ -1419,13 +1433,9 @@
                     if (data && data.chat) {
                         return data.chat;
                     }
-                    
                     return null;
-                    
                 } catch (error) {
                     console.error('Error creating chat:', error);
-                    
-                    // Create local chat
                     return {
                         id: 'chat_' + Date.now(),
                         friendId: friendId,
@@ -1447,7 +1457,6 @@
         // AUTO-LOAD CHAT FROM URL PARAMETERS
         // =============================================
         
-        // Function to extract user info from URL
         function getUserFromURL() {
             const urlParams = new URLSearchParams(window.location.search);
             const userId = urlParams.get('userId') || urlParams.get('friendId') || urlParams.get('user');
@@ -1464,12 +1473,16 @@
             return null;
         }
         
-        // Function to open chat panel with specific user
         async function openChatPanel(userId, username, userAvatar = '') {
             try {
-                // Show loading state
+                if (!currentUser) {
+                    showNotification('Please wait while we verify your session', 'info');
+                    return;
+                }
+                
                 if (chatPanel) chatPanel.classList.remove('hidden');
                 if (sidebar) sidebar.classList.remove('active');
+                
                 if (messagesContainer) {
                     messagesContainer.innerHTML = `
                         <div class="loading-state">
@@ -1479,7 +1492,6 @@
                     `;
                 }
                 
-                // Update chat header with user info
                 const chatFriendName = document.getElementById('chatFriendName');
                 const chatStatusText = document.getElementById('chatStatusText');
                 if (chatFriendName) chatFriendName.textContent = username;
@@ -1496,39 +1508,32 @@
                     }
                 }
                 
-                // Create temporary friend object
                 currentFriend = {
                     uid: userId,
                     displayName: username,
                     photoURL: userAvatar
                 };
                 
-                // Check if chat already exists
                 let existingChat = chats.find(chat => chat.friendId === userId);
                 
                 if (existingChat) {
-                    // Open existing chat
                     currentChat = existingChat;
                     await loadMessages();
                     applyChatTheme(userId);
                 } else {
-                    // Try to get user data from API
                     try {
                         const friendData = await api.getUser(userId);
                         if (friendData) {
-                            // Create chat via API
                             const newChat = await api.createChat(userId);
                             if (newChat) {
                                 chats.unshift(newChat);
                                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                                 renderChatsList();
-                                
                                 currentChat = newChat;
                                 await loadMessages();
                                 applyChatTheme(userId);
                                 return;
                             } else {
-                                // API create failed, create local chat
                                 createLocalChat(userId, friendData);
                             }
                         } else {
@@ -1543,7 +1548,6 @@
                     }
                 }
                 
-                // Set user status
                 if (chatStatusText) chatStatusText.textContent = 'Online';
                 const statusIndicator = document.getElementById('chatStatusIndicator');
                 if (statusIndicator) statusIndicator.className = 'chat-status online';
@@ -1552,7 +1556,6 @@
                 console.error('Error opening chat panel:', error);
                 showNotification('Error loading chat', 'error');
                 
-                // Show error state
                 if (messagesContainer) {
                     messagesContainer.innerHTML = `
                         <div class="empty-chat">
@@ -1568,126 +1571,9 @@
             }
         }
         
-        // Initialize the application
-        async function initializeApp() {
-            console.log('Initializing complete chat system with independent authentication...');
-            
-            // Step 1: Bootstrap authentication (NO PARENT DEPENDENCY)
-            const isAuthenticated = await bootstrapIframe();
-            
-            if (!isAuthenticated) {
-                console.error('Authentication failed, cannot initialize app');
-                return;
-            }
-            
-            // Step 2: Load user and data (only after successful auth)
-            updateApiStatus('Loading chat data...');
-            
-            await loadContacts();
-            await loadChats();
-            loadChatThemes();
-            loadUserSettings();
-            
-            // Load feature-specific data
-            loadMessageDrafts();
-            loadScheduledMessages();
-            loadOfflineQueue();
-            
-            // Setup event listeners
-            setupEventListeners();
-            
-            // Initialize emoji picker
-            initEmojiPicker();
-            
-            // Check for auto-load parameters from URL
-            const urlUser = getUserFromURL();
-            if (urlUser) {
-                // Auto-load the chat with the user from URL
-                console.log('Auto-loading chat with user:', urlUser);
-                await openChatPanel(urlUser.userId, urlUser.username, urlUser.userAvatar);
-            } else {
-                // Check for active chat session
-                const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
-                if (chatSession) {
-                    const session = JSON.parse(chatSession);
-                    await loadChatByFriendId(session.friendId);
-                }
-            }
-            
-            showNotification('Chat system ready', 'success');
-            updateChatCategoryBadges();
-            
-            // Start background sync
-            startBackgroundSync();
-            
-            // Check for offline messages to sync
-            checkOfflineQueue();
-            
-            // Check for scheduled messages
-            checkScheduledMessages();
-            
-            // Setup scroll detection for jump button
-            setupScrollDetection();
-            
-            // Check network status
-            updateNetworkStatus();
-            
-            console.log('Complete chat system initialized successfully');
-            
-            // Hide loading overlay completely
-            setTimeout(() => {
-                if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
-            }, 1000);
-        }
-        
-        // Start initialization when DOM is ready
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, starting app initialization...');
-            
-            // Setup auth error login button
-            if (authErrorLoginBtn) {
-                authErrorLoginBtn.addEventListener('click', redirectToLogin);
-            }
-            
-            // Initialize app
-            initializeApp();
-        });
-        
-        // Update network status
-        function updateNetworkStatus() {
-            if (!offlineOverlay) return;
-            
-            if (!navigator.onLine) {
-                offlineOverlay.classList.add('active');
-            } else {
-                offlineOverlay.classList.remove('active');
-            }
-        }
-        
-        async function loadUser() {
-            // Note: User is already loaded in bootstrapIframe()
-            // This function is kept for compatibility
-            if (!currentUser) {
-                // Fallback to localStorage
-                const userData = localStorage.getItem(TOKEN_STORAGE_KEYS.USER_DATA);
-                if (userData) {
-                    currentUser = JSON.parse(userData);
-                }
-            }
-            
-            if (!currentUser) {
-                // Create minimal user for offline mode
-                currentUser = {
-                    uid: 'local_user_' + Date.now(),
-                    displayName: 'Local User',
-                    email: ''
-                };
-                console.log('Created minimal user object for offline mode');
-            }
-            
-            // Save to localStorage
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-        }
+        // =============================================
+        // CORE CHAT FUNCTIONS
+        // =============================================
         
         function loadUserSettings() {
             try {
@@ -1882,18 +1768,14 @@
         
         async function loadContacts() {
             try {
-                // Load from API
                 const response = await api.getContacts();
                 if (response && response.contacts) {
                     contacts = response.contacts;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
                     renderContactsList();
                 }
-                
             } catch (error) {
                 console.error('Error loading contacts:', error);
-                
-                // Fallback to localStorage
                 const cachedContacts = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
                 if (cachedContacts) {
                     contacts = JSON.parse(cachedContacts);
@@ -1949,7 +1831,6 @@
         
         async function startChatWithContact(contact) {
             try {
-                // Check if chat already exists
                 let existingChat = chats.find(chat => chat.friendId === contact.uid);
                 
                 if (existingChat) {
@@ -1958,7 +1839,6 @@
                     await loadChatByFriendId(contact.uid);
                 }
                 
-                // Hide contacts sidebar and show main chat
                 if (contactsSidebar) contactsSidebar.classList.add('hidden');
                 if (sidebar) sidebar.classList.remove('active');
                 if (chatPanel) chatPanel.classList.remove('hidden');
@@ -1971,18 +1851,14 @@
         
         async function loadChats() {
             try {
-                // Load from API
                 const response = await api.getChats();
                 if (response && response.chats) {
                     chats = response.chats;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                     renderChatsList();
                 }
-                
             } catch (error) {
                 console.error('Error loading chats:', error);
-                
-                // Fallback to localStorage
                 const cachedChats = localStorage.getItem(LOCAL_STORAGE_KEYS.CHATS);
                 if (cachedChats) {
                     chats = JSON.parse(cachedChats);
@@ -1996,7 +1872,6 @@
             
             chatsList.innerHTML = '';
             
-            // Filter chats based on current category
             let filteredChats = chats;
             
             switch (currentCategory) {
@@ -2089,7 +1964,6 @@
                 
                 chatsList.appendChild(chatItem);
                 
-                // Add draft badge if exists
                 if (messageDrafts[chat.id]) {
                     updateDraftBadge(true);
                 }
@@ -2133,7 +2007,6 @@
                     photoURL: chat.friendAvatar
                 };
                 
-                // Update UI
                 const chatFriendName = document.getElementById('chatFriendName');
                 const chatStatusText = document.getElementById('chatStatusText');
                 if (chatFriendName) chatFriendName.textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
@@ -2150,34 +2023,25 @@
                     }
                 }
                 
-                // Switch to chat panel
                 if (sidebar) sidebar.classList.remove('active');
                 if (chatPanel) chatPanel.classList.remove('hidden');
                 
-                // Load messages
                 await loadMessages();
                 
-                // Mark as read
                 if (chat.unreadCount > 0) {
                     await markChatAsRead(chat.id);
                 }
                 
-                // Apply chat theme
                 applyChatTheme(chat.friendId);
-                
-                // Load draft
                 loadMessageDraft();
                 
-                // Set read-only mode if enabled
                 if (messageInput) messageInput.disabled = readOnlyMode || chat.readOnly;
                 if (sendButton) sendButton.disabled = readOnlyMode || chat.readOnly;
                 
-                // Focus input if not read-only
                 if (!readOnlyMode && !chat.readOnly && messageInput) {
                     messageInput.focus();
                 }
                 
-                // Hide search if active
                 if (chatSearchBar) chatSearchBar.classList.remove('active');
                 if (searchResultsDiv) searchResultsDiv.classList.remove('active');
                 
@@ -2189,7 +2053,6 @@
         
         async function loadChatByFriendId(friendId) {
             try {
-                // Check if chat already exists
                 let existingChat = chats.find(chat => chat.friendId === friendId);
                 
                 if (existingChat) {
@@ -2197,11 +2060,9 @@
                     return;
                 }
                 
-                // Try to get user data from API
                 try {
                     const friendData = await api.getUser(friendId);
                     if (friendData) {
-                        // Create chat via API
                         const newChat = await api.createChat(friendId);
                         if (newChat) {
                             chats.unshift(newChat);
@@ -2210,7 +2071,6 @@
                             
                             await openChat(newChat);
                             
-                            // Clear session data
                             localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
                         } else {
                             showNotification('Failed to create chat', 'error');
@@ -2271,18 +2131,13 @@
                 editingMessageId = null;
                 replyToMessage = null;
                 
-                // Load from API
                 const response = await api.getChatMessages(currentChat.id);
                 if (response && response.messages) {
                     messages = response.messages;
-                    
-                    // Save to localStorage for offline access
                     localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                    
                     renderMessages();
                 }
                 
-                // Scroll to bottom
                 setTimeout(() => {
                     if (messagesContainer) {
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -2291,8 +2146,6 @@
                 
             } catch (error) {
                 console.error('Error loading messages:', error);
-                
-                // Fallback to localStorage
                 const cachedMessages = localStorage.getItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`);
                 if (cachedMessages) {
                     messages = JSON.parse(cachedMessages);
@@ -2331,7 +2184,6 @@
             let lastSender = null;
             let currentDateGroup = null;
             
-            // Group messages by date for smart timestamp grouping
             const groupedMessages = {};
             
             messages.forEach((message, index) => {
@@ -2358,23 +2210,18 @@
                 groupedMessages[dateLabel].push({ message, index });
             });
             
-            // Render each date group
             Object.entries(groupedMessages).forEach(([dateLabel, messageGroup]) => {
-                // Add date divider
                 const dateDivider = document.createElement('div');
                 dateDivider.className = 'date-divider';
                 dateDivider.innerHTML = `<span>${dateLabel}</span>`;
                 messagesContainer.appendChild(dateDivider);
                 
-                // Render messages in this group
                 messageGroup.forEach(({ message, index }) => {
                     const messageDate = new Date(message.timestamp);
                     
-                    // Determine if this is a new message group
                     const isNewGroup = !lastSender || lastSender !== message.senderId || 
                         (message.timestamp - messages[index-1]?.timestamp) > 300000;
                     
-                    // Create message group if needed
                     let messageGroupElement;
                     if (isNewGroup) {
                         messageGroupElement = document.createElement('div');
@@ -2385,17 +2232,14 @@
                         messageGroupElement = messagesContainer.lastChild;
                     }
                     
-                    // Create message item
                     const messageItem = document.createElement('div');
                     messageItem.className = `message-item ${editingMessageId === message.id ? 'editing' : ''} ${message.type === 'note' ? 'note-message' : ''} ${message.viewOnce ? 'view-once-message' : ''} ${message.scheduled ? 'scheduled-message' : ''} ${message.expired ? 'expired-message' : ''}`;
                     messageItem.dataset.messageId = message.id;
                     messageItem.dataset.searchable = message.content || '';
                     
-                    // Create message bubble
                     const messageBubble = document.createElement('div');
                     messageBubble.className = `message-bubble ${message.senderId === currentUser.uid ? 'sent' : 'received'} ${message.type === 'note' ? 'note-message' : ''}`;
                     
-                    // Check if message is deleted
                     if (message.deleted) {
                         messageBubble.innerHTML = `
                             <div class="message-text" style="opacity: 0.5; font-style: italic;">
@@ -2408,7 +2252,6 @@
                         return;
                     }
                     
-                    // Check if view-once message has been viewed
                     if (message.viewOnce && message.viewed) {
                         messageBubble.innerHTML = `
                             <div class="view-once-label">
@@ -2421,7 +2264,6 @@
                         return;
                     }
                     
-                    // Check if message has expired
                     if (message.expiresAt && message.expiresAt < Date.now()) {
                         messageBubble.innerHTML = `
                             <div class="expired-label">
@@ -2434,28 +2276,23 @@
                         return;
                     }
                     
-                    // Add mood icon if present
                     let moodIcon = '';
                     if (message.mood) {
                         moodIcon = `<span style="margin-right: 5px; font-size: 16px;">${message.mood}</span>`;
                     }
                     
-                    // Add note label if it's a note
                     if (message.type === 'note') {
                         moodIcon = `<div class="note-label"><i class="fas fa-sticky-note"></i> Note to self</div>` + moodIcon;
                     }
                     
-                    // Add view-once label
                     if (message.viewOnce && !message.viewed) {
                         moodIcon = `<div class="view-once-label"><i class="fas fa-eye"></i> View once</div>` + moodIcon;
                     }
                     
-                    // Add scheduled label
                     if (message.scheduled && message.scheduledTime) {
                         moodIcon = `<div class="scheduled-time"><i class="fas fa-clock"></i> Scheduled for ${formatTime(message.scheduledTime)}</div>` + moodIcon;
                     }
                     
-                    // Add expiry timer if message has expiry
                     if (message.expiresAt && !message.expired) {
                         const timeLeft = message.expiresAt - Date.now();
                         if (timeLeft > 0) {
@@ -2465,12 +2302,10 @@
                         }
                     }
                     
-                    // Render based on message type
                     switch (message.type) {
                         case 'text':
                         case 'note':
                             if (editingMessageId === message.id) {
-                                // Show edit input
                                 messageBubble.innerHTML = `
                                     <textarea class="edit-message-input" id="editMessageInput_${message.id}">${escapeHtml(message.content)}</textarea>
                                     <div class="edit-actions">
@@ -2479,7 +2314,6 @@
                                     </div>
                                 `;
                             } else {
-                                // Show formatted text
                                 const formattedContent = formatMessageText(message.content);
                                 messageBubble.innerHTML = `
                                     ${moodIcon}
@@ -2590,7 +2424,6 @@
                             break;
                     }
                     
-                    // Add reply wrapper if needed (with context label)
                     if (message.replyTo && !message.deleted) {
                         const replyWrapper = document.createElement('div');
                         replyWrapper.className = 'reply-wrapper';
@@ -2603,7 +2436,6 @@
                         messageBubble.insertBefore(replyWrapper, messageBubble.firstChild);
                     }
                     
-                    // Add message metadata
                     const messageMeta = document.createElement('div');
                     messageMeta.className = 'message-meta';
                     
@@ -2629,7 +2461,6 @@
                     
                     messageBubble.appendChild(messageMeta);
                     
-                    // Add reactions if present
                     if (message.reactions && Object.keys(message.reactions).length > 0) {
                         const reactionsContainer = document.createElement('div');
                         reactionsContainer.className = 'message-reactions';
@@ -2650,7 +2481,6 @@
                         messageBubble.appendChild(reactionsContainer);
                     }
                     
-                    // Add thread indicator if needed
                     if (message.threadCount && message.threadCount > 0) {
                         const threadIndicator = document.createElement('div');
                         threadIndicator.className = 'thread-indicator';
@@ -2663,7 +2493,6 @@
                         messageBubble.appendChild(threadIndicator);
                     }
                     
-                    // Add edit indicator if message was edited
                     if (message.edited) {
                         const editIndicator = document.createElement('div');
                         editIndicator.className = 'message-meta';
@@ -2674,7 +2503,6 @@
                     messageItem.appendChild(messageBubble);
                     messageGroupElement.appendChild(messageItem);
                     
-                    // Add context menu
                     messageItem.addEventListener('contextmenu', (e) => {
                         e.preventDefault();
                         showMessageActions(message, e.clientX, e.clientY);
@@ -2686,7 +2514,6 @@
                             !e.target.closest('.file-download') && !e.target.closest('.poll-option') &&
                             !e.target.closest('.message-location') && !e.target.closest('.edit-btn')) {
                             
-                            // Handle view-once messages
                             if (message.viewOnce && !message.viewed) {
                                 markMessageAsViewed(message.id);
                             }
@@ -2697,10 +2524,7 @@
                 });
             });
             
-            // Initialize audio waveforms
             initializeAudioWaveforms();
-            
-            // Update jump button visibility
             updateJumpButtonVisibility();
         }
         
@@ -2710,10 +2534,8 @@
                 messages[messageIndex].viewed = true;
                 messages[messageIndex].viewedAt = new Date();
                 
-                // Save to localStorage
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update view-once messages list
                 const viewedMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.VIEW_ONCE_MESSAGES) || '[]');
                 viewedMessages.push({
                     messageId: messageId,
@@ -2721,7 +2543,6 @@
                 });
                 localStorage.setItem(LOCAL_STORAGE_KEYS.VIEW_ONCE_MESSAGES, JSON.stringify(viewedMessages));
                 
-                // Re-render
                 renderMessages();
             }
         }
@@ -2768,7 +2589,6 @@
                             });
                             
                             audioPlayers.set(message.id, wavesurfer);
-                            
                         } catch (error) {
                             console.error('Error creating waveform:', error);
                         }
@@ -2777,7 +2597,6 @@
             });
         }
         
-        // ENHANCED sendMessage function with all features
         async function sendMessage(content, type = 'text', options = {}) {
             if (!currentChat || !currentUser) {
                 showNotification('Please select a chat first', 'warning');
@@ -2789,7 +2608,6 @@
                 return;
             }
             
-            // Check if chat is read-only
             if (readOnlyMode || currentChat.readOnly) {
                 showNotification('Chat is read-only', 'warning');
                 return;
@@ -2810,7 +2628,6 @@
                     ...options
                 };
                 
-                // Add attachment if present
                 if (currentAttachment) {
                     messageData.type = currentAttachment.type;
                     messageData.content = currentAttachment.data;
@@ -2821,7 +2638,6 @@
                     }
                 }
                 
-                // Add reply info if replying to a message (with context label)
                 if (replyToMessage) {
                     messageData.replyTo = {
                         messageId: replyToMessage.id,
@@ -2833,19 +2649,14 @@
                     };
                 }
                 
-                // Check if we're offline
                 const isOnline = navigator.onLine;
                 
                 if (!isOnline) {
-                    // Add to offline queue
                     offlineQueue.push(messageData);
                     localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
-                    
-                    // Show offline sent notification
                     showNotification('Message queued for sending', 'info');
                 }
                 
-                // Add to local messages immediately for instant feedback
                 messages.push(messageData);
                 
                 renderMessages();
@@ -2853,7 +2664,6 @@
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
                 
-                // Clear input and reset state
                 if (messageInput) {
                     messageInput.value = '';
                     messageInput.style.height = 'auto';
@@ -2861,21 +2671,16 @@
                 replyToMessage = null;
                 removeAttachment();
                 
-                // Clear draft
                 saveMessageDraft();
                 
-                // Save to localStorage for offline access
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update chat list
                 updateChatLastMessage(content, type);
                 
-                // Send to API if online
                 if (isOnline) {
                     try {
                         const savedMessage = await api.sendMessage(currentChat.id, messageData);
                         
-                        // Update message with real ID and status
                         const messageIndex = messages.findIndex(m => m.id === messageData.id);
                         if (messageIndex !== -1 && savedMessage) {
                             messages[messageIndex].id = savedMessage.id;
@@ -2895,7 +2700,6 @@
             }
         }
         
-        // Send message with special options
         async function sendMessageWithOptions(content, options = {}) {
             const messageOptions = {
                 viewOnce: options.viewOnce || false,
@@ -2904,10 +2708,8 @@
                 isNote: options.isNote || false
             };
             
-            // Handle note to self
             if (options.isNote) {
                 messageOptions.type = 'note';
-                // Create or find notes chat
                 let notesChat = chats.find(chat => chat.type === 'note');
                 if (!notesChat) {
                     notesChat = {
@@ -2928,7 +2730,6 @@
                     renderChatsList();
                 }
                 
-                // Switch to notes chat
                 currentChat = notesChat;
                 await loadMessages();
             }
@@ -2936,7 +2737,6 @@
             await sendMessage(content, messageOptions.type, messageOptions);
         }
         
-        // Schedule a message
         async function scheduleMessage(content, scheduleTime, options = {}) {
             if (!scheduleTime || scheduleTime <= Date.now()) {
                 await sendMessageWithOptions(content, options);
@@ -2960,7 +2760,6 @@
             updateScheduleBadge();
         }
         
-        // Check and send scheduled messages
         function checkScheduledMessages() {
             const now = Date.now();
             const toSend = [];
@@ -2973,7 +2772,6 @@
                 return true;
             });
             
-            // Send scheduled messages
             toSend.forEach(async (msg) => {
                 if (msg.chatId === currentChat?.id) {
                     if (msg.attachment) {
@@ -2997,7 +2795,6 @@
             scheduleBadge.style.display = hasScheduled ? 'flex' : 'none';
         }
         
-        // Check and send offline queue
         async function checkOfflineQueue() {
             if (!navigator.onLine || offlineQueue.length === 0) return;
             
@@ -3005,10 +2802,8 @@
             
             for (const message of offlineQueue) {
                 try {
-                    // Use API to send message
                     await api.sendMessage(message.chatId, message);
                     
-                    // Remove from local messages if it's a temp message
                     const localIndex = messages.findIndex(m => m.id === message.id);
                     if (localIndex !== -1) {
                         messages.splice(localIndex, 1);
@@ -3027,7 +2822,6 @@
             }
         }
         
-        // COMPLETE Multi-send functionality
         async function sendToMultipleChats(content, chatIds) {
             if (!content && !currentAttachment) {
                 showNotification('Message cannot be empty', 'warning');
@@ -3063,7 +2857,6 @@
                         if (response) {
                             results.push({ chatId, success: true });
                             
-                            // Update local chat
                             const chat = chats.find(c => c.id === chatId);
                             if (chat) {
                                 chat.lastMessage = content || `Sent a ${currentAttachment?.type || 'message'}`;
@@ -3086,14 +2879,12 @@
             const successCount = results.filter(r => r.success).length;
             showNotification(`Sent to ${successCount} of ${chatIds.length} chats`, 'success');
             
-            // Clear after sending
             const multiSendInput = document.getElementById('multiSendInput');
             if (multiSendInput) multiSendInput.value = '';
             multiSendSelectedChats.clear();
             updateSelectedCount();
             if (multiSendPanel) multiSendPanel.classList.remove('active');
             
-            // Refresh chat list
             renderChatsList();
         }
         
@@ -3102,18 +2893,14 @@
                 const messageIndex = messages.findIndex(m => m.id === messageId);
                 if (messageIndex === -1) return;
                 
-                // Update locally
                 messages[messageIndex].content = newContent;
                 messages[messageIndex].edited = true;
                 messages[messageIndex].editedAt = new Date();
                 
-                // Save to localStorage
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API
                 await api.editMessage(messageId, { content: newContent });
                 
-                // Re-render messages
                 editingMessageId = null;
                 renderMessages();
                 
@@ -3143,24 +2930,19 @@
                 if (messageIndex === -1) return;
                 
                 if (forEveryone) {
-                    // Delete for everyone
                     messages[messageIndex].deleted = true;
                     messages[messageIndex].deletedAt = new Date();
                     
-                    // Call API to delete message
                     await api.deleteMessage(messageId);
                     
                     showNotification('Message deleted for everyone', 'success');
                 } else {
-                    // Delete only for me
                     messages.splice(messageIndex, 1);
                     showNotification('Message deleted', 'success');
                 }
                 
-                // Save to localStorage
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Re-render messages
                 renderMessages();
                 
             } catch (error) {
@@ -3183,7 +2965,6 @@
         
         async function markChatAsRead(chatId) {
             try {
-                // Update local chat
                 const chatIndex = chats.findIndex(chat => chat.id === chatId);
                 if (chatIndex !== -1) {
                     chats[chatIndex].unreadCount = 0;
@@ -3191,7 +2972,6 @@
                     renderChatsList();
                 }
                 
-                // Call API to mark as read
                 await api.markChatAsRead(chatId);
                 
             } catch (error) {
@@ -3209,7 +2989,6 @@
             actionsMenu.style.top = y + 'px';
             actionsMenu.classList.add('active');
             
-            // Update action buttons based on message
             const starBtn = actionsMenu.querySelector('[data-action="star"]');
             const editBtn = actionsMenu.querySelector('[data-action="edit"]');
             const deleteBtn = actionsMenu.querySelector('[data-action="delete"]');
@@ -3218,7 +2997,6 @@
             const reactLoveBtn = actionsMenu.querySelector('[data-action="react-love"]');
             const reactLaughBtn = actionsMenu.querySelector('[data-action="react-laugh"]');
             
-            // Check if message is starred
             const starredMessages = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.STARRED_MESSAGES) || '{}');
             if (starBtn) {
                 if (starredMessages[message.id]) {
@@ -3230,7 +3008,6 @@
                 }
             }
             
-            // Only show edit button for user's own text messages that aren't deleted
             if (editBtn) {
                 if (message.senderId === currentUser.uid && (message.type === 'text' || message.type === 'note') && !message.deleted) {
                     editBtn.style.display = 'flex';
@@ -3239,7 +3016,6 @@
                 }
             }
             
-            // Update delete button text based on message ownership
             if (deleteBtn) {
                 if (message.senderId === currentUser.uid) {
                     deleteBtn.innerHTML = '<i class="fas fa-trash"></i> Delete for everyone';
@@ -3248,7 +3024,6 @@
                 }
             }
             
-            // Only show report button for other people's messages
             if (reportBtn) {
                 if (message.senderId !== currentUser.uid && message.type !== 'note') {
                     reportBtn.style.display = 'flex';
@@ -3257,7 +3032,6 @@
                 }
             }
             
-            // Show reaction buttons for silent reactions
             if (reactLikeBtn && reactLoveBtn && reactLaughBtn) {
                 if (silentReactionsEnabled && !message.deleted) {
                     reactLikeBtn.style.display = 'flex';
@@ -3270,7 +3044,6 @@
                 }
             }
             
-            // Close menu when clicking elsewhere
             setTimeout(() => {
                 document.addEventListener('click', closeMessageActions);
             }, 10);
@@ -3433,12 +3206,10 @@ Message ID: ${message.id.substring(0, 8)}...
                     timestamp: new Date()
                 };
                 
-                // Save report locally
                 const reports = JSON.parse(localStorage.getItem('knecta_reports') || '[]');
                 reports.push(reportData);
                 localStorage.setItem('knecta_reports', JSON.stringify(reports));
                 
-                // Send to API
                 api.submitReport(reportData);
                 
                 if (reportModal) reportModal.classList.remove('active');
@@ -3457,12 +3228,10 @@ Message ID: ${message.id.substring(0, 8)}...
                 const messageIndex = messages.findIndex(m => m.id === messageId);
                 if (messageIndex === -1) return;
                 
-                // Initialize reactions object if not exists
                 if (!messages[messageIndex].reactions) {
                     messages[messageIndex].reactions = {};
                 }
                 
-                // Initialize emoji array if not exists
                 if (!messages[messageIndex].reactions[emoji]) {
                     messages[messageIndex].reactions[emoji] = [];
                 }
@@ -3470,22 +3239,17 @@ Message ID: ${message.id.substring(0, 8)}...
                 const userIndex = messages[messageIndex].reactions[emoji].indexOf(currentUser.uid);
                 
                 if (userIndex > -1) {
-                    // Remove reaction
                     messages[messageIndex].reactions[emoji].splice(userIndex, 1);
                 } else {
-                    // Add reaction
                     messages[messageIndex].reactions[emoji].push(currentUser.uid);
                 }
                 
-                // Clean up empty reactions
                 if (messages[messageIndex].reactions[emoji].length === 0) {
                     delete messages[messageIndex].reactions[emoji];
                 }
                 
-                // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API (silently if requested)
                 if (!silent) {
                     await api.addReaction(messageId, {
                         emoji: emoji,
@@ -3493,7 +3257,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     });
                 }
                 
-                // Re-render messages
                 renderMessages();
                 
                 if (!silent) {
@@ -3545,7 +3308,6 @@ Message ID: ${message.id.substring(0, 8)}...
             
             formattingToolbar.classList.toggle('active');
             
-            // Update active formatting buttons
             const text = messageInput ? messageInput.value.substring(messageInput.selectionStart, messageInput.selectionEnd) : '';
             document.querySelectorAll('.format-btn').forEach(btn => {
                 if (!text) {
@@ -3640,14 +3402,12 @@ Message ID: ${message.id.substring(0, 8)}...
             toggleFormattingToolbar();
         }
         
-        // Setup scroll detection for jump button
         function setupScrollDetection() {
             if (messagesContainer) {
                 messagesContainer.addEventListener('scroll', updateJumpButtonVisibility);
             }
         }
         
-        // Update jump button visibility
         function updateJumpButtonVisibility() {
             if (!jumpToLatestBtn || !messagesContainer) return;
             
@@ -3661,7 +3421,6 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        // Jump to latest messages
         function jumpToLatest() {
             if (messagesContainer) {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -3671,7 +3430,6 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        // COMPLETE In-chat search
         function searchInChat(query) {
             if (!searchResultsDiv) return;
             
@@ -3756,7 +3514,6 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        // Scroll to specific message
         function scrollToMessage(messageId) {
             const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
             if (messageElement) {
@@ -3780,32 +3537,26 @@ Message ID: ${message.id.substring(0, 8)}...
                     numberOfAudioChannels: 1,
                     desiredSampRate: 16000,
                     timeSlice: 1000,
-                    ondataavailable: function(blob) {
-                        // Handle data if needed
-                    }
+                    ondataavailable: function(blob) {}
                 });
                 
                 mediaRecorder.startRecording();
                 isRecording = true;
                 
-                // Show recording indicator
                 if (recordingIndicator) recordingIndicator.style.display = 'flex';
                 recordingStartTime = Date.now();
                 
-                // Start timer
                 recordingTimer = setInterval(() => {
                     const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
                     const minutes = Math.floor(elapsed / 60);
                     const seconds = elapsed % 60;
                     if (recordingTimerEl) recordingTimerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
                     
-                    // Show cancel overlay after 1 second
                     if (elapsed >= 1 && recordingCancelOverlay && !recordingCancelOverlay.classList.contains('active')) {
                         recordingCancelOverlay.classList.add('active');
                     }
                 }, 1000);
                 
-                // Update UI
                 const attachBtn = document.getElementById('attachBtn');
                 if (attachBtn) attachBtn.classList.add('recording');
                 
@@ -3825,7 +3576,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 const blob = mediaRecorder.getBlob();
                 const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
                 
-                // Hide recording indicator
                 if (recordingIndicator) recordingIndicator.style.display = 'none';
                 const attachBtn = document.getElementById('attachBtn');
                 if (attachBtn) attachBtn.classList.remove('recording');
@@ -3835,7 +3585,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     return;
                 }
                 
-                // Convert blob to base64 for local storage
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     const base64data = reader.result;
@@ -3851,7 +3600,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 };
                 reader.readAsDataURL(blob);
                 
-                // Stop all tracks
                 mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
                 
                 isRecording = false;
@@ -3866,12 +3614,10 @@ Message ID: ${message.id.substring(0, 8)}...
             if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
             mediaRecorder.stopRecording();
             
-            // Hide recording indicator
             if (recordingIndicator) recordingIndicator.style.display = 'none';
             const attachBtn = document.getElementById('attachBtn');
             if (attachBtn) attachBtn.classList.remove('recording');
             
-            // Stop all tracks
             mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
             
             isRecording = false;
@@ -3908,7 +3654,6 @@ Message ID: ${message.id.substring(0, 8)}...
             if (attachmentOptions) attachmentOptions.classList.remove('active');
         }
         
-        // Create note to self
         function createNote() {
             const noteContent = messageInput ? messageInput.value.trim() : '';
             if (!noteContent && !currentAttachment) {
@@ -4130,9 +3875,7 @@ Message ID: ${message.id.substring(0, 8)}...
                 
                 const poll = messages[messageIndex];
                 
-                // Check if already voted
                 if (poll.userVote !== null) {
-                    // Remove previous vote
                     const prevOption = poll.options[poll.userVote];
                     prevOption.votes = Math.max(0, prevOption.votes - 1);
                     const voterIndex = prevOption.voters.indexOf(currentUser.uid);
@@ -4141,18 +3884,14 @@ Message ID: ${message.id.substring(0, 8)}...
                     }
                 }
                 
-                // Add new vote
                 poll.options[optionIndex].votes++;
                 poll.options[optionIndex].voters.push(currentUser.uid);
                 poll.userVote = optionIndex;
                 
-                // Save locally
                 localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 
-                // Update API
                 await api.voteInPoll(messageId, { optionIndex: optionIndex });
                 
-                // Re-render messages
                 renderMessages();
                 
             } catch (error) {
@@ -4165,13 +3904,11 @@ Message ID: ${message.id.substring(0, 8)}...
             currentThread = messageId;
             if (threadPanel) threadPanel.classList.add('active');
             
-            // Load thread messages
             loadThreadMessages(messageId);
         }
         
         async function loadThreadMessages(messageId) {
             try {
-                // TODO: Implement thread message loading
                 const threadCount = document.getElementById('threadCount');
                 if (threadCount) threadCount.textContent = '0 replies';
                 
@@ -4238,14 +3975,11 @@ Message ID: ${message.id.substring(0, 8)}...
                 </div>
             `;
             
-            // Update modal title
             const chatInfoName = document.getElementById('chatInfoName');
             if (chatInfoName) chatInfoName.textContent = chat.type === 'note' ? 'Notes' : chat.friendName;
             
-            // Show modal
             if (chatInfoModal) chatInfoModal.classList.add('active');
             
-            // Add event listeners
             if (chat.type !== 'note') {
                 const blockBtn = document.getElementById('chatInfoBlockBtn');
                 if (blockBtn) {
@@ -4302,7 +4036,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 document.documentElement.style.setProperty('--chat-background', theme.background);
                 document.documentElement.style.setProperty('--chat-font-family', theme.fontFamily);
             } else {
-                // Reset to defaults
                 document.documentElement.style.setProperty('--chat-bubble-sent', 'var(--primary-color)');
                 document.documentElement.style.setProperty('--chat-bubble-received', 'var(--secondary-color)');
                 document.documentElement.style.setProperty('--chat-background', 'url(\'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="%23ffffff"/></svg>\')');
@@ -4311,14 +4044,12 @@ Message ID: ${message.id.substring(0, 8)}...
         }
         
         function startBackgroundSync() {
-            // Sync with API every 30 seconds
             setInterval(async () => {
                 try {
                     if (!isSyncing && navigator.onLine) {
                         isSyncing = true;
                         if (syncingIndicator) syncingIndicator.classList.add('active');
                         
-                        // Sync chats
                         try {
                             const response = await api.getChats();
                             if (response && response.chats) {
@@ -4330,7 +4061,6 @@ Message ID: ${message.id.substring(0, 8)}...
                             console.error('Error syncing chats:', error);
                         }
                         
-                        // Sync contacts
                         try {
                             const response = await api.getContacts();
                             if (response && response.contacts) {
@@ -4342,7 +4072,6 @@ Message ID: ${message.id.substring(0, 8)}...
                             console.error('Error syncing contacts:', error);
                         }
                         
-                        // Sync current chat messages if open
                         if (currentChat) {
                             try {
                                 const response = await api.getChatMessages(currentChat.id);
@@ -4356,7 +4085,6 @@ Message ID: ${message.id.substring(0, 8)}...
                             }
                         }
                         
-                        // Check offline queue
                         await checkOfflineQueue();
                         
                         isSyncing = false;
@@ -4369,18 +4097,14 @@ Message ID: ${message.id.substring(0, 8)}...
                 }
             }, 30000);
             
-            // Auto-save to localStorage every minute
             setInterval(() => {
                 if (currentChat) {
                     localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                    
-                    // Auto-save draft
                     saveMessageDraft();
                 }
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
             }, 60000);
             
-            // Listen for online/offline events
             window.addEventListener('online', () => {
                 checkOfflineQueue();
                 updateNetworkStatus();
@@ -4400,7 +4124,6 @@ Message ID: ${message.id.substring(0, 8)}...
             notification.className = 'notification';
             notification.classList.add(type, 'active');
             
-            // Set icon based on type
             const icon = notification.querySelector('i');
             if (icon) {
                 switch (type) {
@@ -4429,9 +4152,7 @@ Message ID: ${message.id.substring(0, 8)}...
             if (settings.notificationSound !== false) {
                 const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ');
                 audio.volume = 0.3;
-                audio.play().catch(() => {
-                    // Silent fail if audio can't play
-                });
+                audio.play().catch(() => {});
             }
         }
         
@@ -4445,25 +4166,20 @@ Message ID: ${message.id.substring(0, 8)}...
             if (chatPanel) chatPanel.classList.add('hidden');
             if (contactsSidebar) contactsSidebar.classList.add('hidden');
             
-            // Save draft before leaving
             saveMessageDraft();
             
-            // Clear current chat
             currentChat = null;
             currentFriend = null;
             
-            // Update UI
             const chatFriendName = document.getElementById('chatFriendName');
             const chatStatusText = document.getElementById('chatStatusText');
             if (chatFriendName) chatFriendName.textContent = 'Select a chat';
             if (chatStatusText) chatStatusText.textContent = 'Tap on a chat to start messaging';
             
-            // Hide search if active
             if (chatSearchBar) chatSearchBar.classList.remove('active');
             if (searchResultsDiv) searchResultsDiv.classList.remove('active');
         }
         
-        // Toggle read-only mode for chat
         async function toggleReadOnly(chatId, readOnly) {
             try {
                 const chatIndex = chats.findIndex(chat => chat.id === chatId);
@@ -4471,7 +4187,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     chats[chatIndex].readOnly = readOnly;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                     
-                    // Update UI
                     if (currentChat && currentChat.id === chatId) {
                         if (messageInput) messageInput.disabled = readOnly;
                         if (sendButton) sendButton.disabled = readOnly;
@@ -4506,7 +4221,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 
                 localStorage.setItem(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, JSON.stringify(archivedChats));
                 
-                // Update local chat
                 const chatIndex = chats.findIndex(chat => chat.id === chatId);
                 if (chatIndex !== -1) {
                     chats[chatIndex].archived = archive;
@@ -4539,7 +4253,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 
                 localStorage.setItem(LOCAL_STORAGE_KEYS.BLOCKED_USERS, JSON.stringify(blockedUsers));
                 
-                // Update local chats
                 chats.forEach(chat => {
                     if (chat.friendId === friendId) {
                         chat.blocked = block;
@@ -4548,12 +4261,10 @@ Message ID: ${message.id.substring(0, 8)}...
                 
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                 
-                // Reload chats to reflect changes
                 await loadChats();
                 
                 showNotification(block ? 'User blocked' : 'User unblocked', 'success');
                 
-                // If currently chatting with blocked user, go back to chat list
                 if (currentChat && currentChat.friendId === friendId && block) {
                     backToChatList();
                 }
@@ -4566,10 +4277,8 @@ Message ID: ${message.id.substring(0, 8)}...
         
         async function clearChatHistory(chatId) {
             try {
-                // Clear local messages
                 localStorage.removeItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${chatId}`);
                 
-                // Update chat
                 const chatIndex = chats.findIndex(chat => chat.id === chatId);
                 if (chatIndex !== -1) {
                     chats[chatIndex].lastMessage = '';
@@ -4578,13 +4287,11 @@ Message ID: ${message.id.substring(0, 8)}...
                     renderChatsList();
                 }
                 
-                // If current chat is cleared, clear messages display
                 if (currentChat && currentChat.id === chatId) {
                     messages = [];
                     renderMessages();
                 }
                 
-                // Call API to clear chat
                 await api.clearChatHistory(chatId);
                 
                 showNotification('Chat history cleared', 'success');
@@ -4595,7 +4302,6 @@ Message ID: ${message.id.substring(0, 8)}...
             }
         }
         
-        // COMPLETE Load chats for multi-send
         function loadMultiSendChats() {
             const multiSendList = document.getElementById('multiSendChatsList');
             if (!multiSendList) return;
@@ -4663,7 +4369,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 multiSendList.appendChild(chatItem);
             });
             
-            // Show attachment preview if exists
             if (currentAttachment && multiSendAttachmentPreview) {
                 multiSendAttachmentPreview.style.display = 'flex';
                 multiSendAttachmentPreview.innerHTML = `
@@ -4800,7 +4505,6 @@ Message ID: ${message.id.substring(0, 8)}...
             const wavesurfer = audioPlayers.get(messageId);
             if (wavesurfer) {
                 if (activeAudioElement && activeAudioElement !== messageId) {
-                    // Stop other audio
                     const otherWavesurfer = audioPlayers.get(activeAudioElement);
                     if (otherWavesurfer) {
                         otherWavesurfer.pause();
@@ -4815,7 +4519,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     wavesurfer.play();
                     activeAudioElement = messageId;
                     
-                    // Update progress
                     wavesurfer.on('audioprocess', () => {
                         const progress = (wavesurfer.getCurrentTime() / duration) * 100;
                         const progressEl = document.getElementById(`progress_${messageId}`);
@@ -4852,22 +4555,21 @@ Message ID: ${message.id.substring(0, 8)}...
         window.navigateToSearchResult = navigateToSearchResult;
         window.removeAttachment = removeAttachment;
         
+        // =============================================
+        // EVENT LISTENERS SETUP
+        // =============================================
+        
         function setupEventListeners() {
-            // Message input
             if (messageInput) {
                 messageInput.addEventListener('input', function() {
-                    // Auto-resize textarea
                     this.style.height = 'auto';
                     this.style.height = (this.scrollHeight) + 'px';
                     
-                    // Auto-save draft (debounced)
                     clearTimeout(window.draftSaveTimeout);
                     window.draftSaveTimeout = setTimeout(saveMessageDraft, 1000);
                     
-                    // Typing indicator
                     if (!isTyping) {
                         isTyping = true;
-                        // Send typing indicator to API
                         if (currentChat) api.sendTypingIndicator(currentChat.id, true);
                     }
                     
@@ -4879,10 +4581,8 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
                 
                 messageInput.addEventListener('keydown', function(e) {
-                    // Shift+Enter for new line, Enter to send
                     if (e.key === 'Enter') {
                         if (e.shiftKey) {
-                            // Allow new line
                             return;
                         } else {
                             e.preventDefault();
@@ -4894,7 +4594,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Send button
             if (sendButton) {
                 sendButton.addEventListener('click', () => {
                     if (messageInput && (messageInput.value.trim() || currentAttachment)) {
@@ -4902,7 +4601,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     }
                 });
                 
-                // Send button with long press for options
                 let sendPressTimer;
                 sendButton.addEventListener('mousedown', () => {
                     sendPressTimer = setTimeout(() => {
@@ -4920,7 +4618,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Send options overlay
             if (sendOptionsOverlay) {
                 sendOptionsOverlay.addEventListener('click', () => {
                     if (sendOptions) sendOptions.classList.remove('active');
@@ -4928,7 +4625,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Send options
             if (sendOptions) {
                 document.querySelectorAll('#sendOptions .action-item').forEach(item => {
                     item.addEventListener('click', (e) => {
@@ -4965,15 +4661,12 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Emoji button
             const emojiBtn = document.getElementById('emojiBtn');
             if (emojiBtn) emojiBtn.addEventListener('click', toggleEmojiPicker);
             
-            // Format button
             const formatBtn = document.getElementById('formatBtn');
             if (formatBtn) formatBtn.addEventListener('click', toggleFormattingToolbar);
             
-            // Formatting buttons
             document.querySelectorAll('.format-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const tag = btn.dataset.tag;
@@ -4981,7 +4674,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             });
             
-            // Schedule button
             const scheduleBtn = document.getElementById('scheduleBtn');
             if (scheduleBtn) {
                 scheduleBtn.addEventListener('click', () => {
@@ -4994,7 +4686,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     const scheduleMessageInput = document.getElementById('scheduleMessage');
                     if (scheduleMessageInput) scheduleMessageInput.value = content;
                     
-                    // Show attachment preview in schedule modal
                     if (currentAttachment && scheduleAttachmentPreview) {
                         scheduleAttachmentPreview.style.display = 'flex';
                         scheduleAttachmentPreview.innerHTML = `
@@ -5012,7 +4703,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Cancel schedule button
             const cancelScheduleBtn = document.getElementById('cancelScheduleBtn');
             if (cancelScheduleBtn) {
                 cancelScheduleBtn.addEventListener('click', () => {
@@ -5020,7 +4710,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Confirm schedule button
             const confirmScheduleBtn = document.getElementById('confirmScheduleBtn');
             if (confirmScheduleBtn) {
                 confirmScheduleBtn.addEventListener('click', () => {
@@ -5060,7 +4749,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Close schedule modal
             const closeScheduleBtn = document.getElementById('closeScheduleBtn');
             if (closeScheduleBtn) {
                 closeScheduleBtn.addEventListener('click', () => {
@@ -5068,7 +4756,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Attach button (with press-and-hold for voice)
             const attachBtn = document.getElementById('attachBtn');
             let pressTimer;
             
@@ -5096,13 +4783,11 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Recording cancel overlay
             const cancelRecordingOverlayBtn = document.getElementById('cancelRecordingOverlayBtn');
             if (cancelRecordingOverlayBtn) {
                 cancelRecordingOverlayBtn.addEventListener('click', cancelRecording);
             }
             
-            // Drag to cancel recording
             if (recordingCancelOverlay) {
                 recordingCancelOverlay.addEventListener('touchstart', (e) => {
                     dragStartY = e.touches[0].clientY;
@@ -5148,7 +4833,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Attachment options
             document.querySelectorAll('.attachment-option').forEach(option => {
                 option.addEventListener('click', () => {
                     const type = option.dataset.type;
@@ -5156,18 +4840,15 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             });
             
-            // Cancel recording button
             const cancelRecordingBtn = document.getElementById('cancelRecordingBtn');
             if (cancelRecordingBtn) {
                 cancelRecordingBtn.addEventListener('click', cancelRecording);
             }
             
-            // Jump to latest button
             if (jumpToLatestBtn) {
                 jumpToLatestBtn.addEventListener('click', jumpToLatest);
             }
             
-            // In-chat search button
             const chatSearchBtn = document.getElementById('chatSearchBtn');
             if (chatSearchBtn) {
                 chatSearchBtn.addEventListener('click', () => {
@@ -5179,7 +4860,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Close in-chat search
             const closeChatSearchBtn = document.getElementById('closeChatSearchBtn');
             if (closeChatSearchBtn) {
                 closeChatSearchBtn.addEventListener('click', () => {
@@ -5189,14 +4869,12 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // In-chat search input
             if (inChatSearch) {
                 inChatSearch.addEventListener('input', function() {
                     searchInChat(this.value);
                 });
             }
             
-            // Dismiss offline overlay
             const dismissOfflineBtn = document.getElementById('dismissOfflineBtn');
             if (dismissOfflineBtn) {
                 dismissOfflineBtn.addEventListener('click', () => {
@@ -5204,11 +4882,9 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Back to chats button
             const backToChatsBtn = document.getElementById('backToChatsBtn');
             if (backToChatsBtn) backToChatsBtn.addEventListener('click', backToChatList);
             
-            // Back from contacts to chats
             const backToChatsFromContactsBtn = document.getElementById('backToChatsFromContactsBtn');
             if (backToChatsFromContactsBtn) {
                 backToChatsFromContactsBtn.addEventListener('click', () => {
@@ -5217,7 +4893,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // New chat button
             const newChatBtn = document.getElementById('newChatBtn');
             if (newChatBtn) {
                 newChatBtn.addEventListener('click', () => {
@@ -5225,7 +4900,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Multi-send toggle button
             const multiSendToggleBtn = document.getElementById('multiSendToggleBtn');
             if (multiSendToggleBtn) {
                 multiSendToggleBtn.addEventListener('click', () => {
@@ -5236,7 +4910,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Close multi-send panel
             const closeMultiSendBtn = document.getElementById('closeMultiSendBtn');
             if (closeMultiSendBtn) {
                 closeMultiSendBtn.addEventListener('click', () => {
@@ -5247,7 +4920,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Multi-send button
             const multiSendBtn = document.getElementById('multiSendBtn');
             if (multiSendBtn) {
                 multiSendBtn.addEventListener('click', () => {
@@ -5258,7 +4930,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Chat search
             const chatSearch = document.getElementById('chatSearch');
             if (chatSearch) {
                 chatSearch.addEventListener('input', function() {
@@ -5283,7 +4954,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Contact search
             const contactSearch = document.getElementById('contactSearch');
             if (contactSearch) {
                 contactSearch.addEventListener('input', function() {
@@ -5308,7 +4978,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Multi-send search
             const multiSendSearch = document.getElementById('multiSendSearch');
             if (multiSendSearch) {
                 multiSendSearch.addEventListener('input', function() {
@@ -5329,7 +4998,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Chat categories
             document.querySelectorAll('.category-tab').forEach(tab => {
                 tab.addEventListener('click', () => {
                     document.querySelectorAll('.category-tab').forEach(t => {
@@ -5344,7 +5012,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             });
             
-            // Message actions
             const messageActions = document.getElementById('messageActions');
             if (messageActions) {
                 document.querySelectorAll('#messageActions .action-item').forEach(item => {
@@ -5355,7 +5022,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Close media viewer
             const closeMediaViewer = document.getElementById('closeMediaViewer');
             if (closeMediaViewer) {
                 closeMediaViewer.addEventListener('click', () => {
@@ -5363,7 +5029,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Close thread panel
             const closeThreadBtn = document.getElementById('closeThreadBtn');
             if (closeThreadBtn) {
                 closeThreadBtn.addEventListener('click', () => {
@@ -5372,7 +5037,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Close chat info modal
             const closeChatInfoBtn = document.getElementById('closeChatInfoBtn');
             if (closeChatInfoBtn) {
                 closeChatInfoBtn.addEventListener('click', () => {
@@ -5380,7 +5044,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Report modal actions
             const cancelReportBtn = document.getElementById('cancelReportBtn');
             if (cancelReportBtn) {
                 cancelReportBtn.addEventListener('click', () => {
@@ -5393,7 +5056,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 submitReportBtn.addEventListener('click', submitReport);
             }
             
-            // Voice call button
             const voiceCallBtn = document.getElementById('voiceCallBtn');
             if (voiceCallBtn) {
                 voiceCallBtn.addEventListener('click', () => {
@@ -5405,7 +5067,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Video call button
             const videoCallBtn = document.getElementById('videoCallBtn');
             if (videoCallBtn) {
                 videoCallBtn.addEventListener('click', () => {
@@ -5417,7 +5078,6 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Chat options button
             const chatOptionsBtn = document.getElementById('chatOptionsBtn');
             if (chatOptionsBtn) {
                 chatOptionsBtn.addEventListener('click', () => {
@@ -5429,9 +5089,7 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             }
             
-            // Before unload
             window.addEventListener('beforeunload', () => {
-                // Save all data
                 saveMessageDraft();
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                 if (currentChat) {
@@ -5442,7 +5100,6 @@ Message ID: ${message.id.substring(0, 8)}...
                     }));
                 }
                 
-                // Stop all audio
                 audioPlayers.forEach(wavesurfer => {
                     if (wavesurfer.isPlaying()) {
                         wavesurfer.pause();
@@ -5450,17 +5107,41 @@ Message ID: ${message.id.substring(0, 8)}...
                 });
             });
             
-            // Request notification permission
             if (Notification.permission === 'default') {
                 Notification.requestPermission();
             }
             
-            // Network status listeners
             window.addEventListener('online', updateNetworkStatus);
             window.addEventListener('offline', updateNetworkStatus);
+            
+            // Auth error login button
+            if (authErrorLoginBtn) {
+                authErrorLoginBtn.addEventListener('click', redirectToLogin);
+            }
         }
         
-        console.log('Enhanced chat system with independent authentication initialized successfully');
+        function updateNetworkStatus() {
+            if (!offlineOverlay) return;
+            
+            if (!navigator.onLine) {
+                offlineOverlay.classList.add('active');
+            } else {
+                offlineOverlay.classList.remove('active');
+            }
+        }
+        
+        // =============================================
+        // INITIALIZE THE APPLICATION
+        // =============================================
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing chat system...');
+            
+            // Initialize app immediately without waiting for auth
+            initializeAppImmediately();
+        });
+        
+        console.log('Chat system initialized successfully');
     </script>
     
 </body>

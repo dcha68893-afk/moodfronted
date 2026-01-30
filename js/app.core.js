@@ -12,6 +12,7 @@
 // FIXED: Application initialization order - wait for auth validation before fallback
 // ADDED: Token validation on startup to check localStorage for accessToken and redirect if missing/expired
 // CRITICAL FIX: Refresh-safe bootstrap - wait for /auth/me validation before loading UI
+// CRITICAL FIX: Bootstrapping order - UI renders immediately, auth happens in background
 
 (function () {
   // ============================================================================
@@ -6175,159 +6176,48 @@
         switchTab(tabName);
       });
     });
-    
+
     // Sidebar toggle
     const sidebarToggle = document.querySelector(APP_CONFIG.sidebarToggle);
     if (sidebarToggle) {
       sidebarToggle.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        toggleSidebar();
+        window.toggleSidebar();
       });
     }
-    
-    // Mobile back button
-    const backToChats = document.getElementById('backToChats');
-    if (backToChats) {
-      backToChats.addEventListener('click', () => {
-        const chatListContainer = document.getElementById('chatListContainer');
-        const chatArea = document.getElementById('chatArea');
-        const chatHeader = document.getElementById('chatHeader');
-        
-        if (chatListContainer && chatArea) {
-          chatListContainer.classList.remove('hidden');
-          chatArea.classList.add('hidden');
-          updateChatAreaVisibility(currentTab);
-        }
-      });
-    }
-    
-    // Mobile chat item clicks - using event delegation
-    document.addEventListener('click', (e) => {
-      const chatItem = e.target.closest('.chat-item');
-      if (chatItem) {
-        const chatListContainer = document.getElementById('chatListContainer');
-        const chatArea = document.getElementById('chatArea');
-        const chatHeader = document.getElementById('chatHeader');
-        
-        if (chatListContainer && chatArea) {
-          chatListContainer.classList.add('hidden');
-          chatArea.classList.remove('hidden');
-          
-          if (chatHeader) {
-            chatHeader.classList.remove('hidden');
-          }
-          
-          const chatName = chatItem.querySelector('.chat-name');
-          if (chatName) {
-            const chatTitle = document.getElementById('chatTitle');
-            if (chatTitle) {
-              chatTitle.textContent = chatName.textContent;
-            }
-          }
-          
-          updateChatAreaVisibility(currentTab);
-        }
-      }
+
+    // Network status listeners
+    window.addEventListener('moodchat-network-status', (event) => {
+      console.log('Network status changed:', event.detail.status);
+      updateNetworkStatus(event.detail.status);
     });
-    
-    // Window resize handling
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        updateChatAreaVisibility(currentTab);
-        
-        const sidebar = document.querySelector(APP_CONFIG.sidebar);
-        if (sidebar) {
-          if (window.innerWidth >= 768) {
-            sidebar.classList.remove('hidden', 'translate-x-full');
-            sidebar.classList.add('translate-x-0');
-            isSidebarOpen = true;
-          } else {
-            sidebar.classList.remove('translate-x-0');
-            sidebar.classList.add('translate-x-full');
-            isSidebarOpen = false;
-          }
-        }
-      }, 250);
+
+    // Auth ready listener for pending operations
+    window.addEventListener('moodchat-auth-ready', () => {
+      console.log('Auth ready event received in setupEventListeners');
+      executePendingAuthOperations();
     });
-    
-    // Handle browser back/forward
-    window.addEventListener('popstate', (event) => {
-      if (event.state && event.state.tab) {
-        switchTab(event.state.tab);
-      }
+
+    // Cached data loaded listener
+    window.addEventListener('cached-data-loaded', (event) => {
+      console.log('Cached data loaded, source:', event.detail.source);
     });
-    
-    // Close sidebar when clicking outside on mobile
-    document.addEventListener('click', (e) => {
-      if (window.innerWidth < 768 && isSidebarOpen) {
-        const sidebar = document.querySelector(APP_CONFIG.sidebar);
-        const toggleBtn = document.querySelector(APP_CONFIG.sidebarToggle);
-        
-        if (sidebar && 
-            !sidebar.contains(e.target) && 
-            toggleBtn && 
-            !toggleBtn.contains(e.target) &&
-            !e.target.closest('.nav-icon[data-tab]')) {
-          toggleSidebar();
-        }
-      }
+
+    // Tab cached data ready listener
+    window.addEventListener('tab-cached-data-ready', (event) => {
+      console.log(`Tab cached data ready for ${event.detail.tab}, source: ${event.detail.source}`);
     });
-    
-    // Inject minimal CSS styles if not already present
-    function injectStyles() {
-      if (document.querySelector('#moodchat-core-styles')) return;
-      
-      const style = document.createElement('style');
-      style.id = 'moodchat-core-styles';
-      style.textContent = `
-        .hidden { display: none !important; }
-        .tab-panel { display: none; }
-        .tab-panel.active { display: block; }
-        .loading-spinner {
-          border: 2px solid #f3f3f3;
-          border-top: 2px solid #8b5cf6;
-          border-radius: 50%;
-          width: 20px;
-          height: 20px;
-          animation: spin 1s linear infinite;
-          margin-right: 8px;
-        }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        .tab-loading-indicator {
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          background: rgba(0, 0, 0, 0.8);
-          color: white;
-          padding: 12px 16px;
-          border-radius: 8px;
-          z-index: 10000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .data-source-indicator {
-          position: absolute;
-          top: 5px;
-          right: 5px;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          opacity: 0.7;
-          z-index: 10;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-    
-    injectStyles();
+
+    // Background data updated listener
+    window.addEventListener('background-data-updated', (event) => {
+      console.log(`Background data updated for ${event.detail.cacheKey}`);
+    });
+
+    // Fresh data available listener
+    window.addEventListener('fresh-data-available', (event) => {
+      console.log(`Fresh data available for ${event.detail.cacheKey}`);
+    });
   }
 
   // ============================================================================
@@ -6335,129 +6225,296 @@
   // ============================================================================
 
   function setupCrossPageCommunication() {
-    // Listen for messages from iframes
-    window.addEventListener('message', (event) => {
-      // Validate origin
-      if (event.origin !== window.location.origin) return;
+    // Listen for storage events from other tabs/windows
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'moodchat-auth-state') {
+        try {
+          const authData = JSON.parse(event.newValue || '{}');
+          if (authData.type === 'auth-state' && authData.user && window.currentUser?.uid !== authData.user.uid) {
+            console.log('Auth state changed in another tab, updating...');
+            
+            // Update current user if different
+            if (authData.isAuthenticated && authData.user) {
+              const updatedUser = {
+                uid: authData.user.uid,
+                email: authData.user.email,
+                displayName: authData.user.displayName,
+                photoURL: authData.user.photoURL,
+                emailVerified: authData.user.emailVerified || false,
+                isOffline: authData.user.authMethod === 'device',
+                providerId: authData.user.authMethod || 'api',
+                refreshToken: 'cross-tab-sync',
+                getIdToken: () => Promise.resolve('cross-tab-sync'),
+                validated: authData.validated || false
+              };
+              
+              handleAuthStateChange(updatedUser);
+            } else {
+              handleAuthStateChange(null);
+            }
+          }
+        } catch (e) {
+          console.log('Error parsing cross-tab auth state:', e);
+        }
+      }
       
-      const message = event.data;
-      
-      if (!message || !message.type) return;
-      
-      switch(message.type) {
-        case 'auth-status-request':
-          // Respond with current auth status
-          event.source.postMessage({
-            type: 'auth-status-response',
-            isAuthenticated: !!window.currentUser,
-            userId: window.currentUser ? window.currentUser.uid : null,
-            authReady: authStateRestored
-          }, event.origin);
-          break;
-          
-        case 'network-status-request':
-          // Respond with current network status
-          event.source.postMessage({
-            type: 'network-status-response',
-            isOnline: API_COORDINATION.getNetworkStatus() === 'online',
-            networkStatus: API_COORDINATION.getNetworkStatus(),
-            backendReachable: window.MoodChatConfig.backendReachable
-          }, event.origin);
-          break;
-          
-        case 'user-data-request':
-          // Respond with user data
-          event.source.postMessage({
-            type: 'user-data-response',
-            user: window.currentUser ? {
-              uid: window.currentUser.uid,
-              email: window.currentUser.email,
-              displayName: window.currentUser.displayName,
-              photoURL: window.currentUser.photoURL
-            } : null
-          }, event.origin);
-          break;
-          
-        case 'perform-logout':
-          // Trigger logout
-          window.logout().then(() => {
-            event.source.postMessage({
-              type: 'logout-complete'
-            }, event.origin);
-          });
-          break;
+      if (event.key === CACHE_CONFIG.KEYS.NETWORK_STATUS) {
+        try {
+          const networkData = JSON.parse(event.newValue || '{}');
+          if (networkData.type === 'network-status') {
+            console.log('Network status changed in another tab:', networkData.status);
+            updateNetworkStatus(networkData.status);
+          }
+        } catch (e) {
+          console.log('Error parsing cross-tab network status:', e);
+        }
       }
     });
-    
-    // Broadcast auth changes to all iframes
-    window.addEventListener('moodchat-auth-change', (event) => {
-      // Send to all iframes
-      document.querySelectorAll('iframe').forEach(iframe => {
-        try {
-          iframe.contentWindow.postMessage({
-            type: 'auth-change',
-            isAuthenticated: !!event.detail.user,
-            user: event.detail.user ? {
-              uid: event.detail.user.uid,
-              email: event.detail.user.email,
-              displayName: event.detail.user.displayName,
-              photoURL: event.detail.user.photoURL
-            } : null
-          }, window.location.origin);
-        } catch (error) {
-          // Silently ignore cross-origin iframes
-        }
-      });
-    });
-    
-    // Broadcast network changes to all iframes
-    window.addEventListener('moodchat-network-change', (event) => {
-      // Send to all iframes
-      document.querySelectorAll('iframe').forEach(iframe => {
-        try {
-          iframe.contentWindow.postMessage({
-            type: 'network-change',
-            isOnline: event.detail.isOnline,
-            networkStatus: event.detail.status,
-            backendReachable: window.MoodChatConfig.backendReachable
-          }, window.location.origin);
-        } catch (error) {
-          // Silently ignore cross-origin iframes
-        }
-      });
-    });
   }
 
   // ============================================================================
-  // START THE APP - UPDATED FOR REFRESH-SAFE BOOTSTRAP
+  // STYLES INJECTION
   // ============================================================================
 
-  // CRITICAL: Wait for DOM to be ready before initializing
+  function injectStyles() {
+    const styleId = 'moodchat-core-styles';
+    if (document.getElementById(styleId)) return;
+
+    const styles = `
+      .theme-dark { background-color: #1f2937; color: #f9fafb; }
+      .theme-light { background-color: #f9fafb; color: #1f2937; }
+      .font-small { font-size: 0.875rem; }
+      .font-medium { font-size: 1rem; }
+      .font-large { font-size: 1.125rem; }
+      .font-xlarge { font-size: 1.25rem; }
+      .hidden { display: none !important; }
+      .tab-loading-indicator {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px;
+        border-radius: 8px;
+        z-index: 9999;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #8b5cf6;
+        animation: spin 1s linear infinite;
+      }
+      .loading-text {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      @keyframes slideIn {
+        from { transform: translateY(-20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      @keyframes slideOut {
+        from { transform: translateY(0); opacity: 1; }
+        to { transform: translateY(-20px); opacity: 0; }
+      }
+      @keyframes slideInUp {
+        from { transform: translateY(100%); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      @keyframes slideOutDown {
+        from { transform: translateY(0); opacity: 1; }
+        to { transform: translateY(100%); opacity: 0; }
+      }
+      .high-contrast {
+        filter: contrast(1.2);
+      }
+      .reduce-motion * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .large-text {
+        font-size: 1.25rem;
+      }
+      .wallpaper-gradient1 {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+      .wallpaper-gradient2 {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      }
+      .wallpaper-pattern1 {
+        background-image: radial-gradient(#4a5568 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+      .wallpaper-default {
+        background-color: #f3f4f6;
+      }
+      .wallpaper-custom {
+        background-size: cover;
+        background-attachment: fixed;
+      }
+      :root {
+        --font-size-multiplier: 1;
+      }
+    `;
+
+    const styleEl = document.createElement('style');
+    styleEl.id = styleId;
+    styleEl.textContent = styles;
+    document.head.appendChild(styleEl);
+  }
+
+  // ============================================================================
+  // MODAL MANAGEMENT
+  // ============================================================================
+
+  function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.classList.add('hidden');
+    }
+  }
+
+  window.closeModal = closeModal;
+
+  // ============================================================================
+  // BOOTSTRAP INITIALIZATION
+  // ============================================================================
+
+  // Wait for DOM to be ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      console.log('DOM fully loaded, starting app...');
-      setTimeout(initializeApp, 10);
-    });
+    document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
-    console.log('DOM already loaded, starting app immediately...');
-    setTimeout(initializeApp, 10);
+    // DOM already loaded
+    setTimeout(initializeApp, 0);
   }
 
   // ============================================================================
-  // EXPOSE CRITICAL FUNCTIONS FOR REFRESH-SAFE BEHAVIOR
+  // GLOBAL EXPORTS
   // ============================================================================
 
-  // Expose queueUntilAuthReady for iframes/other scripts
-  window.queueUntilAuthReady = queueUntilAuthReady;
-  
-  // Expose AUTH_READY flag for external checks
-  window.getAuthReady = () => window.AUTH_READY;
-  
-  // Expose function to manually trigger auth validation (for debugging)
-  window.validateAuth = () => validateAuthDeterministic();
-  
-  // Expose function to check if auth validation is in progress
-  window.isAuthValidationInProgress = () => window.MoodChatConfig.authValidationInProgress;
+  // Expose critical functions globally for other scripts
+  window.switchTab = switchTab;
+  window.loadExternalTab = loadExternalTab;
+  window.queueForSync = queueForSync;
+  window.safeApiCall = safeApiCall;
+  window.processQueuedMessages = processQueuedMessages;
+  window.getDeviceId = getDeviceId;
+  window.getCurrentUser = () => window.currentUser;
+  window.isAuthenticated = () => !!window.currentUser;
+  window.isAuthReady = () => authStateRestored;
+  window.waitForAuth = () => {
+    return new Promise((resolve) => {
+      if (authStateRestored) {
+        resolve(window.currentUser);
+      } else {
+        const listener = () => {
+          window.removeEventListener('moodchat-auth-ready', listener);
+          resolve(window.currentUser);
+        };
+        window.addEventListener('moodchat-auth-ready', listener);
+      }
+    });
+  };
 
-  console.log('✅ app.core.js loaded with refresh-safe bootstrap');
+  // Expose API coordination for external use
+  window.MoodChatAPI = API_COORDINATION;
+  window.MoodChatCache = DATA_CACHE;
+  window.MoodChatSettings = SETTINGS_SERVICE;
+  window.MoodChatNetworkServices = NETWORK_SERVICE_MANAGER;
+  window.MoodChatUserIsolation = USER_DATA_ISOLATION;
+
+  // Expose token validation
+  window.MoodChatJWT = JWT_VALIDATION;
+
+  // Global toast function (if not defined)
+  if (!window.showToast) {
+    window.showToast = function(message, type = 'info') {
+      console.log(`Toast (${type}): ${message}`);
+      
+      // Create a simple toast notification
+      const toast = document.createElement('div');
+      toast.className = 'moodchat-toast';
+      toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${type === 'error' ? '#f87171' : type === 'success' ? '#10b981' : '#3b82f6'};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        z-index: 10000;
+        max-width: 300px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: slideInUp 0.3s ease-out;
+      `;
+      toast.textContent = message;
+      
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.style.animation = 'slideOutDown 0.3s ease-in';
+          setTimeout(() => toast.remove(), 300);
+        }
+      }, 3000);
+    };
+  }
+
+  // Global loading functions (if not defined)
+  if (!window.showLoginLoading) {
+    window.showLoginLoading = function(show) {
+      const button = document.querySelector('#loginBox button[type="submit"]');
+      if (button) {
+        button.disabled = show;
+        button.innerHTML = show ? 
+          '<span class="loading-spinner-small"></span> Logging in...' : 
+          'Login';
+      }
+    };
+  }
+
+  if (!window.showRegisterLoading) {
+    window.showRegisterLoading = function(show) {
+      const button = document.querySelector('#registerBox button[type="submit"]');
+      if (button) {
+        button.disabled = show;
+        button.innerHTML = show ? 
+          '<span class="loading-spinner-small"></span> Registering...' : 
+          'Register';
+      }
+    };
+  }
+
+  // Add small spinner style if not present
+  if (!document.querySelector('#loading-spinner-small-style')) {
+    const spinnerStyle = document.createElement('style');
+    spinnerStyle.id = 'loading-spinner-small-style';
+    spinnerStyle.textContent = `
+      .loading-spinner-small {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+    `;
+    document.head.appendChild(spinnerStyle);
+  }
+
+  console.log('✅ app.core.js loaded successfully');
 })();

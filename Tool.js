@@ -159,22 +159,23 @@ let accessToken = null;
 let refreshToken = null;
 let tokenRefreshInProgress = false;
 let isBootstrapped = false;
+let isAuthReady = false;
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('=== TOOLS.HTML INITIALIZATION STARTED ===');
     
     try {
-        // Bootstrap the iframe with proper authentication
-        await bootstrapIframe();
+        // Wait for authentication to be ready
+        await waitForAuthReady();
         
-        // Setup event listeners
+        // Setup event listeners (non-data dependent)
         setupEnhancedEventListeners();
         
         // Load cached data for instant display
         loadCachedDataInstantly();
         
-        // Initialize marketplace
+        // Initialize marketplace with authenticated data
         await initializeEnhancedMarketplace();
         
         console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
@@ -184,6 +185,33 @@ document.addEventListener('DOMContentLoaded', async function() {
         showNotification('Failed to load marketplace. Please try again.', 'error');
     }
 });
+
+// Wait for authentication to be ready
+async function waitForAuthReady() {
+    console.log('Waiting for authentication to be ready...');
+    
+    // Check if api.js is loaded and has the auth ready mechanism
+    if (typeof window.apiCall === 'function' && typeof window.isAuthReady === 'function') {
+        // Use the api.js authentication ready mechanism
+        await window.waitForAuthReady();
+        isAuthReady = true;
+        console.log('Authentication ready via api.js');
+    } else {
+        // Fallback: Use our own bootstrap mechanism
+        console.log('api.js auth mechanism not found, using fallback bootstrap');
+        await bootstrapIframe();
+        isAuthReady = true;
+    }
+    
+    // Get token from storage
+    accessToken = getTokenFromStorage();
+    
+    if (!accessToken) {
+        console.error('No access token after auth ready');
+        redirectToLogin();
+        throw new Error('Authentication required');
+    }
+}
 
 // SINGLE BOOTSTRAP FUNCTION - Removes parent dependency and race conditions
 async function bootstrapIframe() {
@@ -400,6 +428,12 @@ async function attemptTokenRefresh() {
 async function makeApiCall(method, endpoint, data = null) {
     console.log(`Making API call via api.js: ${method} ${endpoint}`);
     
+    // Ensure authentication is ready
+    if (!isAuthReady) {
+        console.log('Authentication not ready, waiting...');
+        await waitForAuthReady();
+    }
+    
     // Ensure we have a token
     if (!accessToken) {
         accessToken = getTokenFromStorage();
@@ -459,7 +493,7 @@ function redirectToLogin() {
     clearAuthStorage();
     
     // Redirect to login page
-    window.location.href = '/login.html';
+    window.location.href = '/index.html';
 }
 
 // Load cached data for instant display

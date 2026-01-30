@@ -1151,171 +1151,6 @@
                 </div>
             </div>
         </div>
-        
-        <!-- Call Side Panel -->
-        <div class="call-side-panel" id="callSidePanel">
-            <div class="panel-header">
-                <h3 id="panelTitle">Participants</h3>
-                <button id="togglePanelBtn" style="background: none; border: none; font-size: 20px; color: var(--text-primary); cursor: pointer;">
-                    <i class="fas fa-chevron-right"></i>
-                </button>
-            </div>
-            
-            <div class="panel-tabs">
-                <button class="panel-tab active" data-panel="participants">Participants</button>
-                <button class="panel-tab" data-panel="chat">Chat</button>
-                <button class="panel-tab premium-feature" data-panel="whiteboard">
-                    <span class="premium-badge-small">PRO</span>
-                    Whiteboard
-                </button>
-                <button class="panel-tab" data-panel="notes">Notes</button>
-                <button class="panel-tab premium-feature" data-panel="polls">
-                    <span class="premium-badge-small">PRO</span>
-                    Polls
-                </button>
-                <button class="panel-tab premium-feature" data-panel="relationship">
-                    <span class="premium-badge-small">PRO</span>
-                    Relationship
-                </button>
-            </div>
-            
-            <div class="panel-content" id="panelContent">
-                <!-- Participants Panel -->
-                <div class="panel-section active" id="participantsPanel">
-                    <div class="participants-list" id="participantsList">
-                        <!-- Participants will be added dynamically -->
-                    </div>
-                    <div class="section-title">
-                        <span id="participantCount">0 participants</span>
-                    </div>
-                </div>
-                
-                <!-- Chat Panel -->
-                <div class="panel-section" id="chatPanel">
-                    <div class="chat-messages" id="chatMessages">
-                        <!-- Chat messages will be added dynamically -->
-                    </div>
-                    <div class="chat-input">
-                        <input type="text" class="chat-input-field" id="chatInput" placeholder="Type a message...">
-                        <button class="control-btn" id="sendChatBtn" style="width: 40px; height: 40px;">
-                            <i class="fas fa-paper-plane"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Whiteboard Panel -->
-                <div class="panel-section" id="whiteboardPanel">
-                    <div class="whiteboard-container">
-                        <canvas id="whiteboardCanvas" width="800" height="600"></canvas>
-                    </div>
-                    <div class="whiteboard-tools">
-                        <div class="whiteboard-tool-options">
-                            <button class="notes-btn" data-tool="pencil">
-                                <i class="fas fa-pencil-alt"></i> Pencil
-                            </button>
-                            <button class="notes-btn" data-tool="line">
-                                <i class="fas fa-minus"></i> Line
-                            </button>
-                            <button class="notes-btn" data-tool="rectangle">
-                                <i class="fas fa-square"></i> Rectangle
-                            </button>
-                            <button class="notes-btn" data-tool="circle">
-                                <i class="fas fa-circle"></i> Circle
-                            </button>
-                            <button class="notes-btn" data-tool="text">
-                                <i class="fas fa-font"></i> Text
-                            </button>
-                            <button class="notes-btn" id="clearWhiteboardBtn">
-                                <i class="fas fa-trash"></i> Clear
-                            </button>
-                        </div>
-                        <div class="tool-color selected" style="background-color: #000000;" data-color="#000000"></div>
-                        <div class="tool-color" style="background-color: #FF3B30;" data-color="#FF3B30"></div>
-                        <div class="tool-color" style="background-color: #34C759;" data-color="#34C759"></div>
-                        <div class="tool-color" style="background-color: #0084FF;" data-color="#0084FF"></div>
-                        <div class="tool-color" style="background-color: #FF9500;" data-color="#FF9500"></div>
-                        <div class="tool-size">
-                            <input type="range" id="brushSize" min="1" max="20" value="3">
-                            <div class="size-preview" id="sizePreview"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Notes Panel -->
-                <div class="panel-section" id="notesPanel">
-                    <div class="notes-editor">
-                        <div class="notes-toolbar">
-                            <button class="notes-btn" data-format="bold">
-                                <i class="fas fa-bold"></i>
-                            </button>
-                            <button class="notes-btn" data-format="italic">
-                                <i class="fas fa-italic"></i>
-                            </button>
-                            <button class="notes-btn" data-format="heading">
-                                <i class="fas fa-heading"></i>
-                            </button>
-                            <button class="notes-btn" data-format="list">
-                                <i class="fas fa-list-ul"></i>
-                            </button>
-                            <button class="notes-btn" id="saveNotesBtn">
-                                <i class="fas fa-save"></i> Save
-                            </button>
-                            <button class="notes-btn" id="shareNotesBtn">
-                                <i class="fas fa-share"></i> Share
-                            </button>
-                            <button class="notes-btn" id="loadNotesBtn">
-                                <i class="fas fa-history"></i> Load
-                            </button>
-                        </div>
-                        <div class="notes-history-list" id="notesHistoryList" style="display: none;">
-                            <!-- Notes history will be loaded here -->
-                        </div>
-                        <textarea class="notes-input" id="notesInput" placeholder="Start typing shared notes here... Markdown is supported."></textarea>
-                        <div class="notes-preview" id="notesPreview">
-                            <p style="color: var(--text-secondary);">Preview will appear here...</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Polls Panel -->
-                <div class="panel-section" id="pollsPanel">
-                    <div class="poll-container">
-                        <div class="poll-question" id="pollQuestion">
-                            No active poll. Create one below.
-                        </div>
-                        <div class="poll-options" id="pollOptions">
-                            <!-- Poll options will be added dynamically -->
-                        </div>
-                        <div class="poll-results" id="pollResults" style="display: none;">
-                            <!-- Poll results will be shown here -->
-                        </div>
-                        <div class="notes-toolbar">
-                            <button class="notes-btn" id="createPollBtn">
-                                <i class="fas fa-plus"></i> Create Poll
-                            </button>
-                            <button class="notes-btn" id="votePollBtn" style="display: none;">
-                                <i class="fas fa-vote-yea"></i> Vote
-                            </button>
-                            <button class="notes-btn" id="closePollBtn" style="display: none;">
-                                <i class="fas fa-times"></i> Close Poll
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Relationship Panel -->
-                <div class="panel-section" id="relationshipPanel">
-                    <div class="relationship-info" id="relationshipInfo">
-                        <p style="color: var(--text-secondary); text-align: center; padding: 20px;">
-                            Select a contact to view relationship insights
-                        </p>
-                    </div>
-                    <div class="insights-display" id="insightsDisplay" style="display: none;">
-                        <!-- Relationship insights will be loaded here -->
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
     
     <!-- Notification Area -->
@@ -1437,55 +1272,17 @@
             elements.apiStatusText.textContent = 'Authenticating...';
             
             try {
-                // Read token from localStorage using fallback logic
-                const token = localStorage.getItem('accessToken') || 
-                              localStorage.getItem('moodchat_token') || 
-                              localStorage.getItem('token');
-                
-                if (!token) {
-                    console.error('No authentication token found');
-                    redirectToLogin();
-                    return;
+                // Wait for API to be ready (from parent api.js)
+                if (typeof window.waitForAuthReady === 'function') {
+                    console.log('Waiting for auth to be ready via parent API...');
+                    await window.waitForAuthReady();
+                } else {
+                    // Fallback: check token directly
+                    console.log('Parent API not available, checking token directly...');
+                    await checkAuthToken();
                 }
                 
-                console.log('Token found, calling /api/auth/me...');
-                
-                // Call api.js /api/auth/me endpoint
-                const response = await fetch('/api/auth/me', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    if (response.status === 401 || response.status === 403) {
-                        console.error('Authentication failed with status:', response.status);
-                        handleAuthError();
-                        return;
-                    }
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const userData = await response.json();
-                
-                // Store user data
-                AppState.user = userData;
-                AppState.currentUser = userData;
-                AppState.isAuthenticated = true;
-                AppState.authChecked = true;
-                
-                console.log('User authenticated successfully:', userData);
-                
-                // Update API status
-                elements.apiStatusIndicator.className = 'api-status-indicator connected';
-                elements.apiStatusText.textContent = 'Authenticated';
-                AppState.apiReady = true;
-                
-                // Hide API status after successful auth
-                setTimeout(() => {
-                    elements.apiStatusIndicator.style.display = 'none';
-                }, 2000);
+                console.log('Auth ready, proceeding with initialization...');
                 
                 // Now initialize the app
                 initializeApp();
@@ -1497,10 +1294,33 @@
             }
         }
         
+        async function checkAuthToken() {
+            // Check for token with retry logic
+            let attempts = 0;
+            const maxAttempts = 10;
+            
+            while (attempts < maxAttempts) {
+                const token = localStorage.getItem('accessToken') || 
+                              localStorage.getItem('moodchat_token') || 
+                              localStorage.getItem('token');
+                
+                if (token) {
+                    console.log('Token found on attempt', attempts + 1);
+                    return token;
+                }
+                
+                console.log('Token not found, waiting... attempt', attempts + 1);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                attempts++;
+            }
+            
+            throw new Error('No authentication token found after multiple attempts');
+        }
+        
         function redirectToLogin() {
             console.log('Redirecting to login...');
             const currentPath = window.location.pathname;
-            window.location.href = `/login.html?redirect=${encodeURIComponent(currentPath)}`;
+            window.location.href = `/index.html?redirect=${encodeURIComponent(currentPath)}`;
         }
         
         function handleAuthError() {
@@ -1653,8 +1473,10 @@
             // Check URL parameters for call links
             checkUrlParameters();
             
-            // Load initial data
-            loadInitialData();
+            // Load initial data asynchronously
+            setTimeout(() => {
+                loadInitialData();
+            }, 100);
             
             console.log('Call app initialization complete');
         }
@@ -1820,41 +1642,6 @@
             elements.pipVideo = document.getElementById('pipVideo');
             elements.pipCloseBtn = document.getElementById('pipCloseBtn');
             
-            // Side panel elements
-            elements.callSidePanel = document.getElementById('callSidePanel');
-            elements.panelTitle = document.getElementById('panelTitle');
-            elements.togglePanelBtn = document.getElementById('togglePanelBtn');
-            
-            elements.participantsPanel = document.getElementById('participantsPanel');
-            elements.participantsList = document.getElementById('participantsList');
-            elements.participantCount = document.getElementById('participantCount');
-            
-            elements.chatPanel = document.getElementById('chatPanel');
-            elements.chatMessages = document.getElementById('chatMessages');
-            elements.chatInput = document.getElementById('chatInput');
-            elements.sendChatBtn = document.getElementById('sendChatBtn');
-            
-            elements.whiteboardPanel = document.getElementById('whiteboardPanel');
-            elements.whiteboardCanvas = document.getElementById('whiteboardCanvas');
-            elements.clearWhiteboardBtn = document.getElementById('clearWhiteboardBtn');
-            
-            elements.notesPanel = document.getElementById('notesPanel');
-            elements.notesInput = document.getElementById('notesInput');
-            elements.notesPreview = document.getElementById('notesPreview');
-            elements.notesHistoryList = document.getElementById('notesHistoryList');
-            
-            elements.pollsPanel = document.getElementById('pollsPanel');
-            elements.pollQuestion = document.getElementById('pollQuestion');
-            elements.pollOptions = document.getElementById('pollOptions');
-            elements.pollResults = document.getElementById('pollResults');
-            elements.createPollBtn = document.getElementById('createPollBtn');
-            elements.votePollBtn = document.getElementById('votePollBtn');
-            elements.closePollBtn = document.getElementById('closePollBtn');
-            
-            elements.relationshipPanel = document.getElementById('relationshipPanel');
-            elements.relationshipInfo = document.getElementById('relationshipInfo');
-            elements.insightsDisplay = document.getElementById('insightsDisplay');
-            
             // Notification elements
             elements.notificationArea = document.getElementById('notificationArea');
             elements.notificationToast = document.getElementById('notificationToast');
@@ -1868,46 +1655,37 @@
             // Menu item events
             elements.menuParticipants.addEventListener('click', () => {
                 closeMenuDots();
-                switchSidePanel('participants');
-                elements.callSidePanel.classList.remove('collapsed');
+                showNotification('Participants feature accessed from menu', 'info');
             });
             
             elements.menuChat.addEventListener('click', () => {
                 closeMenuDots();
-                switchSidePanel('chat');
-                elements.callSidePanel.classList.remove('collapsed');
-                AppState.unreadChatCount = 0;
-                updateChatBadge();
+                showNotification('Chat feature accessed from menu', 'info');
             });
             
             elements.menuWhiteboard.addEventListener('click', () => {
                 closeMenuDots();
                 if (checkPremiumFeature('whiteboard')) {
-                    switchSidePanel('whiteboard');
-                    elements.callSidePanel.classList.remove('collapsed');
+                    showNotification('Whiteboard feature accessed from menu', 'info');
                 }
             });
             
             elements.menuNotes.addEventListener('click', () => {
                 closeMenuDots();
-                switchSidePanel('notes');
-                elements.callSidePanel.classList.remove('collapsed');
+                showNotification('Notes feature accessed from menu', 'info');
             });
             
             elements.menuPolls.addEventListener('click', () => {
                 closeMenuDots();
                 if (checkPremiumFeature('polls')) {
-                    switchSidePanel('polls');
-                    elements.callSidePanel.classList.remove('collapsed');
+                    showNotification('Polls feature accessed from menu', 'info');
                 }
             });
             
             elements.menuRelationship.addEventListener('click', () => {
                 closeMenuDots();
                 if (checkPremiumFeature('relationshipInsights')) {
-                    switchSidePanel('relationship');
-                    elements.callSidePanel.classList.remove('collapsed');
-                    loadRelationshipInsights();
+                    showNotification('Relationship insights accessed from menu', 'info');
                 }
             });
             
@@ -2024,17 +1802,6 @@
                 });
             });
             
-            // Side panel tabs
-            document.querySelectorAll('.panel-tab').forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const panel = this.dataset.panel;
-                    switchSidePanel(panel);
-                });
-            });
-            
-            // Panel toggle
-            elements.togglePanelBtn.addEventListener('click', toggleSidePanel);
-            
             // Call control events
             elements.muteBtn.addEventListener('click', toggleMute);
             elements.videoBtn.addEventListener('click', toggleVideo);
@@ -2055,22 +1822,6 @@
                 });
             });
             
-            // Chat events
-            elements.chatInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    sendChatMessage();
-                }
-            });
-            elements.sendChatBtn.addEventListener('click', sendChatMessage);
-            
-            // Whiteboard events
-            elements.clearWhiteboardBtn.addEventListener('click', clearWhiteboard);
-            
-            // Poll events
-            elements.createPollBtn.addEventListener('click', createPoll);
-            elements.votePollBtn.addEventListener('click', voteOnPoll);
-            elements.closePollBtn.addEventListener('click', closePoll);
-            
             // PIP events
             elements.pipCloseBtn.addEventListener('click', closePip);
             
@@ -2082,14 +1833,40 @@
             console.log('Starting to load initial data...');
             
             // Check if we can safely make API calls
-            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
-                console.log('Conditions not met for API calls, loading from cache');
+            if (!AppState.isOnline) {
+                console.log('Offline, loading from cache');
+                loadCachedData();
+                return;
+            }
+            
+            // Check authentication status
+            const token = localStorage.getItem('accessToken') || 
+                         localStorage.getItem('moodchat_token') || 
+                         localStorage.getItem('token');
+            
+            if (!token) {
+                console.log('No authentication token found, loading from cache');
                 loadCachedData();
                 return;
             }
             
             console.log('Making API calls for initial data...');
-            Promise.all([
+            
+            // Set authentication state
+            AppState.isAuthenticated = true;
+            AppState.apiReady = true;
+            
+            // Update API status
+            elements.apiStatusIndicator.className = 'api-status-indicator connected';
+            elements.apiStatusText.textContent = 'Authenticated';
+            
+            // Hide API status after successful auth
+            setTimeout(() => {
+                elements.apiStatusIndicator.style.display = 'none';
+            }, 2000);
+            
+            // Load data with proper error handling
+            Promise.allSettled([
                 loadContacts(),
                 loadCallHistory(),
                 loadSettings(),
@@ -2098,23 +1875,23 @@
             .then(() => {
                 enableUI();
                 
-                // Schedule incoming call simulation
+                // Schedule incoming call simulation only if we have contacts
                 setTimeout(() => {
-                    if (AppState.isAuthenticated && !AppState.isInCall && AppState.contacts.length > 0) {
+                    if (AppState.contacts.length > 0) {
                         simulateIncomingCall();
                     }
                 }, 10000);
             })
             .catch(error => {
-                console.error('Error loading initial data:', error);
+                console.error('Error in initial data loading:', error);
                 loadCachedData();
                 enableUI();
             });
         }
         
         function loadContacts() {
-            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
-                console.log('Skipping contacts API call - conditions not met');
+            if (!AppState.isOnline) {
+                console.log('Offline, loading contacts from cache');
                 const cachedContacts = getCachedData('contacts');
                 if (cachedContacts) {
                     AppState.contacts = cachedContacts;
@@ -2142,22 +1919,21 @@
                 .catch(error => {
                     console.error('Error loading contacts:', error);
                     
-                    if (error.message.includes('Authentication')) {
-                        console.error('Authentication error loading contacts.');
-                        showNotification('Authentication error. Please refresh.', 'error');
-                    }
-                    
+                    // Load from cache as fallback
                     const cachedContacts = getCachedData('contacts');
                     if (cachedContacts) {
                         AppState.contacts = cachedContacts;
                         renderContacts();
                     }
+                    
+                    // Don't throw error to prevent breaking the entire app
+                    return [];
                 });
         }
         
         function loadCallHistory() {
-            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
-                console.log('Skipping call history API call - conditions not met');
+            if (!AppState.isOnline) {
+                console.log('Offline, loading call history from cache');
                 const cachedCalls = getCachedData('calls');
                 if (cachedCalls) {
                     AppState.callHistory = cachedCalls;
@@ -2181,15 +1957,14 @@
                 .catch(error => {
                     console.error('Error loading call history:', error);
                     
-                    if (error.message.includes('Authentication')) {
-                        console.error('Authentication error loading call history.');
-                    }
-                    
+                    // Load from cache as fallback
                     const cachedCalls = getCachedData('calls');
                     if (cachedCalls) {
                         AppState.callHistory = cachedCalls;
                         renderCallHistory();
                     }
+                    
+                    return [];
                 });
         }
         
@@ -2267,14 +2042,14 @@
         }
         
         function syncData() {
-            if (!AppState.apiReady || !AppState.isOnline || !AppState.isAuthenticated) {
-                console.log('Cannot sync data - conditions not met');
+            if (!AppState.isOnline) {
+                console.log('Cannot sync data - offline');
                 return Promise.resolve();
             }
             
             console.log('Syncing data...');
             
-            return Promise.all([
+            return Promise.allSettled([
                 loadContacts(),
                 loadCallHistory()
             ])
@@ -2388,8 +2163,8 @@
         }
         
         function checkPremiumStatus() {
-            if (!AppState.apiReady || !AppState.isAuthenticated) {
-                console.log('Skipping premium status API call - not authenticated');
+            if (!AppState.isOnline) {
+                console.log('Offline, using default premium status');
                 AppState.isPremium = false;
                 AppState.trialDaysLeft = 30;
                 updatePremiumUI();
@@ -2412,13 +2187,11 @@
                 .catch(error => {
                     console.error('Error checking premium status:', error);
                     
-                    if (error.message.includes('Authentication')) {
-                        console.error('Authentication error checking premium status.');
-                    }
-                    
                     AppState.isPremium = false;
                     AppState.trialDaysLeft = 30;
                     updatePremiumUI();
+                    
+                    return { isPremium: false, trialDaysLeft: 30 };
                 });
         }
         
@@ -2430,10 +2203,6 @@
                 
                 elements.quickGroupBtn.disabled = false;
                 elements.screenShareBtn.disabled = false;
-                
-                document.querySelectorAll('.panel-tab[data-panel="whiteboard"], .panel-tab[data-panel="polls"], .panel-tab[data-panel="relationship"]').forEach(tab => {
-                    tab.disabled = false;
-                });
             } else {
                 document.querySelectorAll('.premium-badge-small').forEach(badge => {
                     badge.style.display = 'block';
@@ -2441,10 +2210,6 @@
                 
                 elements.quickGroupBtn.disabled = true;
                 elements.screenShareBtn.disabled = true;
-                
-                document.querySelectorAll('.panel-tab[data-panel="whiteboard"], .panel-tab[data-panel="polls"], .panel-tab[data-panel="relationship"]').forEach(tab => {
-                    tab.disabled = true;
-                });
             }
         }
         
@@ -2481,8 +2246,8 @@
         }
         
         function openNewCallModal() {
-            if (!AppState.apiReady || !AppState.isAuthenticated) {
-                showNotification('Authentication required. Please login.', 'warning');
+            if (!AppState.isOnline) {
+                showNotification('Cannot load contacts while offline', 'warning');
                 return;
             }
             
@@ -2727,11 +2492,6 @@
         }
         
         function startCall(type, participants) {
-            if (!AppState.apiReady || !AppState.isAuthenticated) {
-                showNotification('Authentication required. Please login.', 'error');
-                return;
-            }
-            
             if (AppState.isInCall) {
                 showNotification('You are already in a call', 'warning');
                 return;
@@ -2745,18 +2505,15 @@
                     AppState.callType = type;
                     AppState.callParticipants = participants;
                     
-                    // Use API client
-                    console.log('Starting call via API...');
-                    return ApiClient.startCall({
+                    // Simulate API call
+                    console.log('Starting call simulation...');
+                    
+                    AppState.activeCallId = 'call-' + Date.now();
+                    AppState.currentCall = {
+                        id: AppState.activeCallId,
                         type: type,
-                        participants: participants.map(p => p.id),
-                        mood: AppState.currentMood,
-                        intention: AppState.currentIntention
-                    });
-                })
-                .then(callData => {
-                    AppState.activeCallId = callData.callId;
-                    AppState.currentCall = callData;
+                        participants: participants.map(p => p.id)
+                    };
                     
                     initializePeer();
                     
@@ -2776,11 +2533,7 @@
                         AppState.localStream = null;
                     }
                     
-                    if (error.message.includes('Authentication')) {
-                        showNotification('Authentication error starting call. Please refresh.', 'error');
-                    } else {
-                        showNotification(`Failed to start call: ${error.message}`, 'error');
-                    }
+                    showNotification(`Failed to start call: ${error.message}`, 'error');
                 });
         }
         
@@ -2823,15 +2576,6 @@
             
             AppState.peer.on('open', (id) => {
                 console.log('Peer connected with ID:', id);
-                
-                if (AppState.isAuthenticated) {
-                    ApiClient.sendPeerId({
-                        callId: AppState.activeCallId,
-                        peerId: id
-                    }).catch(error => {
-                        console.error('Error sending peer ID:', error);
-                    });
-                }
             });
             
             AppState.peer.on('call', (call) => {
@@ -2867,21 +2611,11 @@
         function simulateRemoteConnection(participantId) {
             const fakePeerId = 'remote-' + participantId;
             
-            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-                .then(stream => {
-                    addRemoteStream(fakePeerId, stream);
-                    
-                    const participant = AppState.callParticipants.find(p => p.id === participantId);
-                    if (participant) {
-                        addParticipantToList(participant);
-                    }
-                })
-                .catch(() => {
-                    const participant = AppState.callParticipants.find(p => p.id === participantId);
-                    if (participant) {
-                        addParticipantToList(participant);
-                    }
-                });
+            // Create a dummy video element for simulation
+            const participant = AppState.callParticipants.find(p => p.id === participantId);
+            if (participant) {
+                addRemoteStream(fakePeerId, null);
+            }
         }
         
         function addRemoteStream(peerId, stream) {
@@ -2915,8 +2649,6 @@
             
             elements.focusModeBtn.style.display = 'block';
             
-            updateParticipantCount();
-            
             updateParticipantBadge();
             
             AppState.isInCall = true;
@@ -2939,14 +2671,6 @@
             if (AppState.localStream && AppState.callType === 'video') {
                 createVideoElement('local', 'You', AppState.localStream, true);
             }
-            
-            initializeWhiteboard();
-            
-            initializeChat();
-            
-            initializeNotes();
-            
-            initializePolls();
             
             if (AppState.settings.liveReactions) {
                 elements.reactionsContainer.style.display = 'flex';
@@ -2998,7 +2722,17 @@
             video.autoplay = true;
             video.playsInline = true;
             video.muted = isLocal;
-            video.srcObject = stream;
+            
+            if (stream) {
+                video.srcObject = stream;
+            } else {
+                // Create a placeholder for simulated participants
+                video.style.backgroundColor = '#333';
+                video.style.display = 'flex';
+                video.style.alignItems = 'center';
+                video.style.justifyContent = 'center';
+                video.innerHTML = `<div style="color: white; font-size: 24px;">${name.charAt(0)}</div>`;
+            }
             
             const overlay = document.createElement('div');
             overlay.className = 'video-overlay';
@@ -3049,7 +2783,9 @@
             
             elements.videoGrid.appendChild(videoContainer);
             
-            video.play().catch(e => console.error('Error playing video:', e));
+            if (stream) {
+                video.play().catch(e => console.error('Error playing video:', e));
+            }
         }
         
         function updateVideoLayout() {
@@ -3151,42 +2887,6 @@
             } else {
                 document.exitFullscreen();
             }
-        }
-        
-        function addParticipantToList(participant) {
-            const listItem = document.createElement('div');
-            listItem.className = 'participant-item';
-            listItem.dataset.id = participant.id;
-            
-            const initials = participant.name.split(' ').map(n => n[0]).join('').toUpperCase();
-            
-            listItem.innerHTML = `
-                <div class="participant-avatar" style="background-color: ${stringToColor(participant.name)}">
-                    ${participant.avatar ? `<img src="${participant.avatar}" alt="${participant.name}">` : initials}
-                </div>
-                <div class="participant-info">
-                    <div class="participant-name">${participant.name}</div>
-                    <div class="participant-status active">
-                        <i class="fas fa-circle"></i>
-                        <span>Connected</span>
-                    </div>
-                </div>
-                <div class="participant-actions">
-                    <button class="video-action-btn" title="Mute participant">
-                        <i class="fas fa-microphone-slash"></i>
-                    </button>
-                </div>
-            `;
-            
-            elements.participantsList.appendChild(listItem);
-            
-            updateParticipantCount();
-            updateParticipantBadge();
-        }
-        
-        function updateParticipantCount() {
-            const count = AppState.callParticipants.length + 1;
-            elements.participantCount.textContent = `${count} participant${count !== 1 ? 's' : ''}`;
         }
         
         function updateParticipantBadge() {
@@ -3364,7 +3064,9 @@
                 }
                 
                 AppState.remoteStreams.forEach(stream => {
-                    stream.getTracks().forEach(track => track.stop());
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
                 });
                 AppState.remoteStreams.clear();
                 
@@ -3379,17 +3081,6 @@
                 
                 const callDuration = AppState.callStartTime ? 
                     Math.floor((Date.now() - AppState.callStartTime) / 1000) : 0;
-                
-                // Use API client
-                if (AppState.isAuthenticated) {
-                    console.log('Ending call via API...');
-                    ApiClient.endCall({
-                        callId: AppState.activeCallId,
-                        duration: callDuration
-                    }).catch(error => {
-                        console.error('Error ending call via API:', error);
-                    });
-                }
                 
                 AppState.isInCall = false;
                 AppState.activeCallId = null;
@@ -3666,509 +3357,6 @@
                     createFloatingReaction(data.reaction);
                 }, Math.random() * 1000 + 500);
             }
-            
-            if (data.type === 'chat' && AppState.isInCall && Math.random() > 0.5) {
-                setTimeout(() => {
-                    const participant = AppState.callParticipants[0];
-                    if (participant) {
-                        addChatMessage('received', participant.name, data.message);
-                        if (AppState.currentPanel !== 'chat') {
-                            AppState.unreadChatCount++;
-                            updateChatBadge();
-                        }
-                    }
-                }, Math.random() * 2000 + 1000);
-            }
-        }
-        
-        function initializeWhiteboard() {
-            const canvas = elements.whiteboardCanvas;
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
-            
-            let isDrawing = false;
-            let lastX = 0;
-            let lastY = 0;
-            let currentTool = 'pencil';
-            let currentColor = '#000000';
-            let currentBrushSize = 3;
-            
-            updateBrushSizePreview();
-            
-            canvas.addEventListener('mousedown', startDrawing);
-            canvas.addEventListener('mousemove', draw);
-            canvas.addEventListener('mouseup', stopDrawing);
-            canvas.addEventListener('mouseout', stopDrawing);
-            
-            canvas.addEventListener('touchstart', handleTouchStart);
-            canvas.addEventListener('touchmove', handleTouchMove);
-            canvas.addEventListener('touchend', stopDrawing);
-            
-            document.querySelectorAll('[data-tool]').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    currentTool = this.dataset.tool;
-                    
-                    document.querySelectorAll('[data-tool]').forEach(b => {
-                        b.classList.remove('active');
-                    });
-                    this.classList.add('active');
-                });
-            });
-            
-            document.querySelectorAll('.tool-color').forEach(colorBtn => {
-                colorBtn.addEventListener('click', function() {
-                    currentColor = this.dataset.color;
-                    
-                    document.querySelectorAll('.tool-color').forEach(c => {
-                        c.classList.remove('selected');
-                    });
-                    this.classList.add('selected');
-                });
-            });
-            
-            elements.brushSize.addEventListener('input', function() {
-                currentBrushSize = parseInt(this.value);
-                updateBrushSizePreview();
-            });
-            
-            function startDrawing(e) {
-                isDrawing = true;
-                [lastX, lastY] = getCoordinates(e);
-            }
-            
-            function draw(e) {
-                if (!isDrawing) return;
-                
-                e.preventDefault();
-                
-                const [x, y] = getCoordinates(e);
-                
-                ctx.strokeStyle = currentColor;
-                ctx.lineWidth = currentBrushSize;
-                ctx.lineJoin = 'round';
-                ctx.lineCap = 'round';
-                
-                ctx.beginPath();
-                
-                if (currentTool === 'pencil') {
-                    ctx.moveTo(lastX, lastY);
-                    ctx.lineTo(x, y);
-                    ctx.stroke();
-                } else if (currentTool === 'line') {
-                } else if (currentTool === 'rectangle') {
-                } else if (currentTool === 'circle') {
-                } else if (currentTool === 'text') {
-                    if (e.type === 'mouseup' || e.type === 'touchend') {
-                        const text = prompt('Enter text:');
-                        if (text) {
-                            ctx.font = `${currentBrushSize * 5}px Arial`;
-                            ctx.fillStyle = currentColor;
-                            ctx.fillText(text, x, y);
-                        }
-                    }
-                }
-                
-                [lastX, lastY] = [x, y];
-            }
-            
-            function stopDrawing(e) {
-                if (!isDrawing) return;
-                
-                isDrawing = false;
-                
-                const [x, y] = getCoordinates(e);
-                
-                if (currentTool === 'line') {
-                    ctx.beginPath();
-                    ctx.moveTo(lastX, lastY);
-                    ctx.lineTo(x, y);
-                    ctx.stroke();
-                } else if (currentTool === 'rectangle') {
-                    const width = x - lastX;
-                    const height = y - lastY;
-                    ctx.strokeRect(lastX, lastY, width, height);
-                } else if (currentTool === 'circle') {
-                    const radius = Math.sqrt(Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2));
-                    ctx.beginPath();
-                    ctx.arc(lastX, lastY, radius, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
-            }
-            
-            function getCoordinates(e) {
-                let x, y;
-                
-                if (e.type.includes('touch')) {
-                    const touch = e.touches[0];
-                    const rect = canvas.getBoundingClientRect();
-                    x = touch.clientX - rect.left;
-                    y = touch.clientY - rect.top;
-                } else {
-                    const rect = canvas.getBoundingClientRect();
-                    x = e.clientX - rect.left;
-                    y = e.clientY - rect.top;
-                }
-                
-                return [x, y];
-            }
-            
-            function handleTouchStart(e) {
-                e.preventDefault();
-                const touch = e.touches[0];
-                const mouseEvent = new MouseEvent('mousedown', {
-                    clientX: touch.clientX,
-                    clientY: touch.clientY
-                });
-                canvas.dispatchEvent(mouseEvent);
-            }
-            
-            function handleTouchMove(e) {
-                e.preventDefault();
-                const touch = e.touches[0];
-                const mouseEvent = new MouseEvent('mousemove', {
-                    clientX: touch.clientX,
-                    clientY: touch.clientY
-                });
-                canvas.dispatchEvent(mouseEvent);
-            }
-            
-            function updateBrushSizePreview() {
-                elements.sizePreview.style.width = currentBrushSize * 2 + 'px';
-                elements.sizePreview.style.height = currentBrushSize * 2 + 'px';
-            }
-        }
-        
-        function clearWhiteboard() {
-            const canvas = elements.whiteboardCanvas;
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-        
-        function initializeChat() {
-            elements.chatMessages.innerHTML = '';
-            
-            if (AppState.chatMessages.length > 0) {
-                AppState.chatMessages.forEach(msg => {
-                    addChatMessage(msg.type, msg.sender, msg.message);
-                });
-            } else {
-                addChatMessage('system', 'System', 'Chat is now active for this call.');
-            }
-        }
-        
-        function sendChatMessage() {
-            const message = elements.chatInput.value.trim();
-            
-            if (!message) return;
-            
-            if (!AppState.settings.inCallChat) {
-                showNotification('Chat is disabled in settings', 'warning');
-                return;
-            }
-            
-            addChatMessage('sent', 'You', message);
-            
-            AppState.chatMessages.push({
-                type: 'sent',
-                sender: 'You',
-                message: message,
-                timestamp: new Date().toISOString()
-            });
-            
-            try {
-                localStorage.setItem('chatMessages', JSON.stringify(AppState.chatMessages));
-            } catch (error) {
-                console.error('Error saving chat messages:', error);
-            }
-            
-            elements.chatInput.value = '';
-            
-            broadcastData({ 
-                type: 'chat', 
-                sender: AppState.currentUser ? AppState.currentUser.name : 'You',
-                message: message,
-                timestamp: new Date().toISOString()
-            });
-        }
-        
-        function addChatMessage(type, sender, message) {
-            const messageEl = document.createElement('div');
-            messageEl.className = `chat-message ${type}`;
-            
-            messageEl.innerHTML = `
-                <div class="message-sender">${sender}</div>
-                <div class="message-content">${escapeHtml(message)}</div>
-            `;
-            
-            elements.chatMessages.appendChild(messageEl);
-            
-            elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
-        }
-        
-        function initializeNotes() {
-            elements.notesInput.addEventListener('input', updateNotesPreview);
-            
-            document.querySelectorAll('[data-format]').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const format = this.dataset.format;
-                    applyFormatting(format);
-                });
-            });
-            
-            loadPreviousNotes();
-        }
-        
-        function updateNotesPreview() {
-            const markdown = elements.notesInput.value;
-            const html = marked.parse(markdown);
-            elements.notesPreview.innerHTML = html;
-        }
-        
-        function applyFormatting(format) {
-            const textarea = elements.notesInput;
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const selectedText = textarea.value.substring(start, end);
-            
-            let formattedText = '';
-            
-            switch (format) {
-                case 'bold':
-                    formattedText = `**${selectedText}**`;
-                    break;
-                case 'italic':
-                    formattedText = `*${selectedText}*`;
-                    break;
-                case 'heading':
-                    formattedText = `# ${selectedText}`;
-                    break;
-                case 'list':
-                    formattedText = `- ${selectedText}`;
-                    break;
-            }
-            
-            textarea.value = textarea.value.substring(0, start) + 
-                            formattedText + 
-                            textarea.value.substring(end);
-            
-            updateNotesPreview();
-            
-            textarea.focus();
-        }
-        
-        function loadPreviousNotes() {
-        }
-        
-        function initializePolls() {
-            AppState.activePoll = null;
-            
-            elements.createPollBtn.addEventListener('click', createPoll);
-            elements.votePollBtn.addEventListener('click', voteOnPoll);
-            elements.closePollBtn.addEventListener('click', closePoll);
-        }
-        
-        function createPoll() {
-            if (!checkPremiumFeature('polls')) {
-                return;
-            }
-            
-            const question = prompt('Enter poll question:');
-            if (!question) return;
-            
-            const optionsInput = prompt('Enter poll options separated by commas:');
-            if (!optionsInput) return;
-            
-            const options = optionsInput.split(',').map(opt => opt.trim()).filter(opt => opt.length > 0);
-            
-            if (options.length < 2) {
-                showNotification('Poll must have at least 2 options', 'error');
-                return;
-            }
-            
-            AppState.activePoll = {
-                id: 'poll-' + Date.now(),
-                question: question,
-                options: options.map(opt => ({
-                    text: opt,
-                    votes: 0
-                })),
-                totalVotes: 0,
-                createdBy: AppState.currentUser ? AppState.currentUser.name : 'You',
-                createdAt: new Date().toISOString()
-            };
-            
-            AppState.userVotes[AppState.activePoll.id] = null;
-            
-            renderPoll();
-            
-            showNotification('Poll created', 'success');
-        }
-        
-        function renderPoll() {
-            if (!AppState.activePoll) {
-                elements.pollQuestion.textContent = 'No active poll. Create one below.';
-                elements.pollOptions.innerHTML = '';
-                elements.pollResults.style.display = 'none';
-                elements.createPollBtn.style.display = 'block';
-                elements.votePollBtn.style.display = 'none';
-                elements.closePollBtn.style.display = 'none';
-                return;
-            }
-            
-            elements.pollQuestion.textContent = AppState.activePoll.question;
-            
-            const userVoted = AppState.userVotes[AppState.activePoll.id] !== null;
-            
-            if (userVoted) {
-                renderPollResults();
-            } else {
-                let optionsHtml = '';
-                AppState.activePoll.options.forEach((option, index) => {
-                    optionsHtml += `
-                        <div class="poll-option-item" data-index="${index}">
-                            <div class="poll-option-text">${option.text}</div>
-                        </div>
-                    `;
-                });
-                
-                elements.pollOptions.innerHTML = optionsHtml;
-                elements.pollResults.style.display = 'none';
-                elements.createPollBtn.style.display = 'none';
-                elements.votePollBtn.style.display = 'block';
-                elements.closePollBtn.style.display = 'block';
-                
-                document.querySelectorAll('.poll-option-item').forEach(item => {
-                    item.addEventListener('click', function() {
-                        document.querySelectorAll('.poll-option-item').forEach(opt => {
-                            opt.classList.remove('selected');
-                        });
-                        this.classList.add('selected');
-                    });
-                });
-            }
-        }
-        
-        function voteOnPoll() {
-            if (!AppState.activePoll) return;
-            
-            const selectedOption = document.querySelector('.poll-option-item.selected');
-            if (!selectedOption) {
-                showNotification('Please select an option', 'warning');
-                return;
-            }
-            
-            const optionIndex = parseInt(selectedOption.dataset.index);
-            
-            AppState.activePoll.options[optionIndex].votes++;
-            AppState.activePoll.totalVotes++;
-            AppState.userVotes[AppState.activePoll.id] = optionIndex;
-            
-            try {
-                localStorage.setItem('polls', JSON.stringify(AppState.userVotes));
-            } catch (error) {
-                console.error('Error saving poll votes:', error);
-            }
-            
-            renderPollResults();
-            
-            showNotification('Vote submitted', 'success');
-        }
-        
-        function renderPollResults() {
-            if (!AppState.activePoll) return;
-            
-            let resultsHtml = '';
-            
-            AppState.activePoll.options.forEach(option => {
-                const percentage = AppState.activePoll.totalVotes > 0 ? 
-                    Math.round((option.votes / AppState.activePoll.totalVotes) * 100) : 0;
-                
-                resultsHtml += `
-                    <div class="poll-result-item">
-                        <div class="poll-option-text">${option.text}</div>
-                        <div class="poll-result-bar">
-                            <div class="poll-result-fill" style="width: ${percentage}%"></div>
-                        </div>
-                        <div class="poll-result-percentage">${option.votes} votes (${percentage}%)</div>
-                    </div>
-                `;
-            });
-            
-            elements.pollResults.innerHTML = resultsHtml;
-            elements.pollResults.style.display = 'block';
-            elements.pollOptions.innerHTML = '';
-            elements.createPollBtn.style.display = 'none';
-            elements.votePollBtn.style.display = 'none';
-            elements.closePollBtn.style.display = 'block';
-        }
-        
-        function closePoll() {
-            AppState.activePoll = null;
-            renderPoll();
-            showNotification('Poll closed', 'info');
-        }
-        
-        function loadRelationshipInsights() {
-            if (AppState.callParticipants.length === 0) {
-                elements.insightsDisplay.style.display = 'none';
-                elements.relationshipInfo.style.display = 'block';
-                return;
-            }
-            
-            const contact = AppState.callParticipants[0];
-            
-            const insights = {
-                totalCalls: Math.floor(Math.random() * 50) + 5,
-                avgDuration: Math.floor(Math.random() * 30) + 5,
-                callFrequency: ['Daily', 'Weekly', 'Monthly', 'Occasionally'][Math.floor(Math.random() * 4)],
-                moodTrend: ['Improving', 'Stable', 'Declining'][Math.floor(Math.random() * 3)],
-                lastCall: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toLocaleDateString(),
-                topics: ['Work', 'Family', 'Hobbies', 'Travel'].slice(0, Math.floor(Math.random() * 4) + 1)
-            };
-            
-            let insightsHtml = `
-                <div class="insight-card">
-                    <div class="insight-title">Total Calls</div>
-                    <div class="insight-value">${insights.totalCalls}</div>
-                    <div class="insight-description">All time calls with ${contact.name}</div>
-                </div>
-                
-                <div class="insight-card">
-                    <div class="insight-title">Average Duration</div>
-                    <div class="insight-value">${insights.avgDuration} min</div>
-                    <div class="insight-description">Per call average</div>
-                </div>
-                
-                <div class="insight-card">
-                    <div class="insight-title">Call Frequency</div>
-                    <div class="insight-value">${insights.callFrequency}</div>
-                    <div class="insight-description">How often you connect</div>
-                </div>
-                
-                <div class="insight-card">
-                    <div class="insight-title">Mood Trend</div>
-                    <div class="insight-value">${insights.moodTrend}</div>
-                    <div class="insight-description">Emotional pattern in calls</div>
-                </div>
-                
-                <div class="insight-card">
-                    <div class="insight-title">Last Call</div>
-                    <div class="insight-value">${insights.lastCall}</div>
-                    <div class="insight-description">Most recent connection</div>
-                </div>
-                
-                <div class="insight-card">
-                    <div class="insight-title">Common Topics</div>
-                    <div class="insight-value">${insights.topics.join(', ')}</div>
-                    <div class="insight-description">Frequently discussed subjects</div>
-                </div>
-            `;
-            
-            elements.insightsDisplay.innerHTML = insightsHtml;
-            elements.insightsDisplay.style.display = 'block';
-            elements.relationshipInfo.style.display = 'none';
         }
         
         function scheduleGroupCall(participants) {
@@ -4413,55 +3601,12 @@
             });
         }
         
-        function switchSidePanel(panel) {
-            AppState.currentPanel = panel;
-            
-            document.querySelectorAll('.panel-tab').forEach(tab => {
-                tab.classList.remove('active');
-                if (tab.dataset.panel === panel) {
-                    tab.classList.add('active');
-                }
-            });
-            
-            document.querySelectorAll('.panel-section').forEach(section => {
-                section.classList.remove('active');
-                if (section.id === panel + 'Panel') {
-                    section.classList.add('active');
-                }
-            });
-            
-            const panelTitles = {
-                participants: 'Participants',
-                chat: 'Chat',
-                whiteboard: 'Whiteboard',
-                notes: 'Notes',
-                polls: 'Polls',
-                relationship: 'Relationship'
-            };
-            
-            elements.panelTitle.textContent = panelTitles[panel] || panel;
+        function toggleMenuDots() {
+            elements.menuDotsDropdown.classList.toggle('active');
         }
         
-        function toggleSidePanel() {
-            elements.callSidePanel.classList.toggle('collapsed');
-            
-            const icon = elements.togglePanelBtn.querySelector('i');
-            if (elements.callSidePanel.classList.contains('collapsed')) {
-                icon.className = 'fas fa-chevron-left';
-            } else {
-                icon.className = 'fas fa-chevron-right';
-            }
-        }
-        
-        function toggleSettingsPanel() {
-            elements.settingsPanel.classList.toggle('active');
-            
-            const icon = elements.settingsToggleIcon;
-            if (elements.settingsPanel.classList.contains('active')) {
-                icon.className = 'fas fa-chevron-up';
-            } else {
-                icon.className = 'fas fa-chevron-down';
-            }
+        function closeMenuDots() {
+            elements.menuDotsDropdown.classList.remove('active');
         }
         
         function openPaymentModal() {
@@ -4604,9 +3749,7 @@
             
             syncData();
             
-            if (AppState.apiReady) {
-                enableUI();
-            }
+            enableUI();
         }
         
         function handleOffline() {
@@ -4639,8 +3782,6 @@
         
         function enableUI() {
             console.log('Enabling UI elements...');
-            console.log('Authentication status:', AppState.isAuthenticated);
-            console.log('API ready:', AppState.apiReady);
             
             elements.newCallBtn.disabled = false;
             
@@ -4675,13 +3816,7 @@
             updateMoodIndicator('neutral');
             updateIntentionIndicator('quick');
             
-            initializeWhiteboard();
-            
             initializeNotifications();
-            
-            initializeChat();
-            
-            initializePolls();
         }
         
         function simulateIncomingCall() {
@@ -4872,19 +4007,17 @@
         window.CallApp = {
             simulateIncomingCall,
             startTestCall: () => {
-                if (AppState.contacts.length > 0 && AppState.isAuthenticated) {
+                if (AppState.contacts.length > 0) {
                     startCall('video', [AppState.contacts[0]]);
                 } else {
-                    console.log('Cannot start test call - conditions not met');
+                    console.log('Cannot start test call - no contacts available');
                 }
             },
             getState: () => AppState,
             checkApiStatus: () => {
                 return {
                     isAuthenticated: AppState.isAuthenticated,
-                    authChecked: AppState.authChecked,
                     apiReady: AppState.apiReady,
-                    user: AppState.user,
                     tokens: {
                         accessToken: localStorage.getItem('accessToken') ? 'Available' : 'Missing',
                         refreshToken: localStorage.getItem('refreshToken') ? 'Available' : 'Missing',

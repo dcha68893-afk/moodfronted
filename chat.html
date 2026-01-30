@@ -1443,178 +1443,304 @@
     <!-- Load api.js BEFORE any other scripts -->
     <script src="../api.js"></script>
 
-    <!-- ====== SIMPLIFIED AUTHENTICATION MANAGEMENT ====== -->
+    <!-- ====== IFRAME AUTHENTICATION HANDLER ====== -->
     <script>
-        // Simple deterministic auth manager - no race conditions
-        const AuthManager = {
-            // Single source of truth for token storage
-            TOKEN_KEYS: {
-                ACCESS_TOKEN: 'access_token',
-                USER_DATA: 'kynecta_user'
-            },
-            
+        // Iframe Authentication Manager - For iframe pages only
+        const IframeAuthManager = {
             // State tracking
             state: {
                 isAuthenticated: false,
+                isBootstrapped: false,
                 user: null,
                 token: null,
-                lastCheck: 0
+                authPromise: null,
+                dataFetchPromises: [],
+                pendingApiCalls: []
+            },
+            
+            // Event listeners collection
+            eventListeners: {
+                authReady: [],
+                dataReady: [],
+                userDataLoaded: []
             },
             
             /**
-             * Get token from localStorage with fallback logic
-             * @returns {string|null} Token or null if not found
+             * Initialize iframe authentication
+             * Called when iframe receives BOOTSTRAP_REQUEST
              */
-            getToken() {
-                // Try all possible token locations in order
-                const tokenKeys = [
-                    'access_token',
-                    'moodchat_token', 
-                    'auth_token'
-                ];
+            async initialize() {
+                console.log('🔄 [IframeAuthManager] Initializing iframe authentication...');
                 
-                for (const key of tokenKeys) {
-                    const token = localStorage.getItem(key);
-                    if (token && token.trim() !== '') {
-                        console.log(`🔐 [AuthManager] Found token in ${key}`);
-                        return token;
-                    }
-                }
+                // Mark as bootstrapped
+                this.state.isBootstrapped = true;
                 
-                console.log('🔐 [AuthManager] No token found in localStorage');
-                return null;
-            },
-            
-            /**
-             * Get user data from localStorage
-             * @returns {Object|null} User object or null
-             */
-            getUserData() {
-                const userData = localStorage.getItem(this.TOKEN_KEYS.USER_DATA);
-                if (userData) {
-                    try {
-                        return JSON.parse(userData);
-                    } catch (e) {
-                        console.error('🔐 [AuthManager] Error parsing user data:', e);
-                        return null;
-                    }
-                }
-                return null;
-            },
-            
-            /**
-             * Validate authentication by calling /api/auth/me
-             * @returns {Promise<Object>} User data if valid, throws error if not
-             */
-            async validate() {
-                console.log('🔐 [AuthManager] Starting authentication validation...');
+                // Create auth promise
+                this.state.authPromise = this.waitForAuthentication();
                 
-                const token = this.getToken();
-                if (!token) {
-                    throw new Error('No authentication token found');
-                }
-                
+                // Wait for authentication
                 try {
-                    // Check if api.js is available
-                    if (typeof window.api !== 'function' && typeof window.parent.api !== 'function') {
-                        console.log('🔐 [AuthManager] api.js not available, checking localStorage only');
-                        const userData = this.getUserData();
-                        if (userData) {
-                            this.state.isAuthenticated = true;
-                            this.state.user = userData;
-                            this.state.token = token;
-                            this.state.lastCheck = Date.now();
-                            console.log('🔐 [AuthManager] Using cached user data');
-                            return userData;
-                        }
-                        throw new Error('api.js not available and no cached user data');
-                    }
+                    const authResult = await this.state.authPromise;
+                    console.log('✅ [IframeAuthManager] Authentication ready:', authResult.user ? authResult.user.name : 'Unknown');
                     
-                    // Call /api/auth/me through api.js
-                    const api = window.api || window.parent.api;
-                    const response = await api('/api/auth/me', 'GET');
+                    // Set state
+                    this.state.isAuthenticated = true;
+                    this.state.user = authResult.user;
+                    this.state.token = authResult.token;
                     
-                    if (response && response.user) {
-                        // Update state
-                        this.state.isAuthenticated = true;
-                        this.state.user = response.user;
-                        this.state.token = token;
-                        this.state.lastCheck = Date.now();
-                        
-                        // Store user data for future use
-                        localStorage.setItem(this.TOKEN_KEYS.USER_DATA, JSON.stringify(response.user));
-                        
-                        console.log('🔐 [AuthManager] Authentication validated successfully:', response.user.name || 'Unknown');
-                        return response.user;
-                    } else {
-                        throw new Error('Invalid response from /api/auth/me');
-                    }
+                    // Trigger auth ready events
+                    this.triggerEvent('authReady', authResult);
+                    
+                    // Process pending API calls
+                    await this.processPendingApiCalls();
+                    
+                    // Trigger data ready events
+                    this.triggerEvent('dataReady', authResult);
+                    
+                    return authResult;
                 } catch (error) {
-                    console.error('🔐 [AuthManager] Validation failed:', error);
+                    console.error('❌ [IframeAuthManager] Authentication failed:', error);
                     
-                    // Clear invalid auth state
-                    this.clearAuth();
+                    // Notify parent about auth failure
+                    this.notifyParentAuthFailure();
                     
                     throw error;
                 }
             },
             
             /**
-             * Clear all authentication data
+             * Wait for authentication to be ready
+             * Uses multiple fallback methods
              */
-            clearAuth() {
-                console.log('🔐 [AuthManager] Clearing authentication data...');
+            async waitForAuthentication() {
+                console.log('⏳ [IframeAuthManager] Waiting for authentication...');
                 
-                // Clear localStorage
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('moodchat_token');
-                localStorage.removeItem('auth_token');
-                localStorage.removeItem('refresh_token');
-                localStorage.removeItem(this.TOKEN_KEYS.USER_DATA);
+                // Method 1: Use AuthManager from parent (if available)
+                if (typeof window.AuthManager !== 'undefined') {
+                    console.log('🔍 [IframeAuthManager] Using window.AuthManager');
+                    try {
+                        const authResult = await window.AuthManager.validate();
+                        return {
+                            user: authResult,
+                            token: window.AuthManager.getCurrentToken()
+                        };
+                    } catch (error) {
+                        console.warn('⚠️ [IframeAuthManager] AuthManager validation failed:', error);
+                    }
+                }
                 
-                // Clear state
-                this.state.isAuthenticated = false;
-                this.state.user = null;
-                this.state.token = null;
-                this.state.lastCheck = 0;
+                // Method 2: Use bootstrapIframe function
+                if (typeof window.bootstrapIframe === 'function') {
+                    console.log('🔍 [IframeAuthManager] Using bootstrapIframe');
+                    try {
+                        const result = await window.bootstrapIframe();
+                        if (result && result.success) {
+                            return {
+                                user: result.user,
+                                token: result.token
+                            };
+                        }
+                    } catch (error) {
+                        console.warn('⚠️ [IframeAuthManager] bootstrapIframe failed:', error);
+                    }
+                }
                 
-                // Clear window objects
-                window.accessToken = null;
-                delete window.currentUser;
-                delete window.authTokens;
+                // Method 3: Check localStorage directly
+                console.log('🔍 [IframeAuthManager] Checking localStorage directly');
+                const tokenKeys = ['access_token', 'moodchat_token', 'auth_token'];
+                let token = null;
+                
+                for (const key of tokenKeys) {
+                    const storedToken = localStorage.getItem(key);
+                    if (storedToken && storedToken.trim() !== '') {
+                        token = storedToken;
+                        console.log(`🔐 [IframeAuthManager] Found token in ${key}`);
+                        break;
+                    }
+                }
+                
+                const userData = localStorage.getItem('kynecta_user');
+                let user = null;
+                
+                if (userData) {
+                    try {
+                        user = JSON.parse(userData);
+                        console.log('👤 [IframeAuthManager] Found user data in localStorage');
+                    } catch (e) {
+                        console.error('❌ [IframeAuthManager] Error parsing user data:', e);
+                    }
+                }
+                
+                if (token && user) {
+                    // Validate with API if api.js is available
+                    if (typeof window.api === 'function') {
+                        try {
+                            const response = await window.api('/api/auth/me', 'GET');
+                            if (response && response.user) {
+                                user = response.user;
+                                localStorage.setItem('kynecta_user', JSON.stringify(user));
+                                console.log('✅ [IframeAuthManager] API validation successful');
+                            }
+                        } catch (apiError) {
+                            console.warn('⚠️ [IframeAuthManager] API validation failed, using cached data:', apiError);
+                        }
+                    }
+                    
+                    return { user, token };
+                }
+                
+                // Method 4: Wait for message from parent
+                console.log('🔍 [IframeAuthManager] Waiting for auth message from parent');
+                return new Promise((resolve, reject) => {
+                    const timeoutId = setTimeout(() => {
+                        window.removeEventListener('message', messageHandler);
+                        reject(new Error('Authentication timeout - no auth data received'));
+                    }, 10000);
+                    
+                    function messageHandler(event) {
+                        if (event.data && event.data.type === 'AUTH_DATA') {
+                            clearTimeout(timeoutId);
+                            window.removeEventListener('message', messageHandler);
+                            
+                            if (event.data.user && event.data.token) {
+                                resolve({
+                                    user: event.data.user,
+                                    token: event.data.token
+                                });
+                            } else {
+                                reject(new Error('Invalid auth data from parent'));
+                            }
+                        }
+                    }
+                    
+                    window.addEventListener('message', messageHandler);
+                    
+                    // Request auth data from parent
+                    window.parent.postMessage({
+                        type: 'REQUEST_AUTH_DATA',
+                        timestamp: Date.now()
+                    }, '*');
+                });
             },
             
             /**
-             * Redirect to login page
+             * Execute API call with authentication
+             * Waits for auth if not ready yet
              */
-            redirectToLogin() {
-                console.log('🔐 [AuthManager] Redirecting to login...');
-                this.clearAuth();
+            async executeApiCall(apiFunction, ...args) {
+                // If auth is ready, execute immediately
+                if (this.state.isAuthenticated && this.state.token) {
+                    return apiFunction(...args);
+                }
                 
-                if (window.parent !== window) {
-                    // We're in an iframe, notify parent
-                    window.parent.postMessage({
-                        type: 'AUTH_REQUIRED',
-                        redirect: true,
-                        timestamp: Date.now()
-                    }, '*');
-                } else {
-                    // We're the main window
-                    window.location.href = '../index.html';
+                // If auth is in progress, wait for it
+                if (this.state.authPromise) {
+                    console.log('⏳ [IframeAuthManager] API call waiting for authentication...');
+                    await this.state.authPromise;
+                    return apiFunction(...args);
+                }
+                
+                // Otherwise, queue the call
+                return new Promise((resolve, reject) => {
+                    this.state.pendingApiCalls.push({
+                        apiFunction,
+                        args,
+                        resolve,
+                        reject
+                    });
+                });
+            },
+            
+            /**
+             * Process pending API calls after auth is ready
+             */
+            async processPendingApiCalls() {
+                if (this.state.pendingApiCalls.length === 0) return;
+                
+                console.log(`🔄 [IframeAuthManager] Processing ${this.state.pendingApiCalls.length} pending API calls`);
+                
+                for (const pendingCall of this.state.pendingApiCalls) {
+                    try {
+                        const result = await pendingCall.apiFunction(...pendingCall.args);
+                        pendingCall.resolve(result);
+                    } catch (error) {
+                        pendingCall.reject(error);
+                    }
+                }
+                
+                this.state.pendingApiCalls = [];
+            },
+            
+            /**
+             * Register data fetch promise
+             */
+            registerDataFetch(promise) {
+                this.state.dataFetchPromises.push(promise);
+                return promise;
+            },
+            
+            /**
+             * Wait for all data to be fetched
+             */
+            async waitForAllData() {
+                if (this.state.dataFetchPromises.length === 0) {
+                    return [];
+                }
+                
+                console.log(`⏳ [IframeAuthManager] Waiting for ${this.state.dataFetchPromises.length} data fetches...`);
+                
+                try {
+                    const results = await Promise.allSettled(this.state.dataFetchPromises);
+                    this.state.dataFetchPromises = [];
+                    return results;
+                } catch (error) {
+                    console.error('❌ [IframeAuthManager] Error waiting for data:', error);
+                    return [];
                 }
             },
             
             /**
-             * Check if user is authenticated (synchronous)
-             * @returns {boolean} True if authenticated
+             * Add event listener
              */
-            isAuthenticated() {
-                return this.state.isAuthenticated && this.state.token !== null;
+            on(event, callback) {
+                if (!this.eventListeners[event]) {
+                    this.eventListeners[event] = [];
+                }
+                this.eventListeners[event].push(callback);
+            },
+            
+            /**
+             * Trigger event
+             */
+            triggerEvent(event, data) {
+                if (this.eventListeners[event]) {
+                    this.eventListeners[event].forEach(callback => {
+                        try {
+                            callback(data);
+                        } catch (error) {
+                            console.error(`❌ [IframeAuthManager] Error in ${event} callback:`, error);
+                        }
+                    });
+                }
+            },
+            
+            /**
+             * Notify parent about authentication failure
+             */
+            notifyParentAuthFailure() {
+                try {
+                    window.parent.postMessage({
+                        type: 'AUTH_REQUIRED',
+                        reason: 'iframe_authentication_failed',
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (error) {
+                    console.error('❌ [IframeAuthManager] Failed to notify parent:', error);
+                }
             },
             
             /**
              * Get current user (synchronous)
-             * @returns {Object|null} User object or null
              */
             getCurrentUser() {
                 return this.state.user;
@@ -1622,114 +1748,171 @@
             
             /**
              * Get current token (synchronous)
-             * @returns {string|null} Token or null
              */
             getCurrentToken() {
                 return this.state.token;
             },
             
             /**
-             * Initialize auth manager
+             * Check if authenticated (synchronous)
              */
-            initialize() {
-                console.log('🔐 [AuthManager] Initializing...');
+            isAuthenticated() {
+                return this.state.isAuthenticated;
+            },
+            
+            /**
+             * Check if bootstrapped (synchronous)
+             */
+            isBootstrapped() {
+                return this.state.isBootstrapped;
+            }
+        };
+        
+        // Make globally available
+        window.IframeAuthManager = IframeAuthManager;
+        
+        // ====== SAFE DATA FETCHER ======
+        // Use this instead of direct API calls in iframes
+        window.safeApiFetch = async function(endpoint, method = 'GET', data = null) {
+            console.log(`🔍 [safeApiFetch] Requesting: ${method} ${endpoint}`);
+            
+            // Wait for authentication
+            await IframeAuthManager.state.authPromise;
+            
+            // Check if api.js is available
+            if (typeof window.api !== 'function') {
+                throw new Error('api.js not available for making authenticated requests');
+            }
+            
+            // Make the API call
+            return window.api(endpoint, method, data);
+        };
+        
+        // ====== SAFE UI UPDATER ======
+        // Use this to update UI after data is fetched
+        window.updateUIAfterAuth = async function(uiUpdateFunction) {
+            console.log('🎨 [updateUIAfterAuth] Scheduling UI update');
+            
+            // Wait for authentication
+            await IframeAuthManager.state.authPromise;
+            
+            // Wait for any pending data fetches
+            await IframeAuthManager.waitForAllData();
+            
+            // Execute UI update
+            return uiUpdateFunction();
+        };
+        
+        // ====== IFRAME MESSAGE HANDLER ======
+        window.addEventListener('message', function(event) {
+            // Handle bootstrap request from parent
+            if (event.data && event.data.type === 'BOOTSTRAP_REQUEST') {
+                console.log('🚀 [iframe] Received BOOTSTRAP_REQUEST from parent');
                 
-                // Load initial state from localStorage
-                const token = this.getToken();
-                const userData = this.getUserData();
+                // Initialize auth manager
+                IframeAuthManager.initialize().then(authResult => {
+                    // Notify parent that bootstrap is complete
+                    window.parent.postMessage({
+                        type: 'BOOTSTRAP_COMPLETE',
+                        success: true,
+                        user: authResult.user,
+                        timestamp: Date.now()
+                    }, '*');
+                    
+                    // Notify iframe is loaded
+                    window.parent.postMessage({
+                        type: 'iframe_loaded',
+                        iframeId: window.frameElement ? window.frameElement.id : 'unknown',
+                        timestamp: Date.now()
+                    }, '*');
+                    
+                }).catch(error => {
+                    console.error('❌ [iframe] Bootstrap failed:', error);
+                    
+                    // Notify parent about failure
+                    window.parent.postMessage({
+                        type: 'BOOTSTRAP_FAILED',
+                        error: error.message,
+                        timestamp: Date.now()
+                    }, '*');
+                });
+            }
+            
+            // Handle auth data from parent
+            if (event.data && event.data.type === 'AUTH_DATA') {
+                console.log('🔐 [iframe] Received AUTH_DATA from parent');
                 
-                if (token && userData) {
-                    this.state.isAuthenticated = true;
-                    this.state.user = userData;
-                    this.state.token = token;
-                    this.state.lastCheck = Date.now();
-                    console.log('🔐 [AuthManager] Loaded initial state from localStorage');
-                }
-                
-                // Set up periodic validation (every 5 minutes)
-                setInterval(() => {
-                    if (this.state.isAuthenticated) {
-                        this.validate().catch(error => {
-                            console.warn('🔐 [AuthManager] Periodic validation failed:', error);
+                // Update auth manager state
+                if (event.data.user && event.data.token) {
+                    IframeAuthManager.state.isAuthenticated = true;
+                    IframeAuthManager.state.user = event.data.user;
+                    IframeAuthManager.state.token = event.data.token;
+                    
+                    // Resolve auth promise if it exists
+                    if (IframeAuthManager.state.authPromise) {
+                        // Create a resolver for the promise
+                        const resolver = {
+                            resolve: null,
+                            reject: null
+                        };
+                        
+                        // Replace the promise with a resolved one
+                        IframeAuthManager.state.authPromise = Promise.resolve({
+                            user: event.data.user,
+                            token: event.data.token
+                        });
+                        
+                        // Trigger auth ready events
+                        IframeAuthManager.triggerEvent('authReady', {
+                            user: event.data.user,
+                            token: event.data.token
                         });
                     }
-                }, 300000);
-                
-                console.log('🔐 [AuthManager] Initialized successfully');
+                }
             }
-        };
-        
-        // Initialize when DOM is loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            AuthManager.initialize();
+            
+            // Handle go_back message
+            if (event.data && event.data.type === 'go_back') {
+                console.log('🔙 [iframe] Received go_back command');
+                if (typeof window.goBack === 'function') {
+                    window.goBack();
+                } else if (window.history.length > 1) {
+                    window.history.back();
+                }
+            }
+            
+            // Handle get_fullscreen_status message
+            if (event.data && event.data.type === 'get_fullscreen_status') {
+                const isFullscreen = document.body.classList.contains('in-chat-view') ||
+                                   document.body.classList.contains('in-status-view') ||
+                                   document.body.classList.contains('in-group-view') ||
+                                   document.body.classList.contains('in-fullscreen-view');
+                
+                window.parent.postMessage({
+                    type: 'fullscreen_status',
+                    isFullscreen: isFullscreen,
+                    timestamp: Date.now()
+                }, '*');
+            }
         });
         
-        // Make AuthManager globally available
-        window.AuthManager = AuthManager;
-        
-        // ====== IFRAME BOOTSTRAP FUNCTION ======
-        // This function should be called in EVERY iframe page
-        window.bootstrapIframe = async function() {
-            console.log('🚀 [bootstrapIframe] Starting iframe bootstrap...');
+        // ====== IFRAME LOAD COMPLETE NOTIFICATION ======
+        // Notify parent that iframe is loaded
+        window.addEventListener('load', function() {
+            console.log('📄 [iframe] Document loaded, notifying parent');
             
-            try {
-                // Step 1: Check for api.js
-                if (typeof window.api !== 'function') {
-                    console.error('🚀 [bootstrapIframe] api.js not found');
-                    
-                    // Try to load it if not present
-                    if (!window.api) {
-                        console.log('🚀 [bootstrapIframe] Attempting to load api.js...');
-                        try {
-                            // Try to get api from parent
-                            if (typeof window.parent.api === 'function') {
-                                window.api = window.parent.api;
-                            } else {
-                                throw new Error('api.js not available in parent either');
-                            }
-                        } catch (e) {
-                            throw new Error('api.js is required for authentication');
-                        }
-                    }
-                }
-                
-                // Step 2: Get token from localStorage
-                const token = AuthManager.getToken();
-                if (!token) {
-                    console.error('🚀 [bootstrapIframe] No authentication token found');
-                    AuthManager.redirectToLogin();
-                    return false;
-                }
-                
-                console.log('🚀 [bootstrapIframe] Token found, validating...');
-                
-                // Step 3: Validate with server
-                try {
-                    const user = await AuthManager.validate();
-                    console.log('✅ [bootstrapIframe] Authentication successful:', user.name || 'Unknown');
-                    
-                    // Step 4: Store token in window for api.js
-                    window.accessToken = token;
-                    
-                    // Step 5: Store user in window
-                    window.currentUser = user;
-                    
-                    return {
-                        success: true,
-                        user: user,
-                        token: token
-                    };
-                } catch (error) {
-                    console.error('🚀 [bootstrapIframe] Authentication failed:', error);
-                    AuthManager.redirectToLogin();
-                    return false;
-                }
-            } catch (error) {
-                console.error('🚀 [bootstrapIframe] Bootstrap failed:', error);
-                AuthManager.redirectToLogin();
-                return false;
-            }
-        };
+            // Small delay to ensure DOM is ready
+            setTimeout(() => {
+                window.parent.postMessage({
+                    type: 'iframe_loaded',
+                    iframeId: window.frameElement ? window.frameElement.id : 'unknown',
+                    timestamp: Date.now(),
+                    url: window.location.href
+                }, '*');
+            }, 100);
+        });
+        
+        console.log('✅ [iframe] Authentication system initialized');
     </script>
 
     <!-- Global Notification Container (Shows on all screens) -->
@@ -1786,6 +1969,7 @@
         </div>
     </div>
 
+    <!-- Loading Screen - Shows only briefly (1 second max) -->
     <div id="loadingScreen" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
         <div class="text-center">
             <div class="w-16 h-16 bg-gradient-to-r from-purple-500 to-green-500 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
@@ -2107,6 +2291,91 @@
         }
     };
     
+    // ====== AUTHENTICATION MANAGER ======
+    const AuthManager = {
+        state: {
+            isAuthenticated: false,
+            user: null,
+            token: null,
+            initialized: false
+        },
+        
+        initialize() {
+            console.log('AuthManager initializing...');
+            
+            // Check localStorage for existing auth
+            const token = localStorage.getItem('access_token') || 
+                         localStorage.getItem('moodchat_token') || 
+                         localStorage.getItem('auth_token');
+            const userData = localStorage.getItem('kynecta_user');
+            
+            if (token && userData) {
+                try {
+                    this.state.isAuthenticated = true;
+                    this.state.user = JSON.parse(userData);
+                    this.state.token = token;
+                    console.log('AuthManager: Loaded existing auth from localStorage');
+                } catch (e) {
+                    console.error('AuthManager: Error parsing user data:', e);
+                }
+            }
+            
+            this.state.initialized = true;
+            console.log('AuthManager initialized:', {
+                isAuthenticated: this.state.isAuthenticated,
+                user: this.state.user ? this.state.user.name : null
+            });
+        },
+        
+        setAuthenticated(user, token) {
+            this.state.isAuthenticated = true;
+            this.state.user = user;
+            this.state.token = token;
+            
+            // Store in localStorage
+            localStorage.setItem('kynecta_user', JSON.stringify(user));
+            localStorage.setItem('access_token', token);
+            localStorage.setItem('moodchat_token', token);
+            localStorage.setItem('auth_token', token);
+            
+            console.log('AuthManager: User authenticated', user.name);
+        },
+        
+        clearAuth() {
+            this.state.isAuthenticated = false;
+            this.state.user = null;
+            this.state.token = null;
+            
+            // Clear localStorage
+            localStorage.removeItem('kynecta_user');
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('moodchat_token');
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('refresh_token');
+            
+            console.log('AuthManager: Auth cleared');
+        },
+        
+        getCurrentUser() {
+            return this.state.user;
+        },
+        
+        getCurrentToken() {
+            return this.state.token;
+        },
+        
+        validate() {
+            if (!this.state.isAuthenticated || !this.state.token) {
+                throw new Error('Not authenticated');
+            }
+            return this.state.user;
+        },
+        
+        isAuthenticated() {
+            return this.state.isAuthenticated;
+        }
+    };
+    
     // ====== NAVIGATION SYSTEM ======
     
     let currentPage = 'messages';
@@ -2123,6 +2392,7 @@
     
     let appInitialized = false;
     let apiCheckInterval = null;
+    let loadingTimeout = null;
     
     // ====== HELPER FUNCTIONS ======
     function closeModal(modalId) {
@@ -2132,6 +2402,78 @@
         }
     }
     
+    // ====== QUICK PAGE INITIALIZATION ======
+    function quickInitialize() {
+        console.log('Quick initialization starting...');
+        
+        // Hide loading screen after brief delay
+        setTimeout(() => {
+            hideLoading();
+        }, 1000);
+        
+        // Initialize AppState immediately
+        AppState.initialize();
+        
+        // Initialize AuthManager immediately
+        AuthManager.initialize();
+        
+        // Setup basic navigation immediately
+        setupNavigation();
+        
+        // Show sidebar and mobile nav
+        document.getElementById('permanentSidebar').classList.remove('hidden');
+        
+        // Show mobile nav on mobile
+        if (window.innerWidth < 768) {
+            const mobileNavBar = document.getElementById('mobileNavBar');
+            if (mobileNavBar) {
+                mobileNavBar.classList.remove('hidden');
+            }
+        }
+        
+        // Pre-load iframes in background
+        preloadIframes();
+        
+        // Switch to messages page immediately
+        switchPage('messages');
+        
+        // Mark app as initialized
+        appInitialized = true;
+        
+        console.log('Quick initialization complete - page is ready');
+        
+        // Start background authentication check
+        startBackgroundAuthCheck();
+    }
+    
+    function startBackgroundAuthCheck() {
+        console.log('Starting background authentication check...');
+        
+        // Check API readiness in background
+        setTimeout(() => {
+            checkApiReadiness();
+            
+            // Validate auth in background
+            if (AuthManager.state.isAuthenticated && typeof window.api === 'function') {
+                console.log('Background: Validating authentication...');
+                window.api('/api/auth/me', 'GET')
+                    .then(response => {
+                        if (response && response.user) {
+                            console.log('Background: Auth validation successful');
+                            AppState.setAuthenticated(response.user, AuthManager.state.token);
+                            AuthManager.setAuthenticated(response.user, AuthManager.state.token);
+                            
+                            // Notify iframes about updated auth
+                            notifyAllIframesAboutAuth(response.user, AuthManager.state.token);
+                        }
+                    })
+                    .catch(error => {
+                        console.log('Background: Auth validation failed (offline or expired)');
+                    });
+            }
+        }, 2000);
+    }
+    
     // ====== IFRAME MESSAGE HANDLING ======
     function handleIframeMessage(event) {
         if (event.data && event.data.type) {
@@ -2139,28 +2481,52 @@
             
             switch(event.data.type) {
                 case 'iframe_loaded':
-                    // Send bootstrap message to iframe
-                    const iframe = event.source && document.querySelector('iframe[src*="' + event.origin + '"]');
-                    if (iframe && iframe.contentWindow) {
-                        // Tell iframe to bootstrap
-                        iframe.contentWindow.postMessage({
-                            type: 'BOOTSTRAP_REQUEST',
-                            timestamp: Date.now()
-                        }, '*');
+                    // Mark iframe as loaded
+                    const iframeId = event.data.iframeId || 'unknown';
+                    iframesLoaded[iframeId] = true;
+                    
+                    // Send auth data to iframe if available
+                    const token = AuthManager.getCurrentToken();
+                    const user = AuthManager.getCurrentUser();
+                    
+                    if (token && user && event.source) {
+                        try {
+                            event.source.postMessage({
+                                type: 'AUTH_DATA',
+                                user: user,
+                                token: token,
+                                timestamp: Date.now()
+                            }, '*');
+                        } catch (e) {
+                            // Silently ignore
+                        }
                     }
                     break;
                     
-                case 'AUTH_REQUIRED':
-                    // Iframe needs authentication
-                    console.log('Iframe reported auth required');
-                    handleLogout();
+                case 'REQUEST_AUTH_DATA':
+                    // Send auth data to requesting iframe
+                    const authToken = AuthManager.getCurrentToken();
+                    const authUser = AuthManager.getCurrentUser();
+                    
+                    if (authToken && authUser && event.source) {
+                        event.source.postMessage({
+                            type: 'AUTH_DATA',
+                            user: authUser,
+                            token: authToken,
+                            timestamp: Date.now()
+                        }, '*');
+                    }
                     break;
                     
                 case 'USER_LOGIN':
                     // Handle login from iframe
                     if (event.data.user && event.data.token) {
                         AppState.setAuthenticated(event.data.user, event.data.token);
+                        AuthManager.setAuthenticated(event.data.user, event.data.token);
                         showGlobalNotification(`Welcome ${event.data.user.name || 'User'}!`, 'success', 3000);
+                        
+                        // Notify all iframes about new auth data
+                        notifyAllIframesAboutAuth(event.data.user, event.data.token);
                     }
                     break;
                     
@@ -2231,6 +2597,14 @@
                     }
                     break;
                     
+                case 'fullscreen_status':
+                    if (event.data.isFullscreen) {
+                        hideBottomNavigation();
+                    } else {
+                        showBottomNavigation();
+                    }
+                    break;
+                    
                 default:
                     // Ignore other messages
                     break;
@@ -2238,23 +2612,41 @@
         }
     }
     
+    // Notify all iframes about auth data
+    function notifyAllIframesAboutAuth(user, token) {
+        document.querySelectorAll('.content-iframe').forEach(iframe => {
+            try {
+                if (iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({
+                        type: 'AUTH_DATA',
+                        user: user,
+                        token: token,
+                        timestamp: Date.now()
+                    }, '*');
+                }
+            } catch (e) {
+                // Silently ignore cross-origin errors
+            }
+        });
+    }
+    
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, initializing...');
+        console.log('DOM loaded, starting quick initialization...');
         
+        // Show loading screen briefly
         showLoading();
         
-        // Initialize AppState
-        AppState.initialize();
+        // Set a timeout to hide loading screen even if something fails
+        loadingTimeout = setTimeout(() => {
+            console.log('Loading timeout - showing app anyway');
+            hideLoading();
+            if (!appInitialized) {
+                quickInitialize();
+            }
+        }, 3000);
         
-        // Setup basic navigation
-        setupNavigation();
-        
-        // Initialize the app immediately
-        console.log('Initializing app with current state');
-        initializeChatApp();
-        
-        // Check for API
-        checkApiReadiness();
+        // Start quick initialization
+        quickInitialize();
     });
     
     function checkApiReadiness() {
@@ -2274,36 +2666,6 @@
         
         console.log('API not ready yet');
         return false;
-    }
-    
-    function initializeChatApp() {
-        if (appInitialized) {
-            console.log('App already initialized');
-            return;
-        }
-        
-        console.log('Initializing chat app...');
-        appInitialized = true;
-        
-        // Hide loading screen
-        hideLoading();
-        
-        // Show sidebar and mobile nav
-        document.getElementById('permanentSidebar').classList.remove('hidden');
-        
-        // Setup back button
-        setupBackButton();
-        
-        // Pre-load iframes
-        preloadIframes();
-        
-        // Setup fullscreen page detection
-        setupFullscreenPageDetection();
-        
-        // Switch to messages page
-        switchPage('messages');
-        
-        console.log('Chat app initialization complete');
     }
     
     function setupBackButton() {
@@ -2526,10 +2888,16 @@
                 mobileNavBar.classList.remove('hidden');
             }
         }
+        
+        // Setup back button
+        setupBackButton();
+        
+        // Setup fullscreen page detection
+        setupFullscreenPageDetection();
     }
     
     function preloadIframes() {
-        console.log('Preloading iframes...');
+        console.log('Preloading iframes in background...');
         
         const iframes = [
             { id: 'messagesIframe', src: 'message.html' },
@@ -2554,15 +2922,21 @@
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
                     
-                    // Send bootstrap message to iframe
-                    try {
-                        this.contentWindow.postMessage({ 
-                            type: 'BOOTSTRAP_REQUEST',
-                            page: iframe.id.replace('Iframe', ''),
-                            timestamp: Date.now()
-                        }, '*');
-                    } catch (e) {
-                        // Silently ignore cross-origin errors
+                    // Send auth data to iframe
+                    const token = AuthManager.getCurrentToken();
+                    const user = AuthManager.getCurrentUser();
+                    
+                    if (token && user) {
+                        try {
+                            this.contentWindow.postMessage({
+                                type: 'AUTH_DATA',
+                                user: user,
+                                token: token,
+                                timestamp: Date.now()
+                            }, '*');
+                        } catch (e) {
+                            // Silently ignore cross-origin errors
+                        }
                     }
                 };
                 
@@ -2572,6 +2946,7 @@
                     this.classList.add('loaded');
                 };
                 
+                // Set src to start loading
                 element.src = iframeSrc;
             }
         });
@@ -2609,22 +2984,22 @@
                 if (iframesLoaded[`${pageName}Iframe`]) {
                     iframe.classList.add('loaded');
                     
-                    // Send bootstrap message
-                    try {
-                        iframe.contentWindow.postMessage({
-                            type: 'BOOTSTRAP_REQUEST',
-                            page: pageName,
-                            timestamp: Date.now()
-                        }, '*');
-                    } catch (e) {
-                        // Silently ignore
+                    // Send auth data to iframe
+                    const token = AuthManager.getCurrentToken();
+                    const user = AuthManager.getCurrentUser();
+                    
+                    if (token && user) {
+                        try {
+                            iframe.contentWindow.postMessage({
+                                type: 'AUTH_DATA',
+                                user: user,
+                                token: token,
+                                timestamp: Date.now()
+                            }, '*');
+                        } catch (e) {
+                            // Silently ignore cross-origin errors
+                        }
                     }
-                } else {
-                    showLoading();
-                    setTimeout(() => {
-                        hideLoading();
-                        iframe.classList.add('loaded');
-                    }, 300);
                 }
             }
         }
@@ -2640,14 +3015,28 @@
         // Clear AppState
         AppState.clearAuthentication();
         
+        // Clear AuthManager
+        if (window.AuthManager) {
+            window.AuthManager.clearAuth();
+        }
+        
         // Clear window objects
         window.accessToken = null;
         delete window.currentUser;
         
-        // Reset AuthManager
-        if (window.AuthManager) {
-            window.AuthManager.clearAuth();
-        }
+        // Notify all iframes about logout
+        document.querySelectorAll('.content-iframe').forEach(iframe => {
+            try {
+                if (iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({
+                        type: 'USER_LOGOUT',
+                        timestamp: Date.now()
+                    }, '*');
+                }
+            } catch (e) {
+                // Silently ignore cross-origin errors
+            }
+        });
         
         // Redirect to login
         window.location.href = '../index.html';
@@ -2685,6 +3074,12 @@
     }
     
     function hideLoading() {
+        // Clear any pending timeout
+        if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+        }
+        
         const loadingScreen = document.getElementById('loadingScreen');
         if (loadingScreen) {
             loadingScreen.classList.add('hidden');
@@ -2779,13 +3174,19 @@
     window.AppState = AppState;
     window.AuthManager = AuthManager;
     window.bootstrapIframe = window.bootstrapIframe;
+    window.notifyAllIframesAboutAuth = notifyAllIframesAboutAuth;
     
-    console.log('Iframe controller loaded successfully');
+    console.log('Page initialization system loaded');
     console.log('Initial AppState:', {
         authenticated: AppState.auth.authenticated,
         user: AppState.auth.user,
         apiReady: AppState.api.ready,
         online: AppState.connectivity.online
+    });
+    console.log('AuthManager state:', {
+        isAuthenticated: AuthManager.state.isAuthenticated,
+        user: AuthManager.state.user,
+        token: AuthManager.state.token ? 'Present' : 'Missing'
     });
     </script>
 </body>

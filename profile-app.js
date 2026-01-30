@@ -369,7 +369,7 @@ auth.onAuthStateChanged(async user => {
   if(!user){
     // Not logged in - redirect to login or show placeholder
     console.log('No user signed in — redirecting to login');
-    // window.location.href = '/login.html'; // uncomment if you have a login page
+    // window.location.href = '/index.html'; // uncomment if you have a login page
     showConnection('error', 'Not signed in');
     return;
   }
