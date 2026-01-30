@@ -86,7 +86,6 @@ const PUBLIC_ENDPOINTS = [
   '/auth/register',
   '/auth/forgot-password',
   '/auth/reset-password',
-  
   '/auth/refresh'
 ];
 
@@ -124,7 +123,7 @@ function isStatusEndpoint(endpoint) {
 }
 
 // ============================================================================
-// CRITICAL FIX 2: AUTHORITATIVE TOKEN HELPER FUNCTION - NORMALIZED
+// MANDATORY TOKEN NORMALIZATION: getValidToken() HELPER FUNCTION
 // ============================================================================
 /**
  * getValidToken() - Authoritative token retrieval helper
@@ -154,7 +153,7 @@ function getValidToken() {
     return token;
   }
   
-  // Priority 3: Check normalized authUser storage
+  // Priority 3: Check authUser storage
   try {
     const authDataStr = localStorage.getItem("authUser");
     if (authDataStr) {
@@ -172,19 +171,6 @@ function getValidToken() {
     }
   } catch (error) {
     console.log('🔐 [AUTH] Error reading token from authUser:', error.message);
-  }
-  
-  // Priority 4: Legacy token keys
-  token = localStorage.getItem("token");
-  if (token && token.trim() !== "" && token !== "null" && token !== "undefined") {
-    console.log('🔐 [AUTH] Token retrieved from legacy "token" key');
-    return token;
-  }
-  
-  token = localStorage.getItem("moodchat_auth_token");
-  if (token && token.trim() !== "" && token !== "null" && token !== "undefined") {
-    console.log('🔐 [AUTH] Token retrieved from "moodchat_auth_token" key');
-    return token;
   }
   
   // No token found
@@ -254,7 +240,7 @@ window.addEventListener('offline', () => {
 });
 
 // ============================================================================
-// CRITICAL FIX 3: UPDATED getAuthHeaders() FUNCTION WITH PUBLIC ENDPOINT CHECK
+// UPDATED getAuthHeaders() FUNCTION WITH PUBLIC ENDPOINT CHECK
 // ============================================================================
 /**
  * getAuthHeaders() - Helper function to get authentication headers
@@ -347,7 +333,7 @@ console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, Bac
 console.log(`🔧 [API] Global Token: ${accessToken ? `Present (${accessToken.substring(0, 20)}...)` : 'Not found'}`);
 
 // ============================================================================
-// TOKEN MANAGEMENT - SINGLE SOURCE OF TRUTH - NORMALIZED
+// TOKEN MANAGEMENT - SINGLE SOURCE OF TRUTH
 // ============================================================================
 /**
  * TOKEN NORMALIZATION - Ensure consistent token format
@@ -359,10 +345,10 @@ const MOODCHAT_TOKEN_KEY = 'moodchat_token';
 const USER_DATA_KEY = 'userData';
 
 // ============================================================================
-// AUTHENTICATION STATE TIMING FIX - CRITICAL NEW VARIABLES
+// AUTHENTICATION STATE TIMING FIX
 // ============================================================================
 /**
- * NEW: Authentication state timing fix variables
+ * Authentication state timing fix variables
  * These ensure authentication state is only determined by explicit /auth/me response
  * NEVER by timing or network delays
  */
@@ -374,7 +360,7 @@ const AUTH_VALIDATION_TIMEOUT = 10000; // 10 seconds
 const AUTH_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * NORMALIZED: Store token in ALL locations for reliability
+ * Store token in ALL locations for reliability
  * @param {string} token - The token to store
  * @param {object} user - User data
  * @param {string} refreshToken - Refresh token (optional)
@@ -481,7 +467,7 @@ function _extractUserFromResponse(responseData) {
 }
 
 /**
- * NORMALIZED: Stores normalized auth data with CONSISTENT format in ALL locations
+ * Stores normalized auth data with CONSISTENT format in ALL locations
  */
 function _storeAuthData(token, user, refreshToken = null) {
   if (!token || token.trim() === "" || token === "null" || token === "undefined") {
@@ -518,7 +504,7 @@ function _storeAuthData(token, user, refreshToken = null) {
 }
 
 /**
- * NORMALIZED: Clears ALL auth data from ALL locations
+ * Clears ALL auth data from ALL locations
  */
 function _clearAllAuthData() {
   // Keep window.currentUser intact as requested
@@ -600,7 +586,7 @@ function _getCurrentUserFromStorage() {
 }
 
 // ============================================================================
-// CRITICAL FIX 4: ENHANCED UNAUTHORIZED ACCESS HANDLING
+// ENHANCED UNAUTHORIZED ACCESS HANDLING
 // ============================================================================
 function handleUnauthorizedAccess() {
   console.log('🔐 [AUTH] Handling unauthorized access - redirecting to login');
@@ -624,7 +610,7 @@ function handleUnauthorizedAccess() {
 }
 
 // ============================================================================
-// CRITICAL FIX: validateAuth() FUNCTION - PERMANENTLY FIXES AUTH TIMING ISSUES
+// validateAuth() FUNCTION - PERMANENTLY FIXES AUTH TIMING ISSUES
 // ============================================================================
 
 /**
@@ -669,7 +655,6 @@ async function validateAuth() {
   // This prevents indefinite waiting for API readiness
   if (token && !_authValidated) {
     console.log('🔐 [AUTH-TIMING-FIX] Token exists, API should be considered available');
-    // Note: We'll still try to validate, but we won't block API readiness
   }
   
   // Mark validation as in progress
@@ -809,8 +794,6 @@ async function validateAuth() {
         // This prevents API readiness from being blocked
         if (token) {
           console.log('🔐 [AUTH-TIMING-FIX] Token exists, marking API as available despite abort');
-          // We don't set _authValidated to true, but we also don't set it to false
-          // The token existence is enough for API availability
         }
         
         _authLastChecked = now;
@@ -846,8 +829,6 @@ async function validateAuth() {
       const tokenExists = getValidToken();
       if (tokenExists && !_authValidated) {
         console.log('🔐 [AUTH-TIMING-FIX] Token exists, ensuring API readiness is not blocked');
-        // Note: We're not setting _authValidated to true, but we're also not
-        // preventing API from being available
       }
     }
   });
@@ -1017,7 +998,7 @@ function _safeFetch(fullUrl, options = {}) {
       ...options.headers
     };
     
-    // NEW: Explicitly add Authorization header if token exists and not already present
+    // Explicitly add Authorization header if token exists and not already present
     // Always read token directly from localStorage using getValidToken()
     const token = getValidToken();
     
@@ -1370,7 +1351,7 @@ const globalApiFunction = function(endpoint, options = {}) {
 
 const apiObject = {
   _singleton: true,
-  _version: '20.3.0', // Updated version for token normalization fix
+  _version: '20.3.0',
   _safeInitialized: true,
   _backendReachable: null,
   _sessionChecked: false,
@@ -1381,8 +1362,8 @@ const apiObject = {
    * Configuration object with dynamic backend URL
    */
   _config: {
-    BACKEND_URL: BACKEND_BASE_URL,               // DYNAMIC backend base URL
-    API_BASE_URL: BASE_API_URL,                  // DYNAMIC API base URL
+    BACKEND_URL: BACKEND_BASE_URL,
+    API_BASE_URL: BASE_API_URL,
     STORAGE_PREFIX: 'moodchat_',
     MAX_RETRIES: 3,
     RETRY_DELAY: 1000,
@@ -1465,7 +1446,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: validateAuth() method - PUBLIC VERSION
+  // validateAuth() method - PUBLIC VERSION
   // ============================================================================
   
   /**
@@ -1530,7 +1511,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // NORMALIZED: Set access token with persistence in ALL locations
+  // Set access token with persistence in ALL locations
   // ============================================================================
   
   /**
@@ -1596,7 +1577,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ADDED api.get(), api.post(), api.put(), api.delete() METHODS
+  // ADDED api.get(), api.post(), api.put(), api.delete() METHODS
   // ============================================================================
   
   /**
@@ -2689,7 +2670,7 @@ const apiObject = {
   // ============================================================================
   
   /**
-   * NORMALIZED: Login function - Sends POST to /auth/login with email and password
+   * Login function - Sends POST to /auth/login with email and password
    * On success, stores accessToken in ALL localStorage locations
    * Returns the logged-in user data
    */
@@ -2762,7 +2743,7 @@ const apiObject = {
         };
       }
       
-      // NORMALIZED: Store auth data in ALL locations for reliability
+      // Store auth data in ALL locations for reliability
       const storageSuccess = _storeAuthData(token, user, refreshToken);
       if (!storageSuccess) {
         throw {
@@ -2954,7 +2935,7 @@ const apiObject = {
         };
       }
       
-      // NORMALIZED: Store auth data in ALL locations
+      // Store auth data in ALL locations
       const storageSuccess = _storeAuthData(token, user, refreshToken);
       if (!storageSuccess) {
         throw {
@@ -3066,7 +3047,7 @@ const apiObject = {
     try {
       const user = _getCurrentUserFromStorage();
       
-      // NORMALIZED: Clear ALL auth data from ALL locations
+      // Clear ALL auth data from ALL locations
       _clearAllAuthData();
       
       this._sessionChecked = false;
@@ -3104,7 +3085,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ENHANCED GET CURRENT USER FUNCTION - WITH AUTHORITATIVE AUTH
+  // ENHANCED GET CURRENT USER FUNCTION - WITH AUTHORITATIVE AUTH
   // ============================================================================
   
   getCurrentUser: async function() {
@@ -3346,7 +3327,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ENHANCED SESSION MANAGEMENT - WITH AUTHORITATIVE AUTH
+  // ENHANCED SESSION MANAGEMENT - WITH AUTHORITATIVE AUTH
   // ============================================================================
   
   checkSession: async function() {
@@ -3625,7 +3606,7 @@ const apiObject = {
   },
   
   // ============================================================================
-  // CRITICAL FIX: ENHANCED isLoggedIn() FUNCTION - AUTHORITATIVE AUTH
+  // ENHANCED isLoggedIn() FUNCTION - AUTHORITATIVE AUTH
   // ============================================================================
   
   isLoggedIn: async function() {
@@ -3801,7 +3782,7 @@ const apiObject = {
     }
     
     // Online mode - API is available if auth is validated or validation is in progress
-    return _authValidated || _authValidationInProgress || !!token; // CRITICAL FIX: Token existence should allow API availability
+    return _authValidated || _authValidationInProgress || !!token;
   },
   
   getConnectionStatus: function() {
@@ -4312,7 +4293,7 @@ const apiObject = {
         authValidated: _authValidated,
         authValidationInProgress: _authValidationInProgress,
         authLastChecked: _authLastChecked ? new Date(_authLastChecked).toISOString() : 'Never',
-        isLoggedIn: 'Async check required', // Because of timing fix
+        isLoggedIn: 'Async check required',
         windowCurrentUser: window.currentUser ? 'Set' : 'Not set'
       },
       environment: envInfo,
@@ -4481,7 +4462,7 @@ const apiObject = {
 };
 
 // ============================================================================
-// CRITICAL FIX: GLOBAL API SETUP WITH TOKEN NORMALIZATION
+// GLOBAL API SETUP WITH TOKEN NORMALIZATION
 // ============================================================================
 
 // Create the global API function with authoritative auth

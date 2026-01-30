@@ -744,7 +744,7 @@
     <!-- Load api.js first, then initialize the page -->
     <script type="module">
         // Import api.js module
-        import * as apiModule from '../js/api.js';
+        import * as apiModule from '/js/api.js';
         
         // Make apiCall globally available
         window.apiCall = apiModule.apiCall;
@@ -979,68 +979,40 @@
                     return false;
                 }
                 
-                // Verify token silently
-                const userResponse = await callApiSilently('/api/auth/me');
-                
-                if (!userResponse || !userResponse.user) {
-                    console.log('Authentication failed');
+                // Verify token silently using api.js
+                if (typeof window.apiCall === 'function') {
+                    const userResponse = await window.apiCall('/api/auth/me');
+                    
+                    if (!userResponse || !userResponse.user) {
+                        console.log('Authentication failed');
+                        return false;
+                    }
+                    
+                    // Store user data
+                    currentUser = userResponse.user;
+                    userData = currentUser;
+                    
+                    // Save to cache
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                        uid: currentUser.id,
+                        id: currentUser.id,
+                        displayName: currentUser.displayName,
+                        email: currentUser.email,
+                        photoURL: currentUser.photoURL,
+                        username: currentUser.username
+                    }));
+                    
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                    
+                    return true;
+                } else {
+                    console.log('apiCall function not available');
                     return false;
                 }
-                
-                // Store user data
-                currentUser = userResponse.user;
-                userData = currentUser;
-                
-                // Save to cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                    uid: currentUser.id,
-                    id: currentUser.id,
-                    displayName: currentUser.displayName,
-                    email: currentUser.email,
-                    photoURL: currentUser.photoURL,
-                    username: currentUser.username
-                }));
-                
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                
-                return true;
                 
             } catch (error) {
                 console.log('Authentication check error:', error);
                 return false;
-            }
-        }
-        
-        // Silent API call wrapper
-        async function callApiSilently(endpoint, options = {}) {
-            try {
-                if (typeof window.apiCall === 'function') {
-                    return await window.apiCall(endpoint, options);
-                }
-                
-                // Fallback to direct fetch
-                const tokens = getTokensFromStorage();
-                if (!tokens.accessToken) {
-                    throw { status: 401 };
-                }
-                
-                const response = await fetch(endpoint, {
-                    ...options,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${tokens.accessToken}`,
-                        ...(options.headers || {})
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                return await response.json();
-                
-            } catch (error) {
-                throw error;
             }
         }
         
@@ -1082,7 +1054,11 @@
         // Individual data loading functions
         async function loadFriendsFromBackend() {
             try {
-                const response = await callApiSilently('/api/friends');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/friends');
                 
                 if (response && response.friends) {
                     friends = response.friends;
@@ -1102,12 +1078,17 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load friends:', error);
             }
         }
         
         async function loadFriendRequestsFromBackend() {
             try {
-                const response = await callApiSilently('/api/friend-requests/incoming');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/friend-requests/incoming');
                 
                 if (response && response.requests) {
                     friendRequests = response.requests;
@@ -1117,12 +1098,17 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load friend requests:', error);
             }
         }
         
         async function loadSentRequestsFromBackend() {
             try {
-                const response = await callApiSilently('/api/friend-requests/sent');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/friend-requests/sent');
                 
                 if (response && response.requests) {
                     sentRequests = response.requests;
@@ -1131,12 +1117,17 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load sent requests:', error);
             }
         }
         
         async function loadPinnedFriendsFromBackend() {
             try {
-                const response = await callApiSilently('/api/friends/pinned');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/friends/pinned');
                 
                 if (response && response.friends) {
                     pinnedFriends = response.friends;
@@ -1146,12 +1137,17 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load pinned friends:', error);
             }
         }
         
         async function loadMutedFriendsFromBackend() {
             try {
-                const response = await callApiSilently('/api/friends/muted');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/friends/muted');
                 
                 if (response && response.friends) {
                     mutedFriends = response.friends;
@@ -1160,12 +1156,17 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load muted friends:', error);
             }
         }
         
         async function loadContactsFromBackend() {
             try {
-                const response = await callApiSilently('/api/contacts/synced');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/contacts/synced');
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -1174,12 +1175,17 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load contacts:', error);
             }
         }
         
         async function loadGroupsFromBackend() {
             try {
-                const response = await callApiSilently('/api/groups/user');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/groups/user');
                 
                 if (response && response.groups) {
                     groups = response.groups;
@@ -1187,6 +1193,7 @@
                 }
             } catch (error) {
                 // Silently fail
+                console.log('Failed to load groups:', error);
             }
         }
         
@@ -1276,7 +1283,7 @@
                 if (notesData) window.privateNotes = JSON.parse(notesData);
                 
             } catch (error) {
-                // Silently handle errors
+                console.log('Error loading cached data:', error);
             }
         }
         
@@ -1564,7 +1571,12 @@
                     }
                     
                     try {
-                        const response = await callApiSilently(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        if (typeof window.apiCall !== 'function') {
+                            showNotification('API not ready', 'error');
+                            return;
+                        }
+                        
+                        const response = await window.apiCall(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
                         
                         if (!response || !response.user) {
                             showNotification('User not found', 'error');
@@ -1708,28 +1720,9 @@
                 // Ensure api.js is loaded
                 if (typeof window.apiCall === 'function') {
                     return await window.apiCall(endpoint, options);
+                } else {
+                    throw new Error('API not available');
                 }
-                
-                // Fallback to direct fetch if api.js not available
-                const tokens = getTokensFromStorage();
-                if (!tokens.accessToken) {
-                    throw { status: 401 };
-                }
-                
-                const response = await fetch(endpoint, {
-                    ...options,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${tokens.accessToken}`,
-                        ...(options.headers || {})
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                return await response.json();
                 
             } catch (error) {
                 throw error;
@@ -2261,7 +2254,11 @@
                 }
                 
                 // Fetch from backend API
-                const response = await callApiSilently('/api/users/all?limit=100');
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/users/all?limit=100');
                 
                 if (response && response.users) {
                     // Filter out current user from the list
@@ -2453,6 +2450,11 @@
         // Send friend request
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             try {
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
                 const requestData = {
                     receiverId: friendId,
                     category: category,
@@ -2462,14 +2464,14 @@
                     isBusiness: isBusiness
                 };
                 
-                const response = await callApi('/api/friend-requests/send', {
+                const response = await window.apiCall('/api/friend-requests/send', {
                     method: 'POST',
                     body: JSON.stringify(requestData)
                 });
                 
                 if (response && response.success) {
                     // Refresh sent requests
-                    const sentResponse = await callApi('/api/friend-requests/sent');
+                    const sentResponse = await window.apiCall('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -2497,7 +2499,12 @@
         // Accept friend request
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
-                const response = await callApi(`/api/friend-requests/${requestId}/accept`, {
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall(`/api/friend-requests/${requestId}/accept`, {
                     method: 'POST'
                 });
                 
@@ -2520,13 +2527,18 @@
         // Decline friend request
         async function declineFriendRequest(requestData) {
             try {
-                const response = await callApi(`/api/friend-requests/${requestData.id}/decline`, {
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall(`/api/friend-requests/${requestData.id}/decline`, {
                     method: 'POST'
                 });
                 
                 if (response && response.success) {
                     // Refresh friend requests
-                    const requestsResponse = await callApi('/api/friend-requests/incoming');
+                    const requestsResponse = await window.apiCall('/api/friend-requests/incoming');
                     
                     if (requestsResponse && requestsResponse.requests) {
                         friendRequests = requestsResponse.requests;
@@ -2555,13 +2567,18 @@
         // Cancel friend request
         async function cancelFriendRequest(requestData) {
             try {
-                const response = await callApi(`/api/friend-requests/${requestData.id}`, {
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall(`/api/friend-requests/${requestData.id}`, {
                     method: 'DELETE'
                 });
                 
                 if (response && response.success) {
                     // Refresh sent requests
-                    const sentResponse = await callApi('/api/friend-requests/sent');
+                    const sentResponse = await window.apiCall('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -2588,7 +2605,12 @@
         // Show mutual friends
         async function showMutualFriends(userId, userName) {
             try {
-                const response = await callApi(`/api/friends/mutual/${userId}`);
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall(`/api/friends/mutual/${userId}`);
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -2673,9 +2695,11 @@
                 if (type === 'friend' || type === 'contact' || type === 'user') {
                     try {
                         const friendId = friendData.id;
-                        const response = await callApi(`/api/users/${friendId}`);
-                        if (response && response.user) {
-                            detailedData = { ...detailedData, ...response.user };
+                        if (typeof window.apiCall === 'function') {
+                            const response = await window.apiCall(`/api/users/${friendId}`);
+                            if (response && response.user) {
+                                detailedData = { ...detailedData, ...response.user };
+                            }
                         }
                     } catch (error) {
                         // Silently fail
@@ -3247,7 +3271,12 @@
                 const isPinned = pinnedFriends.some(f => f.id === friendId);
                 
                 if (isPinned) {
-                    const response = await callApi(`/api/friends/${friendId}/pin`, {
+                    if (typeof window.apiCall !== 'function') {
+                        showNotification('API not ready', 'error');
+                        return;
+                    }
+                    
+                    const response = await window.apiCall(`/api/friends/${friendId}/pin`, {
                         method: 'DELETE'
                     });
                     if (response && response.success) {
@@ -3255,7 +3284,12 @@
                         showNotification('Friend unpinned', 'success');
                     }
                 } else {
-                    const response = await callApi(`/api/friends/${friendId}/pin`, {
+                    if (typeof window.apiCall !== 'function') {
+                        showNotification('API not ready', 'error');
+                        return;
+                    }
+                    
+                    const response = await window.apiCall(`/api/friends/${friendId}/pin`, {
                         method: 'POST'
                     });
                     if (response && response.success) {
@@ -3282,7 +3316,12 @@
                 const isMuted = mutedFriends.some(f => f.id === friendId);
                 
                 if (isMuted) {
-                    const response = await callApi(`/api/friends/${friendId}/mute`, {
+                    if (typeof window.apiCall !== 'function') {
+                        showNotification('API not ready', 'error');
+                        return;
+                    }
+                    
+                    const response = await window.apiCall(`/api/friends/${friendId}/mute`, {
                         method: 'DELETE'
                     });
                     if (response && response.success) {
@@ -3290,7 +3329,12 @@
                         showNotification('Friend unmuted', 'success');
                     }
                 } else {
-                    const response = await callApi(`/api/friends/${friendId}/mute`, {
+                    if (typeof window.apiCall !== 'function') {
+                        showNotification('API not ready', 'error');
+                        return;
+                    }
+                    
+                    const response = await window.apiCall(`/api/friends/${friendId}/mute`, {
                         method: 'POST'
                     });
                     if (response && response.success) {
@@ -3477,7 +3521,12 @@
             showNotification('Syncing contacts...', 'info');
             
             try {
-                const response = await callApi('/api/contacts/sync');
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall('/api/contacts/sync');
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -3552,7 +3601,12 @@
                 const newCategory = modal.querySelector('#newCategorySelect').value;
                 
                 try {
-                    const response = await callApi(`/api/friends/${friendData.id}/category`, {
+                    if (typeof window.apiCall !== 'function') {
+                        showNotification('API not ready', 'error');
+                        return;
+                    }
+                    
+                    const response = await window.apiCall(`/api/friends/${friendData.id}/category`, {
                         method: 'PUT',
                         body: JSON.stringify({ category: newCategory })
                     });
@@ -3591,7 +3645,12 @@
             }
             
             try {
-                const response = await callApi(`/api/friends/${friendData.id}`, {
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall(`/api/friends/${friendData.id}`, {
                     method: 'DELETE'
                 });
                 
@@ -3627,7 +3686,12 @@
             }
             
             try {
-                const response = await callApi(`/api/users/${friendData.id}/block`, {
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await window.apiCall(`/api/users/${friendData.id}/block`, {
                     method: 'POST'
                 });
                 
@@ -3879,7 +3943,11 @@
         
         async function fetchUserInfoFromQR(userId) {
             try {
-                const response = await callApi(`/api/users/${userId}`);
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall(`/api/users/${userId}`);
                 
                 if (response && response.user) {
                     return response.user;

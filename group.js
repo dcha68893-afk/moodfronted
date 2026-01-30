@@ -554,18 +554,22 @@ async function callApi(method, endpoint, data = null, options = {}) {
         return { success: false, error: 'Authentication required', requiresAuth: true };
     }
     
-    const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    
-    try {
-        // Use api.js if available
-        if (window.api && typeof window.api.callApi === 'function') {
-            return await window.api.callApi(method, url, data, {
+    // Use api.js if available
+    if (window.api && typeof window.api.callApi === 'function') {
+        try {
+            return await window.api.callApi(method, endpoint, data, {
                 ...options,
                 token: token
             });
+        } catch (error) {
+            console.error('API call via api.js failed:', error);
+            return { success: false, error: error.message || 'API call failed' };
         }
-        
-        // Fallback to direct fetch if api.js not available
+    }
+    
+    // Fallback to direct fetch if api.js not available
+    try {
+        const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
@@ -649,7 +653,12 @@ async function handleApiResponse(response) {
 
 // Safe API call wrapper for background sync
 async function safeApiCall(method, endpoint, data = null) {
-    return await callApi(method.toUpperCase(), `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, data);
+    try {
+        return await callApi(method.toUpperCase(), `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, data);
+    } catch (error) {
+        console.error('Safe API call error:', error);
+        return { success: false, error: error.message };
+    }
 }
 
 // =============================================

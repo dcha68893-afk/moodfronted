@@ -166,19 +166,26 @@ document.addEventListener('DOMContentLoaded', async function() {
     console.log('=== TOOLS.HTML INITIALIZATION STARTED ===');
     
     try {
-        // Wait for authentication to be ready
-        await waitForAuthReady();
-        
-        // Setup event listeners (non-data dependent)
+        // Setup event listeners first (non-data dependent)
         setupEnhancedEventListeners();
         
         // Load cached data for instant display
         loadCachedDataInstantly();
         
-        // Initialize marketplace with authenticated data
-        await initializeEnhancedMarketplace();
-        
-        console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
+        // Wait for authentication to be ready in background
+        waitForAuthReady().then(async () => {
+            try {
+                // Initialize marketplace with authenticated data
+                await initializeEnhancedMarketplace();
+                console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
+            } catch (error) {
+                console.error('Marketplace initialization failed:', error);
+                // Continue with cached data
+            }
+        }).catch(error => {
+            console.error('Auth ready failed:', error);
+            // Continue with cached data
+        });
         
     } catch (error) {
         console.error('Initialization failed:', error);
@@ -191,9 +198,11 @@ async function waitForAuthReady() {
     console.log('Waiting for authentication to be ready...');
     
     // Check if api.js is loaded and has the auth ready mechanism
-    if (typeof window.apiCall === 'function' && typeof window.isAuthReady === 'function') {
-        // Use the api.js authentication ready mechanism
-        await window.waitForAuthReady();
+    if (typeof window.apiCall === 'function') {
+        // Use the api.js authentication ready mechanism if available
+        if (typeof window.waitForAuthReady === 'function') {
+            await window.waitForAuthReady();
+        }
         isAuthReady = true;
         console.log('Authentication ready via api.js');
     } else {
@@ -207,9 +216,8 @@ async function waitForAuthReady() {
     accessToken = getTokenFromStorage();
     
     if (!accessToken) {
-        console.error('No access token after auth ready');
-        redirectToLogin();
-        throw new Error('Authentication required');
+        console.warn('No access token after auth ready - continuing offline');
+        // Don't throw, allow offline mode
     }
 }
 
@@ -226,55 +234,42 @@ async function bootstrapIframe() {
     accessToken = getTokenFromStorage();
     
     if (!accessToken) {
-        console.log('No access token found, redirecting to login');
-        redirectToLogin();
-        throw new Error('Authentication required');
+        console.log('No access token found, continuing offline');
+        // Don't throw - allow offline mode
+        isBootstrapped = true;
+        return;
     }
     
     // 2. Validate token expiration
     if (isTokenExpired(accessToken)) {
         console.log('Access token expired, attempting refresh');
-        await attemptTokenRefresh();
-        
-        // Get fresh token after refresh
-        accessToken = getTokenFromStorage();
-        if (!accessToken) {
-            redirectToLogin();
-            throw new Error('Token refresh failed');
+        try {
+            await attemptTokenRefresh();
+            // Get fresh token after refresh
+            accessToken = getTokenFromStorage();
+        } catch (error) {
+            console.warn('Token refresh failed, continuing offline:', error);
         }
     }
     
-    // 3. Call /api/auth/me to verify user
+    // 3. Call /api/auth/me to verify user (if possible)
     console.log('Verifying user with /api/auth/me');
     try {
         const userResponse = await makeApiCall('GET', '/api/auth/me');
         
-        if (!userResponse || !userResponse.user) {
-            console.error('Invalid user response:', userResponse);
-            clearAuthStorage();
-            redirectToLogin();
-            throw new Error('Invalid user data');
+        if (userResponse && userResponse.user) {
+            currentUser = userResponse.user;
+            userData = userResponse.user;
+            
+            // Save user to localStorage
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+            
+            console.log('User verified:', currentUser.displayName || currentUser.email);
         }
-        
-        currentUser = userResponse.user;
-        userData = userResponse.user;
-        
-        // Save user to localStorage
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-        
-        console.log('User verified:', currentUser.displayName || currentUser.email);
         
     } catch (error) {
-        console.error('Failed to verify user:', error);
-        
-        // Handle 401/403 by clearing storage and redirecting
-        if (error.status === 401 || error.status === 403) {
-            clearAuthStorage();
-            redirectToLogin();
-        }
-        
-        throw error;
+        console.warn('Failed to verify user, continuing offline:', error);
     }
     
     // 4. Mark as bootstrapped
@@ -382,7 +377,6 @@ async function attemptTokenRefresh() {
         if (!refreshToken) {
             console.log('No refresh token available');
             clearAuthStorage();
-            redirectToLogin();
             return;
         }
         
@@ -416,7 +410,6 @@ async function attemptTokenRefresh() {
         console.error('Token refresh failed:', error);
         showNotification('Session expired. Please login again.', 'error');
         clearAuthStorage();
-        redirectToLogin();
         throw error;
         
     } finally {
@@ -426,47 +419,70 @@ async function attemptTokenRefresh() {
 
 // Unified API call function using api.js
 async function makeApiCall(method, endpoint, data = null) {
-    console.log(`Making API call via api.js: ${method} ${endpoint}`);
-    
-    // Ensure authentication is ready
-    if (!isAuthReady) {
-        console.log('Authentication not ready, waiting...');
-        await waitForAuthReady();
-    }
+    console.log(`Making API call: ${method} ${endpoint}`);
     
     // Ensure we have a token
     if (!accessToken) {
         accessToken = getTokenFromStorage();
-        if (!accessToken) {
-            throw { status: 401, message: 'Authentication required' };
+    }
+    
+    // Use api.js for all API calls if available
+    if (typeof window.apiCall === 'function') {
+        try {
+            const response = await window.apiCall(method, endpoint, data);
+            return response;
+        } catch (error) {
+            console.error(`API call failed via api.js: ${method} ${endpoint}`, error);
+            
+            // If it's an auth error, clear storage
+            if (error.status === 401 || error.status === 403) {
+                clearAuthStorage();
+            }
+            
+            throw error;
         }
+    } else {
+        // Fallback for when api.js is not available
+        console.warn('api.js not loaded, using fallback fetch');
+        return await makeFallbackApiCall(method, endpoint, data);
     }
-    
-    // Check token expiration
-    if (isTokenExpired(accessToken)) {
-        console.log('Token expired before API call, refreshing...');
-        await attemptTokenRefresh();
-        accessToken = getTokenFromStorage();
-    }
-    
-    // Use api.js for all API calls
-    if (typeof window.apiCall !== 'function') {
-        console.error('api.js not loaded');
-        throw new Error('API library not available');
+}
+
+// Fallback API call for when api.js is not available
+async function makeFallbackApiCall(method, endpoint, data = null) {
+    if (!accessToken) {
+        throw { status: 401, message: 'Authentication required' };
     }
     
     try {
-        const response = await window.apiCall(method, endpoint, data);
-        return response;
-    } catch (error) {
-        console.error(`API call failed: ${method} ${endpoint}`, error);
+        const headers = {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        };
         
-        // If it's an auth error, clear storage and redirect
-        if (error.status === 401 || error.status === 403) {
-            clearAuthStorage();
-            redirectToLogin();
+        const options = {
+            method: method,
+            headers: headers
+        };
+        
+        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+            options.body = JSON.stringify(data);
         }
         
+        const response = await fetch(endpoint, options);
+        
+        if (!response.ok) {
+            throw { 
+                status: response.status, 
+                message: response.statusText 
+            };
+        }
+        
+        const responseData = await response.json();
+        return responseData;
+        
+    } catch (error) {
+        console.error(`Fallback API call failed: ${method} ${endpoint}`, error);
         throw error;
     }
 }
@@ -478,7 +494,12 @@ async function authenticatedApiCall(method, endpoint, data = null) {
 
 // Safe API call wrapper for backward compatibility
 async function safeApiCall(method, endpoint, data = null) {
-    return await makeApiCall(method, endpoint, data);
+    try {
+        return await makeApiCall(method, endpoint, data);
+    } catch (error) {
+        console.error('Safe API call failed:', error);
+        return null;
+    }
 }
 
 // Redirect to login page
@@ -755,7 +776,7 @@ async function checkUserPremiumStatus() {
         
         // Check with backend
         console.log('Checking premium status with backend');
-        const response = await makeApiCall('GET', '/api/user/subscription');
+        const response = await safeApiCall('GET', '/api/user/subscription');
         if (response && response.subscription) {
             userSubscription = response.subscription;
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(userSubscription));
@@ -800,7 +821,7 @@ async function loadEnhancedMarketplaceData() {
 async function loadListingsFromBackend() {
     try {
         console.log('Loading listings from backend');
-        const response = await makeApiCall('GET', '/api/marketplace/listings');
+        const response = await safeApiCall('GET', '/api/marketplace/listings');
         
         if (response && response.listings) {
             allListings = response.listings;
@@ -827,7 +848,7 @@ async function loadListingsFromBackend() {
 async function loadUserGroups() {
     try {
         console.log('Loading user groups from backend');
-        const response = await makeApiCall('GET', '/api/user/groups');
+        const response = await safeApiCall('GET', '/api/user/groups');
         
         if (response && response.groups) {
             userGroups = response.groups;
@@ -842,7 +863,7 @@ async function loadUserGroups() {
 async function loadUserFriends() {
     try {
         console.log('Loading user friends from backend');
-        const response = await makeApiCall('GET', '/api/user/friends');
+        const response = await safeApiCall('GET', '/api/user/friends');
         
         if (response && response.friends) {
             userFriends = response.friends;
@@ -859,7 +880,7 @@ async function loadTeamMembers() {
         // Only load if user has team subscription
         if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team')) {
             console.log('Loading team members from backend');
-            const response = await makeApiCall('GET', '/api/team/members');
+            const response = await safeApiCall('GET', '/api/team/members');
             
             if (response && response.members) {
                 teamMembers = response.members;
@@ -875,7 +896,7 @@ async function loadTeamMembers() {
 async function loadLeaderboard() {
     try {
         console.log('Loading leaderboard from backend');
-        const response = await makeApiCall('GET', '/api/marketplace/leaderboard');
+        const response = await safeApiCall('GET', '/api/marketplace/leaderboard');
         
         if (response && response.leaderboard) {
             leaderboardData = response.leaderboard;
@@ -891,7 +912,7 @@ async function loadAnalyticsData() {
     try {
         if (isUserPremium()) {
             console.log('Loading analytics data from backend');
-            const response = await makeApiCall('GET', '/api/marketplace/analytics');
+            const response = await safeApiCall('GET', '/api/marketplace/analytics');
             
             if (response && response.analytics) {
                 analyticsData = response.analytics;
@@ -908,7 +929,7 @@ async function loadAnalyticsData() {
 async function loadPremiumFeatures() {
     try {
         console.log('Loading premium features from backend');
-        const response = await makeApiCall('GET', '/api/premium/features');
+        const response = await safeApiCall('GET', '/api/premium/features');
         
         if (response && response.features) {
             premiumFeatures = response.features;
@@ -923,7 +944,7 @@ async function loadPremiumFeatures() {
 async function loadSpotlightListingsFromBackend() {
     try {
         console.log('Loading spotlight listings from backend');
-        const response = await makeApiCall('GET', '/api/marketplace/spotlight');
+        const response = await safeApiCall('GET', '/api/marketplace/spotlight');
         
         if (response && response.spotlightListings) {
             renderSpotlightListings(response.spotlightListings);
@@ -1107,21 +1128,21 @@ function isListingVisibleToUser(listing) {
     // Check trust circles
     if (listing.visibility === TRUST_CIRCLES.FRIENDS) {
         // Only show to friends
-        return userFriends.some(friend => friend.id === listing.userId) || listing.userId === currentUser.id;
+        return userFriends.some(friend => friend.id === listing.userId) || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.GROUPS) {
         // Only show to group members
         return listing.allowedGroups && listing.allowedGroups.some(groupId => 
             userGroups.some(group => group.id === groupId)
-        ) || listing.userId === currentUser.id;
+        ) || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.SELECTED) {
         // Only show to selected people
-        return listing.allowedUsers && listing.allowedUsers.includes(currentUser.id) || listing.userId === currentUser.id;
+        return listing.allowedUsers && listing.allowedUsers.includes(currentUser?.id) || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.PREMIUM) {
         // Only show to premium users
-        return isUserPremium() || listing.userId === currentUser.id;
+        return isUserPremium() || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.MICRO) {
         // Show to selected premium users
-        return (isUserPremium() && listing.allowedUsers && listing.allowedUsers.includes(currentUser.id)) || listing.userId === currentUser.id;
+        return (isUserPremium() && listing.allowedUsers && listing.allowedUsers.includes(currentUser?.id)) || listing.userId === currentUser?.id;
     }
     
     // Public listings are visible to all
@@ -1485,7 +1506,7 @@ async function downloadDigitalFile(listingId, fileUrl, fileName) {
     try {
         // Track download
         console.log('Tracking download');
-        await makeApiCall('POST', `/api/marketplace/listings/${listingId}/download`);
+        await safeApiCall('POST', `/api/marketplace/listings/${listingId}/download`);
         
         // Create download link
         const link = document.createElement('a');
@@ -1520,7 +1541,7 @@ async function createPremiumServiceListing(title, description, premiumOptions = 
     
     const listing = {
         id: listingId,
-        userId: currentUser.id || currentUser._id,
+        userId: currentUser?.id || currentUser?._id,
         user: userData,
         type: LISTING_TYPES.SERVICE,
         title: title,
@@ -1575,7 +1596,7 @@ async function createPremiumServiceListing(title, description, premiumOptions = 
     // Send to backend using authenticated API if available
     try {
         console.log('Posting premium service listing to backend');
-        const response = await makeApiCall('POST', '/api/marketplace/listings/premium', listing);
+        const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
         if (response && response.listing) {
             listing.id = response.listing.id || listingId;
             console.log('Premium service listing posted to backend');
@@ -1615,7 +1636,7 @@ async function createPremiumDigitalListing(title, description, fileData, premium
     
     const listing = {
         id: listingId,
-        userId: currentUser.id || currentUser._id,
+        userId: currentUser?.id || currentUser?._id,
         user: userData,
         type: LISTING_TYPES.DIGITAL,
         title: title,
@@ -1675,7 +1696,7 @@ async function createPremiumDigitalListing(title, description, fileData, premium
     // Send to backend using authenticated API if available
     try {
         console.log('Posting premium digital listing to backend');
-        const response = await makeApiCall('POST', '/api/marketplace/listings/premium', listing);
+        const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
         if (response && response.listing) {
             listing.id = response.listing.id || listingId;
             console.log('Premium digital listing posted to backend');
@@ -1718,7 +1739,7 @@ async function processFeaturedListing(listing) {
         
         // Send to backend
         console.log('Processing featured listing');
-        await makeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
+        await safeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
         
     } catch (error) {
         console.error('Error processing featured listing:', error);
@@ -1729,7 +1750,7 @@ async function processBoostedListing(listing) {
     try {
         // Send boost request to backend
         console.log('Processing boosted listing');
-        await makeApiCall('POST', '/api/marketplace/boost', { 
+        await safeApiCall('POST', '/api/marketplace/boost', { 
             listingId: listing.id,
             duration: '24h'
         });
@@ -1756,7 +1777,7 @@ async function processPremiumPayment(listing, options) {
             }
         };
         
-        const response = await makeApiCall('POST', '/api/payments/process', paymentData);
+        const response = await safeApiCall('POST', '/api/payments/process', paymentData);
         
         if (response && response.success) {
             showNotification('Premium features activated successfully', 'success');
@@ -1795,7 +1816,7 @@ async function sendTip(listingId, amount, customAmount = null) {
             message: 'Thanks for your great listing!'
         };
         
-        const response = await makeApiCall('POST', '/api/marketplace/tips', tipData);
+        const response = await safeApiCall('POST', '/api/marketplace/tips', tipData);
         
         if (response && response.success) {
             showNotification(`Tip of $${finalAmount} sent successfully!`, 'success');
@@ -2097,7 +2118,7 @@ async function uploadBulkListings(listings) {
         try {
             // Upload listing
             console.log('Uploading bulk listing');
-            const response = await makeApiCall('POST', '/api/marketplace/listings/bulk', listing);
+            const response = await safeApiCall('POST', '/api/marketplace/listings/bulk', listing);
             
             if (response && response.success) {
                 item.querySelector('.loading-spinner').style.display = 'none';
@@ -2238,7 +2259,7 @@ function renderLeaderboard() {
 async function exportAnalytics(format) {
     try {
         console.log('Exporting analytics');
-        const response = await makeApiCall('GET', `/api/analytics/export?format=${format}`);
+        const response = await safeApiCall('GET', `/api/analytics/export?format=${format}`);
         
         if (response && response.downloadUrl) {
             // Create download link
@@ -2567,7 +2588,7 @@ function trackListingView(listingId) {
     // Send to backend
     try {
         console.log('Tracking listing view');
-        makeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
+        safeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
     } catch (error) {
         console.error('Error tracking view:', error);
     }
@@ -2584,7 +2605,7 @@ function createServiceListing(title, description, options = {}) {
     
     const listing = {
         id: listingId,
-        userId: currentUser.id || currentUser._id,
+        userId: currentUser?.id || currentUser?._id,
         user: userData,
         type: LISTING_TYPES.SERVICE,
         title: title,
@@ -2617,7 +2638,7 @@ function createServiceListing(title, description, options = {}) {
     // Send to backend
     try {
         console.log('Posting service listing to backend');
-        makeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
+        safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
             if (response && response.listing) {
                 listing.id = response.listing.id || listingId;
                 console.log('Service listing posted to backend');
@@ -2652,7 +2673,7 @@ function createDigitalListing(title, description, fileData, options = {}) {
     
     const listing = {
         id: listingId,
-        userId: currentUser.id || currentUser._id,
+        userId: currentUser?.id || currentUser?._id,
         user: userData,
         type: LISTING_TYPES.DIGITAL,
         title: title,
@@ -2689,7 +2710,7 @@ function createDigitalListing(title, description, fileData, options = {}) {
     // Send to backend
     try {
         console.log('Posting digital listing to backend');
-        makeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
+        safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
             if (response && response.listing) {
                 listing.id = response.listing.id || listingId;
                 console.log('Digital listing posted to backend');
@@ -4290,7 +4311,7 @@ async function processSubscriptionPayment() {
             };
         }
         
-        const response = await makeApiCall('POST', '/api/subscriptions/purchase', paymentData);
+        const response = await safeApiCall('POST', '/api/subscriptions/purchase', paymentData);
         
         if (response && response.success) {
             userSubscription = response.subscription;
@@ -4311,7 +4332,7 @@ async function processSubscriptionPayment() {
 async function startFreeTrial() {
     try {
         console.log('Starting free trial');
-        const response = await makeApiCall('POST', '/api/subscriptions/trial');
+        const response = await safeApiCall('POST', '/api/subscriptions/trial');
         
         if (response && response.success) {
             userSubscription = response.subscription;
@@ -4332,7 +4353,7 @@ async function startFreeTrial() {
 async function restorePurchase() {
     try {
         console.log('Restoring purchase');
-        const response = await makeApiCall('POST', '/api/subscriptions/restore');
+        const response = await safeApiCall('POST', '/api/subscriptions/restore');
         
         if (response && response.success) {
             userSubscription = response.subscription;
@@ -4358,7 +4379,7 @@ async function inviteTeamMember() {
     
     try {
         console.log('Inviting team member');
-        const response = await makeApiCall('POST', '/api/team/invite', { email });
+        const response = await safeApiCall('POST', '/api/team/invite', { email });
         
         if (response && response.success) {
             showNotification('Invitation sent successfully', 'success');
@@ -4382,7 +4403,7 @@ async function saveTeamChanges() {
             });
         });
         
-        const response = await makeApiCall('POST', '/api/team/update', { roleChanges });
+        const response = await safeApiCall('POST', '/api/team/update', { roleChanges });
         
         if (response && response.success) {
             showNotification('Team updated successfully', 'success');
@@ -4398,7 +4419,7 @@ async function saveTeamChanges() {
 async function addReaction(listingId, reaction) {
     try {
         console.log('Adding reaction');
-        const response = await makeApiCall('POST', `/api/marketplace/listings/${listingId}/reactions`, {
+        const response = await safeApiCall('POST', `/api/marketplace/listings/${listingId}/reactions`, {
             reaction: reaction,
             premium: reaction.length > 2 // Premium reactions are usually longer emoji sequences
         });
@@ -4545,11 +4566,11 @@ async function syncOfflineMarketplaceData() {
         try {
             if (item.type === 'marketplace_listing') {
                 console.log('Syncing marketplace listing');
-                await makeApiCall('POST', '/api/marketplace/listings', item.data);
+                await safeApiCall('POST', '/api/marketplace/listings', item.data);
                 syncQueue.splice(syncQueue.indexOf(item), 1);
             } else if (item.type === 'marketplace_premium_listing') {
                 console.log('Syncing premium marketplace listing');
-                await makeApiCall('POST', '/api/marketplace/listings/premium', item.data);
+                await safeApiCall('POST', '/api/marketplace/listings/premium', item.data);
                 syncQueue.splice(syncQueue.indexOf(item), 1);
             }
         } catch (error) {

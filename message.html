@@ -27,10 +27,11 @@
     <!-- Wavesurfer.js for audio visualization -->
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6.6.0/dist/wavesurfer.min.js"></script>
     
-    <!-- Load api.js FIRST -->
-    <script type="module" src="../api.js"></script>
+    <!-- Load api.js from /js/ directory -->
+    <script type="module" src="/js/api.js"></script>
     
-    <link rel="stylesheet" href="messages.css">
+    <!-- Load CSS from /css/ directory -->
+    <link rel="stylesheet" href="/css/messages.css">
 
     <style>
         /* Additional styles for new features */
@@ -1178,7 +1179,7 @@
             localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
             
             // Redirect
-            window.location.href = '../index.html';
+            window.location.href = '/';
         }
         
         // =============================================

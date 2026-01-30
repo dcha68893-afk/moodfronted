@@ -422,17 +422,6 @@ async function bootstrapIframe() {
             return false;
         }
         
-        // Wait for authentication to be ready via api.js
-        console.log('Waiting for authentication to be ready...');
-        try {
-            await window.knectaAPI.waitForAuthReady();
-            console.log('Authentication is ready');
-        } catch (authError) {
-            console.error('Authentication wait failed:', authError);
-            handleAuthError('Authentication service unavailable');
-            return false;
-        }
-        
         // Read tokens from localStorage with fallback
         const tokenData = readTokensFromStorage();
         
@@ -448,7 +437,7 @@ async function bootstrapIframe() {
         
         // Validate token using api.js /api/auth/me endpoint
         try {
-            const response = await window.knectaAPI?.get('/api/auth/me');
+            const response = await window.knectaAPI.get('/api/auth/me');
             
             if (!response || !response.user) {
                 console.error('Token validation failed - no user data');
@@ -495,7 +484,7 @@ async function bootstrapIframe() {
             if (refreshToken) {
                 console.log('Attempting token refresh...');
                 try {
-                    const refreshResponse = await window.knectaAPI?.post('/api/auth/refresh', {
+                    const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
                         refreshToken: refreshToken
                     });
                     
@@ -507,7 +496,7 @@ async function bootstrapIframe() {
                         }
                         
                         // Retry auth
-                        const retryResponse = await window.knectaAPI?.get('/api/auth/me');
+                        const retryResponse = await window.knectaAPI.get('/api/auth/me');
                         if (retryResponse && retryResponse.user) {
                             currentUser = retryResponse.user;
                             userData = currentUser;
@@ -723,15 +712,6 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
     try {
         console.log('Making authenticated API call via api.js to:', endpoint);
         
-        // Prepare request options
-        const requestOptions = {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
-        };
-        
         let response;
         
         // Handle different HTTP methods
@@ -766,7 +746,7 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
             // Attempt token refresh if we have a refresh token
             if (refreshToken) {
                 try {
-                    const refreshResponse = await window.knectaAPI?.post('/api/auth/refresh', {
+                    const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
                         refreshToken: refreshToken
                     });
                     

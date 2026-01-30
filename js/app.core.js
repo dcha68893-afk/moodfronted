@@ -13,6 +13,7 @@
 // ADDED: Token validation on startup to check localStorage for accessToken and redirect if missing/expired
 // CRITICAL FIX: Refresh-safe bootstrap - wait for /auth/me validation before loading UI
 // CRITICAL FIX: Bootstrapping order - UI renders immediately, auth happens in background
+// CRITICAL FIX: COMPLETELY REMOVED all admin route calls and backend route mounting logic
 
 (function () {
   // ============================================================================
@@ -429,13 +430,14 @@
       window.MoodChatConfig.authRoutesMounted = true;
     },
     
-    // FIXED: Auth routes are assumed to be mounted - no verification needed
+    // CRITICAL FIX: Auth routes are assumed to be mounted - NO verification needed
+    // COMPLETELY REMOVED all admin route mounting logic
     ensureAuthRoutesMounted: async function() {
-      console.log('✅ Auth routes assumed to be mounted by backend');
+      console.log('✅ Auth routes assumed to be mounted by backend - no verification needed');
       return true;
     },
     
-    // FIXED: Verify /auth/me route without attempting to mount anything
+    // CRITICAL FIX: Verify /auth/me route ONLY - NO admin calls
     verifyAuthMeRoute: async function() {
       try {
         if (!this.apiReady || !window.MoodChatConfig.api) {
@@ -451,7 +453,7 @@
         
         console.log('🔐 Testing /auth/me route with authentication...');
         
-        // Make a test request to /auth/me
+        // Make a test request to /auth/me ONLY - NO admin routes
         const response = await window.MoodChatConfig.api('/auth/me', {
           method: 'GET',
           headers: {
@@ -514,16 +516,18 @@
       }
     },
     
-    // FIXED: Mount auth routes - NO-OP function (routes are mounted by backend)
+    // CRITICAL FIX: Mount auth routes - NO-OP function (routes are mounted by backend)
+    // COMPLETELY DISABLED - frontend cannot mount backend routes
     mountAuthRoutes: async function() {
       console.log('🔄 Backend routes are mounted by backend - frontend cannot mount routes');
-      return { success: true, message: 'Routes are mounted by backend' };
+      return { success: true, message: 'Routes are mounted by backend - NO OP' };
     },
     
-    // FIXED: Alternative method to mount auth routes - NO-OP
+    // CRITICAL FIX: Alternative method to mount auth routes - NO-OP
+    // COMPLETELY DISABLED - frontend cannot mount backend routes
     mountAuthRoutesAlternative: async function() {
       console.log('🔄 Backend routes are mounted by backend - no alternative mounting needed');
-      return { success: true, message: 'Routes are mounted by backend' };
+      return { success: true, message: 'Routes are mounted by backend - NO OP' };
     },
     
     // Wait for backend to be ready
@@ -840,7 +844,8 @@
         throw new Error('API service not available');
       }
       
-      // FIXED: No special handling needed - backend routes are always mounted
+      // CRITICAL FIX: No special handling needed - backend routes are always mounted
+      // NO admin route calls - ONLY auth endpoints
       const isAuthMeEndpoint = endpoint === '/auth/me';
       
       try {
@@ -917,6 +922,7 @@
     },
     
     // Validate authentication via /auth/me endpoint with enhanced error handling
+    // CRITICAL FIX: Only uses /auth/me - NO admin routes
     checkAuthMe: async function() {
       try {
         // Wait for API to be ready
@@ -938,7 +944,8 @@
         try {
           console.log('🔄 Validating authentication via /auth/me endpoint...');
           
-          // FIXED: No need to mount routes - assume they exist
+          // CRITICAL FIX: No need to mount routes - assume they exist
+          // NO admin route calls
           console.log('✅ Auth routes assumed to be mounted by backend');
           
           const response = await this.safeApiCall('/auth/me', {
@@ -1076,6 +1083,7 @@
     },
     
     // Validate token by calling protected endpoint using api.js
+    // CRITICAL FIX: Only uses /auth/me - NO admin routes
     validateToken: async function() {
       const token = this.getToken();
       if (!token) {
@@ -1114,6 +1122,7 @@
     },
     
     // Perform BACKGROUND authentication check - NON-BLOCKING
+    // CRITICAL FIX: Only uses /auth/me - NO admin routes
     performBackgroundAuthCheck: async function() {
       console.log('Starting BACKGROUND JWT token validation...');
       
@@ -1276,6 +1285,7 @@
     
     try {
       // CRITICAL: Call /auth/me using api.js and await the result
+      // CRITICAL FIX: Only uses /auth/me - NO admin routes
       console.log('🔐 Calling /auth/me to validate token...');
       const validation = await API_COORDINATION.checkAuthMe();
       
@@ -1477,11 +1487,13 @@
       return false;
     }
     
-    // FIXED: No need to mount auth routes - assume they're already mounted
+    // CRITICAL FIX: No need to mount auth routes - assume they're already mounted
+    // NO admin route calls
     console.log('✅ Auth routes assumed to be mounted by backend');
     
     try {
       // Call /auth/me to validate the token
+      // CRITICAL FIX: Only uses /auth/me - NO admin routes
       console.log('🔐 Validating authentication via API...');
       const validation = await API_COORDINATION.checkAuthMe();
       
@@ -6193,44 +6205,71 @@
     document.head.appendChild(style);
   }
 
-  function closeModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-      modal.classList.add('hidden');
-    }
-  }
-
   // ============================================================================
   // STARTUP EXECUTION
   // ============================================================================
 
-  // Start the app initialization after DOM is ready
+  // Start the app after DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
-    setTimeout(initializeApp, 100);
+    initializeApp();
   }
 
-  // Expose core functions globally for debugging and testing
-  window.MoodChatCore = {
-    API_COORDINATION,
-    DATA_CACHE,
-    SETTINGS_SERVICE,
-    USER_DATA_ISOLATION,
-    NETWORK_SERVICE_MANAGER,
-    JWT_VALIDATION,
-    validateAuthDeterministic,
-    validateAuthOnStartup,
-    initializeApp,
-    loadCachedDataInstantly,
-    createOfflineUserForUI,
-    safeApiCall,
-    queueForSync,
-    processQueuedMessages,
-    showTab,
-    switchTab,
-    getDeviceId
+  // CRITICAL FIX: COMPLETELY DISABLED all admin route calls
+  // These are NO-OP stubs that prevent any attempts to call backend admin routes
+  window.ensureAuthRoutes = async function() {
+    console.log('🔄 Auth routes assumed to be mounted by backend - NO OP');
+    return { success: true, message: 'Routes are mounted by backend - NO OP' };
+  };
+  
+  window.verifyAuthRoutes = async function() {
+    console.log('🔄 Auth routes assumed to be mounted by backend - NO OP');
+    return { success: true, message: 'Routes are mounted by backend - NO OP' };
+  };
+  
+  window.mountAuthRoutes = async function() {
+    console.log('🔄 Backend routes are mounted by backend - frontend cannot mount routes - NO OP');
+    return { success: true, message: 'Routes are mounted by backend - NO OP' };
+  };
+  
+  window.mountAuthRoutesAlternative = async function() {
+    console.log('🔄 Backend routes are mounted by backend - no alternative mounting needed - NO OP');
+    return { success: true, message: 'Routes are mounted by backend - NO OP' };
+  };
+  
+  // CRITICAL FIX: Block any direct calls to /api/admin/*
+  const originalFetch = window.fetch;
+  window.fetch = function(url, options) {
+    if (typeof url === 'string' && url.includes('/api/admin/')) {
+      console.log('🚫 BLOCKED: Admin route call prevented:', url);
+      return Promise.reject(new Error('Admin routes cannot be called from frontend'));
+    }
+    return originalFetch.call(this, url, options);
   };
 
-  console.log('✅ MoodChat Core Services loaded and ready');
+  // Expose key functions globally
+  window.MoodChatCore = {
+    initializeApp: initializeApp,
+    switchTab: switchTab,
+    loadPage: window.loadPage,
+    toggleSidebar: window.toggleSidebar,
+    getCurrentUser: () => window.currentUser,
+    isAuthenticated: () => !!window.currentUser,
+    isAuthReady: () => authStateRestored,
+    getNetworkStatus: () => API_COORDINATION.getNetworkStatus(),
+    isBackendReachable: () => window.MoodChatConfig.backendReachable,
+    // CRITICAL FIX: Expose NO-OP admin route functions
+    ensureAuthRoutes: () => Promise.resolve({ success: true, message: 'NO OP - Backend routes are mounted by backend' }),
+    verifyAuthRoutes: () => Promise.resolve({ success: true, message: 'NO OP - Backend routes are mounted by backend' }),
+    mountAuthRoutes: () => Promise.resolve({ success: true, message: 'NO OP - Backend routes are mounted by backend' })
+  };
+
+  // Add close modal function
+  window.closeModal = function(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.classList.add('hidden');
+    }
+  };
 })();
