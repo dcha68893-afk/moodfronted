@@ -744,7 +744,7 @@
     <!-- Load api.js first, then initialize the page -->
     <script type="module">
         // Import api.js module
-        import * as apiModule from '/js/api.js';
+        import * as apiModule from "/js/api.js";
         
         // Make apiCall globally available
         window.apiCall = apiModule.apiCall;
@@ -903,7 +903,7 @@
                 if (!isAuthenticated) {
                     // Silently redirect to login if not authenticated
                     setTimeout(() => {
-                        window.location.href = '../login.html';
+                        window.location.href = '../index.html';
                     }, 100);
                     return false;
                 }
