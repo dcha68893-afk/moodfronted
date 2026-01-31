@@ -745,44 +745,66 @@
 
     <!-- Enhanced JavaScript Module for Production-Ready Friend Page -->
     <script type="module">
-        // Import api.js module
+        // Import api.js module - IFRAME PAGE: READ-ONLY CONSUMER
         import * as apiModule from "/js/api.js";
         
-        // Make apiCall globally available
+        // Make apiCall globally available - IFRAME PAGE: PASSIVE WORKER
         window.apiCall = apiModule.apiCall;
-        window.apiReady = true;
+        window.apiReady = false; // Initialize as not ready
         
-        // Enhanced user data synchronization
+        // Enhanced user data synchronization - IFRAME PAGE: READ-ONLY CONSUMER
         window.userDataSync = {
             currentUser: null,
             token: null,
             lastSync: 0,
             syncInterval: null,
+            isReady: false,
+            authReady: false,
             
             init: function() {
+                console.log('[Friend Page] IFRAME: Initializing as read-only consumer');
                 this.loadUserFromStorage();
-                this.startSyncInterval();
                 
-                window.addEventListener('storage', (e) => {
-                    if (e.key === 'knecta_current_user' || e.key === 'moodchat_token' || e.key === 'accessToken') {
+                // Listen for parent page auth readiness
+                window.addEventListener('message', (event) => {
+                    if (event.data && event.data.type === 'authReady') {
+                        console.log('[Friend Page] IFRAME: Received authReady signal from parent');
+                        this.authReady = true;
                         this.loadUserFromStorage();
                         this.updateUI();
                     }
                 });
+                
+                // Check for parent's AppState
+                setTimeout(() => {
+                    this.checkParentAuth();
+                }, 1000);
+            },
+            
+            checkParentAuth: function() {
+                if (window.parent && window.parent.AppState) {
+                    console.log('[Friend Page] IFRAME: Detected parent AppState');
+                    this.authReady = true;
+                    this.loadUserFromStorage();
+                    this.updateUI();
+                }
             },
             
             loadUserFromStorage: function() {
+                // IFRAME RULE: Read auth state without mutating it
                 const tokenKeys = ['moodchat_token', 'accessToken', 'knecta_token', 'token'];
                 const userKeys = ['knecta_current_user', 'authUser', 'currentUser'];
                 
+                // Read tokens - DO NOT MODIFY
                 for (const key of tokenKeys) {
                     const token = localStorage.getItem(key) || sessionStorage.getItem(key);
-                    if (token) {
+                    if (token && token !== 'null' && token !== 'undefined') {
                         this.token = token;
                         break;
                     }
                 }
                 
+                // Read user data - DO NOT MODIFY
                 for (const key of userKeys) {
                     const userData = localStorage.getItem(key) || sessionStorage.getItem(key);
                     if (userData) {
@@ -791,29 +813,19 @@
                             this.lastSync = Date.now();
                             break;
                         } catch (e) {
-                            console.log('Error parsing user data:', e);
+                            console.log('[Friend Page] IFRAME: Error parsing user data:', e);
                         }
                     }
                 }
                 
-                if (this.token && !this.currentUser && window.apiCall) {
-                    this.fetchUserFromAPI();
+                // IFRAME RULE: If auth is missing, pause protected requests
+                if (!this.token) {
+                    console.log('[Friend Page] IFRAME: No token found, pausing protected requests');
+                } else {
+                    console.log('[Friend Page] IFRAME: Token found, length:', this.token.length);
                 }
-            },
-            
-            fetchUserFromAPI: async function() {
-                try {
-                    const response = await window.apiCall('/api/auth/me');
-                    if (response && response.user) {
-                        this.currentUser = response.user;
-                        this.lastSync = Date.now();
-                        localStorage.setItem('knecta_current_user', JSON.stringify(this.currentUser));
-                        localStorage.setItem('authUser', JSON.stringify(this.currentUser));
-                        this.updateUI();
-                    }
-                } catch (error) {
-                    console.log('Error fetching user from API:', error);
-                }
+                
+                this.isReady = true;
             },
             
             updateUI: function() {
@@ -829,46 +841,47 @@
                 }
             },
             
-            startSyncInterval: function() {
-                if (this.syncInterval) clearInterval(this.syncInterval);
-                this.syncInterval = setInterval(() => {
-                    this.loadUserFromStorage();
-                    if (this.token && Date.now() - this.lastSync > 300000) {
-                        this.fetchUserFromAPI();
-                    }
-                }, 60000);
-            },
-            
             getUser: function() {
                 return this.currentUser;
             },
             
             getToken: function() {
+                // IFRAME RULE: Dynamic, read-only token access
                 return this.token;
+            },
+            
+            isAuthReady: function() {
+                return this.authReady;
             }
         };
         
-        window.userDataSync.init();
+        // Initialize synchronizer
+        setTimeout(() => {
+            window.userDataSync.init();
+        }, 100);
     </script>
     
     <script>
         // Production-Ready Friend Page JavaScript
-        // Enhanced with robust authentication, API integration, and error handling
+        // Stabilized for IFRAME usage with parent coordination
         
         // =============================================
-        // GLOBAL UTILITY FUNCTIONS
+        // IFRAME RULES: GLOBAL UTILITY FUNCTIONS
         // =============================================
         
-        // Secure token retrieval from multiple sources
+        // Secure token retrieval - IFRAME: READ-ONLY, DYNAMIC
         function getValidToken() {
+            // RULE: Check parent first
             if (window.parent && window.parent.AppState && window.parent.AppState.token) {
                 return window.parent.AppState.token;
             }
             
+            // RULE: Check our read-only sync module
             if (window.userDataSync && window.userDataSync.getToken()) {
                 return window.userDataSync.getToken();
             }
             
+            // RULE: Fallback to localStorage read-only
             const possibleTokenKeys = [
                 'moodchat_token',
                 'accessToken',
@@ -883,19 +896,23 @@
                 }
             }
             
+            // RULE: If auth is missing, return null (don't redirect)
             return null;
         }
         
-        // Secure current user retrieval
+        // Secure current user retrieval - IFRAME: READ-ONLY
         function getCurrentUser() {
+            // RULE: Check parent first
             if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
                 return window.parent.AppState.currentUser;
             }
             
+            // RULE: Check our read-only sync module
             if (window.userDataSync && window.userDataSync.getUser()) {
                 return window.userDataSync.getUser();
             }
             
+            // RULE: Fallback to localStorage read-only
             const userKeys = ['knecta_current_user', 'authUser', 'currentUser'];
             for (const key of userKeys) {
                 const userData = localStorage.getItem(key);
@@ -903,45 +920,70 @@
                     try {
                         return JSON.parse(userData);
                     } catch (e) {
-                        console.log('Error parsing user data:', e);
+                        console.log('[Friend Page] IFRAME: Error parsing user data:', e);
                     }
                 }
             }
             
+            // RULE: Return null if not found (don't block UI)
             return null;
         }
         
-        // Background authentication validation with retry logic
+        // Background authentication validation - IFRAME: PASSIVE CHECK
         async function validateAuth() {
             try {
                 const token = getValidToken();
                 if (!token) {
-                    console.log('[Friend Page] No token found');
+                    console.log('[Friend Page] IFRAME: No token found - pausing protected requests');
                     return false;
                 }
                 
-                if (typeof window.apiCall === 'function') {
-                    const response = await window.apiCall('/api/auth/verify', null, true);
-                    if (response && response.valid) {
-                        console.log('[Friend Page] Authentication valid');
-                        return true;
-                    }
+                // RULE: Wait for API to be ready
+                if (typeof window.apiCall !== 'function') {
+                    console.log('[Friend Page] IFRAME: API not ready yet');
+                    return false;
                 }
                 
-                return false;
+                // RULE: Use parent's auth verification if available
+                if (window.parent && window.parent.verifyAuth) {
+                    return await window.parent.verifyAuth();
+                }
+                
+                // RULE: Fallback to API verification
+                try {
+                    const response = await window.apiCall('/api/auth/verify', null, true);
+                    return response && response.valid === true;
+                } catch (error) {
+                    console.log('[Friend Page] IFRAME: Auth verification failed:', error.message);
+                    return false;
+                }
+                
             } catch (error) {
-                console.log('[Friend Page] Auth validation error:', error);
+                console.log('[Friend Page] IFRAME: Auth validation error:', error.message);
                 return false;
             }
         }
         
-        // Exponential backoff retry for API calls
-        async function apiCallWithRetry(apiPath, options = {}, maxRetries = 3) {
+        // API call with retry - IFRAME: GRACEFUL ERROR HANDLING
+        async function apiCallWithRetry(apiPath, options = {}, maxRetries = 2) {
+            // RULE: Check auth first
+            const token = getValidToken();
+            if (!token) {
+                console.log('[Friend Page] IFRAME: No token for API call, skipping:', apiPath);
+                throw new Error('No authentication token');
+            }
+            
+            // RULE: Ensure API is ready
+            if (typeof window.apiCall !== 'function') {
+                throw new Error('API not ready');
+            }
+            
             let lastError;
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
                     if (attempt > 0) {
-                        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                        // RULE: Exponential backoff
+                        const delay = Math.min(1000 * Math.pow(1.5, attempt - 1), 5000);
                         await new Promise(resolve => setTimeout(resolve, delay));
                     }
                     
@@ -949,17 +991,23 @@
                     return response;
                 } catch (error) {
                     lastError = error;
-                    console.log(`[Friend Page] API attempt ${attempt + 1} failed:`, error);
+                    console.log(`[Friend Page] IFRAME: API attempt ${attempt + 1} failed:`, error.message);
+                    
+                    // RULE: Don't retry auth errors endlessly
+                    if (error.message && error.message.includes('auth') || error.message.includes('token')) {
+                        break;
+                    }
                     
                     if (attempt === maxRetries - 1) {
                         throw lastError;
                     }
                 }
             }
+            throw lastError;
         }
         
         // =============================================
-        // GLOBAL VARIABLES
+        // GLOBAL VARIABLES - IFRAME: LOCAL STATE ONLY
         // =============================================
         
         let currentUser = null;
@@ -983,10 +1031,11 @@
         let flashOn = false;
         let apiReady = false;
         let scanningActive = false;
-        let qrCodeScanner = null;
         let isInitialized = false;
         let initializationStarted = false;
         let backgroundSyncInterval = null;
+        let isAuthReady = false;
+        let backgroundTasksStarted = false;
         
         // Friend categories configuration
         const friendCategories = {
@@ -1034,7 +1083,7 @@
             }
         };
         
-        // Local Storage Keys
+        // Local Storage Keys - IFRAME: READ-ONLY CACHE
         const LOCAL_STORAGE_KEYS = {
             USER: 'knecta_current_user',
             USER_TOKEN: 'knecta_user_token',
@@ -1083,55 +1132,47 @@
         const mutedList = document.getElementById('mutedList');
         
         // =============================================
-        // ENHANCED INITIALIZATION
+        // ENHANCED INITIALIZATION - IFRAME: WAIT FOR AUTH
         // =============================================
         
         async function enhancedInitialize() {
             if (initializationStarted) return;
             initializationStarted = true;
             
-            console.log('[Friend Page] STARTING ENHANCED INITIALIZATION');
+            console.log('[Friend Page] IFRAME: STARTING ENHANCED INITIALIZATION');
             
             try {
-                // 1. Immediate UI from cache
+                // 1. Immediate UI from cache (RULE: Render UI immediately)
                 currentUser = getCurrentUser();
                 userData = currentUser;
                 
-                // 2. Setup UI immediately
+                // 2. Setup UI immediately (RULE: Keep UI visible)
                 setupEventListeners();
                 loadCachedDataInstantly();
                 
-                // 3. Generate QR code
+                // 3. Generate QR code (non-auth dependent)
                 setTimeout(generateUniqueQRCode, 100);
                 
-                // 4. Wait for API
-                await waitForApiWithTimeout(5000);
+                // 4. Wait for API with timeout
+                await waitForApiWithTimeout(3000);
                 
-                // 5. Background authentication
-                setTimeout(async () => {
-                    const isAuthenticated = await validateAuth();
-                    if (!isAuthenticated && !currentUser) {
-                        console.log('[Friend Page] Authentication failed');
-                        setTimeout(() => {
-                            window.location.href = '../index.html';
-                        }, 2000);
-                    }
-                }, 500);
+                // 5. Wait for auth readiness from parent
+                await waitForAuthReady(5000);
                 
-                // 6. Start parallel data loading
+                // 6. Start parallel data loading (RULE: Only after auth ready)
                 startParallelDataLoading();
                 
-                // 7. Start background sync
+                // 7. Start background sync (RULE: Guarded against duplication)
                 startBackgroundSync();
                 
                 apiReady = true;
                 isInitialized = true;
                 
-                console.log('[Friend Page] ENHANCED INITIALIZATION COMPLETE');
+                console.log('[Friend Page] IFRAME: ENHANCED INITIALIZATION COMPLETE');
                 return true;
                 
             } catch (error) {
-                console.error('[Friend Page] Enhanced initialization error:', error);
+                console.error('[Friend Page] IFRAME: Enhanced initialization error:', error.message);
                 loadCachedDataInstantly();
                 setupEventListeners();
                 apiReady = false;
@@ -1140,10 +1181,11 @@
             }
         }
         
-        // Wait for API with timeout
-        async function waitForApiWithTimeout(timeout = 5000) {
+        // Wait for API with timeout - IFRAME: GRACEFUL TIMEOUT
+        async function waitForApiWithTimeout(timeout = 3000) {
             return new Promise((resolve) => {
                 if (window.apiCall && typeof window.apiCall === 'function') {
+                    apiReady = true;
                     resolve();
                     return;
                 }
@@ -1155,12 +1197,13 @@
                     checkCount++;
                     
                     if (window.apiCall && typeof window.apiCall === 'function') {
+                        apiReady = true;
                         resolve();
                         return;
                     }
                     
                     if (checkCount >= maxChecks) {
-                        console.log('[Friend Page] API wait timeout after', timeout, 'ms');
+                        console.log('[Friend Page] IFRAME: API wait timeout after', timeout, 'ms');
                         resolve();
                         return;
                     }
@@ -1172,12 +1215,80 @@
             });
         }
         
-        // Start background synchronization
+        // Wait for auth readiness - IFRAME: PASSIVE WAIT
+        async function waitForAuthReady(timeout = 5000) {
+            return new Promise((resolve) => {
+                if (window.userDataSync && window.userDataSync.isAuthReady()) {
+                    isAuthReady = true;
+                    resolve();
+                    return;
+                }
+                
+                // Check if we already have a token
+                if (getValidToken()) {
+                    isAuthReady = true;
+                    resolve();
+                    return;
+                }
+                
+                let checkCount = 0;
+                const maxChecks = timeout / 200;
+                
+                const checkAuth = () => {
+                    checkCount++;
+                    
+                    if (window.userDataSync && window.userDataSync.isAuthReady()) {
+                        isAuthReady = true;
+                        resolve();
+                        return;
+                    }
+                    
+                    if (getValidToken()) {
+                        isAuthReady = true;
+                        resolve();
+                        return;
+                    }
+                    
+                    if (checkCount >= maxChecks) {
+                        console.log('[Friend Page] IFRAME: Auth wait timeout after', timeout, 'ms');
+                        isAuthReady = false;
+                        resolve();
+                        return;
+                    }
+                    
+                    setTimeout(checkAuth, 200);
+                };
+                
+                checkAuth();
+            });
+        }
+        
+        // Start background synchronization - IFRAME: GUARDED, SINGLE START
         function startBackgroundSync() {
-            if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
+            if (backgroundSyncInterval) {
+                console.log('[Friend Page] IFRAME: Background sync already running');
+                return;
+            }
+            
+            if (!isAuthReady) {
+                console.log('[Friend Page] IFRAME: Auth not ready, delaying background sync');
+                return;
+            }
+            
+            console.log('[Friend Page] IFRAME: Starting background sync');
             
             backgroundSyncInterval = setInterval(async () => {
-                if (!apiReady || !getValidToken()) return;
+                // RULE: Check auth before each sync
+                if (!getValidToken()) {
+                    console.log('[Friend Page] IFRAME: No token, pausing background sync');
+                    clearInterval(backgroundSyncInterval);
+                    backgroundSyncInterval = null;
+                    return;
+                }
+                
+                if (!apiReady) {
+                    return;
+                }
                 
                 try {
                     await loadFriendsFromBackend();
@@ -1188,13 +1299,13 @@
                         updateCurrentSection();
                     }
                 } catch (error) {
-                    console.log('[Friend Page] Background sync error:', error);
+                    console.log('[Friend Page] IFRAME: Background sync error:', error.message);
                 }
-            }, 30000); // Sync every 30 seconds
+            }, 45000); // Sync every 45 seconds
         }
         
         // =============================================
-        // INSTANT UI RENDERING FROM CACHE
+        // INSTANT UI RENDERING FROM CACHE - IFRAME: IMMEDIATE UI
         // =============================================
         
         function loadCachedDataInstantly() {
@@ -1260,11 +1371,11 @@
                 if (notesData) window.privateNotes = JSON.parse(notesData);
                 
             } catch (error) {
-                console.log('[Friend Page] Error loading cached data:', error);
+                console.log('[Friend Page] IFRAME: Error loading cached data:', error.message);
             }
         }
         
-        // Render friends list instantly from cache
+        // Render friends list instantly from cache - IFRAME: IMMEDIATE UI
         function renderFriendsListInstantly() {
             if (!allFriendsList) return;
             
@@ -1299,7 +1410,7 @@
             allFriendsList.classList.add('instant-load');
         }
         
-        // Add friend item instantly
+        // Add friend item instantly - IFRAME: UI PRESENTER
         function addFriendItemInstant(friendData, container, type) {
             const friendItem = document.createElement('div');
             friendItem.className = 'friend-item';
@@ -1401,20 +1512,35 @@
         }
         
         // =============================================
-        // PARALLEL DATA LOADING
+        // PARALLEL DATA LOADING - IFRAME: AFTER AUTH READY
         // =============================================
         
         function startParallelDataLoading() {
+            // RULE: Check if already started
+            if (backgroundTasksStarted) {
+                console.log('[Friend Page] IFRAME: Background tasks already started');
+                return;
+            }
+            
+            // RULE: Check auth before starting
+            if (!getValidToken()) {
+                console.log('[Friend Page] IFRAME: No token, skipping background data loading');
+                return;
+            }
+            
+            console.log('[Friend Page] IFRAME: Starting parallel data loading');
+            backgroundTasksStarted = true;
+            
             const loadPromises = [];
             
-            loadPromises.push(loadFriendsFromBackend().catch(e => console.log('[Friend Page] Friends load error:', e)));
-            loadPromises.push(loadFriendRequestsFromBackend().catch(e => console.log('[Friend Page] Requests load error:', e)));
-            loadPromises.push(loadSentRequestsFromBackend().catch(e => console.log('[Friend Page] Sent requests load error:', e)));
-            loadPromises.push(loadPinnedFriendsFromBackend().catch(e => console.log('[Friend Page] Pinned friends load error:', e)));
-            loadPromises.push(loadMutedFriendsFromBackend().catch(e => console.log('[Friend Page] Muted friends load error:', e)));
-            loadPromises.push(loadContactsFromBackend().catch(e => console.log('[Friend Page] Contacts load error:', e)));
-            loadPromises.push(loadGroupsFromBackend().catch(e => console.log('[Friend Page] Groups load error:', e)));
-            loadPromises.push(fetchAllUsersFromBackend().catch(e => console.log('[Friend Page] All users load error:', e)));
+            loadPromises.push(loadFriendsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Friends load error:', e.message)));
+            loadPromises.push(loadFriendRequestsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Requests load error:', e.message)));
+            loadPromises.push(loadSentRequestsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Sent requests load error:', e.message)));
+            loadPromises.push(loadPinnedFriendsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Pinned friends load error:', e.message)));
+            loadPromises.push(loadMutedFriendsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Muted friends load error:', e.message)));
+            loadPromises.push(loadContactsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Contacts load error:', e.message)));
+            loadPromises.push(loadGroupsFromBackend().catch(e => console.log('[Friend Page] IFRAME: Groups load error:', e.message)));
+            loadPromises.push(fetchAllUsersFromBackend().catch(e => console.log('[Friend Page] IFRAME: All users load error:', e.message)));
             
             Promise.allSettled(loadPromises).then(() => {
                 updateCurrentSection();
@@ -1424,12 +1550,20 @@
         
         async function loadFriendsFromBackend() {
             try {
+                // RULE: Check auth before API call
                 const token = getValidToken();
-                if (!token) throw new Error('No valid token');
+                if (!token) {
+                    console.log('[Friend Page] IFRAME: No token for friends load');
+                    throw new Error('No valid token');
+                }
                 
-                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                if (typeof window.apiCall !== 'function') {
+                    console.log('[Friend Page] IFRAME: API not ready for friends load');
+                    throw new Error('API not ready');
+                }
                 
-                const response = await apiCallWithRetry('/api/friends', null, 2);
+                console.log('[Friend Page] IFRAME: Loading friends from backend');
+                const response = await apiCallWithRetry('/api/friends', null, 1);
                 
                 if (response && response.friends) {
                     friends = response.friends;
@@ -1443,8 +1577,12 @@
                     
                     localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
                     localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+                    
+                    console.log('[Friend Page] IFRAME: Loaded', friends.length, 'friends');
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load friends:', error.message);
+                // RULE: Fallback to cache
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
                 if (cached) {
                     friends = JSON.parse(cached);
@@ -1460,7 +1598,7 @@
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/friend-requests/incoming', null, 2);
+                const response = await apiCallWithRetry('/api/friend-requests/incoming', null, 1);
                 
                 if (response && response.requests) {
                     friendRequests = response.requests;
@@ -1469,6 +1607,7 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load friend requests:', error.message);
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
                 if (cached) {
                     friendRequests = JSON.parse(cached);
@@ -1485,7 +1624,7 @@
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/friend-requests/sent', null, 2);
+                const response = await apiCallWithRetry('/api/friend-requests/sent', null, 1);
                 
                 if (response && response.requests) {
                     sentRequests = response.requests;
@@ -1493,6 +1632,7 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load sent requests:', error.message);
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
                 if (cached) {
                     sentRequests = JSON.parse(cached);
@@ -1508,7 +1648,7 @@
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/friends/pinned', null, 2);
+                const response = await apiCallWithRetry('/api/friends/pinned', null, 1);
                 
                 if (response && response.friends) {
                     pinnedFriends = response.friends;
@@ -1517,6 +1657,7 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load pinned friends:', error.message);
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
                 if (cached) {
                     pinnedFriends = JSON.parse(cached);
@@ -1533,7 +1674,7 @@
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/friends/muted', null, 2);
+                const response = await apiCallWithRetry('/api/friends/muted', null, 1);
                 
                 if (response && response.friends) {
                     mutedFriends = response.friends;
@@ -1541,6 +1682,7 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load muted friends:', error.message);
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
                 if (cached) {
                     mutedFriends = JSON.parse(cached);
@@ -1556,7 +1698,7 @@
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/contacts/synced', null, 2);
+                const response = await apiCallWithRetry('/api/contacts/synced', null, 1);
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -1564,6 +1706,7 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load contacts:', error.message);
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
                 if (cached) {
                     contacts = JSON.parse(cached);
@@ -1579,13 +1722,14 @@
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/groups/user', null, 2);
+                const response = await apiCallWithRetry('/api/groups/user', null, 1);
                 
                 if (response && response.groups) {
                     groups = response.groups;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
                 }
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load groups:', error.message);
                 const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
                 if (cached) groups = JSON.parse(cached);
             }
@@ -1596,18 +1740,19 @@
                 const token = getValidToken();
                 if (!token) throw new Error('No valid token');
                 
+                // Check cache first
                 const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
                 const lastSync = localStorage.getItem('all_users_last_sync');
                 const now = Date.now();
                 
-                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 5 * 60 * 1000) {
+                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 10 * 60 * 1000) {
                     allUsers = JSON.parse(cachedAllUsers);
                     return;
                 }
                 
                 if (typeof window.apiCall !== 'function') throw new Error('API not ready');
                 
-                const response = await apiCallWithRetry('/api/users/all?limit=100', null, 2);
+                const response = await apiCallWithRetry('/api/users/all?limit=50', null, 1);
                 
                 if (response && response.users) {
                     const currentUserId = currentUser?.id;
@@ -1623,6 +1768,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to load all users:', error.message);
                 const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
                 if (cachedAllUsers) {
                     allUsers = JSON.parse(cachedAllUsers);
@@ -1631,7 +1777,7 @@
         }
         
         // =============================================
-        // EVENT LISTENERS SETUP
+        // EVENT LISTENERS SETUP - IFRAME: UI PRESENTER
         // =============================================
         
         function setupEventListeners() {
@@ -1878,7 +2024,10 @@
             window.addEventListener('beforeunload', () => {
                 saveFriendsToLocalStorage();
                 stopCameraScanner();
-                if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
+                if (backgroundSyncInterval) {
+                    clearInterval(backgroundSyncInterval);
+                    backgroundSyncInterval = null;
+                }
             });
             
             // Listen for user data updates
@@ -1893,12 +2042,25 @@
                 }
             });
             
+            // Listen for auth state changes from parent
+            window.addEventListener('message', (event) => {
+                if (event.data && event.data.type === 'authStateChanged') {
+                    console.log('[Friend Page] IFRAME: Received auth state change from parent');
+                    currentUser = getCurrentUser();
+                    userData = currentUser;
+                    
+                    if (isInitialized) {
+                        updateCurrentSection();
+                    }
+                }
+            });
+            
             // Initial mobile check
             checkMobile();
         }
         
         // =============================================
-        // CORE UI FUNCTIONS
+        // CORE UI FUNCTIONS - IFRAME: UI PRESENTER
         // =============================================
         
         function updateFriendCounts() {
@@ -2325,7 +2487,7 @@
                     break;
                     
                 default:
-                    console.log('Unknown action:', action);
+                    console.log('[Friend Page] IFRAME: Unknown action:', action);
             }
         }
         
@@ -2350,7 +2512,7 @@
         }
         
         // =============================================
-        // FILTERING AND SEARCH
+        // FILTERING AND SEARCH - IFRAME: UI FUNCTIONALITY
         // =============================================
         
         function filterFriendsByCategory(category) {
@@ -2386,7 +2548,7 @@
         }
         
         // =============================================
-        // ALL USERS TAB
+        // ALL USERS TAB - IFRAME: UI PRESENTER
         // =============================================
         
         function renderAllUsersList() {
@@ -2536,7 +2698,7 @@
         }
         
         // =============================================
-        // NAVIGATION FUNCTIONS
+        // NAVIGATION FUNCTIONS - IFRAME: PASSIVE NAVIGATION
         // =============================================
         
         function navigateToChat(userId, userName) {
@@ -2550,11 +2712,12 @@
         }
         
         // =============================================
-        // FRIEND REQUEST MANAGEMENT
+        // FRIEND REQUEST MANAGEMENT - IFRAME: API CONSUMER
         // =============================================
         
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             try {
+                // RULE: Check auth before API call
                 const token = getValidToken();
                 if (!token) {
                     showNotification('Authentication required', 'error');
@@ -2575,20 +2738,27 @@
                     isBusiness: isBusiness
                 };
                 
+                console.log('[Friend Page] IFRAME: Sending friend request to:', friendId);
                 const response = await apiCallWithRetry('/api/friend-requests/send', {
                     method: 'POST',
                     body: JSON.stringify(requestData)
-                });
+                }, 1);
                 
                 if (response && response.success) {
-                    const sentResponse = await apiCallWithRetry('/api/friend-requests/sent');
-                    
-                    if (sentResponse && sentResponse.requests) {
-                        sentRequests = sentResponse.requests;
-                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                    // Refresh sent requests
+                    try {
+                        const sentResponse = await apiCallWithRetry('/api/friend-requests/sent', null, 1);
+                        
+                        if (sentResponse && sentResponse.requests) {
+                            sentRequests = sentResponse.requests;
+                            document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                        }
+                    } catch (error) {
+                        console.log('[Friend Page] IFRAME: Failed to refresh sent requests:', error.message);
                     }
                     
+                    // Refresh all users
                     fetchAllUsersFromBackend();
                     updateCurrentSection();
                     
@@ -2599,6 +2769,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to send friend request:', error.message);
                 showNotification('Failed to send friend request', 'error');
             }
         }
@@ -2618,9 +2789,10 @@
                 
                 const response = await apiCallWithRetry(`/api/friend-requests/${requestId}/accept`, {
                     method: 'POST'
-                });
+                }, 1);
                 
                 if (response && response.success) {
+                    // Refresh data
                     startParallelDataLoading();
                     showNotification('Friend request accepted', 'success');
                     friendRequestModal.classList.remove('active');
@@ -2629,6 +2801,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to accept friend request:', error.message);
                 showNotification('Failed to accept friend request', 'error');
             }
         }
@@ -2648,16 +2821,21 @@
                 
                 const response = await apiCallWithRetry(`/api/friend-requests/${requestData.id}/decline`, {
                     method: 'POST'
-                });
+                }, 1);
                 
                 if (response && response.success) {
-                    const requestsResponse = await apiCallWithRetry('/api/friend-requests/incoming');
-                    
-                    if (requestsResponse && requestsResponse.requests) {
-                        friendRequests = requestsResponse.requests;
-                        document.getElementById('requestsCount').textContent = friendRequests.length;
-                        document.getElementById('requestsSectionCount').textContent = friendRequests.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                    // Refresh requests
+                    try {
+                        const requestsResponse = await apiCallWithRetry('/api/friend-requests/incoming', null, 1);
+                        
+                        if (requestsResponse && requestsResponse.requests) {
+                            friendRequests = requestsResponse.requests;
+                            document.getElementById('requestsCount').textContent = friendRequests.length;
+                            document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                        }
+                    } catch (error) {
+                        console.log('[Friend Page] IFRAME: Failed to refresh requests:', error.message);
                     }
                     
                     fetchAllUsersFromBackend();
@@ -2670,6 +2848,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to decline friend request:', error.message);
                 showNotification('Failed to decline friend request', 'error');
             }
         }
@@ -2689,15 +2868,20 @@
                 
                 const response = await apiCallWithRetry(`/api/friend-requests/${requestData.id}`, {
                     method: 'DELETE'
-                });
+                }, 1);
                 
                 if (response && response.success) {
-                    const sentResponse = await apiCallWithRetry('/api/friend-requests/sent');
-                    
-                    if (sentResponse && sentResponse.requests) {
-                        sentRequests = sentResponse.requests;
-                        document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                    // Refresh sent requests
+                    try {
+                        const sentResponse = await apiCallWithRetry('/api/friend-requests/sent', null, 1);
+                        
+                        if (sentResponse && sentResponse.requests) {
+                            sentRequests = sentResponse.requests;
+                            document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                        }
+                    } catch (error) {
+                        console.log('[Friend Page] IFRAME: Failed to refresh sent requests:', error.message);
                     }
                     
                     fetchAllUsersFromBackend();
@@ -2709,12 +2893,13 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to cancel friend request:', error.message);
                 showNotification('Failed to cancel friend request', 'error');
             }
         }
         
         // =============================================
-        // MUTUAL FRIENDS
+        // MUTUAL FRIENDS - IFRAME: API CONSUMER
         // =============================================
         
         async function showMutualFriends(userId, userName) {
@@ -2730,7 +2915,7 @@
                     return;
                 }
                 
-                const response = await apiCallWithRetry(`/api/friends/mutual/${userId}`);
+                const response = await apiCallWithRetry(`/api/friends/mutual/${userId}`, null, 1);
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -2746,6 +2931,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Error loading mutual friends:', error.message);
                 showNotification('Error loading mutual friends', 'error');
             }
         }
@@ -2796,7 +2982,7 @@
         }
         
         // =============================================
-        // FRIEND DETAILS AND PROFILE
+        // FRIEND DETAILS AND PROFILE - IFRAME: UI PRESENTER
         // =============================================
         
         function showFriendDetails(friendData, type) {
@@ -2817,13 +3003,13 @@
                     try {
                         const friendId = friendData.id;
                         if (typeof window.apiCall === 'function') {
-                            const response = await apiCallWithRetry(`/api/users/${friendId}`);
+                            const response = await apiCallWithRetry(`/api/users/${friendId}`, null, 1);
                             if (response && response.user) {
                                 detailedData = { ...detailedData, ...response.user };
                             }
                         }
                     } catch (error) {
-                        // Silently fail
+                        // Silently fail - use cached data
                     }
                 }
                 
@@ -3143,6 +3329,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Error loading friend details:', error.message);
                 detailsContent.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-exclamation-triangle"></i>
@@ -3287,7 +3474,7 @@
         }
         
         // =============================================
-        // FRIEND OPTIONS AND MANAGEMENT
+        // FRIEND OPTIONS AND MANAGEMENT - IFRAME: UI PRESENTER
         // =============================================
         
         function showFriendOptions(friendData) {
@@ -3406,7 +3593,7 @@
                     
                     const response = await apiCallWithRetry(`/api/friends/${friendId}/pin`, {
                         method: 'DELETE'
-                    });
+                    }, 1);
                     if (response && response.success) {
                         pinnedFriends = pinnedFriends.filter(f => f.id !== friendId);
                         showNotification('Friend unpinned', 'success');
@@ -3419,7 +3606,7 @@
                     
                     const response = await apiCallWithRetry(`/api/friends/${friendId}/pin`, {
                         method: 'POST'
-                    });
+                    }, 1);
                     if (response && response.success) {
                         pinnedFriends.push(friendData);
                         showNotification('Friend pinned', 'success');
@@ -3433,6 +3620,7 @@
                 updateFriendCounts();
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to update pin status:', error.message);
                 showNotification('Failed to update pin status', 'error');
             }
         }
@@ -3456,7 +3644,7 @@
                     
                     const response = await apiCallWithRetry(`/api/friends/${friendId}/mute`, {
                         method: 'DELETE'
-                    });
+                    }, 1);
                     if (response && response.success) {
                         mutedFriends = mutedFriends.filter(f => f.id !== friendId);
                         showNotification('Friend unmuted', 'success');
@@ -3469,7 +3657,7 @@
                     
                     const response = await apiCallWithRetry(`/api/friends/${friendId}/mute`, {
                         method: 'POST'
-                    });
+                    }, 1);
                     if (response && response.success) {
                         mutedFriends.push(friendData);
                         showNotification('Friend muted', 'success');
@@ -3482,6 +3670,7 @@
                 updateFriendCounts();
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to update mute status:', error.message);
                 showNotification('Failed to update mute status', 'error');
             }
         }
@@ -3497,6 +3686,7 @@
                 showNotification('Note saved', 'success');
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to save note:', error.message);
                 showNotification('Failed to save note', 'error');
             }
         }
@@ -3583,7 +3773,7 @@
                     const response = await apiCallWithRetry(`/api/friends/${friendData.id}/category`, {
                         method: 'PUT',
                         body: JSON.stringify({ category: newCategory })
-                    });
+                    }, 1);
                     
                     if (response && response.success) {
                         const friendIndex = friends.findIndex(f => f.id === friendData.id);
@@ -3596,6 +3786,7 @@
                         showNotification('Category updated successfully', 'success');
                     }
                 } catch (error) {
+                    console.log('[Friend Page] IFRAME: Failed to update category:', error.message);
                     showNotification('Failed to update category', 'error');
                 }
                 
@@ -3630,7 +3821,7 @@
                 
                 const response = await apiCallWithRetry(`/api/friends/${friendData.id}`, {
                     method: 'DELETE'
-                });
+                }, 1);
                 
                 if (response && response.success) {
                     friends = friends.filter(f => f.id !== friendData.id);
@@ -3650,6 +3841,7 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to remove friend:', error.message);
                 showNotification('Failed to remove friend', 'error');
             }
         }
@@ -3673,7 +3865,7 @@
                 
                 const response = await apiCallWithRetry(`/api/users/${friendData.id}/block`, {
                     method: 'POST'
-                });
+                }, 1);
                 
                 if (response && response.success) {
                     friends = friends.filter(f => f.id !== friendData.id);
@@ -3693,12 +3885,13 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Failed to block user:', error.message);
                 showNotification('Failed to block user', 'error');
             }
         }
         
         // =============================================
-        // NOTIFICATION SYSTEM
+        // NOTIFICATION SYSTEM - IFRAME: UI FUNCTIONALITY
         // =============================================
         
         function showNotification(message, type = 'success') {
@@ -3716,7 +3909,7 @@
         }
         
         // =============================================
-        // START CHAT MODAL
+        // START CHAT MODAL - IFRAME: UI PRESENTER
         // =============================================
         
         function showStartChatModal() {
@@ -3808,7 +4001,7 @@
         }
         
         // =============================================
-        // DATA PERSISTENCE
+        // DATA PERSISTENCE - IFRAME: READ-ONLY CACHE
         // =============================================
         
         function saveFriendsToLocalStorage() {
@@ -3841,7 +4034,7 @@
                     return;
                 }
                 
-                const response = await apiCallWithRetry('/api/contacts/sync');
+                const response = await apiCallWithRetry('/api/contacts/sync', null, 1);
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -3868,12 +4061,13 @@
                 }
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Error syncing contacts:', error.message);
                 showNotification('Error syncing contacts', 'error');
             }
         }
         
         // =============================================
-        // TEMPORARY, PINNED, AND MUTED FRIENDS
+        // TEMPORARY, PINNED, AND MUTED FRIENDS - IFRAME: UI
         // =============================================
         
         function renderTemporaryFriends() {
@@ -3921,7 +4115,7 @@
         }
         
         // =============================================
-        // CAMERA AND QR CODE FUNCTIONS
+        // CAMERA AND QR CODE FUNCTIONS - IFRAME: DEVICE ACCESS
         // =============================================
         
         async function startCameraScanner() {
@@ -3953,6 +4147,7 @@
                 showNotification('Camera started successfully', 'success');
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Camera access error:', error.message);
                 const cameraContainer = document.querySelector('.camera-container');
                 if (cameraContainer) {
                     cameraContainer.innerHTML = `
@@ -4045,6 +4240,7 @@
                 showNotification('QR code scanned successfully!', 'success');
                 
             } catch (error) {
+                console.log('[Friend Page] IFRAME: Error processing QR code:', error.message);
                 showNotification('Error processing QR code', 'error');
             }
         }
@@ -4098,7 +4294,7 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await apiCallWithRetry(`/api/users/${userId}`);
+                const response = await apiCallWithRetry(`/api/users/${userId}`, null, 1);
                 
                 if (response && response.user) {
                     return response.user;
@@ -4160,7 +4356,7 @@
         }
         
         // =============================================
-        // QR CODE GENERATION
+        // QR CODE GENERATION - IFRAME: NON-AUTH FEATURE
         // =============================================
         
         function generateUniqueQRCode() {
@@ -4183,6 +4379,12 @@
                 
                 const user = currentUser || userData;
                 if (!user) {
+                    qrContainer.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <p>Sign in to generate QR code</p>
+                        </div>
+                    `;
                     return;
                 }
                 
@@ -4246,7 +4448,7 @@
         }
         
         // =============================================
-        // UTILITY FUNCTIONS
+        // UTILITY FUNCTIONS - IFRAME: HELPERS
         // =============================================
         
         function escapeHtml(text) {
@@ -4294,11 +4496,25 @@
         }
         
         // =============================================
-        // INITIALIZE ON PAGE LOAD
+        // INITIALIZE ON PAGE LOAD - IFRAME: ENTRY POINT
         // =============================================
         
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('[Friend Page] IFRAME: DOM Content Loaded');
             setTimeout(enhancedInitialize, 100);
+        });
+        
+        // Listen for parent auth state changes
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'authStateChanged') {
+                console.log('[Friend Page] IFRAME: Received auth state change, refreshing data');
+                currentUser = getCurrentUser();
+                userData = currentUser;
+                
+                if (isInitialized) {
+                    startParallelDataLoading();
+                }
+            }
         });
     </script>
 </body>

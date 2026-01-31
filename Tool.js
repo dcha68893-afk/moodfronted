@@ -154,12 +154,10 @@ const spotlightListings = document.getElementById('spotlightListings');
 const premiumStatusBadge = document.getElementById('premiumStatusBadge');
 const listingStreak = document.getElementById('listingStreak');
 
-// Authentication state
-let accessToken = null;
-let refreshToken = null;
-let tokenRefreshInProgress = false;
+// Authentication state - NO TOKEN GLOBALS
 let isBootstrapped = false;
 let isAuthReady = false;
+let backgroundJobsStarted = false;
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', async function() {
@@ -172,13 +170,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Load cached data for instant display
         loadCachedDataInstantly();
         
-        // Start background authentication
-        initializeBackgroundAuth();
+        // Wait for parent to signal auth readiness
+        await waitForAuthReady();
         
-        // Background data fetching
-        setTimeout(() => {
-            loadEnhancedMarketplaceData();
-        }, 1000);
+        // Start background data fetching only once
+        if (isAuthReady && !backgroundJobsStarted) {
+            startBackgroundJobs();
+            backgroundJobsStarted = true;
+        }
         
     } catch (error) {
         console.error('[Tool.js] Initialization failed:', error);
@@ -186,84 +185,126 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 });
 
-// Get valid token from multiple sources
-function getValidToken() {
-    // Try parent first
-    let token = null;
+// Wait for parent to signal auth readiness
+async function waitForAuthReady() {
+    console.log('[Tool.js] Waiting for auth readiness signal...');
     
-    try {
-        if (window.parent && window.parent.AppState && window.parent.AppState.accessToken) {
-            token = window.parent.AppState.accessToken;
-            console.log('[Tool.js] Token from parent AppState');
-        }
-    } catch (e) {
-        // Parent not accessible, try localStorage
+    // Check if parent has already signaled readiness
+    if (window.parent && window.parent.AppState && window.parent.AppState.authReady === true) {
+        isAuthReady = true;
+        console.log('[Tool.js] Auth ready signaled by parent');
+        return;
     }
     
-    // Try localStorage
-    if (!token) {
-        token = localStorage.getItem('accessToken') || 
-                localStorage.getItem('knecta_auth_token') || 
-                sessionStorage.getItem('accessToken');
-    }
-    
-    // If still no token, check parent localStorage via try-catch
-    if (!token && window.parent) {
+    // Listen for auth readiness message from parent
+    return new Promise((resolve) => {
+        const checkAuth = () => {
+            try {
+                // Check if parent has signaled auth readiness
+                if (window.parent && window.parent.AppState && window.parent.AppState.authReady === true) {
+                    isAuthReady = true;
+                    console.log('[Tool.js] Auth ready detected from parent AppState');
+                    resolve();
+                    return;
+                }
+                
+                // Check for token via api.js if available
+                if (typeof window.getAuthToken === 'function') {
+                    try {
+                        const token = window.getAuthToken();
+                        if (token) {
+                            isAuthReady = true;
+                            console.log('[Tool.js] Auth ready via api.js token');
+                            resolve();
+                            return;
+                        }
+                    } catch (e) {
+                        // api.js not ready yet
+                    }
+                }
+                
+                // Check localStorage as fallback (but don't trust it as auth)
+                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                if (cachedUser) {
+                    try {
+                        currentUser = JSON.parse(cachedUser);
+                        userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
+                        console.log('[Tool.js] Using cached user data for UI');
+                    } catch (e) {
+                        // Silent fail
+                    }
+                }
+                
+                // Continue waiting or timeout
+                setTimeout(checkAuth, 100);
+            } catch (error) {
+                // Parent inaccessible, continue with offline mode
+                console.warn('[Tool.js] Parent inaccessible, continuing offline');
+                isAuthReady = true; // Don't block UI
+                resolve();
+            }
+        };
+        
+        checkAuth();
+        
+        // Timeout after 3 seconds to prevent hanging
+        setTimeout(() => {
+            if (!isAuthReady) {
+                console.warn('[Tool.js] Auth readiness timeout, continuing offline');
+                isAuthReady = true; // Don't block UI
+                resolve();
+            }
+        }, 3000);
+    });
+}
+
+// Get token dynamically from parent/api.js - NO GLOBAL STORAGE
+function getAuthToken() {
+    // Priority 1: Use api.js if available
+    if (typeof window.getAuthToken === 'function') {
         try {
-            token = window.parent.localStorage.getItem('accessToken');
+            const token = window.getAuthToken();
+            if (token) {
+                return token;
+            }
+        } catch (e) {
+            console.warn('[Tool.js] Failed to get token from api.js:', e);
+        }
+    }
+    
+    // Priority 2: Check parent AppState
+    if (window.parent && window.parent.AppState) {
+        try {
+            if (window.parent.AppState.accessToken) {
+                return window.parent.AppState.accessToken;
+            }
         } catch (e) {
             // Cross-origin restriction
         }
     }
     
-    return token;
-}
-
-// Initialize background authentication
-async function initializeBackgroundAuth() {
-    console.log('[Tool.js] Starting background authentication');
+    // Priority 3: localStorage (fallback only, not authoritative)
+    const storedToken = localStorage.getItem('accessToken') || 
+                       localStorage.getItem('knecta_auth_token');
     
-    try {
-        const token = getValidToken();
-        
-        if (!token) {
-            console.warn('[Tool.js] No token found, continuing offline');
-            isAuthReady = true;
-            return;
-        }
-        
-        accessToken = token;
-        
-        // Try to validate token with backend in background
-        if (typeof window.apiCall === 'function') {
-            try {
-                const userResponse = await window.apiCall('GET', '/api/auth/me');
-                if (userResponse && userResponse.user) {
-                    currentUser = userResponse.user;
-                    userData = userResponse.user;
-                    
-                    // Save to localStorage
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                    
-                    console.log('[Tool.js] User authenticated:', currentUser.displayName || currentUser.email);
-                }
-            } catch (error) {
-                console.warn('[Tool.js] Background auth failed:', error);
-                // Continue with cached user
-            }
-        }
-        
-        isAuthReady = true;
-        console.log('[Tool.js] Background auth completed');
-        
-    } catch (error) {
-        console.error('[Tool.js] Auth initialization error:', error);
-        isAuthReady = true; // Don't block UI
+    if (storedToken) {
+        console.log('[Tool.js] Using token from localStorage fallback');
+        return storedToken;
     }
+    
+    return null;
 }
 
-// SINGLE BOOTSTRAP FUNCTION - Removes parent dependency and race conditions
+// Check if we have a valid auth token
+function hasValidAuth() {
+    const token = getAuthToken();
+    if (!token) return false;
+    
+    // Basic token validation (not expiration checking - that's parent's job)
+    return token.length > 10; // Simple sanity check
+}
+
+// SINGLE BOOTSTRAP FUNCTION - Safe, parent-independent
 async function bootstrapIframe() {
     console.log('[Tool.js] Bootstrapping marketplace iframe');
     
@@ -272,168 +313,83 @@ async function bootstrapIframe() {
         return;
     }
     
-    // 1. Read token from localStorage using fallback logic
-    accessToken = getValidToken();
-    
-    if (!accessToken) {
-        console.log('[Tool.js] No access token found, continuing offline');
-        isBootstrapped = true;
-        return;
+    // Wait for auth readiness
+    if (!isAuthReady) {
+        console.log('[Tool.js] Waiting for auth readiness before bootstrapping');
+        await waitForAuthReady();
     }
     
-    // 2. Validate token expiration
-    if (isTokenExpired(accessToken)) {
-        console.log('[Tool.js] Access token expired, attempting refresh');
+    // Load cached data for immediate UI
+    loadCachedDataInstantly();
+    
+    // Verify auth if we have a token
+    if (hasValidAuth()) {
         try {
-            await attemptTokenRefresh();
-            accessToken = getValidToken();
+            // Try to validate token via api.js
+            if (typeof window.apiCall === 'function') {
+                try {
+                    const userResponse = await window.apiCall('GET', '/api/auth/me');
+                    if (userResponse && userResponse.user) {
+                        currentUser = userResponse.user;
+                        userData = userResponse.user;
+                        
+                        // Cache for offline use
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                        
+                        console.log('[Tool.js] User verified via api.js:', currentUser.displayName || currentUser.email);
+                    }
+                } catch (error) {
+                    console.warn('[Tool.js] User verification failed, using cached data:', error.message);
+                    // Continue with cached user
+                }
+            }
         } catch (error) {
-            console.warn('[Tool.js] Token refresh failed, continuing offline:', error);
+            console.warn('[Tool.js] Bootstrap auth check failed:', error.message);
+            // Continue offline
         }
-    }
-    
-    // 3. Call /api/auth/me to verify user (if possible)
-    try {
-        const userResponse = await makeApiCall('GET', '/api/auth/me');
-        
-        if (userResponse && userResponse.user) {
-            currentUser = userResponse.user;
-            userData = userResponse.user;
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-            
-            console.log('[Tool.js] User verified:', currentUser.displayName || currentUser.email);
-        }
-        
-    } catch (error) {
-        console.warn('[Tool.js] Failed to verify user, continuing offline:', error);
     }
     
     isBootstrapped = true;
     console.log('[Tool.js] Marketplace iframe bootstrapped successfully');
 }
 
-// Helper function to get token from storage with fallback logic
-function getTokenFromStorage() {
-    return getValidToken();
-}
-
-// Helper function to clear authentication storage
-function clearAuthStorage() {
-    console.log('[Tool.js] Clearing authentication storage');
-    
-    const tokensToRemove = [
-        'accessToken',
-        'knecta_auth_token',
-        'moodchat_token',
-        'refreshToken',
-        'knecta_refresh_token'
-    ];
-    
-    tokensToRemove.forEach(token => {
-        localStorage.removeItem(token);
-        sessionStorage.removeItem(token);
-    });
-    
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-    
-    accessToken = null;
-    refreshToken = null;
-    currentUser = null;
-    userData = null;
-}
-
-// Check if token is expired
-function isTokenExpired(token) {
-    if (!token) return true;
-    
-    try {
-        const parts = token.split('.');
-        if (parts.length !== 3) {
-            console.warn('[Tool.js] Invalid JWT token format');
-            return true;
-        }
-        
-        const payload = JSON.parse(atob(parts[1]));
-        const expirationTime = payload.exp * 1000;
-        const currentTime = Date.now();
-        
-        const isExpired = expirationTime < (currentTime + 60000);
-        
-        if (isExpired) {
-            console.log('[Tool.js] Token expired');
-        }
-        
-        return isExpired;
-        
-    } catch (error) {
-        console.error('[Tool.js] Error parsing token:', error);
-        return true;
-    }
-}
-
-// Attempt to refresh the access token
-async function attemptTokenRefresh() {
-    if (tokenRefreshInProgress) {
-        console.log('[Tool.js] Token refresh already in progress');
+// Start background jobs only once
+function startBackgroundJobs() {
+    if (!isAuthReady || backgroundJobsStarted) {
         return;
     }
     
-    tokenRefreshInProgress = true;
+    console.log('[Tool.js] Starting background data jobs');
+    backgroundJobsStarted = true;
     
-    try {
-        console.log('[Tool.js] Refreshing access token');
-        
-        refreshToken = localStorage.getItem('refreshToken') || 
-                       localStorage.getItem('knecta_refresh_token');
-        
-        if (!refreshToken) {
-            console.log('[Tool.js] No refresh token available');
-            clearAuthStorage();
-            return;
-        }
-        
-        const response = await makeApiCall('POST', '/api/auth/refresh', {
-            refreshToken: refreshToken
+    // Start background data loading
+    setTimeout(() => {
+        loadEnhancedMarketplaceData().catch(error => {
+            console.warn('[Tool.js] Background data load failed:', error.message);
         });
-        
-        if (response && response.accessToken) {
-            accessToken = response.accessToken;
-            if (response.refreshToken) {
-                refreshToken = response.refreshToken;
-            }
-            
-            localStorage.setItem('accessToken', accessToken);
-            localStorage.setItem('knecta_auth_token', accessToken);
-            if (refreshToken) {
-                localStorage.setItem('refreshToken', refreshToken);
-                localStorage.setItem('knecta_refresh_token', refreshToken);
-            }
-            
-            console.log('[Tool.js] Access token refreshed successfully');
-            
-        } else {
-            throw new Error('No access token in response');
-        }
-        
-    } catch (error) {
-        console.error('[Tool.js] Token refresh failed:', error);
-        clearAuthStorage();
-        throw error;
-        
-    } finally {
-        tokenRefreshInProgress = false;
-    }
+    }, 1000);
+    
+    // Check premium status in background
+    setTimeout(() => {
+        checkUserPremiumStatus().catch(error => {
+            console.warn('[Tool.js] Premium status check failed:', error.message);
+        });
+    }, 1500);
 }
 
-// Unified API call function using api.js
+// Unified API call function using api.js - SAFE VERSION
 async function makeApiCall(method, endpoint, data = null) {
-    const token = getValidToken();
+    // Wait for auth readiness
+    if (!isAuthReady) {
+        console.warn('[Tool.js] Auth not ready, pausing API call');
+        return null;
+    }
     
-    if (!token && endpoint !== '/api/auth/refresh') {
-        throw { status: 401, message: 'Authentication required' };
+    // Check if we have valid auth
+    if (!hasValidAuth()) {
+        console.warn('[Tool.js] No valid auth token, skipping API call');
+        return null;
     }
     
     // Use api.js for all API calls if available
@@ -442,63 +398,22 @@ async function makeApiCall(method, endpoint, data = null) {
             const response = await window.apiCall(method, endpoint, data);
             return response;
         } catch (error) {
-            console.error(`[Tool.js] API call failed via api.js: ${method} ${endpoint}`, error);
+            // Log error but don't clear auth (parent's responsibility)
+            console.error(`[Tool.js] API call failed: ${method} ${endpoint}`, error.message || error);
             
+            // If auth error, notify parent once
             if (error.status === 401 || error.status === 403) {
-                clearAuthStorage();
+                console.warn('[Tool.js] Auth error detected, notifying parent');
+                // Parent will handle auth refresh/logout
             }
             
             throw error;
         }
     } else {
-        // Fallback for when api.js is not available
-        return await makeFallbackApiCall(method, endpoint, data);
+        // api.js not available, can't make calls
+        console.warn('[Tool.js] api.js not available, cannot make API call');
+        return null;
     }
-}
-
-// Fallback API call for when api.js is not available
-async function makeFallbackApiCall(method, endpoint, data = null) {
-    const token = getValidToken();
-    
-    if (!token) {
-        throw { status: 401, message: 'Authentication required' };
-    }
-    
-    try {
-        const headers = {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        };
-        
-        const options = {
-            method: method,
-            headers: headers
-        };
-        
-        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-            options.body = JSON.stringify(data);
-        }
-        
-        const response = await fetch(endpoint, options);
-        
-        if (!response.ok) {
-            throw { 
-                status: response.status, 
-                message: response.statusText 
-            };
-        }
-        
-        return await response.json();
-        
-    } catch (error) {
-        console.error(`[Tool.js] Fallback API call failed: ${method} ${endpoint}`, error);
-        throw error;
-    }
-}
-
-// Authenticated API call wrapper for backward compatibility
-async function authenticatedApiCall(method, endpoint, data = null) {
-    return await makeApiCall(method, endpoint, data);
 }
 
 // Safe API call wrapper for backward compatibility
@@ -506,21 +421,14 @@ async function safeApiCall(method, endpoint, data = null) {
     try {
         return await makeApiCall(method, endpoint, data);
     } catch (error) {
-        console.error('[Tool.js] Safe API call failed:', error);
+        console.warn('[Tool.js] Safe API call failed:', error.message || error);
         return null;
     }
 }
 
-// Redirect to login page
-function redirectToLogin() {
-    console.log('[Tool.js] Redirecting to login');
-    
-    const currentPath = window.location.pathname + window.location.search;
-    localStorage.setItem('login_redirect', currentPath);
-    
-    clearAuthStorage();
-    
-    window.location.href = '/index.html';
+// Authenticated API call wrapper for backward compatibility
+async function authenticatedApiCall(method, endpoint, data = null) {
+    return await safeApiCall(method, endpoint, data);
 }
 
 // Load cached data for instant display

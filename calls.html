@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Call</title>
-    <link rel="stylesheet" href="/css/calls.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="manifest" href="/manifest.json">
     
@@ -1268,21 +1267,27 @@
                 this.maxRetries = 3;
                 this.retryDelay = 1000;
                 this.exponentialBackoff = true;
+                this.backgroundSyncInterval = null;
+                this.authCheckDone = false;
+                this.backgroundJobsStarted = false;
             }
             
-            // Get authentication token securely
+            // Get authentication token securely - READ ONLY
             async getAuthToken() {
                 try {
-                    // First try to get from parent window
+                    // First try to get from parent window (read-only)
                     if (window.parent && window.parent.getAuthToken) {
-                        const parentToken = await window.parent.getAuthToken();
-                        if (parentToken && this.validateToken(parentToken)) {
-                            this.syncTokenToStorage(parentToken);
-                            return parentToken;
+                        try {
+                            const parentToken = await window.parent.getAuthToken();
+                            if (parentToken && this.validateToken(parentToken)) {
+                                return parentToken;
+                            }
+                        } catch (error) {
+                            console.log('[Calls iframe] Parent token unavailable:', error.message);
                         }
                     }
                     
-                    // Try localStorage
+                    // Try localStorage (read-only)
                     const tokens = [
                         localStorage.getItem('accessToken'),
                         localStorage.getItem('moodchat_token'),
@@ -1293,7 +1298,7 @@
                         return tokens[0];
                     }
                     
-                    // Check sessionStorage
+                    // Check sessionStorage (read-only)
                     const sessionTokens = [
                         sessionStorage.getItem('accessToken'),
                         sessionStorage.getItem('moodchat_token'),
@@ -1304,10 +1309,10 @@
                         return sessionTokens[0];
                     }
                     
-                    console.warn('[Calls iframe] No valid tokens found');
+                    console.log('[Calls iframe] No valid tokens found - waiting for parent signal');
                     return null;
                 } catch (error) {
-                    console.error('[Calls iframe] Error getting auth token:', error);
+                    console.log('[Calls iframe] Error reading auth token:', error.message);
                     return null;
                 }
             }
@@ -1319,20 +1324,20 @@
                 return true;
             }
             
-            // Sync token to storage for API access
-            syncTokenToStorage(token) {
-                try {
-                    if (token !== localStorage.getItem('accessToken')) {
-                        localStorage.setItem('accessToken', token);
-                    }
-                } catch (error) {
-                    console.warn('[Calls iframe] Failed to sync token to storage:', error);
-                }
-            }
-            
-            // Fetch with retry logic
+            // Fetch with retry logic using api.js when available
             async fetchWithRetry(url, options = {}, retryCount = 0) {
                 try {
+                    // Try to use api.js module first if available
+                    if (window.ApiModule && window.ApiModule.apiRequest) {
+                        try {
+                            const response = await window.ApiModule.apiRequest(url, options);
+                            return response;
+                        } catch (apiError) {
+                            console.log('[Calls iframe] api.js request failed, falling back:', apiError.message);
+                        }
+                    }
+                    
+                    // Fallback: Use direct fetch with token
                     const token = await this.getAuthToken();
                     const headers = {
                         'Content-Type': 'application/json',
@@ -1350,8 +1355,8 @@
                     
                     if (!response.ok) {
                         if (response.status === 401 || response.status === 403) {
-                            // Authentication error - don't retry
-                            this.handleAuthError();
+                            // Authentication error - don't retry, notify parent once
+                            this.notifyParentAuthError();
                             throw new Error(`Authentication failed: ${response.status}`);
                         }
                         
@@ -1383,54 +1388,79 @@
                 }
             }
             
-            // Handle authentication error
-            handleAuthError() {
-                console.warn('[Calls iframe] Authentication error detected');
+            // Handle authentication error - notify parent only once
+            notifyParentAuthError() {
+                console.log('[Calls iframe] Authentication error detected - notifying parent');
+                
+                // Update local state only
                 AppState.isAuthenticated = false;
                 AppState.user = null;
                 
-                // Clear invalid tokens
-                ['accessToken', 'moodchat_token', 'token', 'authUser', 'currentUser'].forEach(key => {
-                    localStorage.removeItem(key);
-                    sessionStorage.removeItem(key);
-                });
+                // NEVER clear tokens from storage
                 
-                // Show user-friendly message
-                showNotification('Authentication expired. Please login again.', 'warning');
-                
-                // Notify parent if available
-                if (window.parent) {
+                // Notify parent once if available
+                if (window.parent && !this.authErrorNotified) {
+                    this.authErrorNotified = true;
                     window.parent.postMessage({
                         type: 'AUTH_ERROR',
-                        source: 'calls-iframe'
+                        source: 'calls-iframe',
+                        timestamp: Date.now()
                     }, '*');
+                    
+                    // Show user-friendly message without blocking UI
+                    showNotification('Authentication issue - some features limited', 'warning');
                 }
             }
             
-            // Fetch user data
+            // Fetch user data through api.js when available
             async fetchUserData() {
                 try {
-                    const token = await this.getAuthToken();
-                    if (!token) {
-                        throw new Error('No authentication token available');
-                    }
-                    
                     // Try to use api.js module if available
                     if (window.ApiModule && window.ApiModule.getCurrentUser) {
-                        const userData = await window.ApiModule.getCurrentUser();
-                        if (userData) {
-                            this.updateUserState(userData);
-                            return userData;
+                        try {
+                            const userData = await window.ApiModule.getCurrentUser();
+                            if (userData) {
+                                this.updateUserState(userData);
+                                return userData;
+                            }
+                        } catch (apiError) {
+                            console.log('[Calls iframe] api.js user fetch failed:', apiError.message);
                         }
                     }
                     
-                    // Fallback to direct fetch
-                    const response = await this.fetchWithRetry('/api/user/me');
+                    // Fallback: Check for token before making request
+                    const token = await this.getAuthToken();
+                    if (!token) {
+                        console.log('[Calls iframe] No token available for user fetch');
+                        
+                        // Try to get from storage as fallback
+                        const cachedUser = localStorage.getItem('authUser') || 
+                                          localStorage.getItem('currentUser');
+                        
+                        if (cachedUser) {
+                            try {
+                                const userData = JSON.parse(cachedUser);
+                                this.updateUserState(userData);
+                                return userData;
+                            } catch (e) {
+                                console.log('[Calls iframe] Failed to parse cached user data');
+                            }
+                        }
+                        
+                        return null;
+                    }
+                    
+                    // Use absolute backend URL if provided by parent
+                    const apiBase = window.parent?.ApiModule?.getApiBaseUrl ? 
+                                   window.parent.ApiModule.getApiBaseUrl() : 
+                                   '/api';
+                    
+                    const response = await this.fetchWithRetry(`${apiBase}/user/me`);
                     const userData = await response.json();
                     this.updateUserState(userData);
                     return userData;
                 } catch (error) {
-                    console.warn('[Calls iframe] Failed to fetch user data:', error.message);
+                    console.log('[Calls iframe] Failed to fetch user data:', error.message);
                     
                     // Try to get from storage as fallback
                     const cachedUser = localStorage.getItem('authUser') || 
@@ -1442,7 +1472,7 @@
                             this.updateUserState(userData);
                             return userData;
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached user data');
+                            console.log('[Calls iframe] Failed to parse cached user data');
                         }
                     }
                     
@@ -1450,22 +1480,16 @@
                 }
             }
             
-            // Update user state
+            // Update user state - READ ONLY
             updateUserState(userData) {
                 if (!userData) return;
                 
                 AppState.user = userData;
                 AppState.currentUser = userData;
                 AppState.isAuthenticated = true;
+                this.authCheckDone = true;
                 
-                // Cache user data
-                try {
-                    localStorage.setItem('currentUser', JSON.stringify(userData));
-                } catch (error) {
-                    console.warn('[Calls iframe] Failed to cache user data:', error);
-                }
-                
-                // Update UI
+                // Update UI without blocking
                 if (elements.apiStatusIndicator) {
                     elements.apiStatusIndicator.className = 'api-status-indicator connected';
                     elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
@@ -1473,6 +1497,53 @@
                     setTimeout(() => {
                         elements.apiStatusIndicator.style.display = 'none';
                     }, 2000);
+                }
+                
+                // Start background jobs only once after auth confirmation
+                if (!this.backgroundJobsStarted) {
+                    this.backgroundJobsStarted = true;
+                    this.startBackgroundJobs();
+                }
+            }
+            
+            // Start background jobs only once
+            startBackgroundJobs() {
+                if (!AppState.isOnline) return;
+                
+                console.log('[Calls iframe] Starting background jobs after auth confirmation');
+                
+                // Initialize background sync
+                this.initializeBackgroundSync();
+                
+                // Load initial data in background
+                setTimeout(() => {
+                    this.performInitialDataLoad();
+                }, 500);
+            }
+            
+            // Perform initial data load
+            async performInitialDataLoad() {
+                if (!AppState.isAuthenticated) return;
+                
+                try {
+                    // Load data in parallel but handle failures gracefully
+                    await Promise.allSettled([
+                        this.fetchContacts(),
+                        this.fetchCallHistory(),
+                        this.fetchSettings(),
+                        this.checkPremiumStatus()
+                    ]);
+                    
+                    console.log('[Calls iframe] Initial data loading complete');
+                    
+                    // Update sync indicator
+                    if (elements.syncIndicator) {
+                        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+                        elements.syncIndicator.classList.remove('syncing');
+                    }
+                } catch (error) {
+                    console.log('[Calls iframe] Initial data loading failed:', error.message);
+                    // Silent fail - UI remains functional
                 }
             }
             
@@ -1492,12 +1563,22 @@
                             this.renderContacts(contacts);
                             return contacts;
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached contacts');
+                            console.log('[Calls iframe] Failed to parse cached contacts');
                         }
                     }
                     
-                    // Fetch from API
-                    const response = await this.fetchWithRetry('/api/contacts');
+                    // Only fetch if authenticated
+                    if (!AppState.isAuthenticated) {
+                        console.log('[Calls iframe] Not authenticated, skipping contacts fetch');
+                        return AppState.contacts;
+                    }
+                    
+                    // Use absolute backend URL
+                    const apiBase = window.parent?.ApiModule?.getApiBaseUrl ? 
+                                   window.parent.ApiModule.getApiBaseUrl() : 
+                                   '/api';
+                    
+                    const response = await this.fetchWithRetry(`${apiBase}/contacts`);
                     const contacts = await response.json();
                     
                     // Update state
@@ -1508,7 +1589,7 @@
                         localStorage.setItem('cachedContacts', JSON.stringify(contacts));
                         localStorage.setItem('cachedContactsTimestamp', Date.now().toString());
                     } catch (error) {
-                        console.warn('[Calls iframe] Failed to cache contacts:', error);
+                        console.log('[Calls iframe] Failed to cache contacts:', error);
                     }
                     
                     // Render if needed
@@ -1518,7 +1599,7 @@
                     
                     return contacts;
                 } catch (error) {
-                    console.warn('[Calls iframe] Failed to fetch contacts:', error.message);
+                    console.log('[Calls iframe] Failed to fetch contacts:', error.message);
                     
                     // Use cached data if available
                     const cachedContacts = localStorage.getItem('cachedContacts');
@@ -1529,7 +1610,7 @@
                             this.renderContacts(contacts);
                             return contacts;
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached contacts on error');
+                            console.log('[Calls iframe] Failed to parse cached contacts on error');
                         }
                     }
                     
@@ -1554,12 +1635,22 @@
                             renderCallHistory();
                             return history;
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached call history');
+                            console.log('[Calls iframe] Failed to parse cached call history');
                         }
                     }
                     
-                    // Fetch from API
-                    const response = await this.fetchWithRetry('/api/calls/history');
+                    // Only fetch if authenticated
+                    if (!AppState.isAuthenticated) {
+                        console.log('[Calls iframe] Not authenticated, skipping call history fetch');
+                        return AppState.callHistory;
+                    }
+                    
+                    // Use absolute backend URL
+                    const apiBase = window.parent?.ApiModule?.getApiBaseUrl ? 
+                                   window.parent.ApiModule.getApiBaseUrl() : 
+                                   '/api';
+                    
+                    const response = await this.fetchWithRetry(`${apiBase}/calls/history`);
                     const history = await response.json();
                     
                     // Update state
@@ -1570,7 +1661,7 @@
                         localStorage.setItem('cachedCallHistory', JSON.stringify(history));
                         localStorage.setItem('cachedCallHistoryTimestamp', Date.now().toString());
                     } catch (error) {
-                        console.warn('[Calls iframe] Failed to cache call history:', error);
+                        console.log('[Calls iframe] Failed to cache call history:', error);
                     }
                     
                     // Render
@@ -1578,7 +1669,7 @@
                     
                     return history;
                 } catch (error) {
-                    console.warn('[Calls iframe] Failed to fetch call history:', error.message);
+                    console.log('[Calls iframe] Failed to fetch call history:', error.message);
                     
                     // Use cached data if available
                     const cachedHistory = localStorage.getItem('cachedCallHistory');
@@ -1589,7 +1680,7 @@
                             renderCallHistory();
                             return history;
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached call history on error');
+                            console.log('[Calls iframe] Failed to parse cached call history on error');
                         }
                     }
                     
@@ -1600,32 +1691,35 @@
             // Fetch settings
             async fetchSettings() {
                 try {
-                    // Try to get from parent first
+                    // Try to get from parent first (read-only)
                     if (window.parent && window.parent.AppState && window.parent.AppState.settings) {
                         AppState.settings = { ...AppState.settings, ...window.parent.AppState.settings };
                         applySettingsToUI();
                         return AppState.settings;
                     }
                     
-                    // Try API
-                    const response = await this.fetchWithRetry('/api/user/settings');
+                    // Only fetch if authenticated
+                    if (!AppState.isAuthenticated) {
+                        console.log('[Calls iframe] Not authenticated, using cached settings');
+                        return AppState.settings;
+                    }
+                    
+                    // Use absolute backend URL
+                    const apiBase = window.parent?.ApiModule?.getApiBaseUrl ? 
+                                   window.parent.ApiModule.getApiBaseUrl() : 
+                                   '/api';
+                    
+                    const response = await this.fetchWithRetry(`${apiBase}/user/settings`);
                     const settings = await response.json();
                     
                     if (settings) {
                         AppState.settings = { ...AppState.settings, ...settings };
                         applySettingsToUI();
-                        
-                        // Cache settings
-                        try {
-                            localStorage.setItem('callSettings', JSON.stringify(settings));
-                        } catch (error) {
-                            console.warn('[Calls iframe] Failed to cache settings:', error);
-                        }
                     }
                     
                     return AppState.settings;
                 } catch (error) {
-                    console.warn('[Calls iframe] Failed to fetch settings:', error.message);
+                    console.log('[Calls iframe] Failed to fetch settings:', error.message);
                     
                     // Use cached settings
                     const cachedSettings = localStorage.getItem('callSettings');
@@ -1635,7 +1729,7 @@
                             AppState.settings = { ...AppState.settings, ...settings };
                             applySettingsToUI();
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached settings');
+                            console.log('[Calls iframe] Failed to parse cached settings');
                         }
                     }
                     
@@ -1646,7 +1740,7 @@
             // Check premium status
             async checkPremiumStatus() {
                 try {
-                    // Try to get from parent first
+                    // Try to get from parent first (read-only)
                     if (window.parent && window.parent.AppState) {
                         AppState.isPremium = window.parent.AppState.isPremium || false;
                         AppState.trialDaysLeft = window.parent.AppState.trialDaysLeft || 30;
@@ -1654,29 +1748,29 @@
                         return AppState.isPremium;
                     }
                     
-                    // Try API
-                    const response = await this.fetchWithRetry('/api/user/premium');
+                    // Only fetch if authenticated
+                    if (!AppState.isAuthenticated) {
+                        console.log('[Calls iframe] Not authenticated, using cached premium status');
+                        updatePremiumUI();
+                        return AppState.isPremium;
+                    }
+                    
+                    // Use absolute backend URL
+                    const apiBase = window.parent?.ApiModule?.getApiBaseUrl ? 
+                                   window.parent.ApiModule.getApiBaseUrl() : 
+                                   '/api';
+                    
+                    const response = await this.fetchWithRetry(`${apiBase}/user/premium`);
                     const premiumData = await response.json();
                     
                     AppState.isPremium = premiumData.isPremium || false;
                     AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
                     AppState.premiumFeatures = premiumData.features || AppState.premiumFeatures;
                     
-                    // Cache premium status
-                    try {
-                        localStorage.setItem('premiumStatus', JSON.stringify({
-                            isPremium: AppState.isPremium,
-                            trialDaysLeft: AppState.trialDaysLeft,
-                            features: AppState.premiumFeatures
-                        }));
-                    } catch (error) {
-                        console.warn('[Calls iframe] Failed to cache premium status:', error);
-                    }
-                    
                     updatePremiumUI();
                     return AppState.isPremium;
                 } catch (error) {
-                    console.warn('[Calls iframe] Failed to check premium status:', error.message);
+                    console.log('[Calls iframe] Failed to check premium status:', error.message);
                     
                     // Use cached premium status
                     const cachedPremium = localStorage.getItem('premiumStatus');
@@ -1687,7 +1781,7 @@
                             AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
                             AppState.premiumFeatures = premiumData.features || AppState.premiumFeatures;
                         } catch (e) {
-                            console.warn('[Calls iframe] Failed to parse cached premium status');
+                            console.log('[Calls iframe] Failed to parse cached premium status');
                         }
                     }
                     
@@ -1783,10 +1877,17 @@
                 });
             }
             
-            // Initialize background sync
+            // Initialize background sync - start only once after auth
             initializeBackgroundSync() {
-                // Set up periodic sync if online
-                if (AppState.isOnline) {
+                // Clear any existing interval
+                if (this.backgroundSyncInterval) {
+                    clearInterval(this.backgroundSyncInterval);
+                }
+                
+                // Only start if authenticated and online
+                if (AppState.isAuthenticated && AppState.isOnline) {
+                    console.log('[Calls iframe] Starting background sync');
+                    
                     this.backgroundSyncInterval = setInterval(() => {
                         this.performBackgroundSync();
                     }, 30000); // Sync every 30 seconds
@@ -1794,15 +1895,15 @@
                 
                 // Listen for visibility changes
                 document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden && AppState.isOnline) {
+                    if (!document.hidden && AppState.isOnline && AppState.isAuthenticated) {
                         this.performBackgroundSync();
                     }
                 });
             }
             
-            // Perform background sync
+            // Perform background sync - guarded against duplicates
             async performBackgroundSync() {
-                if (!AppState.isOnline || AppState.isInCall) return;
+                if (!AppState.isOnline || !AppState.isAuthenticated || AppState.isInCall) return;
                 
                 try {
                     await Promise.allSettled([
@@ -1818,7 +1919,7 @@
                     
                     AppState.syncPending = false;
                 } catch (error) {
-                    console.warn('[Calls iframe] Background sync failed:', error.message);
+                    console.log('[Calls iframe] Background sync failed:', error.message);
                     AppState.syncPending = true;
                 }
             }
@@ -1827,13 +1928,14 @@
             cleanup() {
                 if (this.backgroundSyncInterval) {
                     clearInterval(this.backgroundSyncInterval);
+                    this.backgroundSyncInterval = null;
                 }
             }
         }
         
-        // ==================== ENHANCED BOOTSTRAP WITH IMMEDIATE UI RENDERING ====================
+        // ==================== STABILIZED BOOTSTRAP ====================
         async function bootstrapIframe() {
-            console.log('[Calls iframe] Bootstrapping with enhanced API integration...');
+            console.log('[Calls iframe] Bootstrapping with stabilized API integration...');
             
             // Initialize API integration
             window.callAPI = new CallAPIIntegration();
@@ -1841,19 +1943,13 @@
             // Show UI immediately from cached data
             initializeUIFromCache();
             
-            // Start background authentication and data loading
+            // Start background authentication check (non-blocking)
             setTimeout(() => {
-                initializeBackgroundDataLoading();
+                initializeBackgroundAuthCheck();
             }, 100);
-            
-            // Log once for initialization
-            console.log('[Calls iframe] UI loaded. Background auth pending.');
             
             // Initialize app functionality
             initializeApp();
-            
-            // Initialize background sync
-            window.callAPI.initializeBackgroundSync();
             
             // Set up cleanup on page unload
             window.addEventListener('beforeunload', () => {
@@ -1889,46 +1985,54 @@
             checkUrlParameters();
         }
         
-        // Background data loading
-        async function initializeBackgroundDataLoading() {
+        // Background authentication check - non-blocking
+        async function initializeBackgroundAuthCheck() {
             try {
-                // First authenticate
+                // Wait for parent API to be ready
+                await waitForParentAPI();
+                
+                // Check authentication
                 await window.callAPI.fetchUserData();
                 
                 if (AppState.isAuthenticated) {
-                    // Load data in parallel
-                    await Promise.allSettled([
-                        window.callAPI.fetchContacts(),
-                        window.callAPI.fetchCallHistory(),
-                        window.callAPI.fetchSettings(),
-                        window.callAPI.checkPremiumStatus()
-                    ]);
-                    
-                    console.log('[Calls iframe] Background data loading complete');
-                    
-                    // Update sync indicator
-                    if (elements.syncIndicator) {
-                        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
-                        elements.syncIndicator.classList.remove('syncing');
-                    }
-                    
-                    // Schedule incoming call simulation only if we have contacts
-                    setTimeout(() => {
-                        if (AppState.contacts.length > 0) {
-                            simulateIncomingCall();
-                        }
-                    }, 10000);
+                    console.log('[Calls iframe] Authentication confirmed via background check');
                 } else {
-                    console.log('[Calls iframe] Not authenticated, loading cached data only');
-                    showNotification('Not authenticated. Some features may be limited.', 'warning');
+                    console.log('[Calls iframe] Not authenticated - UI remains functional with cached data');
                 }
             } catch (error) {
-                console.error('[Calls iframe] Background data loading error:', error);
+                console.log('[Calls iframe] Background auth check failed:', error.message);
                 // Silent fail - UI already functional
             }
         }
         
-        // Initialize function
+        // Wait for parent API to be ready
+        function waitForParentAPI() {
+            return new Promise((resolve) => {
+                // Check if api.js is already loaded
+                if (window.ApiModule && window.ApiModule.isReady && window.ApiModule.isReady()) {
+                    resolve();
+                    return;
+                }
+                
+                // Wait for parent message
+                const messageHandler = (event) => {
+                    if (event.data && event.data.type === 'API_READY') {
+                        window.removeEventListener('message', messageHandler);
+                        resolve();
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                // Timeout after 5 seconds to prevent blocking
+                setTimeout(() => {
+                    window.removeEventListener('message', messageHandler);
+                    console.log('[Calls iframe] Parent API wait timeout - proceeding with cached data');
+                    resolve();
+                }, 5000);
+            });
+        }
+        
         function initializeApp() {
             console.log('[Calls iframe] Initializing call app...');
         }
@@ -2289,7 +2393,7 @@
             // Validate origin for security
             const allowedOrigins = [window.location.origin, 'http://localhost:*', 'https://yourdomain.com'];
             if (!allowedOrigins.some(origin => event.origin.match(new RegExp(origin.replace('*', '.*'))))) {
-                console.warn('[Calls iframe] Message from unauthorized origin:', event.origin);
+                console.log('[Calls iframe] Message from unauthorized origin:', event.origin);
                 return;
             }
             
@@ -2308,12 +2412,18 @@
                 case 'SYNC_REQUEST':
                     handleSyncRequest();
                     break;
+                case 'API_READY':
+                    handleApiReady();
+                    break;
             }
         }
         
         // Handle authentication update from parent
         function handleAuthUpdate(payload) {
             if (payload.user) {
+                console.log('[Calls iframe] Received auth update from parent');
+                
+                // Update local state (read-only)
                 AppState.user = payload.user;
                 AppState.currentUser = payload.user;
                 AppState.isAuthenticated = true;
@@ -2326,16 +2436,29 @@
                     elements.apiStatusIndicator.style.display = 'none';
                 }, 2000);
                 
-                // Refresh data
-                if (window.callAPI) {
+                // Refresh data through background jobs
+                if (window.callAPI && window.callAPI.authCheckDone) {
                     window.callAPI.performBackgroundSync();
                 }
             }
         }
         
+        // Handle API ready signal from parent
+        function handleApiReady() {
+            console.log('[Calls iframe] Parent API ready signal received');
+            AppState.apiReady = true;
+            
+            // Initialize background auth check if not done yet
+            if (!window.callAPI.authCheckDone) {
+                setTimeout(() => {
+                    window.callAPI.fetchUserData();
+                }, 100);
+            }
+        }
+        
         // Handle data refresh request
         function handleDataRefresh(payload) {
-            if (window.callAPI) {
+            if (window.callAPI && AppState.isAuthenticated) {
                 window.callAPI.performBackgroundSync();
                 showNotification('Refreshing data...', 'info');
             }
@@ -2354,7 +2477,7 @@
         
         // Handle sync request
         function handleSyncRequest() {
-            if (window.callAPI) {
+            if (window.callAPI && AppState.isAuthenticated) {
                 window.callAPI.performBackgroundSync();
             }
         }
@@ -2373,7 +2496,7 @@
                         window.callAPI.renderContacts(contacts);
                     }
                 } catch (e) {
-                    console.warn('[Calls iframe] Failed to parse cached contacts');
+                    console.log('[Calls iframe] Failed to parse cached contacts');
                 }
             }
             
@@ -2385,7 +2508,7 @@
                     AppState.callHistory = calls;
                     renderCallHistory();
                 } catch (e) {
-                    console.warn('[Calls iframe] Failed to parse cached call history');
+                    console.log('[Calls iframe] Failed to parse cached call history');
                 }
             }
             
@@ -2398,7 +2521,7 @@
                     AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
                     updatePremiumUI();
                 } catch (e) {
-                    console.warn('[Calls iframe] Failed to parse premium status');
+                    console.log('[Calls iframe] Failed to parse premium status');
                 }
             }
         }
@@ -2411,7 +2534,7 @@
                         AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
                         applySettingsToUI();
                     } catch (error) {
-                        console.error('[Calls iframe] Error loading settings:', error);
+                        console.log('[Calls iframe] Error loading settings:', error);
                     }
                 }
                 resolve();
@@ -2422,7 +2545,7 @@
             try {
                 localStorage.setItem('callSettings', JSON.stringify(AppState.settings));
             } catch (error) {
-                console.error('[Calls iframe] Error saving settings:', error);
+                console.log('[Calls iframe] Error saving settings:', error);
             }
         }
         
@@ -3967,8 +4090,9 @@
             elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
             elements.syncIndicator.classList.add('syncing');
             
-            if (window.callAPI) {
-                window.callAPI.performBackgroundSync();
+            // Restart background jobs if authenticated
+            if (window.callAPI && AppState.isAuthenticated) {
+                window.callAPI.initializeBackgroundSync();
             }
             
             enableUI();
@@ -4169,34 +4293,27 @@
                 }
             }
             
-            // Handle user data updates from other tabs
+            // Handle user data updates from other tabs (read-only)
             if (event.key === 'authUser' || event.key === 'currentUser') {
                 try {
                     const userData = JSON.parse(event.newValue);
                     if (userData) {
-                        AppState.user = userData;
-                        AppState.currentUser = userData;
-                        
-                        // Update UI
-                        elements.apiStatusIndicator.className = 'api-status-indicator connected';
-                        elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
-                        
-                        setTimeout(() => {
-                            elements.apiStatusIndicator.style.display = 'none';
-                        }, 2000);
+                        // Only update if we don't already have authenticated user
+                        if (!AppState.isAuthenticated) {
+                            AppState.user = userData;
+                            AppState.currentUser = userData;
+                            
+                            // Update UI
+                            elements.apiStatusIndicator.className = 'api-status-indicator connected';
+                            elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
+                            
+                            setTimeout(() => {
+                                elements.apiStatusIndicator.style.display = 'none';
+                            }, 2000);
+                        }
                     }
                 } catch (error) {
-                    console.warn('[Calls iframe] Error parsing user data update:', error);
-                }
-            }
-            
-            // Handle token updates
-            if (event.key === 'accessToken' || event.key === 'moodchat_token' || event.key === 'token') {
-                // Token was updated, we might need to refresh data
-                if (AppState.isOnline && window.callAPI) {
-                    setTimeout(() => {
-                        window.callAPI.performBackgroundSync();
-                    }, 1000);
+                    console.log('[Calls iframe] Error parsing user data update:', error);
                 }
             }
         }
@@ -4273,21 +4390,14 @@
                 return {
                     isAuthenticated: AppState.isAuthenticated,
                     apiReady: AppState.apiReady,
-                    user: AppState.user,
-                    tokens: {
-                        accessToken: localStorage.getItem('accessToken') ? 'Available' : 'Missing',
-                        refreshToken: localStorage.getItem('refreshToken') ? 'Available' : 'Missing',
-                        moodchat_token: localStorage.getItem('moodchat_token') ? 'Available' : 'Missing',
-                        token: localStorage.getItem('token') ? 'Available' : 'Missing',
-                        authUser: localStorage.getItem('authUser') ? 'Available' : 'Missing'
-                    }
+                    user: AppState.user
                 };
             },
             // Expose bootstrap for testing
             bootstrapIframe,
             // Expose API integration for parent window
             refreshData: () => {
-                if (window.callAPI) {
+                if (window.callAPI && AppState.isAuthenticated) {
                     return window.callAPI.performBackgroundSync();
                 }
                 return Promise.resolve();

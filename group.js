@@ -202,25 +202,20 @@ const LOCAL_STORAGE_KEYS = {
     GROUP_NOTES: 'knecta_group_notes_',
     GROUP_EVENTS: 'knecta_group_events_',
     GROUP_TRANSPARENCY: 'knecta_group_transparency_',
-    USER_PARTICIPATION_MODES: 'knecta_user_participation_modes',
-    ACCESS_TOKEN: 'knecta_access_token',
-    REFRESH_TOKEN: 'knecta_refresh_token'
+    USER_PARTICIPATION_MODES: 'knecta_user_participation_modes'
 };
 
 // Flag to track if page is already initialized
 let isPageInitialized = false;
 
-// Token management variables
-let accessToken = null;
-let refreshToken = null;
-let isTokenValid = false;
-
-// Authentication wait state
+// Authentication and sync control variables
 let authReady = false;
-let authCheckInterval = null;
+let authCheckComplete = false;
+let backgroundSyncRunning = false;
+let syncIntervalId = null;
 
 // =============================================
-// AUTHENTICATION & TOKEN MANAGEMENT
+// AUTHENTICATION & TOKEN MANAGEMENT - STABILIZED
 // =============================================
 
 /**
@@ -318,11 +313,16 @@ function getCurrentUser() {
 }
 
 /**
- * Wait for authentication to be ready (non-blocking)
+ * Wait for authentication to be ready (non-blocking, single attempt)
  * @returns {Promise<boolean>} True if auth is ready, false otherwise
  */
 function waitForAuth() {
     return new Promise((resolve) => {
+        if (authCheckComplete) {
+            resolve(authReady);
+            return;
+        }
+
         console.log('[Groups iframe] Waiting for authentication...');
         
         // Check immediately if we already have a token
@@ -330,6 +330,7 @@ function waitForAuth() {
         if (token) {
             console.log('[Groups iframe] Token found immediately');
             authReady = true;
+            authCheckComplete = true;
             resolve(true);
             return;
         }
@@ -339,6 +340,7 @@ function waitForAuth() {
         if (user) {
             console.log('[Groups iframe] User data found immediately');
             authReady = true;
+            authCheckComplete = true;
             resolve(true);
             return;
         }
@@ -346,15 +348,20 @@ function waitForAuth() {
         // If we don't have auth, we'll proceed with cached data anyway
         console.log('[Groups iframe] No auth found, will use cached data');
         authReady = false;
+        authCheckComplete = true;
         resolve(false);
     });
 }
 
 /**
- * Validate token with server in background
+ * Validate token with server in background (single attempt)
  * @returns {Promise<boolean>} True if token is valid, false otherwise
  */
 async function validateAuthInBackground() {
+    if (authCheckComplete && !authReady) {
+        return false;
+    }
+
     try {
         const token = getValidToken();
         if (!token) {
@@ -390,7 +397,7 @@ async function validateAuthInBackground() {
             }
         }
         
-        // Fallback direct fetch
+        // Fallback direct fetch with absolute URL
         const response = await fetch('/api/auth/me', {
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -431,19 +438,19 @@ async function validateAuthInBackground() {
 }
 
 // =============================================
-// API CALL FUNCTION - OPTIMIZED FOR IFRAME
+// API CALL FUNCTION - STABILIZED FOR IFRAME
 // =============================================
 
 /**
  * Make API call with token handling and error management
  * @param {string} method - HTTP method (GET, POST, PUT, DELETE)
- * @param {string} endpoint - API endpoint
+ * @param {string} endpoint - API endpoint (absolute or relative)
  * @param {Object|null} data - Request body data
  * @param {Object} options - Additional options
  * @returns {Promise<Object>} API response object
  */
 async function callApi(method, endpoint, data = null, options = {}) {
-    // Get token from multiple sources
+    // Check if we have a valid token
     const token = getValidToken();
     
     if (!token && endpoint !== '/api/auth/me') {
@@ -451,7 +458,7 @@ async function callApi(method, endpoint, data = null, options = {}) {
         return { success: false, error: 'No authentication token', isOffline: true };
     }
     
-    // Use api.js if available
+    // Use api.js if available (preferred)
     if (window.api && typeof window.api.callApi === 'function') {
         try {
             return await window.api.callApi(method, endpoint, data, {
@@ -468,9 +475,12 @@ async function callApi(method, endpoint, data = null, options = {}) {
         }
     }
     
-    // Fallback to direct fetch
+    // Fallback to direct fetch with absolute URL
     try {
-        const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+        // Ensure endpoint is absolute
+        const url = endpoint.startsWith('http') ? endpoint : 
+                   endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+        
         const headers = {
             'Content-Type': 'application/json'
         };
@@ -491,9 +501,16 @@ async function callApi(method, endpoint, data = null, options = {}) {
         
         const response = await fetch(url, fetchOptions);
         
-        // Handle 401 Unauthorized
+        // Handle 401 Unauthorized - notify parent only once
         if (response.status === 401) {
-            console.log('[Groups iframe] Token expired or invalid');
+            console.log('[Groups iframe] Token expired or invalid - notifying parent');
+            if (window.parent && window.parent.authExpired) {
+                try {
+                    window.parent.authExpired();
+                } catch (e) {
+                    console.log('[Groups iframe] Cannot notify parent:', e.message);
+                }
+            }
             return { 
                 success: false, 
                 error: 'Authentication failed',
@@ -537,7 +554,10 @@ async function callApi(method, endpoint, data = null, options = {}) {
  */
 async function safeApiCall(method, endpoint, data = null) {
     try {
-        const apiEndpoint = endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`;
+        // Use absolute URL for API calls
+        const apiEndpoint = endpoint.startsWith('http') ? endpoint : 
+                           endpoint.startsWith('/api/') ? endpoint : 
+                           `/api/${endpoint}`;
         return await callApi(method, apiEndpoint, data);
     } catch (error) {
         console.log('[Groups iframe] Safe API call error:', error.message);
@@ -546,7 +566,7 @@ async function safeApiCall(method, endpoint, data = null) {
 }
 
 // =============================================
-// MAIN INITIALIZATION - OPTIMIZED FOR IFRAME
+// MAIN INITIALIZATION - STABILIZED FOR IFRAME
 // =============================================
 
 /**
@@ -568,15 +588,12 @@ async function initGroupPage() {
     // Set up event listeners immediately
     console.log('[Groups iframe] Setting up event listeners...');
     setupEventListeners();
-    if (typeof setupGroupInvitesListener === 'function') {
-        setupGroupInvitesListener();
-    }
     
     // Check mobile
     checkMobile();
     window.addEventListener('resize', checkMobile);
     
-    // BACKGROUND AUTHENTICATION (non-blocking)
+    // BACKGROUND AUTHENTICATION (non-blocking, single attempt)
     setTimeout(async () => {
         try {
             await waitForAuth();
@@ -584,7 +601,7 @@ async function initGroupPage() {
             if (authReady) {
                 console.log('[Groups iframe] Authentication ready, validating in background...');
                 
-                // Validate auth in background
+                // Validate auth in background (single attempt)
                 const isValid = await validateAuthInBackground();
                 
                 if (isValid) {
@@ -592,23 +609,11 @@ async function initGroupPage() {
                     
                     // Start full app initialization in background
                     setTimeout(async () => {
-                        if (typeof initializeApp === 'function') {
-                            await initializeApp();
-                        }
+                        await initializeApp();
                         
-                        // Start background sync
-                        setTimeout(() => {
-                            backgroundSyncWithServer();
-                        }, 2000);
+                        // Start controlled background sync
+                        startBackgroundSync();
                         
-                        // Set up periodic sync
-                        setInterval(() => {
-                            backgroundSyncWithServer();
-                        }, 30000);
-                        
-                        if (typeof processPendingOfflineActions === 'function') {
-                            processPendingOfflineActions();
-                        }
                     }, 500);
                 }
             }
@@ -620,6 +625,59 @@ async function initGroupPage() {
     }, 100);
     
     console.log('[Groups iframe] UI ready with cached data');
+}
+
+/**
+ * Start controlled background sync (runs once per lifecycle)
+ */
+function startBackgroundSync() {
+    if (backgroundSyncRunning) {
+        console.log('[Groups iframe] Background sync already running');
+        return;
+    }
+    
+    if (!authReady) {
+        console.log('[Groups iframe] Background sync skipped - auth not ready');
+        return;
+    }
+    
+    backgroundSyncRunning = true;
+    console.log('[Groups iframe] Starting controlled background sync');
+    
+    // Initial sync
+    setTimeout(() => {
+        backgroundSyncWithServer();
+    }, 2000);
+    
+    // Set up periodic sync with cleanup
+    syncIntervalId = setInterval(() => {
+        if (authReady) {
+            backgroundSyncWithServer();
+        } else {
+            console.log('[Groups iframe] Background sync paused - auth not ready');
+            // Clear interval if auth is lost
+            clearInterval(syncIntervalId);
+            syncIntervalId = null;
+            backgroundSyncRunning = false;
+        }
+    }, 30000);
+    
+    // Process pending actions
+    if (typeof processPendingOfflineActions === 'function') {
+        processPendingOfflineActions();
+    }
+}
+
+/**
+ * Stop background sync when auth is lost
+ */
+function stopBackgroundSync() {
+    if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+        syncIntervalId = null;
+    }
+    backgroundSyncRunning = false;
+    console.log('[Groups iframe] Background sync stopped');
 }
 
 /**
@@ -896,8 +954,8 @@ async function loadFriends() {
  * Background sync with server for groups data
  */
 async function backgroundSyncWithServer() {
-    if (!currentUser) {
-        console.log('[Groups iframe] Background sync: Skipping - no user');
+    if (!currentUser || !authReady) {
+        console.log('[Groups iframe] Background sync: Skipping - no user or auth not ready');
         return;
     }
     
@@ -920,7 +978,7 @@ async function backgroundSyncWithServer() {
  * Sync unique features data from server
  */
 async function syncUniqueFeaturesData() {
-    if (!currentUser) return;
+    if (!currentUser || !authReady) return;
     
     try {
         const purposesResponse = await safeApiCall('get', 'groups/purposes');
@@ -956,7 +1014,7 @@ async function syncUniqueFeaturesData() {
  * Sync groups from server with cache fallback
  */
 async function syncGroupsFromServer() {
-    if (!currentUser) return;
+    if (!currentUser || !authReady) return;
     
     try {
         const response = await safeApiCall('get', 'groups/user');
@@ -1029,7 +1087,7 @@ async function syncGroupsFromServer() {
  * Sync group invites from server
  */
 async function syncGroupInvitesFromServer() {
-    if (!currentUser) return;
+    if (!currentUser || !authReady) return;
     
     try {
         const response = await safeApiCall('get', 'groups/invites');
@@ -5020,9 +5078,7 @@ function setupEventListeners() {
  * Setup group invites listener (for real-time updates)
  */
 function setupGroupInvitesListener() {
-    if (!currentUser) return;
-    
-    // Already handled by background sync interval
+    // Background sync already handles this
 }
 
 /**

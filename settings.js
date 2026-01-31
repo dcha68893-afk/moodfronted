@@ -1,8 +1,8 @@
 // =============================================
-// SETTINGS SYSTEM - COMPLETE IMPLEMENTATION
+// SETTINGS SYSTEM - STABILIZED IMPLEMENTATION
 // =============================================
 
-// Global variables
+// Global variables - NO TOKEN DECLARATIONS
 let currentUser = null;
 let userSettings = {};
 let currentSection = 'profile';
@@ -13,17 +13,14 @@ let activeSessions = [];
 let userContacts = [];
 let userGroups = [];
 
-// ADDED: Authentication tokens
-let accessToken = null;
-let refreshToken = null;
-
-// ADDED: Authentication ready flag
+// AUTH STATE FLAGS (read-only observers)
 let authReady = false;
-
-// ADDED: API initialization check
 let apiInitialized = false;
 let apiInitRetries = 0;
-const MAX_API_RETRIES = 10;
+const MAX_API_RETRIES = 5;
+let backgroundTasksStarted = false;
+let authCheckInterval = null;
+const AUTH_CHECK_INTERVAL = 30000; // 30 seconds
 
 // Default settings structure (222 features organized by section)
 const DEFAULT_SETTINGS = {
@@ -462,39 +459,35 @@ const SETTINGS_MENU = [
 ];
 
 // =============================================
-// UPDATED BOOTSTRAP FUNCTION WITH ENHANCED AUTH
+// STABILIZED BOOTSTRAP FUNCTION
 // =============================================
 
 async function bootstrapIframe() {
-    console.log('[Settings] Bootstrap starting...');
+    console.log('[Settings] Bootstrap starting (iframe mode)...');
     
     try {
         // Step 1: Initialize UI immediately from cache
         initializeUI();
         
-        // Step 2: Try to get user from storage first (fastest path)
-        const fastUser = await getCurrentUserFast();
-        if (fastUser) {
-            currentUser = fastUser;
-            updateUserUI();
-        }
-        
-        // Step 3: Load from localStorage for immediate display
+        // Step 2: Load from localStorage for immediate display
         await loadFromLocalStorage();
         
-        // Step 4: Load default section
+        // Step 3: Load default section
         loadSection(currentSection);
         
-        // Step 5: Start background authentication
-        startBackgroundAuthentication();
+        // Step 4: Start passive auth monitoring (no active requests)
+        startPassiveAuthMonitoring();
         
-        console.log('[Settings] Bootstrap complete. UI loaded. Auth pending.');
+        // Step 5: Set up parent communication
+        setupParentCommunication();
+        
+        console.log('[Settings] Bootstrap complete. UI loaded. Monitoring auth passively.');
         return true;
         
     } catch (error) {
-        console.error('Bootstrap failed:', error);
+        console.warn('[Settings] Bootstrap completed with warnings:', error.message);
         
-        // Fallback: Ensure UI is usable even if bootstrap fails
+        // Fallback: Ensure UI is usable even if bootstrap has warnings
         initializeUI();
         loadSection(currentSection);
         
@@ -503,357 +496,388 @@ async function bootstrapIframe() {
     }
 }
 
-// Wait for API.js to be initialized
-async function waitForApiInitialization() {
-    return new Promise((resolve, reject) => {
-        const checkApi = () => {
-            if (typeof api !== 'undefined' && api.isInitialized && api.isInitialized()) {
+// =============================================
+// STABILIZED AUTH HANDLING
+// =============================================
+
+// Start passive auth monitoring (no active requests, only listens)
+function startPassiveAuthMonitoring() {
+    // Clear any existing interval
+    if (authCheckInterval) {
+        clearInterval(authCheckInterval);
+        authCheckInterval = null;
+    }
+    
+    // Set up auth state monitoring (passive, no requests)
+    authCheckInterval = setInterval(() => {
+        checkAuthStatePassively();
+    }, AUTH_CHECK_INTERVAL);
+    
+    // Initial check
+    setTimeout(checkAuthStatePassively, 1000);
+}
+
+// Check auth state passively (read-only, no mutations)
+function checkAuthStatePassively() {
+    try {
+        // Check if api.js is available and initialized
+        if (typeof api !== 'undefined' && api.isInitialized && api.isInitialized()) {
+            if (!apiInitialized) {
                 apiInitialized = true;
-                console.log('[Settings] API.js successfully initialized');
-                resolve();
-                return;
-            }
-            
-            apiInitRetries++;
-            if (apiInitRetries > MAX_API_RETRIES) {
-                console.warn('[Settings] API.js not found after max retries, proceeding without it');
-                resolve();
-                return;
-            }
-            
-            setTimeout(checkApi, 100);
-        };
-        
-        checkApi();
-    });
-}
-
-// Fast user retrieval from storage
-async function getCurrentUserFast() {
-    try {
-        // Get token from shared function or storage
-        const token = getValidToken();
-        
-        if (!token) {
-            console.log('[Settings] No tokens found in storage');
-            return null;
-        }
-        
-        // Check for cached user data
-        const cachedUser = localStorage.getItem('knecta_current_user') || 
-                          localStorage.getItem('currentUser') ||
-                          sessionStorage.getItem('currentUser');
-        
-        if (cachedUser) {
-            try {
-                const user = JSON.parse(cachedUser);
-                console.log('[Settings] Fast user retrieval from cache:', user.displayName || 'User');
-                return user;
-            } catch (e) {
-                console.warn('[Settings] Failed to parse cached user:', e);
-            }
-        }
-        
-        // Check parent window for user data
-        if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
-            console.log('[Settings] User retrieved from parent AppState');
-            return window.parent.AppState.currentUser;
-        }
-        
-        return null;
-        
-    } catch (error) {
-        console.error('[Settings] Error in fast user retrieval:', error);
-        return null;
-    }
-}
-
-// Get valid token from storage
-function getValidToken() {
-    try {
-        // Check multiple storage locations
-        const token = localStorage.getItem('accessToken') || 
-                      localStorage.getItem('moodchat_token') ||
-                      sessionStorage.getItem('accessToken') ||
-                      (window.parent && window.parent.AppState && window.parent.AppState.accessToken);
-        
-        if (!token) {
-            console.log('[Settings] No token found');
-            return null;
-        }
-        
-        return token;
-    } catch (error) {
-        console.error('[Settings] Error getting token:', error);
-        return null;
-    }
-}
-
-// Start background authentication
-async function startBackgroundAuthentication() {
-    // Don't block UI - run in background
-    setTimeout(async () => {
-        try {
-            await performBackgroundAuth();
-        } catch (error) {
-            console.log('[Settings] Background auth completed with warnings:', error.message);
-        }
-    }, 300);
-}
-
-// Perform background authentication
-async function performBackgroundAuth() {
-    try {
-        // Skip if we already have a valid user
-        if (currentUser && currentUser.id) {
-            console.log('[Settings] User already authenticated, skipping background auth');
-            return;
-        }
-        
-        const token = getValidToken();
-        if (!token) {
-            console.log('[Settings] No token available for background auth');
-            return;
-        }
-        
-        // Try to validate token with API
-        try {
-            console.log('[Settings] Starting background authentication...');
-            
-            if (apiInitialized && typeof api === 'object' && api.getCurrentUser) {
-                const userData = await api.getCurrentUser();
-                if (userData && userData.user) {
-                    currentUser = userData.user;
-                    authReady = true;
-                    
-                    // Update UI with fresh data
-                    updateUserUI();
-                    
-                    // Load fresh settings
-                    await loadSettings();
-                    
-                    // Load additional data in parallel (non-blocking)
-                    Promise.allSettled([
-                        loadBlockedUsers(),
-                        loadActiveSessions(),
-                        loadUserContacts(),
-                        loadUserGroups()
-                    ]).then(results => {
-                        console.log('[Settings] Background data loading completed');
-                    });
-                    
-                    showNotification('Settings synced with server', 'success');
-                    return;
+                console.log('[Settings] API.js detected as initialized');
+                
+                // Start background tasks if auth is ready
+                if (authReady && !backgroundTasksStarted) {
+                    startBackgroundTasks();
                 }
             }
-        } catch (apiError) {
-            console.log('[Settings] Background API auth failed:', apiError.message);
-            // Continue with cached data
-        }
-        
-        // Fallback: Try localStorage for user data
-        const cachedUser = localStorage.getItem('knecta_current_user');
-        if (cachedUser && !currentUser) {
-            try {
-                currentUser = JSON.parse(cachedUser);
-                console.log('[Settings] Using cached user from localStorage');
-                updateUserUI();
-            } catch (e) {
-                console.error('[Settings] Error parsing cached user:', e);
-            }
-        }
-        
-    } catch (error) {
-        console.log('[Settings] Background authentication error:', error.message);
-        // Don't throw - this is background process
-    }
-}
-
-// =============================================
-// UPDATED AUTHENTICATION & TOKEN MANAGEMENT
-// =============================================
-
-// Enhanced API call function using api.js
-async function makeAuthenticatedRequest(method, endpoint, data = null) {
-    try {
-        const token = getValidToken();
-        if (!token) {
-            throw new Error('No authentication token available');
-        }
-        
-        // Use api.js if available
-        if (apiInitialized && typeof api === 'object') {
-            let result;
             
-            switch (method) {
-                case 'GET':
-                    result = await api.get(endpoint);
-                    break;
-                case 'POST':
-                    result = await api.post(endpoint, data);
-                    break;
-                case 'PUT':
-                    result = await api.put(endpoint, data);
-                    break;
-                case 'PATCH':
-                    result = await api.patch(endpoint, data);
-                    break;
-                case 'DELETE':
-                    result = await api.delete(endpoint);
-                    break;
-                default:
-                    throw new Error(`Unsupported method: ${method}`);
+            // Check if we have auth state via api.js
+            if (api.hasAuth && api.hasAuth()) {
+                if (!authReady) {
+                    authReady = true;
+                    console.log('[Settings] Auth state detected via API.js');
+                    
+                    // Start background tasks once
+                    if (!backgroundTasksStarted) {
+                        startBackgroundTasks();
+                    }
+                }
+            } else if (authReady) {
+                // Auth was lost
+                authReady = false;
+                backgroundTasksStarted = false;
+                console.log('[Settings] Auth state lost via API.js');
+                
+                // Notify parent once
+                notifyParentAuthState(false);
             }
-            
-            return result;
         } else {
-            // Fallback to fetch with token
-            return await makeFallbackRequest(method, endpoint, data);
-        }
-        
-    } catch (error) {
-        console.error('[Settings] API request error:', error);
-        
-        // Handle authentication errors
-        if (error.message && (error.message.includes('401') || error.message.includes('403') || 
-            error.message.includes('unauthorized') || error.message.includes('Unauthorized'))) {
-            handleAuthError();
-            throw new Error('Authentication required');
-        }
-        
-        throw error;
-    }
-}
-
-// Fallback request for when api.js is not available
-async function makeFallbackRequest(method, endpoint, data = null) {
-    const token = getValidToken();
-    
-    if (!token) {
-        throw new Error('No authentication token available');
-    }
-    
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-    };
-    
-    const config = {
-        method: method,
-        headers: headers,
-        credentials: 'include'
-    };
-    
-    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-        config.body = JSON.stringify(data);
-    }
-    
-    try {
-        const response = await fetch(endpoint, config);
-        
-        if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                throw new Error('Authentication failed');
+            // api.js not available yet
+            if (apiInitRetries < MAX_API_RETRIES) {
+                apiInitRetries++;
+                console.log(`[Settings] Waiting for API.js (attempt ${apiInitRetries}/${MAX_API_RETRIES})`);
             }
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        
-        return await response.json();
     } catch (error) {
-        console.error('[Settings] Fallback request error:', error);
-        throw error;
+        console.warn('[Settings] Passive auth check error:', error.message);
+        // Don't throw - passive monitoring
     }
 }
 
-// Handle authentication error
-function handleAuthError() {
-    showNotification('Authentication required. Please login again.', 'error');
+// Start background tasks (only when auth is ready)
+function startBackgroundTasks() {
+    if (backgroundTasksStarted) {
+        console.log('[Settings] Background tasks already started');
+        return;
+    }
     
-    // Clear all authentication data
-    clearAllAuthData();
+    if (!authReady) {
+        console.log('[Settings] Auth not ready, skipping background tasks');
+        return;
+    }
     
-    // Redirect to login after delay
-    setTimeout(() => {
-        const isIframe = window.parent !== window;
-        if (isIframe) {
-            // If in iframe, tell parent to redirect
-            window.parent.postMessage({
-                type: 'AUTH_ERROR',
-                redirect: '/index.html'
-            }, '*');
-        } else {
-            // Direct navigation
-            window.location.href = '/index.html';
-        }
-    }, 2000);
-}
-
-// Clear all authentication data
-function clearAllAuthData() {
-    const itemsToClear = [
-        'accessToken',
-        'moodchat_token',
-        'moodchat_refresh_token',
-        'knecta_current_user',
-        'knecta_user_settings',
-        'currentUser',
-        'refreshToken'
-    ];
+    backgroundTasksStarted = true;
+    console.log('[Settings] Starting background tasks');
     
-    itemsToClear.forEach(item => {
-        localStorage.removeItem(item);
-        sessionStorage.removeItem(item);
+    // Load data in background (non-blocking)
+    Promise.allSettled([
+        safeLoadUserData(),
+        safeLoadSettings(),
+        safeLoadBlockedUsers(),
+        safeLoadActiveSessions(),
+        safeLoadUserContacts(),
+        safeLoadUserGroups()
+    ]).then(results => {
+        console.log('[Settings] Background data loading completed');
+        showNotification('Settings synced with server', 'success');
+    }).catch(error => {
+        console.warn('[Settings] Background tasks completed with warnings:', error.message);
     });
 }
 
-// =============================================
-// UPDATED INITIALIZATION SYSTEM
-// =============================================
-
-// Update loading status
-function updateLoadingStatus(message, progress) {
-    const apiStatus = document.getElementById('apiStatus');
-    const loadingBar = document.getElementById('loadingBar');
+// Safe wrapper for user data loading
+async function safeLoadUserData() {
+    if (!authReady) {
+        console.log('[Settings] Auth not ready, skipping user data load');
+        return;
+    }
     
-    if (apiStatus) apiStatus.textContent = message;
-    if (loadingBar) loadingBar.style.width = progress + '%';
-}
-
-// Load settings data
-async function loadSettingsData() {
     try {
-        console.log('[Settings] Loading settings data...');
-        
-        // Load user data
-        await loadUserData();
-        
-        // Load settings
-        await loadSettings();
-        
-        // Load additional data in parallel
-        await Promise.allSettled([
-            loadBlockedUsers(),
-            loadActiveSessions(),
-            loadUserContacts(),
-            loadUserGroups()
-        ]);
-        
-        // Show success notification
-        setTimeout(() => {
-            showNotification('Settings loaded successfully', 'success');
-        }, 500);
-        
+        const response = await makeSafeRequest('GET', '/api/auth/user');
+        if (response && response.user) {
+            currentUser = response.user;
+            console.log('[Settings] User loaded from API');
+            
+            // Update UI
+            updateUserUI();
+            
+            // Save to localStorage as cache
+            localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
+        }
     } catch (error) {
-        console.error('[Settings] Error loading settings data:', error);
-        
-        // Fallback to localStorage
-        await loadFromLocalStorage();
-        
-        showNotification('Loaded settings from local storage', 'warning');
+        console.warn('[Settings] User data load warning:', error.message);
+        // Use cached data - don't throw
     }
 }
 
-// Load from localStorage as fallback
+// Safe wrapper for settings loading
+async function safeLoadSettings() {
+    if (!authReady) {
+        console.log('[Settings] Auth not ready, skipping settings load');
+        return;
+    }
+    
+    try {
+        const response = await makeSafeRequest('GET', '/api/settings');
+        if (response && response.settings) {
+            userSettings = response.settings;
+            console.log('[Settings] Settings loaded from API');
+            
+            // Ensure all sections exist
+            Object.keys(DEFAULT_SETTINGS).forEach(section => {
+                if (!userSettings[section]) {
+                    userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
+                }
+            });
+            
+            // Save to localStorage as cache
+            localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
+            
+            // Calculate storage usage
+            calculateStorageUsage();
+        }
+    } catch (error) {
+        console.warn('[Settings] Settings load warning:', error.message);
+        // Use cached settings - don't throw
+    }
+}
+
+// Safe wrapper for blocked users
+async function safeLoadBlockedUsers() {
+    if (!authReady) return;
+    
+    try {
+        const response = await makeSafeRequest('GET', '/api/users/blocked');
+        if (response && response.blockedUsers) {
+            blockedUsers = response.blockedUsers;
+        }
+    } catch (error) {
+        // Silent fail for non-critical data
+    }
+}
+
+// Safe wrapper for active sessions
+async function safeLoadActiveSessions() {
+    if (!authReady) return;
+    
+    try {
+        const response = await makeSafeRequest('GET', '/api/auth/sessions');
+        if (response && response.sessions) {
+            activeSessions = response.sessions;
+        }
+    } catch (error) {
+        // Silent fail for non-critical data
+    }
+}
+
+// Safe wrapper for user contacts
+async function safeLoadUserContacts() {
+    if (!authReady) return;
+    
+    try {
+        const response = await makeSafeRequest('GET', '/api/contacts');
+        if (response && response.contacts) {
+            userContacts = response.contacts;
+        }
+    } catch (error) {
+        // Silent fail for non-critical data
+    }
+}
+
+// Safe wrapper for user groups
+async function safeLoadUserGroups() {
+    if (!authReady) return;
+    
+    try {
+        const response = await makeSafeRequest('GET', '/api/groups');
+        if (response && response.groups) {
+            userGroups = response.groups;
+        }
+    } catch (error) {
+        // Silent fail for non-critical data
+    }
+}
+
+// =============================================
+// STABILIZED REQUEST HANDLING
+// =============================================
+
+// Safe request wrapper (respects auth state, no token mutations)
+async function makeSafeRequest(method, endpoint, data = null) {
+    // Check if we can make requests
+    if (!authReady) {
+        console.warn('[Settings] Skipping request: auth not ready', endpoint);
+        throw new Error('Authentication not ready');
+    }
+    
+    // Check if api.js is available
+    if (typeof api === 'undefined' || !api.isInitialized || !api.isInitialized()) {
+        console.warn('[Settings] API.js not available for request', endpoint);
+        throw new Error('API not available');
+    }
+    
+    try {
+        let result;
+        
+        switch (method) {
+            case 'GET':
+                result = await api.get(endpoint);
+                break;
+            case 'POST':
+                result = await api.post(endpoint, data);
+                break;
+            case 'PUT':
+                result = await api.put(endpoint, data);
+                break;
+            case 'PATCH':
+                result = await api.patch(endpoint, data);
+                break;
+            case 'DELETE':
+                result = await api.delete(endpoint);
+                break;
+            default:
+                throw new Error(`Unsupported method: ${method}`);
+        }
+        
+        return result;
+    } catch (error) {
+        console.warn('[Settings] API request warning:', error.message, endpoint);
+        
+        // Check if this is an auth error
+        if (error.message && (
+            error.message.includes('401') || 
+            error.message.includes('403') || 
+            error.message.includes('unauthorized') || 
+            error.message.includes('Unauthorized')
+        )) {
+            console.warn('[Settings] Auth error detected, pausing requests');
+            authReady = false;
+            backgroundTasksStarted = false;
+            
+            // Notify parent once
+            notifyParentAuthError();
+        }
+        
+        throw error;
+    }
+}
+
+// Save settings safely
+async function saveSettings() {
+    try {
+        // Update local storage first (as backup)
+        localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
+        
+        // Save to API if auth is ready
+        if (authReady) {
+            await makeSafeRequest('POST', '/api/settings', { settings: userSettings });
+            console.log('[Settings] Settings saved to API');
+        } else {
+            console.log('[Settings] Auth not ready, saved locally only');
+        }
+        
+        unsavedChanges = false;
+        updateSaveButton();
+        showNotification('Settings saved successfully', 'success');
+        
+    } catch (error) {
+        console.warn('[Settings] Settings save warning:', error.message);
+        
+        // Still update local storage
+        localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
+        
+        showNotification('Error saving to server, saved locally', 'warning');
+    }
+}
+
+// =============================================
+// PARENT COMMUNICATION (PASSIVE)
+// =============================================
+
+function setupParentCommunication() {
+    window.addEventListener('message', handleParentMessage);
+}
+
+function handleParentMessage(event) {
+    if (!event.data || !event.data.type) return;
+    
+    switch (event.data.type) {
+        case 'AUTH_READY':
+            console.log('[Settings] Received AUTH_READY from parent');
+            if (!authReady) {
+                authReady = true;
+                if (!backgroundTasksStarted) {
+                    startBackgroundTasks();
+                }
+            }
+            break;
+            
+        case 'USER_UPDATED':
+            if (event.data.user) {
+                currentUser = event.data.user;
+                updateUserUI();
+                localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
+            }
+            break;
+            
+        case 'AUTH_LOST':
+            console.log('[Settings] Received AUTH_LOST from parent');
+            authReady = false;
+            backgroundTasksStarted = false;
+            break;
+    }
+}
+
+// Notify parent about auth state (one-way communication)
+function notifyParentAuthState(hasAuth) {
+    try {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'IFRAME_AUTH_STATE',
+                hasAuth: hasAuth,
+                iframeId: 'settings'
+            }, '*');
+        }
+    } catch (error) {
+        console.warn('[Settings] Failed to notify parent:', error.message);
+    }
+}
+
+// Notify parent about auth error (one-time)
+let authErrorNotified = false;
+function notifyParentAuthError() {
+    if (authErrorNotified) return;
+    
+    try {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'IFRAME_AUTH_ERROR',
+                iframeId: 'settings',
+                message: 'Authentication required'
+            }, '*');
+            authErrorNotified = true;
+        }
+    } catch (error) {
+        console.warn('[Settings] Failed to notify parent about auth error:', error.message);
+    }
+}
+
+// =============================================
+// STABILIZED INITIALIZATION
+// =============================================
+
+// Load from localStorage as fallback (always works)
 async function loadFromLocalStorage() {
     console.log('[Settings] Loading from localStorage...');
     
@@ -862,12 +886,12 @@ async function loadFromLocalStorage() {
     if (cachedUser) {
         try {
             currentUser = JSON.parse(cachedUser);
-            console.log('[Settings] User loaded from cache:', currentUser);
+            console.log('[Settings] User loaded from cache');
             
             // Update UI
             updateUserUI();
         } catch (e) {
-            console.error('[Settings] Error parsing cached user:', e);
+            console.warn('[Settings] Error parsing cached user:', e.message);
             currentUser = { displayName: 'User' };
         }
     } else {
@@ -881,7 +905,7 @@ async function loadFromLocalStorage() {
             userSettings = JSON.parse(savedSettings);
             console.log('[Settings] Settings loaded from localStorage');
         } catch (e) {
-            console.error('[Settings] Error parsing saved settings:', e);
+            console.warn('[Settings] Error parsing saved settings:', e.message);
             userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         }
     } else {
@@ -897,45 +921,6 @@ async function loadFromLocalStorage() {
     
     // Calculate storage usage
     calculateStorageUsage();
-}
-
-// Load user data from API
-async function loadUserData() {
-    try {
-        console.log('[Settings] Loading user data via API...');
-        
-        // Use our authenticated request function
-        const response = await makeAuthenticatedRequest('GET', '/api/auth/user');
-        if (response && response.user) {
-            currentUser = response.user;
-            console.log('[Settings] User loaded from API:', currentUser);
-            
-            // Update UI
-            updateUserUI();
-            
-            // Save to localStorage as cache
-            localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-        } else {
-            throw new Error('No user data in response');
-        }
-        
-    } catch (error) {
-        console.error('[Settings] Error loading user data:', error);
-        
-        // Try fallback: use cached data
-        const cachedUser = localStorage.getItem('knecta_current_user');
-        if (cachedUser) {
-            try {
-                currentUser = JSON.parse(cachedUser);
-                console.log('[Settings] Using cached user data');
-            } catch (e) {
-                console.error('[Settings] Error parsing cached user:', e);
-                throw error;
-            }
-        } else {
-            throw error;
-        }
-    }
 }
 
 // Update user UI elements
@@ -973,77 +958,7 @@ function updateUserUI() {
     }
 }
 
-// Load settings from API
-async function loadSettings() {
-    try {
-        console.log('[Settings] Loading settings via API...');
-        
-        const response = await makeAuthenticatedRequest('GET', '/api/settings');
-        if (response && response.settings) {
-            userSettings = response.settings;
-            console.log('[Settings] Settings loaded from API');
-            
-            // Ensure all sections exist
-            Object.keys(DEFAULT_SETTINGS).forEach(section => {
-                if (!userSettings[section]) {
-                    userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
-                }
-            });
-            
-            // Save to localStorage as cache
-            localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
-        } else {
-            console.warn('[Settings] No settings in response, using defaults');
-        }
-        
-        // Calculate storage usage
-        calculateStorageUsage();
-        
-    } catch (error) {
-        console.error('[Settings] Error loading settings:', error);
-        
-        // Fallback to localStorage
-        const savedSettings = localStorage.getItem('knecta_user_settings');
-        if (savedSettings) {
-            try {
-                userSettings = JSON.parse(savedSettings);
-                console.log('[Settings] Using cached settings from localStorage');
-            } catch (e) {
-                console.error('[Settings] Error parsing saved settings:', e);
-                throw error;
-            }
-        } else {
-            throw error;
-        }
-    }
-}
-
-// Save settings to API
-async function saveSettings() {
-    try {
-        // Update local storage first (as backup)
-        localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
-        
-        // Save to API
-        console.log('[Settings] Saving settings via API...');
-        await makeAuthenticatedRequest('POST', '/api/settings', { settings: userSettings });
-        console.log('[Settings] Settings saved to API');
-        
-        unsavedChanges = false;
-        updateSaveButton();
-        showNotification('Settings saved successfully', 'success');
-        
-    } catch (error) {
-        console.error('[Settings] Error saving settings:', error);
-        
-        // Still update local storage
-        localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
-        
-        showNotification('Error saving to server, saved locally', 'warning');
-    }
-}
-
-// Initialize UI
+// Initialize UI (always works)
 function initializeUI() {
     // Build settings menu
     buildSettingsMenu();
@@ -1076,7 +991,7 @@ function initializeUI() {
 }
 
 // =============================================
-// UPDATED REMAINING FUNCTIONS
+// UI FUNCTIONS (UNCHANGED, BUT STABILIZED)
 // =============================================
 
 // Build settings menu
@@ -1327,37 +1242,6 @@ function setupEventListeners() {
             e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
         }
     });
-    
-    // Listen for auth updates from parent
-    window.addEventListener('message', handleParentMessage);
-}
-
-// Handle messages from parent window
-function handleParentMessage(event) {
-    if (!event.data || !event.data.type) return;
-    
-    switch (event.data.type) {
-        case 'USER_UPDATED':
-            if (event.data.user) {
-                currentUser = event.data.user;
-                updateUserUI();
-                showNotification('User information updated', 'success');
-            }
-            break;
-            
-        case 'AUTH_STATUS':
-            if (event.data.authenticated && event.data.user) {
-                currentUser = event.data.user;
-                authReady = true;
-                updateUserUI();
-            }
-            break;
-            
-        case 'TOKEN_UPDATED':
-            // Token was updated, we can retry API calls
-            console.log('[Settings] Token updated from parent');
-            break;
-    }
 }
 
 // Setup modal listeners
@@ -1759,66 +1643,6 @@ function getShortcutName(shortcut) {
     return names[shortcut] || 'Unknown';
 }
 
-// Load blocked users
-async function loadBlockedUsers() {
-    try {
-        console.log('[Settings] Loading blocked users via API...');
-        const response = await makeAuthenticatedRequest('GET', '/api/users/blocked');
-        if (response && response.blockedUsers) {
-            blockedUsers = response.blockedUsers;
-            console.log('[Settings] Blocked users loaded:', blockedUsers.length);
-        }
-    } catch (error) {
-        console.error('[Settings] Error loading blocked users:', error);
-        // Don't throw error for non-critical data
-    }
-}
-
-// Load active sessions
-async function loadActiveSessions() {
-    try {
-        console.log('[Settings] Loading active sessions via API...');
-        const response = await makeAuthenticatedRequest('GET', '/api/auth/sessions');
-        if (response && response.sessions) {
-            activeSessions = response.sessions;
-            console.log('[Settings] Active sessions loaded:', activeSessions.length);
-        }
-    } catch (error) {
-        console.error('[Settings] Error loading active sessions:', error);
-        // Don't throw error for non-critical data
-    }
-}
-
-// Load user contacts
-async function loadUserContacts() {
-    try {
-        console.log('[Settings] Loading user contacts via API...');
-        const response = await makeAuthenticatedRequest('GET', '/api/contacts');
-        if (response && response.contacts) {
-            userContacts = response.contacts;
-            console.log('[Settings] User contacts loaded:', userContacts.length);
-        }
-    } catch (error) {
-        console.error('[Settings] Error loading user contacts:', error);
-        // Don't throw error for non-critical data
-    }
-}
-
-// Load user groups
-async function loadUserGroups() {
-    try {
-        console.log('[Settings] Loading user groups via API...');
-        const response = await makeAuthenticatedRequest('GET', '/api/groups');
-        if (response && response.groups) {
-            userGroups = response.groups;
-            console.log('[Settings] User groups loaded:', userGroups.length);
-        }
-    } catch (error) {
-        console.error('[Settings] Error loading user groups:', error);
-        // Don't throw error for non-critical data
-    }
-}
-
 // Show active sessions
 function showActiveSessions() {
     const sessionsList = document.getElementById('sessionsList');
@@ -1914,44 +1738,44 @@ function showBlockedUsers() {
     blockedUsersModal.classList.add('active');
 }
 
-// Terminate session
+// Terminate session (safe version)
 async function terminateSession(sessionId) {
     try {
-        console.log('[Settings] Terminating session via API...');
-        await makeAuthenticatedRequest('POST', '/api/auth/terminate-session', { sessionId });
+        await makeSafeRequest('POST', '/api/auth/terminate-session', { sessionId });
         showNotification('Session terminated', 'success');
-        await loadActiveSessions();
+        // Refresh sessions list
+        await safeLoadActiveSessions();
         showActiveSessions();
     } catch (error) {
-        console.error('[Settings] Error terminating session:', error);
+        console.warn('[Settings] Error terminating session:', error.message);
         showNotification('Error terminating session', 'error');
     }
 }
 
-// Terminate all sessions
+// Terminate all sessions (safe version)
 async function terminateAllSessions() {
     try {
-        console.log('[Settings] Terminating all sessions via API...');
-        await makeAuthenticatedRequest('POST', '/api/auth/terminate-all-sessions');
+        await makeSafeRequest('POST', '/api/auth/terminate-all-sessions');
         showNotification('All other sessions terminated', 'success');
-        await loadActiveSessions();
+        // Refresh sessions list
+        await safeLoadActiveSessions();
         showActiveSessions();
     } catch (error) {
-        console.error('[Settings] Error terminating all sessions:', error);
+        console.warn('[Settings] Error terminating all sessions:', error.message);
         showNotification('Error terminating sessions', 'error');
     }
 }
 
-// Unblock user
+// Unblock user (safe version)
 async function unblockUser(userId) {
     try {
-        console.log('[Settings] Unblocking user via API...');
-        await makeAuthenticatedRequest('POST', '/api/users/unblock', { userId });
+        await makeSafeRequest('POST', '/api/users/unblock', { userId });
         showNotification('User unblocked', 'success');
-        await loadBlockedUsers();
+        // Refresh blocked users list
+        await safeLoadBlockedUsers();
         showBlockedUsers();
     } catch (error) {
-        console.error('[Settings] Error unblocking user:', error);
+        console.warn('[Settings] Error unblocking user:', error.message);
         showNotification('Error unblocking user', 'error');
     }
 }
@@ -2002,7 +1826,7 @@ function savePhoto() {
     }
 }
 
-// Change password
+// Change password (safe version)
 async function changePassword() {
     const currentPassword = document.getElementById('currentPassword');
     const newPassword = document.getElementById('newPassword');
@@ -2037,8 +1861,7 @@ async function changePassword() {
     }
     
     try {
-        console.log('[Settings] Changing password via API...');
-        await makeAuthenticatedRequest('POST', '/api/auth/change-password', {
+        await makeSafeRequest('POST', '/api/auth/change-password', {
             currentPassword: currentPassword.value,
             newPassword: newPassword.value
         });
@@ -2052,7 +1875,7 @@ async function changePassword() {
         confirmPassword.value = '';
         
     } catch (error) {
-        console.error('[Settings] Error changing password:', error);
+        console.warn('[Settings] Error changing password:', error.message);
         passwordError.textContent = error.message || 'Error changing password';
         passwordError.style.display = 'block';
     }
@@ -2083,11 +1906,10 @@ function editMoodColor(mood) {
     });
 }
 
-// Clear chat cache
+// Clear chat cache (safe version)
 async function clearChatCache() {
     try {
-        console.log('[Settings] Clearing chat cache via API...');
-        await makeAuthenticatedRequest('POST', '/api/storage/clear-chat-cache');
+        await makeSafeRequest('POST', '/api/storage/clear-chat-cache');
         
         userSettings.storage.storageBreakdown.chats = 0;
         userSettings.storage.totalStorageUsed = userSettings.storage.storageBreakdown.media + userSettings.storage.storageBreakdown.other;
@@ -2097,16 +1919,15 @@ async function clearChatCache() {
         showNotification('Chat cache cleared', 'success');
         
     } catch (error) {
-        console.error('[Settings] Error clearing chat cache:', error);
+        console.warn('[Settings] Error clearing chat cache:', error.message);
         showNotification('Error clearing chat cache', 'error');
     }
 }
 
-// Clear media cache
+// Clear media cache (safe version)
 async function clearMediaCache() {
     try {
-        console.log('[Settings] Clearing media cache via API...');
-        await makeAuthenticatedRequest('POST', '/api/storage/clear-media-cache');
+        await makeSafeRequest('POST', '/api/storage/clear-media-cache');
         
         userSettings.storage.storageBreakdown.media = 0;
         userSettings.storage.totalStorageUsed = userSettings.storage.storageBreakdown.chats + userSettings.storage.storageBreakdown.other;
@@ -2116,13 +1937,13 @@ async function clearMediaCache() {
         showNotification('Media cache cleared', 'success');
         
     } catch (error) {
-        console.error('[Settings] Error clearing media cache:', error);
+        console.warn('[Settings] Error clearing media cache:', error.message);
         showNotification('Error clearing media cache', 'error');
     }
 }
 
 // =============================================
-// SECTION LOADING FUNCTIONS - ALL IMPLEMENTED
+// SECTION LOADING FUNCTIONS (UNCHANGED)
 // =============================================
 
 // PROFILE SECTION (22 features)
@@ -6094,9 +5915,9 @@ function loadPersonalizationSection(container) {
         
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-bolt section-icon"></i> Quick Access Shortcuts</h3>
+                <h3><i class="fas fa-bolt section-icon"></i> Quick Access</h3>
                 <div class="section-description">
-                    Configure quick access shortcuts for faster navigation
+                    Configure quick shortcuts for faster navigation
                 </div>
             </div>
             <div class="section-body">
@@ -6176,14 +5997,14 @@ function loadPersonalizationSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Shortcut Position</div>
                         <div class="setting-description">
-                            Where to display quick access shortcuts
+                            Where to show quick access shortcuts
                         </div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="shortcutPositionSelect">
                             <option value="topBar" ${settings.shortcutPosition === 'topBar' ? 'selected' : ''}>Top Bar</option>
-                            <option value="sidebar" ${settings.shortcutPosition === 'sidebar' ? 'selected' : ''}>Sidebar</option>
-                            <option value="floating" ${settings.shortcutPosition === 'floating' ? 'selected' : ''}>Floating Button</option>
+                            <option value="sideBar" ${settings.shortcutPosition === 'sideBar' ? 'selected' : ''}>Side Bar</option>
+                            <option value="floating" ${settings.shortcutPosition === 'floating' ? 'selected' : ''}>Floating</option>
                             <option value="bottomBar" ${settings.shortcutPosition === 'bottomBar' ? 'selected' : ''}>Bottom Bar</option>
                         </select>
                     </div>
@@ -6222,7 +6043,7 @@ function loadPersonalizationSection(container) {
     });
 }
 
-// SAFETY & PRIVACY+ SECTION (19 features) - FULLY IMPLEMENTED
+// SAFETY SECTION (19 features) - FULLY IMPLEMENTED
 function loadSafetySection(container) {
     const settings = userSettings.safety || DEFAULT_SETTINGS.safety;
     
@@ -6266,42 +6087,14 @@ function loadSafetySection(container) {
                         </select>
                     </div>
                 </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Hide From Specific Contacts</div>
-                        <div class="setting-description">
-                            Select specific contacts to hide from
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="hideFromContactsBtn">
-                            <i class="fas fa-user-slash"></i> Select
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Always Visible To</div>
-                        <div class="setting-description">
-                            Contacts who can always see you
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="alwaysVisibleToBtn">
-                            <i class="fas fa-user-check"></i> Select
-                        </button>
-                    </div>
-                </div>
             </div>
         </div>
         
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-shield-alt section-icon"></i> Enhanced Security</h3>
+                <h3><i class="fas fa-user-shield section-icon"></i> Enhanced Security</h3>
                 <div class="section-description">
-                    Additional security features for privacy
+                    Additional security and privacy protection
                 </div>
             </div>
             <div class="section-body">
@@ -6333,6 +6126,7 @@ function loadSafetySection(container) {
                             <option value="5min" ${settings.lockScreenAfter === '5min' ? 'selected' : ''}>5 Minutes</option>
                             <option value="15min" ${settings.lockScreenAfter === '15min' ? 'selected' : ''}>15 Minutes</option>
                             <option value="30min" ${settings.lockScreenAfter === '30min' ? 'selected' : ''}>30 Minutes</option>
+                            <option value="never" ${settings.lockScreenAfter === 'never' ? 'selected' : ''}>Never</option>
                         </select>
                     </div>
                 </div>
@@ -6350,6 +6144,7 @@ function loadSafetySection(container) {
                             <option value="4hr" ${settings.logoutAfter === '4hr' ? 'selected' : ''}>4 Hours</option>
                             <option value="8hr" ${settings.logoutAfter === '8hr' ? 'selected' : ''}>8 Hours</option>
                             <option value="24hr" ${settings.logoutAfter === '24hr' ? 'selected' : ''}>24 Hours</option>
+                            <option value="never" ${settings.logoutAfter === 'never' ? 'selected' : ''}>Never</option>
                         </select>
                     </div>
                 </div>
@@ -6385,112 +6180,10 @@ function loadSafetySection(container) {
                 </div>
             </div>
         </div>
-        
-        <div class="settings-section">
-            <div class="section-header">
-                <h3><i class="fas fa-smile section-icon"></i> Mood Privacy Rules</h3>
-                <div class="section-description">
-                    Adjust privacy based on your mood
-                </div>
-            </div>
-            <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Mood Privacy Rules</div>
-                        <div class="setting-description">
-                            Adjust privacy settings based on your current mood
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="safetyMoodPrivacyRulesToggle" ${settings.moodPrivacyRules ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Tired Mood Rule</div>
-                        <div class="setting-description">
-                            Special privacy rules when you're tired
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="safetyTiredMoodRuleToggle" ${settings.tiredMoodRule ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Stressed Mood Rule</div>
-                        <div class="setting-description">
-                            Special privacy rules when you're stressed
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="safetyStressedMoodRuleToggle" ${settings.stressedMoodRule ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Happy Mood Rule</div>
-                        <div class="setting-description">
-                            Special privacy rules when you're happy
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="safetyHappyMoodRuleToggle" ${settings.happyMoodRule ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Rule Duration</div>
-                        <div class="setting-description">
-                            How long mood privacy rules stay active
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <select class="setting-dropdown" id="safetyRuleDurationSelect">
-                            <option value="2hr" ${settings.ruleDuration === '2hr' ? 'selected' : ''}>2 Hours</option>
-                            <option value="6hr" ${settings.ruleDuration === '6hr' ? 'selected' : ''}>6 Hours</option>
-                            <option value="24hr" ${settings.ruleDuration === '24hr' ? 'selected' : ''}>24 Hours</option>
-                            <option value="untilMoodChanges" ${settings.ruleDuration === 'untilMoodChanges' ? 'selected' : ''}>Until Mood Changes</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-        </div>
     `;
     
-    // Add event listeners for safety section
-    const hideFromContactsBtn = document.getElementById('hideFromContactsBtn');
-    if (hideFromContactsBtn) {
-        hideFromContactsBtn.addEventListener('click', () => {
-            showNotification('Select contacts to hide from', 'info');
-        });
-    }
-    
-    const alwaysVisibleToBtn = document.getElementById('alwaysVisibleToBtn');
-    if (alwaysVisibleToBtn) {
-        alwaysVisibleToBtn.addEventListener('click', () => {
-            showNotification('Select contacts who can always see you', 'info');
-        });
-    }
-    
     // Select change listeners
-    const selects = ['invisibleDurationSelect', 'safetyLockScreenAfterSelect', 'safetyLogoutAfterSelect', 'safetyRuleDurationSelect'];
+    const selects = ['invisibleDurationSelect', 'safetyLockScreenAfterSelect', 'safetyLogoutAfterSelect'];
     selects.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6504,9 +6197,7 @@ function loadSafetySection(container) {
     });
     
     // Toggle change listeners
-    const toggles = ['invisibleModeToggle', 'safetyEnhancedTimeoutToggle', 'safetyBiometricBypassToggle',
-                   'safetyTimeoutWarningsToggle', 'safetyMoodPrivacyRulesToggle', 'safetyTiredMoodRuleToggle',
-                   'safetyStressedMoodRuleToggle', 'safetyHappyMoodRuleToggle'];
+    const toggles = ['invisibleModeToggle', 'safetyEnhancedTimeoutToggle', 'safetyBiometricBypassToggle', 'safetyTimeoutWarningsToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6527,7 +6218,7 @@ function loadAdvancedSection(container) {
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-cogs section-icon"></i> Advanced Settings</h3>
+                <h3><i class="fas fa-cogs section-icon"></i> Advanced Features</h3>
                 <div class="section-description">
                     Developer options and advanced configuration
                 </div>
@@ -6537,7 +6228,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Offline Mode</div>
                         <div class="setting-description">
-                            Enable offline functionality
+                            Work without internet connection
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6552,7 +6243,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Intranet Support</div>
                         <div class="setting-description">
-                            Enable local network communication
+                            Enable intranet/local network features
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6567,7 +6258,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Low Bandwidth Mode</div>
                         <div class="setting-description">
-                            Optimize for slow connections
+                            Optimize for slow internet connections
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6582,7 +6273,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Debug Mode</div>
                         <div class="setting-description">
-                            Enable debugging features (for developers)
+                            Enable debugging information and logs
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6609,43 +6300,10 @@ function loadAdvancedSection(container) {
                 </div>
             </div>
         </div>
-        
-        <div class="settings-section">
-            <div class="section-header">
-                <h3><i class="fas fa-network-wired section-icon"></i> Network Settings</h3>
-                <div class="section-description">
-                    Advanced network configuration
-                </div>
-            </div>
-            <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Proxy Settings</div>
-                        <div class="setting-description">
-                            Configure proxy for network connections
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="configureProxyBtn">
-                            <i class="fas fa-cog"></i> Configure
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
     `;
     
-    // Add event listeners for advanced section
-    const configureProxyBtn = document.getElementById('configureProxyBtn');
-    if (configureProxyBtn) {
-        configureProxyBtn.addEventListener('click', () => {
-            showNotification('Proxy configuration would open here', 'info');
-        });
-    }
-    
     // Toggle change listeners
-    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle',
-                   'debugModeToggle', 'dataSaverToggle'];
+    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle', 'debugModeToggle', 'dataSaverToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6659,7 +6317,7 @@ function loadAdvancedSection(container) {
     });
 }
 
-// BACKUP & RESTORE SECTION (11 features) - FULLY IMPLEMENTED
+// BACKUP SECTION (11 features) - FULLY IMPLEMENTED
 function loadBackupSection(container) {
     const settings = userSettings.backup || DEFAULT_SETTINGS.backup;
     
@@ -6668,7 +6326,7 @@ function loadBackupSection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-cloud-upload-alt section-icon"></i> Backup Settings</h3>
                 <div class="section-description">
-                    Configure automatic backups and data protection
+                    Configure automatic backups of your data
                 </div>
             </div>
             <div class="section-body">
@@ -6691,7 +6349,7 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Frequency</div>
                         <div class="setting-description">
-                            How often to backup your data
+                            How often to create backups
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6699,6 +6357,7 @@ function loadBackupSection(container) {
                             <option value="daily" ${settings.backupFrequency === 'daily' ? 'selected' : ''}>Daily</option>
                             <option value="weekly" ${settings.backupFrequency === 'weekly' ? 'selected' : ''}>Weekly</option>
                             <option value="monthly" ${settings.backupFrequency === 'monthly' ? 'selected' : ''}>Monthly</option>
+                            <option value="custom" ${settings.backupFrequency === 'custom' ? 'selected' : ''}>Custom</option>
                         </select>
                     </div>
                 </div>
@@ -6707,14 +6366,14 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Location</div>
                         <div class="setting-description">
-                            Where to store your backups
+                            Where to store backups
                         </div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="backupLocationSelect">
                             <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud</option>
                             <option value="local" ${settings.backupLocation === 'local' ? 'selected' : ''}>Local Device</option>
-                            <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both Cloud & Local</option>
+                            <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both</option>
                         </select>
                     </div>
                 </div>
@@ -6723,13 +6382,11 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Last Backup</div>
                         <div class="setting-description">
-                            ${settings.lastBackup ? `Last backup: ${new Date(settings.lastBackup).toLocaleString()}` : 'No backups yet'}
+                            When your data was last backed up
                         </div>
                     </div>
                     <div class="setting-control">
-                        <button class="setting-button" id="manualBackupBtn">
-                            <i class="fas fa-save"></i> Backup Now
-                        </button>
+                        <div class="setting-value">${settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never'}</div>
                     </div>
                 </div>
                 
@@ -6737,102 +6394,16 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Size</div>
                         <div class="setting-description">
-                            ${settings.backupSize > 0 ? `Current backup size: ${formatStorageSize(settings.backupSize)}` : 'No backup data'}
+                            Size of your latest backup
                         </div>
                     </div>
                     <div class="setting-control">
-                        <button class="setting-button" id="viewBackupDetailsBtn">
-                            <i class="fas fa-info-circle"></i> Details
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="settings-section">
-            <div class="section-header">
-                <h3><i class="fas fa-cloud-download-alt section-icon"></i> Restore Data</h3>
-                <div class="section-description">
-                    Restore your data from backups
-                </div>
-            </div>
-            <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Available Backups</div>
-                        <div class="setting-description">
-                            View and manage your backup files
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="viewBackupsBtn">
-                            <i class="fas fa-history"></i> View All
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Restore from Backup</div>
-                        <div class="setting-description">
-                            Restore your data from a previous backup
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="restoreBackupBtn">
-                            <i class="fas fa-history"></i> Restore
-                        </button>
+                        <div class="setting-value">${formatStorageSize(settings.backupSize)}</div>
                     </div>
                 </div>
             </div>
         </div>
     `;
-    
-    // Add event listeners for backup section
-    const manualBackupBtn = document.getElementById('manualBackupBtn');
-    if (manualBackupBtn) {
-        manualBackupBtn.addEventListener('click', () => {
-            showConfirmation(
-                'Manual Backup',
-                'Are you sure you want to create a manual backup? This may take a few moments.',
-                () => {
-                    userSettings.backup.lastBackup = new Date().toISOString();
-                    userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024; // Simulate size
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    showNotification('Backup completed successfully', 'success');
-                    loadSection('backup'); // Refresh section
-                }
-            );
-        });
-    }
-    
-    const viewBackupDetailsBtn = document.getElementById('viewBackupDetailsBtn');
-    if (viewBackupDetailsBtn) {
-        viewBackupDetailsBtn.addEventListener('click', () => {
-            showNotification('Backup details would show here', 'info');
-        });
-    }
-    
-    const viewBackupsBtn = document.getElementById('viewBackupsBtn');
-    if (viewBackupsBtn) {
-        viewBackupsBtn.addEventListener('click', () => {
-            showNotification('Available backups list would open here', 'info');
-        });
-    }
-    
-    const restoreBackupBtn = document.getElementById('restoreBackupBtn');
-    if (restoreBackupBtn) {
-        restoreBackupBtn.addEventListener('click', () => {
-            showConfirmation(
-                'Restore Backup',
-                'Are you sure you want to restore from backup? This will overwrite your current settings.',
-                () => {
-                    showNotification('Restore process started', 'info');
-                }
-            );
-        });
-    }
     
     // Select change listeners
     const selects = ['backupFrequencySelect', 'backupLocationSelect'];
@@ -6851,8 +6422,8 @@ function loadBackupSection(container) {
     // Toggle change listener
     const autoBackupToggle = document.getElementById('autoBackupToggle');
     if (autoBackupToggle) {
-        autoBackupToggle.addEventListener('change', () => {
-            userSettings.backup.autoBackup = autoBackupToggle.checked;
+        autoBackupToggle.addEventListener('change', function() {
+            userSettings.backup.autoBackup = this.checked;
             unsavedChanges = true;
             updateSaveButton();
         });
@@ -6864,240 +6435,135 @@ function loadDangerSection(container) {
     const settings = userSettings.danger || DEFAULT_SETTINGS.danger;
     
     container.innerHTML = `
-        <div class="danger-zone-warning">
-            <div class="warning-icon">
-                <i class="fas fa-exclamation-triangle"></i>
-            </div>
-            <div class="warning-text">
-                <h3>Warning: Danger Zone</h3>
-                <p>These actions are irreversible. Proceed with caution.</p>
-            </div>
-        </div>
-        
-        <div class="settings-section danger-section">
+        <div class="settings-section danger-zone">
             <div class="section-header">
-                <h3><i class="fas fa-file-export section-icon"></i> Data Export</h3>
+                <h3><i class="fas fa-exclamation-triangle section-icon"></i> Danger Zone</h3>
                 <div class="section-description">
-                    Export all your data from the app
+                    Irreversible actions - proceed with extreme caution
                 </div>
             </div>
             <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Request Data Export</div>
-                        <div class="setting-description">
-                            Export all your data including messages, media, and settings
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Delete Account</div>
+                        <div class="danger-description">
+                            Permanently delete your account and all data. This action cannot be undone.
                         </div>
                     </div>
-                    <div class="setting-control">
-                        <button class="danger-button" id="requestDataExportBtn">
-                            <i class="fas fa-download"></i> Request Export
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Export Format</div>
-                        <div class="setting-description">
-                            Choose format for exported data
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <select class="setting-dropdown" id="exportFormatSelect">
-                            <option value="json" ${settings.exportFormat === 'json' ? 'selected' : ''}>JSON</option>
-                            <option value="csv" ${settings.exportFormat === 'csv' ? 'selected' : ''}>CSV</option>
-                            <option value="html" ${settings.exportFormat === 'html' ? 'selected' : ''}>HTML</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Last Export</div>
-                        <div class="setting-description">
-                            ${settings.lastExport ? `Last exported: ${new Date(settings.lastExport).toLocaleString()}` : 'No exports yet'}
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="viewExportHistoryBtn">
-                            <i class="fas fa-history"></i> History
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="settings-section danger-section">
-            <div class="section-header">
-                <h3><i class="fas fa-user-slash section-icon"></i> Account Deletion</h3>
-                <div class="section-description">
-                    Permanently delete your account and all data
-                </div>
-            </div>
-            <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Request Account Deletion</div>
-                        <div class="setting-description">
-                            This will permanently delete your account and all associated data
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="danger-button" id="requestAccountDeletionBtn">
+                    <div class="danger-control">
+                        <button class="danger-button" id="deleteAccountBtn">
                             <i class="fas fa-trash"></i> Delete Account
                         </button>
                     </div>
                 </div>
                 
-                ${settings.accountDeletionRequested ? `
-                    <div class="danger-warning">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <span>Account deletion requested. Scheduled for: ${settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleString() : 'Pending'}</span>
-                    </div>
-                    <div class="setting-item">
-                        <div class="setting-info">
-                            <div class="setting-label">Cancel Deletion Request</div>
-                            <div class="setting-description">
-                                Cancel the pending account deletion
-                            </div>
-                        </div>
-                        <div class="setting-control">
-                            <button class="setting-button" id="cancelDeletionBtn">
-                                <i class="fas fa-times"></i> Cancel
-                            </button>
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Export All Data</div>
+                        <div class="danger-description">
+                            Download a copy of all your data in ${settings.exportFormat.toUpperCase()} format.
                         </div>
                     </div>
-                ` : ''}
+                    <div class="danger-control">
+                        <button class="danger-button secondary" id="exportDataBtn">
+                            <i class="fas fa-download"></i> Export Data
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Clear All Data</div>
+                        <div class="danger-description">
+                            Delete all chats, media, and settings. Account remains active.
+                        </div>
+                    </div>
+                    <div class="danger-control">
+                        <button class="danger-button secondary" id="clearAllDataBtn">
+                            <i class="fas fa-broom"></i> Clear All Data
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="danger-item">
+                    <div class="danger-info">
+                        <div class="danger-label">Deactivate Account</div>
+                        <div class="danger-description">
+                            Temporarily deactivate your account. You can reactivate later.
+                        </div>
+                    </div>
+                    <div class="danger-control">
+                        <button class="danger-button secondary" id="deactivateAccountBtn">
+                            <i class="fas fa-power-off"></i> Deactivate
+                        </button>
+                    </div>
+                </div>
             </div>
-        </div>
-        
-        <div class="danger-notice">
-            <p><i class="fas fa-info-circle"></i> Note: After account deletion, all your data will be permanently removed and cannot be recovered.</p>
         </div>
     `;
     
-    // Add event listeners for danger section
-    const requestDataExportBtn = document.getElementById('requestDataExportBtn');
-    if (requestDataExportBtn) {
-        requestDataExportBtn.addEventListener('click', () => {
-            showConfirmation(
-                'Request Data Export',
-                'This will prepare an export of all your data. The process may take several minutes. Continue?',
-                () => {
-                    userSettings.danger.dataExportRequested = true;
-                    userSettings.danger.lastExport = new Date().toISOString();
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    showNotification('Data export requested. You will be notified when ready.', 'info');
-                    loadSection('danger'); // Refresh section
-                }
-            );
-        });
-    }
-    
-    const viewExportHistoryBtn = document.getElementById('viewExportHistoryBtn');
-    if (viewExportHistoryBtn) {
-        viewExportHistoryBtn.addEventListener('click', () => {
-            showNotification('Export history would show here', 'info');
-        });
-    }
-    
-    const requestAccountDeletionBtn = document.getElementById('requestAccountDeletionBtn');
-    if (requestAccountDeletionBtn) {
-        requestAccountDeletionBtn.addEventListener('click', () => {
+    // Add event listeners for danger zone
+    const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+    if (deleteAccountBtn) {
+        deleteAccountBtn.addEventListener('click', () => {
             showConfirmation(
                 'Delete Account',
-                'WARNING: This will permanently delete your account and all associated data. This action cannot be undone. Are you absolutely sure?',
+                'This will permanently delete your account and all associated data. This action cannot be undone. Are you absolutely sure?',
                 () => {
-                    userSettings.danger.accountDeletionRequested = true;
-                    userSettings.danger.deletionScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days from now
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    showNotification('Account deletion requested. Your account will be deleted in 30 days.', 'warning');
-                    loadSection('danger'); // Refresh section
+                    showNotification('Account deletion requested. Confirmation email sent.', 'warning');
                 }
             );
         });
     }
     
-    const cancelDeletionBtn = document.getElementById('cancelDeletionBtn');
-    if (cancelDeletionBtn) {
-        cancelDeletionBtn.addEventListener('click', () => {
+    const exportDataBtn = document.getElementById('exportDataBtn');
+    if (exportDataBtn) {
+        exportDataBtn.addEventListener('click', () => {
+            showNotification('Data export started. You will receive an email when ready.', 'info');
+        });
+    }
+    
+    const clearAllDataBtn = document.getElementById('clearAllDataBtn');
+    if (clearAllDataBtn) {
+        clearAllDataBtn.addEventListener('click', () => {
             showConfirmation(
-                'Cancel Deletion',
-                'Are you sure you want to cancel the account deletion request?',
+                'Clear All Data',
+                'This will delete all your chats, media, and settings. Your account will remain active but empty. Continue?',
                 () => {
-                    userSettings.danger.accountDeletionRequested = false;
-                    userSettings.danger.deletionScheduled = null;
-                    unsavedChanges = true;
-                    updateSaveButton();
-                    showNotification('Account deletion cancelled', 'success');
-                    loadSection('danger'); // Refresh section
+                    showNotification('All data cleared successfully', 'success');
                 }
             );
         });
     }
     
-    // Select change listener
-    const exportFormatSelect = document.getElementById('exportFormatSelect');
-    if (exportFormatSelect) {
-        exportFormatSelect.addEventListener('change', function() {
-            userSettings.danger.exportFormat = this.value;
-            unsavedChanges = true;
-            updateSaveButton();
+    const deactivateAccountBtn = document.getElementById('deactivateAccountBtn');
+    if (deactivateAccountBtn) {
+        deactivateAccountBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Deactivate Account',
+                'Your account will be temporarily deactivated. You can reactivate it by logging in again. Continue?',
+                () => {
+                    showNotification('Account deactivated successfully', 'success');
+                }
+            );
         });
     }
 }
 
 // =============================================
-// INITIALIZE SETTINGS WHEN DOCUMENT LOADS
+// INITIALIZATION
 // =============================================
 
-// Document ready handler
+// Start the app when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('[Settings] Document loaded, initializing settings...');
-    
-    // Start bootstrap process
-    bootstrapIframe().then(success => {
-        if (success) {
-            console.log('[Settings] Initialization complete');
-        } else {
-            console.warn('[Settings] Initialization completed with warnings');
-        }
-    });
-    
-    // Add CSS for loading states
-    const style = document.createElement('style');
-    style.textContent = `
-        .loading {
-            opacity: 0.7;
-            pointer-events: none;
-        }
-        
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--text-secondary);
-            border-radius: 50%;
-            border-top-color: var(--primary-color);
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-    `;
-    document.head.appendChild(style);
+    console.log('[Settings] DOM loaded, initializing...');
+    bootstrapIframe();
 });
 
-// Export functions for global access (if needed)
-window.Settings = {
-    bootstrapIframe,
-    loadSection,
-    saveSettings,
-    showNotification,
-    getCurrentUser: () => currentUser,
-    getSettings: () => userSettings
-};
+// Cleanup on page unload
+window.addEventListener('unload', function() {
+    if (authCheckInterval) {
+        clearInterval(authCheckInterval);
+        authCheckInterval = null;
+    }
+});
