@@ -10,6 +10,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Friends | Knecta Chat</title>
     
+    <script src="/js/api.js"></script>
+
+
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -752,6 +755,124 @@
         
         // Initialize page silently in background
         console.log('API module loaded - Starting silent initialization');
+        
+        // Enhanced user data synchronization
+        window.userDataSync = {
+            currentUser: null,
+            token: null,
+            lastSync: 0,
+            syncInterval: null,
+            
+            // Initialize user sync
+            init: function() {
+                this.loadUserFromStorage();
+                this.startSyncInterval();
+                
+                // Listen for storage events from other tabs
+                window.addEventListener('storage', (e) => {
+                    if (e.key === 'knecta_current_user' || e.key === 'moodchat_token' || e.key === 'accessToken') {
+                        this.loadUserFromStorage();
+                        this.updateUI();
+                    }
+                });
+            },
+            
+            // Load user from any storage location
+            loadUserFromStorage: function() {
+                const tokenKeys = ['moodchat_token', 'accessToken', 'knecta_token', 'token'];
+                const userKeys = ['knecta_current_user', 'authUser', 'currentUser'];
+                
+                // Try to find token
+                for (const key of tokenKeys) {
+                    const token = localStorage.getItem(key) || sessionStorage.getItem(key);
+                    if (token) {
+                        this.token = token;
+                        break;
+                    }
+                }
+                
+                // Try to find user data
+                for (const key of userKeys) {
+                    const userData = localStorage.getItem(key) || sessionStorage.getItem(key);
+                    if (userData) {
+                        try {
+                            this.currentUser = JSON.parse(userData);
+                            this.lastSync = Date.now();
+                            break;
+                        } catch (e) {
+                            console.log('Error parsing user data:', e);
+                        }
+                    }
+                }
+                
+                // If we have token but no user data, try to fetch from API
+                if (this.token && !this.currentUser && window.apiCall) {
+                    this.fetchUserFromAPI();
+                }
+            },
+            
+            // Fetch user from API using token
+            fetchUserFromAPI: async function() {
+                try {
+                    const response = await window.apiCall('/api/auth/me');
+                    if (response && response.user) {
+                        this.currentUser = response.user;
+                        this.lastSync = Date.now();
+                        
+                        // Save to all storage locations for consistency
+                        localStorage.setItem('knecta_current_user', JSON.stringify(this.currentUser));
+                        localStorage.setItem('authUser', JSON.stringify(this.currentUser));
+                        
+                        this.updateUI();
+                    }
+                } catch (error) {
+                    console.log('Error fetching user from API:', error);
+                }
+            },
+            
+            // Update UI with current user data
+            updateUI: function() {
+                if (this.currentUser) {
+                    // Dispatch custom event for other parts of the app
+                    const event = new CustomEvent('userDataUpdated', { 
+                        detail: { user: this.currentUser } 
+                    });
+                    window.dispatchEvent(event);
+                    
+                    // Update any user-specific UI elements
+                    if (typeof window.updateUserUI === 'function') {
+                        window.updateUserUI(this.currentUser);
+                    }
+                }
+            },
+            
+            // Start periodic sync
+            startSyncInterval: function() {
+                if (this.syncInterval) clearInterval(this.syncInterval);
+                
+                this.syncInterval = setInterval(() => {
+                    this.loadUserFromStorage();
+                    
+                    // Refresh from API every 5 minutes if we have a token
+                    if (this.token && Date.now() - this.lastSync > 300000) {
+                        this.fetchUserFromAPI();
+                    }
+                }, 60000); // Check every minute
+            },
+            
+            // Get current user
+            getUser: function() {
+                return this.currentUser;
+            },
+            
+            // Get token
+            getToken: function() {
+                return this.token;
+            }
+        };
+        
+        // Initialize user sync
+        window.userDataSync.init();
     </script>
     
     <script>
@@ -884,54 +1005,56 @@
         };
         
         // =============================================
-        // SILENT INITIALIZATION FUNCTION
+        // ENHANCED USER AUTHENTICATION & DATA FETCH
         // =============================================
         
-        async function silentInitialize() {
+        async function enhancedInitialize() {
             if (initializationStarted) return;
             initializationStarted = true;
             
-            console.log('=== STARTING SILENT INITIALIZATION ===');
+            console.log('=== STARTING ENHANCED INITIALIZATION ===');
             
             try {
-                // 1. Wait for api.js to be ready (no console spam)
-                await waitForApiSilently();
+                // 1. Wait for api.js with timeout
+                await waitForApiWithTimeout(5000);
                 
-                // 2. Check authentication in background
-                const isAuthenticated = await checkAuthenticationSilently();
+                // 2. Fast user detection from multiple sources
+                const userDetected = await fastUserDetection();
                 
-                if (!isAuthenticated) {
-                    // Silently redirect to login if not authenticated
+                if (!userDetected) {
+                    console.log('No user detected, checking API silently...');
+                    // Try silent API check without redirecting immediately
                     setTimeout(() => {
-                        window.location.href = '../index.html';
+                        if (!currentUser) {
+                            // Only redirect after 2 seconds if still no user
+                            setTimeout(() => {
+                                window.location.href = '../index.html';
+                            }, 2000);
+                        }
                     }, 100);
-                    return false;
                 }
                 
-                // 3. Load cached data instantly (no waiting)
+                // 3. Load cached data immediately for instant UI
                 loadCachedDataInstantly();
                 
-                // 4. Setup UI immediately
+                // 4. Setup UI immediately for responsiveness
                 setupEventListeners();
                 
                 // 5. Generate QR code in background
                 setTimeout(generateUniqueQRCode, 100);
                 
-                // 6. Start background data loading
-                setTimeout(loadInitialDataInBackground, 300);
-                
-                // 7. Load all users in background
-                setTimeout(fetchAllUsersFromBackend, 1000);
+                // 6. Start parallel data loading
+                startParallelDataLoading();
                 
                 apiReady = true;
                 isInitialized = true;
                 
-                console.log('=== SILENT INITIALIZATION COMPLETE ===');
+                console.log('=== ENHANCED INITIALIZATION COMPLETE ===');
                 return true;
                 
             } catch (error) {
-                console.error('Silent initialization error:', error);
-                // Even if there's an error, still show cached data
+                console.error('Enhanced initialization error:', error);
+                // Even on error, show cached data and functional UI
                 loadCachedDataInstantly();
                 setupEventListeners();
                 apiReady = false;
@@ -940,14 +1063,91 @@
             }
         }
         
-        // Wait for API silently without console spam
-        async function waitForApiSilently() {
+        // Fast user detection from all sources
+        async function fastUserDetection() {
+            // Method 1: Check window.userDataSync first
+            if (window.userDataSync && window.userDataSync.getUser()) {
+                currentUser = window.userDataSync.getUser();
+                userData = currentUser;
+                console.log('User found via userDataSync');
+                return true;
+            }
+            
+            // Method 2: Check localStorage directly
+            const userKeys = ['knecta_current_user', 'authUser', 'currentUser', 'moodchat_user'];
+            for (const key of userKeys) {
+                const userDataStr = localStorage.getItem(key);
+                if (userDataStr) {
+                    try {
+                        currentUser = JSON.parse(userDataStr);
+                        userData = currentUser;
+                        console.log(`User found via localStorage key: ${key}`);
+                        
+                        // Sync to userDataSync
+                        if (window.userDataSync) {
+                            window.userDataSync.currentUser = currentUser;
+                            window.userDataSync.updateUI();
+                        }
+                        return true;
+                    } catch (e) {
+                        console.log(`Error parsing user data from ${key}:`, e);
+                    }
+                }
+            }
+            
+            // Method 3: Check sessionStorage
+            for (const key of userKeys) {
+                const userDataStr = sessionStorage.getItem(key);
+                if (userDataStr) {
+                    try {
+                        currentUser = JSON.parse(userDataStr);
+                        userData = currentUser;
+                        console.log(`User found via sessionStorage key: ${key}`);
+                        return true;
+                    } catch (e) {
+                        console.log(`Error parsing user data from sessionStorage ${key}:`, e);
+                    }
+                }
+            }
+            
+            // Method 4: Try API if available
+            if (window.apiCall && typeof window.apiCall === 'function') {
+                try {
+                    const response = await window.apiCall('/api/auth/me');
+                    if (response && response.user) {
+                        currentUser = response.user;
+                        userData = currentUser;
+                        console.log('User found via API');
+                        
+                        // Save to localStorage for future use
+                        localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
+                        return true;
+                    }
+                } catch (error) {
+                    console.log('API auth check failed:', error);
+                    // Don't throw, just return false
+                }
+            }
+            
+            return false;
+        }
+        
+        // Wait for API with timeout
+        async function waitForApiWithTimeout(timeout = 5000) {
             return new Promise((resolve) => {
+                if (window.apiCall && typeof window.apiCall === 'function') {
+                    resolve();
+                    return;
+                }
+                
+                let elapsed = 0;
+                const interval = 100;
+                const maxChecks = timeout / interval;
                 let checkCount = 0;
-                const maxChecks = 50; // Max 5 seconds
                 
                 const checkApi = () => {
                     checkCount++;
+                    elapsed += interval;
                     
                     if (window.apiCall && typeof window.apiCall === 'function') {
                         resolve();
@@ -955,110 +1155,65 @@
                     }
                     
                     if (checkCount >= maxChecks) {
-                        console.log('API not available after timeout');
+                        console.log('API wait timeout after', timeout, 'ms');
                         resolve(); // Resolve anyway to continue
                         return;
                     }
                     
-                    setTimeout(checkApi, 100);
+                    setTimeout(checkApi, interval);
                 };
                 
                 checkApi();
             });
         }
         
-        // Check authentication silently
-        async function checkAuthenticationSilently() {
-            try {
-                // Get token from localStorage
-                const tokens = getTokensFromStorage();
-                accessToken = tokens.accessToken;
-                
-                if (!accessToken) {
-                    console.log('No access token found');
-                    return false;
-                }
-                
-                // Verify token silently using api.js
-                if (typeof window.apiCall === 'function') {
-                    const userResponse = await window.apiCall('/api/auth/me');
-                    
-                    if (!userResponse || !userResponse.user) {
-                        console.log('Authentication failed');
-                        return false;
-                    }
-                    
-                    // Store user data
-                    currentUser = userResponse.user;
-                    userData = currentUser;
-                    
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                        uid: currentUser.id,
-                        id: currentUser.id,
-                        displayName: currentUser.displayName,
-                        email: currentUser.email,
-                        photoURL: currentUser.photoURL,
-                        username: currentUser.username
-                    }));
-                    
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                    
-                    return true;
-                } else {
-                    console.log('apiCall function not available');
-                    return false;
-                }
-                
-            } catch (error) {
-                console.log('Authentication check error:', error);
-                return false;
-            }
-        }
-        
-        // =============================================
-        // BACKGROUND DATA LOADING
-        // =============================================
-        
-        async function loadInitialDataInBackground() {
-            try {
-                // Load friends
-                await loadFriendsFromBackend();
-                
-                // Load friend requests
-                await loadFriendRequestsFromBackend();
-                
-                // Load sent requests
-                await loadSentRequestsFromBackend();
-                
-                // Load pinned friends
-                await loadPinnedFriendsFromBackend();
-                
-                // Load muted friends
-                await loadMutedFriendsFromBackend();
-                
-                // Load contacts
-                await loadContactsFromBackend();
-                
-                // Load groups
-                await loadGroupsFromBackend();
-                
-                // Update UI silently
+        // Start parallel data loading
+        function startParallelDataLoading() {
+            // Start all data loads in parallel
+            const loadPromises = [];
+            
+            // Load friends data
+            loadPromises.push(loadFriendsFromBackend().catch(e => console.log('Friends load error:', e)));
+            
+            // Load friend requests
+            loadPromises.push(loadFriendRequestsFromBackend().catch(e => console.log('Requests load error:', e)));
+            
+            // Load sent requests
+            loadPromises.push(loadSentRequestsFromBackend().catch(e => console.log('Sent requests load error:', e)));
+            
+            // Load pinned friends
+            loadPromises.push(loadPinnedFriendsFromBackend().catch(e => console.log('Pinned friends load error:', e)));
+            
+            // Load muted friends
+            loadPromises.push(loadMutedFriendsFromBackend().catch(e => console.log('Muted friends load error:', e)));
+            
+            // Load contacts
+            loadPromises.push(loadContactsFromBackend().catch(e => console.log('Contacts load error:', e)));
+            
+            // Load groups
+            loadPromises.push(loadGroupsFromBackend().catch(e => console.log('Groups load error:', e)));
+            
+            // Load all users
+            loadPromises.push(fetchAllUsersFromBackend().catch(e => console.log('All users load error:', e)));
+            
+            // When all loads complete, update UI
+            Promise.allSettled(loadPromises).then(() => {
                 updateCurrentSection();
-                
-            } catch (error) {
-                console.log('Background data loading error:', error);
-            }
+                showNotification('Friends data loaded', 'success');
+            });
         }
         
-        // Individual data loading functions
+        // =============================================
+        // ENHANCED DATA LOADING FUNCTIONS
+        // =============================================
+        
         async function loadFriendsFromBackend() {
             try {
                 if (typeof window.apiCall !== 'function') {
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/friends');
+                const response = await window.apiCall('/api/friends', null, true); // silent=true
                 
                 if (response && response.friends) {
                     friends = response.friends;
@@ -1075,10 +1230,15 @@
                     
                     // Save to cache
                     localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load friends:', error);
+                // Use cached data
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+                if (cached) {
+                    friends = JSON.parse(cached);
+                    updateFriendCounts();
+                }
             }
         }
         
@@ -1088,7 +1248,7 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/friend-requests/incoming');
+                const response = await window.apiCall('/api/friend-requests/incoming', null, true);
                 
                 if (response && response.requests) {
                     friendRequests = response.requests;
@@ -1097,8 +1257,12 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load friend requests:', error);
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
+                if (cached) {
+                    friendRequests = JSON.parse(cached);
+                    document.getElementById('requestsCount').textContent = friendRequests.length;
+                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                }
             }
         }
         
@@ -1108,7 +1272,7 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/friend-requests/sent');
+                const response = await window.apiCall('/api/friend-requests/sent', null, true);
                 
                 if (response && response.requests) {
                     sentRequests = response.requests;
@@ -1116,8 +1280,11 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load sent requests:', error);
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
+                if (cached) {
+                    sentRequests = JSON.parse(cached);
+                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                }
             }
         }
         
@@ -1127,7 +1294,7 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/friends/pinned');
+                const response = await window.apiCall('/api/friends/pinned', null, true);
                 
                 if (response && response.friends) {
                     pinnedFriends = response.friends;
@@ -1136,8 +1303,12 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load pinned friends:', error);
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
+                if (cached) {
+                    pinnedFriends = JSON.parse(cached);
+                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+                }
             }
         }
         
@@ -1147,7 +1318,7 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/friends/muted');
+                const response = await window.apiCall('/api/friends/muted', null, true);
                 
                 if (response && response.friends) {
                     mutedFriends = response.friends;
@@ -1155,8 +1326,11 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load muted friends:', error);
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
+                if (cached) {
+                    mutedFriends = JSON.parse(cached);
+                    document.getElementById('mutedCount').textContent = mutedFriends.length;
+                }
             }
         }
         
@@ -1166,7 +1340,7 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/contacts/synced');
+                const response = await window.apiCall('/api/contacts/synced', null, true);
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -1174,8 +1348,11 @@
                     localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load contacts:', error);
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
+                if (cached) {
+                    contacts = JSON.parse(cached);
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                }
             }
         }
         
@@ -1185,15 +1362,62 @@
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall('/api/groups/user');
+                const response = await window.apiCall('/api/groups/user', null, true);
                 
                 if (response && response.groups) {
                     groups = response.groups;
                     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
                 }
             } catch (error) {
-                // Silently fail
-                console.log('Failed to load groups:', error);
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
+                if (cached) groups = JSON.parse(cached);
+            }
+        }
+        
+        async function fetchAllUsersFromBackend() {
+            try {
+                // Check cache first
+                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
+                const lastSync = localStorage.getItem('all_users_last_sync');
+                const now = Date.now();
+                
+                // Use cache if less than 5 minutes old
+                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 5 * 60 * 1000) {
+                    allUsers = JSON.parse(cachedAllUsers);
+                    return;
+                }
+                
+                // Fetch from backend
+                if (typeof window.apiCall !== 'function') {
+                    throw new Error('API not ready');
+                }
+                
+                const response = await window.apiCall('/api/users/all?limit=100', null, true);
+                
+                if (response && response.users) {
+                    // Filter out current user
+                    const currentUserId = currentUser?.id;
+                    allUsers = response.users.filter(user => {
+                        return user.id !== currentUserId;
+                    });
+                    
+                    // Sort users
+                    allUsers.sort((a, b) => {
+                        if (a.online !== b.online) return b.online ? 1 : -1;
+                        return (a.displayName || '').localeCompare(b.displayName || '');
+                    });
+                    
+                    // Cache results
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE, JSON.stringify(allUsers));
+                    localStorage.setItem('all_users_last_sync', Date.now().toString());
+                }
+                
+            } catch (error) {
+                // Use cached data
+                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
+                if (cachedAllUsers) {
+                    allUsers = JSON.parse(cachedAllUsers);
+                }
             }
         }
         
@@ -1673,6 +1897,19 @@
             window.addEventListener('beforeunload', () => {
                 saveFriendsToLocalStorage();
                 stopCameraScanner();
+            });
+            
+            // Listen for user data updates
+            window.addEventListener('userDataUpdated', (event) => {
+                if (event.detail && event.detail.user) {
+                    currentUser = event.detail.user;
+                    userData = currentUser;
+                    
+                    // Update UI if needed
+                    if (isInitialized) {
+                        updateCurrentSection();
+                    }
+                }
             });
             
             // Initial mobile check
@@ -2239,55 +2476,6 @@
             return searchIn.includes(searchTerm);
         }
         
-        // Fetch all users from backend
-        async function fetchAllUsersFromBackend() {
-            try {
-                // Check for cached data first
-                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
-                const lastSync = localStorage.getItem('all_users_last_sync');
-                const now = Date.now();
-                
-                // Use cache if it's less than 2 minutes old
-                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 2 * 60 * 1000) {
-                    allUsers = JSON.parse(cachedAllUsers);
-                    return;
-                }
-                
-                // Fetch from backend API
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/users/all?limit=100');
-                
-                if (response && response.users) {
-                    // Filter out current user from the list
-                    const currentUserId = currentUser?.id;
-                    allUsers = response.users.filter(user => {
-                        const userId = user.id;
-                        return userId !== currentUserId;
-                    });
-                    
-                    // Sort users: online first, then alphabetical
-                    allUsers.sort((a, b) => {
-                        if (a.online !== b.online) return b.online ? 1 : -1;
-                        return (a.displayName || '').localeCompare(b.displayName || '');
-                    });
-                    
-                    // Cache the results
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE, JSON.stringify(allUsers));
-                    localStorage.setItem('all_users_last_sync', Date.now().toString());
-                }
-                
-            } catch (error) {
-                // Use cached data as fallback
-                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
-                if (cachedAllUsers) {
-                    allUsers = JSON.parse(cachedAllUsers);
-                }
-            }
-        }
-        
         // Render all users list in the "All Users" tab
         function renderAllUsersList() {
             const allUsersListElement = document.getElementById('allUsersList');
@@ -2510,8 +2698,7 @@
                 
                 if (response && response.success) {
                     // Refresh data
-                    loadInitialDataInBackground();
-                    fetchAllUsersFromBackend();
+                    startParallelDataLoading();
                     
                     showNotification('Friend request accepted', 'success');
                     friendRequestModal.classList.remove('active');
@@ -4145,8 +4332,8 @@
         // =============================================
         
         document.addEventListener('DOMContentLoaded', function() {
-            // Start silent initialization in background
-            setTimeout(silentInitialize, 100);
+            // Start enhanced initialization in background
+            setTimeout(enhancedInitialize, 100);
         });
     </script>
 </body>

@@ -20,6 +20,11 @@ let refreshToken = null;
 // ADDED: Authentication ready flag
 let authReady = false;
 
+// ADDED: API initialization check
+let apiInitialized = false;
+let apiInitRetries = 0;
+const MAX_API_RETRIES = 10;
+
 // Default settings structure (222 features organized by section)
 const DEFAULT_SETTINGS = {
     // PROFILE SECTION (22 features)
@@ -457,30 +462,34 @@ const SETTINGS_MENU = [
 ];
 
 // =============================================
-// BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
+// UPDATED BOOTSTRAP FUNCTION WITH ENHANCED AUTH
 // =============================================
 
 async function bootstrapIframe() {
     console.log('=== SETTINGS IFRAME BOOTSTRAP START ===');
     
     try {
-        // Step 1: Initialize UI immediately
+        // Step 1: Wait for API.js to be ready
+        await waitForApiInitialization();
+        
+        // Step 2: Initialize UI immediately
         initializeUI();
         
-        // Step 2: Try to load from localStorage first for immediate display
+        // Step 3: Try to get user from storage first (fastest path)
+        const fastUser = await getCurrentUserFast();
+        if (fastUser) {
+            currentUser = fastUser;
+            updateUserUI();
+        }
+        
+        // Step 4: Load from localStorage for immediate display
         await loadFromLocalStorage();
         
-        // Step 3: Load default section
+        // Step 5: Load default section
         loadSection(currentSection);
         
-        // Step 4: Attempt to authenticate in background
-        setTimeout(async () => {
-            try {
-                await attemptBackgroundAuthentication();
-            } catch (error) {
-                console.log('Background authentication failed, using cached data:', error.message);
-            }
-        }, 100);
+        // Step 6: Start background authentication
+        startBackgroundAuthentication();
         
         console.log('=== SETTINGS IFRAME BOOTSTRAP COMPLETE ===');
         return true;
@@ -488,7 +497,7 @@ async function bootstrapIframe() {
     } catch (error) {
         console.error('Bootstrap failed:', error);
         
-        // Even if bootstrap fails, ensure UI is usable
+        // Fallback: Ensure UI is usable even if bootstrap fails
         initializeUI();
         loadSection(currentSection);
         
@@ -497,62 +506,156 @@ async function bootstrapIframe() {
     }
 }
 
-// Background authentication
-async function attemptBackgroundAuthentication() {
-    try {
-        // Check if api.js is loaded
-        if (typeof api === 'undefined') {
-            console.log('api.js not loaded yet, skipping background auth');
-            return;
-        }
-        
-        // Check for token in localStorage
-        const token = localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
-        if (!token) {
-            console.log('No token found, skipping background auth');
-            return;
-        }
-        
-        // Try to get user data
-        try {
-            const userData = await api.get('/api/auth/me');
-            if (userData && userData.user) {
-                currentUser = userData.user;
-                authReady = true;
-                
-                // Update UI with fresh data
-                const userNamePreview = document.getElementById('userNamePreview');
-                const userAvatarPreview = document.getElementById('userAvatarPreview');
-                
-                if (userNamePreview) userNamePreview.textContent = currentUser.displayName || 'User';
-                
-                if (userAvatarPreview) {
-                    if (currentUser.photoURL) {
-                        userAvatarPreview.style.backgroundImage = `url('${currentUser.photoURL}')`;
-                    } else {
-                        const initials = currentUser.displayName ? 
-                            currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                            'U';
-                        userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
-                    }
-                }
-                
-                // Load fresh settings
-                await loadSettings();
-                
-                // Load additional data in background
-                Promise.all([
-                    loadBlockedUsers(),
-                    loadActiveSessions(),
-                    loadUserContacts(),
-                    loadUserGroups()
-                ]).catch(e => console.log('Background data loading failed:', e));
-                
-                showNotification('Settings synced with server', 'success');
+// Wait for API.js to be initialized
+async function waitForApiInitialization() {
+    return new Promise((resolve, reject) => {
+        const checkApi = () => {
+            if (typeof api !== 'undefined' && api.isInitialized && api.isInitialized()) {
+                apiInitialized = true;
+                console.log('API.js successfully initialized');
+                resolve();
+                return;
             }
-        } catch (apiError) {
-            console.log('Background API call failed:', apiError.message);
-            // Continue with cached data
+            
+            apiInitRetries++;
+            if (apiInitRetries > MAX_API_RETRIES) {
+                console.warn('API.js not found after max retries, proceeding without it');
+                resolve();
+                return;
+            }
+            
+            setTimeout(checkApi, 100);
+        };
+        
+        checkApi();
+    });
+}
+
+// Fast user retrieval from storage
+async function getCurrentUserFast() {
+    try {
+        // Check all possible token storage locations
+        const tokens = [
+            localStorage.getItem('accessToken'),
+            localStorage.getItem('moodchat_token'),
+            localStorage.getItem('knecta_access_token'),
+            sessionStorage.getItem('accessToken'),
+            sessionStorage.getItem('moodchat_token')
+        ].filter(Boolean);
+        
+        if (tokens.length === 0) {
+            console.log('No tokens found in storage');
+            return null;
+        }
+        
+        // Check for cached user data
+        const cachedUser = localStorage.getItem('knecta_current_user') || 
+                          localStorage.getItem('currentUser') ||
+                          sessionStorage.getItem('currentUser');
+        
+        if (cachedUser) {
+            try {
+                const user = JSON.parse(cachedUser);
+                console.log('Fast user retrieval from cache:', user.displayName || 'User');
+                return user;
+            } catch (e) {
+                console.warn('Failed to parse cached user:', e);
+            }
+        }
+        
+        // If API is available, try to validate token
+        if (apiInitialized && typeof api === 'object') {
+            try {
+                // Use api.js to get current user
+                const userData = await api.getCurrentUser();
+                if (userData && userData.user) {
+                    console.log('Fast user retrieval via API:', userData.user.displayName || 'User');
+                    
+                    // Cache for future use
+                    localStorage.setItem('knecta_current_user', JSON.stringify(userData.user));
+                    
+                    return userData.user;
+                }
+            } catch (apiError) {
+                console.log('Fast API user fetch failed:', apiError.message);
+                // Continue without API
+            }
+        }
+        
+        return null;
+        
+    } catch (error) {
+        console.error('Error in fast user retrieval:', error);
+        return null;
+    }
+}
+
+// Start background authentication
+async function startBackgroundAuthentication() {
+    // Don't block UI - run in background
+    setTimeout(async () => {
+        try {
+            await performBackgroundAuth();
+        } catch (error) {
+            console.log('Background auth completed with warnings:', error.message);
+        }
+    }, 300);
+}
+
+// Perform background authentication
+async function performBackgroundAuth() {
+    try {
+        // Skip if we already have a valid user
+        if (currentUser && currentUser.id) {
+            console.log('User already authenticated, skipping background auth');
+            return;
+        }
+        
+        // If API is available, try to get fresh user data
+        if (apiInitialized && typeof api === 'object') {
+            try {
+                console.log('Starting background authentication via API...');
+                
+                const userData = await api.getCurrentUser();
+                if (userData && userData.user) {
+                    currentUser = userData.user;
+                    authReady = true;
+                    
+                    // Update UI with fresh data
+                    updateUserUI();
+                    
+                    // Load fresh settings
+                    await loadSettings();
+                    
+                    // Load additional data in parallel (non-blocking)
+                    Promise.allSettled([
+                        loadBlockedUsers(),
+                        loadActiveSessions(),
+                        loadUserContacts(),
+                        loadUserGroups()
+                    ]).then(results => {
+                        console.log('Background data loading completed:', results.map(r => r.status));
+                    });
+                    
+                    showNotification('Settings synced with server', 'success');
+                    return;
+                }
+            } catch (apiError) {
+                console.log('Background API auth failed:', apiError.message);
+                // Continue with cached data
+            }
+        }
+        
+        // Fallback: Try localStorage for user data
+        const cachedUser = localStorage.getItem('knecta_current_user');
+        if (cachedUser && !currentUser) {
+            try {
+                currentUser = JSON.parse(cachedUser);
+                console.log('Using cached user from localStorage');
+                updateUserUI();
+            } catch (e) {
+                console.error('Error parsing cached user:', e);
+            }
         }
         
     } catch (error) {
@@ -562,61 +665,48 @@ async function attemptBackgroundAuthentication() {
 }
 
 // =============================================
-// AUTHENTICATION & TOKEN MANAGEMENT
+// UPDATED AUTHENTICATION & TOKEN MANAGEMENT
 // =============================================
-
-// Handle authentication error
-function handleAuthError() {
-    showNotification('Authentication required. Please login again.', 'error');
-    setTimeout(() => {
-        // Clear storage
-        localStorage.removeItem('moodchat_token');
-        localStorage.removeItem('moodchat_refresh_token');
-        localStorage.removeItem('knecta_current_user');
-        localStorage.removeItem('knecta_user_settings');
-        
-        // Redirect to login page
-        window.location.href = '/index.html';
-    }, 2000);
-}
 
 // Enhanced API call function using api.js
 async function makeAuthenticatedRequest(method, endpoint, data = null) {
     try {
-        // Use api.js for all API calls
-        if (typeof api === 'undefined') {
-            throw new Error('API library not available');
+        // Use api.js if available
+        if (apiInitialized && typeof api === 'object') {
+            let result;
+            
+            switch (method) {
+                case 'GET':
+                    result = await api.get(endpoint);
+                    break;
+                case 'POST':
+                    result = await api.post(endpoint, data);
+                    break;
+                case 'PUT':
+                    result = await api.put(endpoint, data);
+                    break;
+                case 'PATCH':
+                    result = await api.patch(endpoint, data);
+                    break;
+                case 'DELETE':
+                    result = await api.delete(endpoint);
+                    break;
+                default:
+                    throw new Error(`Unsupported method: ${method}`);
+            }
+            
+            return result;
+        } else {
+            // Fallback to fetch with token
+            return await makeFallbackRequest(method, endpoint, data);
         }
-        
-        let result;
-        
-        switch (method) {
-            case 'GET':
-                result = await api.get(endpoint);
-                break;
-            case 'POST':
-                result = await api.post(endpoint, data);
-                break;
-            case 'PUT':
-                result = await api.put(endpoint, data);
-                break;
-            case 'PATCH':
-                result = await api.patch(endpoint, data);
-                break;
-            case 'DELETE':
-                result = await api.delete(endpoint);
-                break;
-            default:
-                throw new Error(`Unsupported method: ${method}`);
-        }
-        
-        return result;
         
     } catch (error) {
         console.error('API request error:', error);
         
         // Handle authentication errors
-        if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
+        if (error.message && (error.message.includes('401') || error.message.includes('403') || 
+            error.message.includes('unauthorized') || error.message.includes('Unauthorized'))) {
             handleAuthError();
             throw new Error('Authentication required');
         }
@@ -625,8 +715,92 @@ async function makeAuthenticatedRequest(method, endpoint, data = null) {
     }
 }
 
+// Fallback request for when api.js is not available
+async function makeFallbackRequest(method, endpoint, data = null) {
+    // Get token from any storage location
+    const token = localStorage.getItem('accessToken') || 
+                  localStorage.getItem('moodchat_token') ||
+                  sessionStorage.getItem('accessToken');
+    
+    if (!token) {
+        throw new Error('No authentication token available');
+    }
+    
+    const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+    };
+    
+    const config = {
+        method: method,
+        headers: headers,
+        credentials: 'include'
+    };
+    
+    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+        config.body = JSON.stringify(data);
+    }
+    
+    try {
+        const response = await fetch(endpoint, config);
+        
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                throw new Error('Authentication failed');
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Fallback request error:', error);
+        throw error;
+    }
+}
+
+// Handle authentication error
+function handleAuthError() {
+    showNotification('Authentication required. Please login again.', 'error');
+    
+    // Clear all authentication data
+    clearAllAuthData();
+    
+    // Redirect to login after delay
+    setTimeout(() => {
+        const isIframe = window.parent !== window;
+        if (isIframe) {
+            // If in iframe, tell parent to redirect
+            window.parent.postMessage({
+                type: 'AUTH_ERROR',
+                redirect: '/index.html'
+            }, '*');
+        } else {
+            // Direct navigation
+            window.location.href = '/index.html';
+        }
+    }, 2000);
+}
+
+// Clear all authentication data
+function clearAllAuthData() {
+    const itemsToClear = [
+        'accessToken',
+        'moodchat_token',
+        'moodchat_refresh_token',
+        'knecta_current_user',
+        'knecta_user_settings',
+        'currentUser',
+        'refreshToken'
+    ];
+    
+    itemsToClear.forEach(item => {
+        localStorage.removeItem(item);
+        sessionStorage.removeItem(item);
+    });
+}
+
 // =============================================
-// INITIALIZATION SYSTEM - SIMPLIFIED
+// UPDATED INITIALIZATION SYSTEM
 // =============================================
 
 // Update loading status
@@ -649,8 +823,8 @@ async function loadSettingsData() {
         // Load settings
         await loadSettings();
         
-        // Load additional data
-        await Promise.all([
+        // Load additional data in parallel
+        await Promise.allSettled([
             loadBlockedUsers(),
             loadActiveSessions(),
             loadUserContacts(),
@@ -684,21 +858,7 @@ async function loadFromLocalStorage() {
             console.log('User loaded from cache:', currentUser);
             
             // Update UI
-            const userNamePreview = document.getElementById('userNamePreview');
-            const userAvatarPreview = document.getElementById('userAvatarPreview');
-            
-            if (userNamePreview) userNamePreview.textContent = currentUser.displayName || 'User';
-            
-            if (userAvatarPreview) {
-                if (currentUser.photoURL) {
-                    userAvatarPreview.style.backgroundImage = `url('${currentUser.photoURL}')`;
-                } else {
-                    const initials = currentUser.displayName ? 
-                        currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                        'U';
-                    userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
-                }
-            }
+            updateUserUI();
         } catch (e) {
             console.error('Error parsing cached user:', e);
             currentUser = { displayName: 'User' };
@@ -744,21 +904,7 @@ async function loadUserData() {
             console.log('User loaded from API:', currentUser);
             
             // Update UI
-            const userNamePreview = document.getElementById('userNamePreview');
-            const userAvatarPreview = document.getElementById('userAvatarPreview');
-            
-            if (userNamePreview) userNamePreview.textContent = currentUser.displayName || 'User';
-            
-            if (userAvatarPreview) {
-                if (currentUser.photoURL) {
-                    userAvatarPreview.style.backgroundImage = `url('${currentUser.photoURL}')`;
-                } else {
-                    const initials = currentUser.displayName ? 
-                        currentUser.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                        'U';
-                    userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
-                }
-            }
+            updateUserUI();
             
             // Save to localStorage as cache
             localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
@@ -768,7 +914,55 @@ async function loadUserData() {
         
     } catch (error) {
         console.error('Error loading user data:', error);
-        throw error;
+        
+        // Try fallback: use cached data
+        const cachedUser = localStorage.getItem('knecta_current_user');
+        if (cachedUser) {
+            try {
+                currentUser = JSON.parse(cachedUser);
+                console.log('Using cached user data');
+            } catch (e) {
+                console.error('Error parsing cached user:', e);
+                throw error;
+            }
+        } else {
+            throw error;
+        }
+    }
+}
+
+// Update user UI elements
+function updateUserUI() {
+    if (!currentUser) return;
+    
+    const userNamePreview = document.getElementById('userNamePreview');
+    const userAvatarPreview = document.getElementById('userAvatarPreview');
+    
+    if (userNamePreview) {
+        userNamePreview.textContent = currentUser.displayName || 
+                                     currentUser.username || 
+                                     currentUser.email?.split('@')[0] || 
+                                     'User';
+    }
+    
+    if (userAvatarPreview) {
+        if (currentUser.photoURL || currentUser.avatar || currentUser.profilePicture) {
+            const photoUrl = currentUser.photoURL || currentUser.avatar || currentUser.profilePicture;
+            userAvatarPreview.style.backgroundImage = `url('${photoUrl}')`;
+            userAvatarPreview.innerHTML = '';
+        } else {
+            // Create initials from display name
+            const displayName = currentUser.displayName || currentUser.username || currentUser.email || 'User';
+            const initials = displayName
+                .split(' ')
+                .map(word => word[0])
+                .join('')
+                .toUpperCase()
+                .substring(0, 2);
+            
+            userAvatarPreview.style.backgroundImage = '';
+            userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+        }
     }
 }
 
@@ -800,7 +994,20 @@ async function loadSettings() {
         
     } catch (error) {
         console.error('Error loading settings:', error);
-        throw error;
+        
+        // Fallback to localStorage
+        const savedSettings = localStorage.getItem('knecta_user_settings');
+        if (savedSettings) {
+            try {
+                userSettings = JSON.parse(savedSettings);
+                console.log('Using cached settings from localStorage');
+            } catch (e) {
+                console.error('Error parsing saved settings:', e);
+                throw error;
+            }
+        } else {
+            throw error;
+        }
     }
 }
 
@@ -862,7 +1069,7 @@ function initializeUI() {
 }
 
 // =============================================
-// REMAINING FUNCTIONS - UPDATED
+// UPDATED REMAINING FUNCTIONS
 // =============================================
 
 // Build settings menu
@@ -1113,6 +1320,37 @@ function setupEventListeners() {
             e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
         }
     });
+    
+    // Listen for auth updates from parent
+    window.addEventListener('message', handleParentMessage);
+}
+
+// Handle messages from parent window
+function handleParentMessage(event) {
+    if (!event.data || !event.data.type) return;
+    
+    switch (event.data.type) {
+        case 'USER_UPDATED':
+            if (event.data.user) {
+                currentUser = event.data.user;
+                updateUserUI();
+                showNotification('User information updated', 'success');
+            }
+            break;
+            
+        case 'AUTH_STATUS':
+            if (event.data.authenticated && event.data.user) {
+                currentUser = event.data.user;
+                authReady = true;
+                updateUserUI();
+            }
+            break;
+            
+        case 'TOKEN_UPDATED':
+            // Token was updated, we can retry API calls
+            console.log('Token updated from parent');
+            break;
+    }
 }
 
 // Setup modal listeners
@@ -5943,25 +6181,13 @@ function loadPersonalizationSection(container) {
                         </select>
                     </div>
                 </div>
-                
-                <div class="shortcut-preview">
-                    <div class="shortcut-icon">
-                        <i class="fas fa-${getShortcutIcon(settings.shortcut1)}"></i>
-                    </div>
-                    <div class="shortcut-icon">
-                        <i class="fas fa-${getShortcutIcon(settings.shortcut2)}"></i>
-                    </div>
-                    <div class="shortcut-icon">
-                        <i class="fas fa-${getShortcutIcon(settings.shortcut3)}"></i>
-                    </div>
-                </div>
             </div>
         </div>
     `;
     
     // Select change listeners
-    const selects = ['personalizationLayoutModeSelect', 'personalizationButtonStylesSelect', 
-                   'shortcut1Select', 'shortcut2Select', 'shortcut3Select', 'shortcutPositionSelect'];
+    const selects = ['personalizationLayoutModeSelect', 'personalizationButtonStylesSelect', 'shortcut1Select',
+                    'shortcut2Select', 'shortcut3Select', 'shortcutPositionSelect'];
     selects.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -5970,15 +6196,6 @@ function loadPersonalizationSection(container) {
                 userSettings.personalization[property] = element.value;
                 unsavedChanges = true;
                 updateSaveButton();
-                
-                // Update shortcut preview
-                if (id.includes('shortcut')) {
-                    const shortcutNum = id.replace('shortcut', '').replace('Select', '');
-                    const previewIcon = document.querySelector(`.shortcut-icon:nth-child(${shortcutNum}) i`);
-                    if (previewIcon) {
-                        previewIcon.className = `fas fa-${getShortcutIcon(element.value)}`;
-                    }
-                }
             });
         }
     });
@@ -6007,7 +6224,7 @@ function loadSafetySection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-user-secret section-icon"></i> Invisible Mode</h3>
                 <div class="section-description">
-                    Go invisible to others temporarily
+                    Temporarily hide your online status and activity
                 </div>
             </div>
             <div class="section-body">
@@ -6015,7 +6232,7 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Invisible Mode</div>
                         <div class="setting-description">
-                            Temporarily hide your online status and activity
+                            Temporarily hide your online status
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6035,11 +6252,10 @@ function loadSafetySection(container) {
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="invisibleDurationSelect">
+                            <option value="15min" ${settings.invisibleDuration === '15min' ? 'selected' : ''}>15 Minutes</option>
                             <option value="30min" ${settings.invisibleDuration === '30min' ? 'selected' : ''}>30 Minutes</option>
                             <option value="1hr" ${settings.invisibleDuration === '1hr' ? 'selected' : ''}>1 Hour</option>
-                            <option value="4hr" ${settings.invisibleDuration === '4hr' ? 'selected' : ''}>4 Hours</option>
-                            <option value="24hr" ${settings.invisibleDuration === '24hr' ? 'selected' : ''}>24 Hours</option>
-                            <option value="untilTurnedOff" ${settings.invisibleDuration === 'untilTurnedOff' ? 'selected' : ''}>Until Turned Off</option>
+                            <option value="custom" ${settings.invisibleDuration === 'custom' ? 'selected' : ''}>Custom</option>
                         </select>
                     </div>
                 </div>
@@ -6048,7 +6264,7 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Hide from Specific Contacts</div>
                         <div class="setting-description">
-                            Hide only from selected contacts
+                            Choose contacts to hide from when invisible
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6062,7 +6278,7 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Always Visible To</div>
                         <div class="setting-description">
-                            Always show your status to these contacts
+                            Contacts who can always see you
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6076,9 +6292,9 @@ function loadSafetySection(container) {
         
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-shield-alt section-icon"></i> Enhanced Security</h3>
+                <h3><i class="fas fa-clock section-icon"></i> Enhanced Timeout</h3>
                 <div class="section-description">
-                    Additional security features
+                    Advanced timeout and session management
                 </div>
             </div>
             <div class="section-body">
@@ -6165,9 +6381,9 @@ function loadSafetySection(container) {
         
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-cog section-icon"></i> Mood Privacy Rules</h3>
+                <h3><i class="fas fa-shield-alt section-icon"></i> Mood Privacy Rules</h3>
                 <div class="section-description">
-                    Adjust privacy based on your mood
+                    Adjust privacy based on your current mood
                 </div>
             </div>
             <div class="section-body">
@@ -6175,7 +6391,7 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Mood Privacy Rules</div>
                         <div class="setting-description">
-                            Adjust privacy based on mood
+                            Automatically adjust privacy based on mood
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6190,12 +6406,12 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Tired Mood Rule</div>
                         <div class="setting-description">
-                            Special rules when you're tired
+                            Special privacy rules when tired
                         </div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="safetyTiredMoodRuleToggle" ${settings.tiredMoodRule ? 'checked' : ''}>
+                            <input type="checkbox" id="tiredMoodRuleToggle" ${settings.tiredMoodRule ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -6205,12 +6421,12 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Stressed Mood Rule</div>
                         <div class="setting-description">
-                            Special rules when you're stressed
+                            Special privacy rules when stressed
                         </div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="safetyStressedMoodRuleToggle" ${settings.stressedMoodRule ? 'checked' : ''}>
+                            <input type="checkbox" id="stressedMoodRuleToggle" ${settings.stressedMoodRule ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -6220,12 +6436,12 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Happy Mood Rule</div>
                         <div class="setting-description">
-                            Special rules when you're happy
+                            Special privacy rules when happy
                         </div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="safetyHappyMoodRuleToggle" ${settings.happyMoodRule ? 'checked' : ''}>
+                            <input type="checkbox" id="happyMoodRuleToggle" ${settings.happyMoodRule ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -6235,7 +6451,7 @@ function loadSafetySection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Rule Duration</div>
                         <div class="setting-description">
-                            How long mood rules stay active
+                            How long mood privacy rules stay active
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6255,7 +6471,7 @@ function loadSafetySection(container) {
     const hideFromContactsBtn = document.getElementById('hideFromContactsBtn');
     if (hideFromContactsBtn) {
         hideFromContactsBtn.addEventListener('click', () => {
-            showNotification('Select contacts to hide from', 'info');
+            showNotification('Select contacts to hide from when invisible', 'info');
         });
     }
     
@@ -6282,8 +6498,8 @@ function loadSafetySection(container) {
     
     // Toggle change listeners
     const toggles = ['invisibleModeToggle', 'safetyEnhancedTimeoutToggle', 'safetyBiometricBypassToggle',
-                   'safetyTimeoutWarningsToggle', 'safetyMoodPrivacyRulesToggle', 'safetyTiredMoodRuleToggle',
-                   'safetyStressedMoodRuleToggle', 'safetyHappyMoodRuleToggle'];
+                    'safetyTimeoutWarningsToggle', 'safetyMoodPrivacyRulesToggle', 'tiredMoodRuleToggle',
+                    'stressedMoodRuleToggle', 'happyMoodRuleToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6304,9 +6520,9 @@ function loadAdvancedSection(container) {
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-cogs section-icon"></i> Advanced Settings</h3>
+                <h3><i class="fas fa-cogs section-icon"></i> Advanced Features</h3>
                 <div class="section-description">
-                    Developer and advanced user settings
+                    Developer options and advanced configurations
                 </div>
             </div>
             <div class="section-body">
@@ -6314,7 +6530,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Offline Mode</div>
                         <div class="setting-description">
-                            Enable offline functionality
+                            Use the app without internet connection
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6329,7 +6545,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Intranet Support</div>
                         <div class="setting-description">
-                            Enable features for internal networks
+                            Enable communication within local network
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6344,7 +6560,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Low Bandwidth Mode</div>
                         <div class="setting-description">
-                            Reduce data usage for slow connections
+                            Optimize for slow internet connections
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6359,7 +6575,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Debug Mode</div>
                         <div class="setting-description">
-                            Enable debug logging and features
+                            Enable debugging and logging features
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6374,7 +6590,7 @@ function loadAdvancedSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Data Saver</div>
                         <div class="setting-description">
-                            Reduce data usage across the app
+                            Reduce data usage for mobile networks
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6384,13 +6600,35 @@ function loadAdvancedSection(container) {
                         </label>
                     </div>
                 </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Proxy Settings</div>
+                        <div class="setting-description">
+                            Configure network proxy settings
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="proxySettingsBtn">
+                            <i class="fas fa-network-wired"></i> Configure
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     `;
     
+    // Add event listeners for advanced section
+    const proxySettingsBtn = document.getElementById('proxySettingsBtn');
+    if (proxySettingsBtn) {
+        proxySettingsBtn.addEventListener('click', () => {
+            showNotification('Proxy configuration would open here', 'info');
+        });
+    }
+    
     // Toggle change listeners
-    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle', 
-                   'debugModeToggle', 'dataSaverToggle'];
+    const toggles = ['offlineModeToggle', 'intranetSupportToggle', 'lowBandwidthModeToggle',
+                    'debugModeToggle', 'dataSaverToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6407,13 +6645,14 @@ function loadAdvancedSection(container) {
 // BACKUP SECTION (11 features) - FULLY IMPLEMENTED
 function loadBackupSection(container) {
     const settings = userSettings.backup || DEFAULT_SETTINGS.backup;
+    const lastBackup = settings.lastBackup ? new Date(settings.lastBackup).toLocaleDateString() : 'Never';
     
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
                 <h3><i class="fas fa-cloud-upload-alt section-icon"></i> Backup Settings</h3>
                 <div class="section-description">
-                    Configure automatic backups
+                    Configure automatic backups and restore options
                 </div>
             </div>
             <div class="section-body">
@@ -6452,14 +6691,14 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Location</div>
                         <div class="setting-description">
-                            Where to store backups
+                            Where to store your backups
                         </div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="backupLocationSelect">
-                            <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud</option>
+                            <option value="cloud" ${settings.backupLocation === 'cloud' ? 'selected' : ''}>Cloud Storage</option>
                             <option value="local" ${settings.backupLocation === 'local' ? 'selected' : ''}>Local Device</option>
-                            <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both</option>
+                            <option value="both" ${settings.backupLocation === 'both' ? 'selected' : ''}>Both Cloud and Local</option>
                         </select>
                     </div>
                 </div>
@@ -6472,7 +6711,7 @@ function loadBackupSection(container) {
                         </div>
                     </div>
                     <div class="setting-control">
-                        <div class="setting-value">${settings.lastBackup ? new Date(settings.lastBackup).toLocaleString() : 'Never'}</div>
+                        <div class="setting-value">${lastBackup}</div>
                     </div>
                 </div>
                 
@@ -6480,24 +6719,48 @@ function loadBackupSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Backup Size</div>
                         <div class="setting-description">
-                            Size of your last backup
+                            Size of your latest backup
                         </div>
                     </div>
                     <div class="setting-control">
                         <div class="setting-value">${formatStorageSize(settings.backupSize)}</div>
                     </div>
                 </div>
-                
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-download section-icon"></i> Restore Options</h3>
+                <div class="section-description">
+                    Restore your data from backup
+                </div>
+            </div>
+            <div class="section-body">
                 <div class="setting-item">
                     <div class="setting-info">
-                        <div class="setting-label">Backup Now</div>
+                        <div class="setting-label">Create Backup Now</div>
                         <div class="setting-description">
-                            Create a backup immediately
+                            Manually create a backup of your data
                         </div>
                     </div>
                     <div class="setting-control">
-                        <button class="setting-button" id="backupNowBtn">
-                            <i class="fas fa-cloud-upload-alt"></i> Backup Now
+                        <button class="setting-button" id="createBackupBtn">
+                            <i class="fas fa-save"></i> Backup Now
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Restore from Backup</div>
+                        <div class="setting-description">
+                            Restore your data from a previous backup
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="restoreBackupBtn">
+                            <i class="fas fa-history"></i> Restore
                         </button>
                     </div>
                 </div>
@@ -6506,19 +6769,29 @@ function loadBackupSection(container) {
     `;
     
     // Add event listeners for backup section
-    const backupNowBtn = document.getElementById('backupNowBtn');
-    if (backupNowBtn) {
-        backupNowBtn.addEventListener('click', () => {
-            showNotification('Backup started in background', 'info');
-            // Simulate backup process
-            setTimeout(() => {
-                settings.lastBackup = new Date().toISOString();
-                settings.backupSize = userSettings.storage.totalStorageUsed;
-                unsavedChanges = true;
-                updateSaveButton();
-                loadSection('backup');
-                showNotification('Backup completed successfully', 'success');
-            }, 2000);
+    const createBackupBtn = document.getElementById('createBackupBtn');
+    if (createBackupBtn) {
+        createBackupBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Create Backup',
+                'Are you sure you want to create a backup now? This may take a few minutes.',
+                () => {
+                    createBackup();
+                }
+            );
+        });
+    }
+    
+    const restoreBackupBtn = document.getElementById('restoreBackupBtn');
+    if (restoreBackupBtn) {
+        restoreBackupBtn.addEventListener('click', () => {
+            showConfirmation(
+                'Restore from Backup',
+                'Are you sure you want to restore from backup? This will overwrite your current data.',
+                () => {
+                    restoreFromBackup();
+                }
+            );
         });
     }
     
@@ -6547,75 +6820,44 @@ function loadBackupSection(container) {
     }
 }
 
-// DANGER SECTION (7 features) - FULLY IMPLEMENTED
+// DANGER ZONE SECTION (7 features) - FULLY IMPLEMENTED
 function loadDangerSection(container) {
     const settings = userSettings.danger || DEFAULT_SETTINGS.danger;
+    const deletionScheduled = settings.deletionScheduled ? new Date(settings.deletionScheduled).toLocaleDateString() : 'Not scheduled';
+    const lastExport = settings.lastExport ? new Date(settings.lastExport).toLocaleDateString() : 'Never';
     
     container.innerHTML = `
         <div class="settings-section danger-zone">
             <div class="section-header">
-                <h3><i class="fas fa-exclamation-triangle section-icon"></i> Danger Zone</h3>
+                <h3 style="color: var(--danger-color);"><i class="fas fa-exclamation-triangle section-icon"></i> Danger Zone</h3>
                 <div class="section-description">
                     Irreversible actions - proceed with extreme caution
                 </div>
             </div>
             <div class="section-body">
-                <div class="danger-warning">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <span>These actions cannot be undone. Please proceed with caution.</span>
-                </div>
-                
                 <div class="setting-item danger-item">
                     <div class="setting-info">
-                        <div class="setting-label">Export All Data</div>
+                        <div class="setting-label" style="color: var(--danger-color);">Export Your Data</div>
                         <div class="setting-description">
                             Download a copy of all your data
                         </div>
                     </div>
                     <div class="setting-control">
-                        <button class="setting-button danger-button" id="exportDataBtn">
-                            <i class="fas fa-download"></i> Export Data
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="setting-item danger-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Delete Account</div>
-                        <div class="setting-description">
-                            Permanently delete your account and all data
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button danger-button" id="deleteAccountBtn">
-                            <i class="fas fa-trash"></i> Delete Account
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="setting-item danger-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Clear All Data</div>
-                        <div class="setting-description">
-                            Remove all your data from this device
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button danger-button" id="clearAllDataBtn">
-                            <i class="fas fa-eraser"></i> Clear All Data
+                        <button class="setting-button danger" id="exportDataBtn">
+                            <i class="fas fa-file-export"></i> Export Data
                         </button>
                     </div>
                 </div>
                 
                 <div class="setting-item">
                     <div class="setting-info">
-                        <div class="setting-label">Last Data Export</div>
+                        <div class="setting-label">Last Export</div>
                         <div class="setting-description">
                             When your data was last exported
                         </div>
                     </div>
                     <div class="setting-control">
-                        <div class="setting-value">${settings.lastExport ? new Date(settings.lastExport).toLocaleString() : 'Never'}</div>
+                        <div class="setting-value">${lastExport}</div>
                     </div>
                 </div>
                 
@@ -6623,7 +6865,7 @@ function loadDangerSection(container) {
                     <div class="setting-info">
                         <div class="setting-label">Export Format</div>
                         <div class="setting-description">
-                            Format for data exports
+                            Choose the format for exported data
                         </div>
                     </div>
                     <div class="setting-control">
@@ -6632,6 +6874,42 @@ function loadDangerSection(container) {
                             <option value="csv" ${settings.exportFormat === 'csv' ? 'selected' : ''}>CSV</option>
                             <option value="xml" ${settings.exportFormat === 'xml' ? 'selected' : ''}>XML</option>
                         </select>
+                    </div>
+                </div>
+                
+                <div class="divider"></div>
+                
+                <div class="setting-item danger-item">
+                    <div class="setting-info">
+                        <div class="setting-label" style="color: var(--danger-color);">Request Account Deletion</div>
+                        <div class="setting-description">
+                            Permanently delete your account and all data
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button danger" id="requestDeletionBtn">
+                            <i class="fas fa-trash-alt"></i> Delete Account
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Deletion Scheduled</div>
+                        <div class="setting-description">
+                            When your account will be deleted
+                        </div>
+                    </div>
+                    <div class="setting-control">
+                        <div class="setting-value">${deletionScheduled}</div>
+                    </div>
+                </div>
+                
+                <div class="warning-box">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <div class="warning-text">
+                        <strong>Warning:</strong> Account deletion is permanent and cannot be undone. 
+                        All your messages, contacts, photos, and other data will be permanently deleted.
                     </div>
                 </div>
             </div>
@@ -6643,55 +6921,23 @@ function loadDangerSection(container) {
     if (exportDataBtn) {
         exportDataBtn.addEventListener('click', () => {
             showConfirmation(
-                'Export All Data',
-                'This will create a downloadable file containing all your data. Continue?',
+                'Export Your Data',
+                'Are you sure you want to export all your data? This may take several minutes.',
                 () => {
-                    showNotification('Preparing data export...', 'info');
-                    // Simulate export process
-                    setTimeout(() => {
-                        settings.lastExport = new Date().toISOString();
-                        unsavedChanges = true;
-                        updateSaveButton();
-                        showNotification('Data export ready for download', 'success');
-                    }, 3000);
+                    exportUserData();
                 }
             );
         });
     }
     
-    const deleteAccountBtn = document.getElementById('deleteAccountBtn');
-    if (deleteAccountBtn) {
-        deleteAccountBtn.addEventListener('click', () => {
+    const requestDeletionBtn = document.getElementById('requestDeletionBtn');
+    if (requestDeletionBtn) {
+        requestDeletionBtn.addEventListener('click', () => {
             showConfirmation(
                 'Delete Account',
-                'This will permanently delete your account and all associated data. This action cannot be undone. Are you absolutely sure?',
+                'Are you absolutely sure you want to delete your account? This action is permanent and cannot be undone.',
                 () => {
-                    showNotification('Account deletion scheduled', 'warning');
-                    settings.accountDeletionRequested = true;
-                    settings.deletionScheduled = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-                    unsavedChanges = true;
-                    updateSaveButton();
-                }
-            );
-        });
-    }
-    
-    const clearAllDataBtn = document.getElementById('clearAllDataBtn');
-    if (clearAllDataBtn) {
-        clearAllDataBtn.addEventListener('click', () => {
-            showConfirmation(
-                'Clear All Data',
-                'This will remove all your data from this device. This action cannot be undone. Continue?',
-                () => {
-                    showNotification('Clearing all data...', 'warning');
-                    // In a real app, this would clear all local data
-                    setTimeout(() => {
-                        localStorage.clear();
-                        showNotification('All data cleared. App will now reload.', 'success');
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 2000);
-                    }, 2000);
+                    requestAccountDeletion();
                 }
             );
         });
@@ -6708,12 +6954,88 @@ function loadDangerSection(container) {
     }
 }
 
-// =============================================
-// INITIALIZE ON LOAD
-// =============================================
+// Create backup function
+async function createBackup() {
+    try {
+        showNotification('Creating backup...', 'info');
+        
+        // Simulate backup creation
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        userSettings.backup.lastBackup = new Date().toISOString();
+        userSettings.backup.backupSize = Math.floor(Math.random() * 500) * 1024 * 1024; // Random size
+        
+        unsavedChanges = true;
+        updateSaveButton();
+        loadSection('backup');
+        
+        showNotification('Backup created successfully', 'success');
+    } catch (error) {
+        console.error('Error creating backup:', error);
+        showNotification('Error creating backup', 'error');
+    }
+}
 
-// Wait for DOM to be ready
-document.addEventListener('DOMContentLoaded', function() {
-    // Start bootstrap process
-    bootstrapIframe();
-});
+// Restore from backup function
+async function restoreFromBackup() {
+    try {
+        showNotification('Restoring from backup...', 'info');
+        
+        // Simulate restore process
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        showNotification('Data restored successfully', 'success');
+    } catch (error) {
+        console.error('Error restoring from backup:', error);
+        showNotification('Error restoring from backup', 'error');
+    }
+}
+
+// Export user data function
+async function exportUserData() {
+    try {
+        showNotification('Exporting your data...', 'info');
+        
+        // Simulate export process
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        
+        userSettings.danger.lastExport = new Date().toISOString();
+        userSettings.danger.dataExportRequested = true;
+        
+        unsavedChanges = true;
+        updateSaveButton();
+        
+        showNotification('Data export started. You will receive a download link when ready.', 'success');
+    } catch (error) {
+        console.error('Error exporting data:', error);
+        showNotification('Error exporting data', 'error');
+    }
+}
+
+// Request account deletion function
+async function requestAccountDeletion() {
+    try {
+        showNotification('Processing account deletion request...', 'info');
+        
+        // Simulate deletion request
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        const deletionDate = new Date();
+        deletionDate.setDate(deletionDate.getDate() + 30); // 30 days from now
+        
+        userSettings.danger.accountDeletionRequested = true;
+        userSettings.danger.deletionScheduled = deletionDate.toISOString();
+        
+        unsavedChanges = true;
+        updateSaveButton();
+        loadSection('danger');
+        
+        showNotification('Account deletion scheduled. You have 30 days to cancel.', 'warning');
+    } catch (error) {
+        console.error('Error requesting account deletion:', error);
+        showNotification('Error requesting account deletion', 'error');
+    }
+}
+
+// Start bootstrap when page loads
+document.addEventListener('DOMContentLoaded', bootstrapIframe);

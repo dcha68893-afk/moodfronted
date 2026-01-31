@@ -11,20 +11,14 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase scripts removed from controller - loaded in individual pages -->
     <meta http-equiv="origin-trial" content="your-origin-trial-token">
-
     <meta name="ignore-tailwind-cdn-warning" content="true">
-
+    
+    <script src="/js/api.js"></script>
+    
     <link rel="stylesheet" href="chat.css">
     
     <style>
-        /* Embedded Tailwind CSS to avoid MIME type error */
-        /*! tailwindcss v2.2.19 | MIT License | https://tailwindcss.com */
-        /*! modern-normalize v1.1.0 | MIT License | https://github.com/sindresorhus/modern-normalize */
-        /* For brevity, I'm including only essential parts */
-        
-        /* Disable right-click and inspect */
         * {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -33,7 +27,6 @@
             -webkit-tap-highlight-color: transparent;
         }
         
-        /* Allow selection in input and textarea */
         input, textarea {
             -webkit-user-select: text;
             -moz-user-select: text;
@@ -41,7 +34,6 @@
             user-select: text;
         }
         
-        /* Disable text selection */
         .no-select {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -49,7 +41,6 @@
             user-select: none;
         }
         
-        /* Custom scrollbar */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
         }
@@ -65,7 +56,6 @@
             background: #555;
         }
         
-        /* Mood indicators */
         .mood-indicator {
             width: 8px;
             height: 8px;
@@ -79,7 +69,6 @@
         .mood-focused-indicator { background-color: #34D399; }
         .mood-creative-indicator { background-color: #A78BFA; }
         
-        /* Typing animation */
         .typing-indicator {
             display: flex;
             align-items: center;
@@ -105,7 +94,6 @@
             30% { opacity: 1; }
         }
         
-        /* Message bubbles */
         .message-bubble {
             max-width: 70%;
             word-wrap: break-word;
@@ -125,13 +113,11 @@
             margin-right: auto;
             border-bottom-left-radius: 4px;
         }
-        /* Offline message styling */
         .message-bubble.sent.offline {
             background: linear-gradient(135deg, #8a8a8a 0%, #a0a0a0 100%);
             opacity: 0.8;
         }
         
-        /* Loading animation */
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -140,7 +126,6 @@
             animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
         
-        /* Fade in animation */
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -149,12 +134,10 @@
             animation: fadeIn 0.3s ease-out;
         }
         
-        /* Header styles */
         .kynecta-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
         
-        /* Optimized iframe container */
         .iframe-container {
             position: fixed;
             top: 0;
@@ -176,7 +159,6 @@
             display: block;
         }
         
-        /* Navigation styles */
         .nav-icon {
             transition: all 0.2s ease;
         }
@@ -186,7 +168,6 @@
             color: white;
         }
         
-        /* Content area transitions */
         .content-area {
             display: none;
             transition: opacity 0.2s ease;
@@ -197,7 +178,6 @@
             display: block;
         }
         
-        /* Sidebar permanent visibility */
         .fixed.left-0 {
             z-index: 100 !important;
             position: fixed !important;
@@ -207,13 +187,11 @@
             height: 100vh;
         }
         
-        /* Loading screen animation */
         #loadingScreen {
             transition: opacity 0.2s ease;
             z-index: 9999;
         }
         
-        /* Ensure sidebar is always visible and on top */
         #permanentSidebar {
             z-index: 1000 !important;
             transform: translateZ(0);
@@ -221,7 +199,6 @@
             width: 60px;
         }
         
-        /* Chat filter tabs in header */
         .chat-filter-tabs-header {
             display: flex;
             background: rgba(255, 255, 255, 0.1);
@@ -255,8 +232,6 @@
             color: white;
         }
         
-        /* ====== WHATSAPP-LIKE BOTTOM NAVIGATION ====== */
-        /* Mobile bottom navigation bar - WhatsApp-like behavior */
         .mobile-nav-bar {
             position: fixed !important;
             bottom: 0 !important;
@@ -275,13 +250,11 @@
             box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
         }
         
-        /* Hide bottom nav when in fullscreen views */
         .mobile-nav-bar.hidden-nav {
             transform: translateY(100%) !important;
             pointer-events: none !important;
         }
         
-        /* WhatsApp-like behavior: Hide nav in chat/status/group views */
         body.in-chat-view .mobile-nav-bar,
         body.in-status-view .mobile-nav-bar,
         body.in-group-view .mobile-nav-bar,
@@ -290,7 +263,6 @@
             pointer-events: none !important;
         }
         
-        /* Adjust content areas when nav is hidden - WhatsApp behavior */
         body.in-chat-view .iframe-container,
         body.in-status-view .iframe-container,
         body.in-group-view .iframe-container,
@@ -300,10 +272,9 @@
             bottom: 0 !important;
         }
         
-        /* FIXED: Mobile nav icons styling for better visibility */
         .mobile-nav-icon {
-            color: transparent !important; /* Hide text color */
-            font-size: 0; /* Hide text */
+            color: transparent !important;
+            font-size: 0;
             padding: 12px;
             border-radius: 12px;
             transition: all 0.2s ease;
@@ -317,7 +288,6 @@
             position: relative;
         }
         
-        /* FIXED: Ensure FontAwesome icons are visible */
         .mobile-nav-icon i {
             font-family: "Font Awesome 6 Free" !important;
             font-weight: 900 !important;
@@ -349,7 +319,6 @@
             color: white !important;
         }
         
-        /* ====== FIXED: MOBILE NAVIGATION ICONS ====== */
         @media (max-width: 767px) {
             .iframe-container {
                 left: 0;
@@ -363,7 +332,6 @@
                 width: 60px;
             }
             
-            /* Mobile header adjustments */
             .kynecta-header.p-4 {
                 padding: 0.75rem !important;
             }
@@ -385,28 +353,24 @@
                 display: block !important;
             }
             
-            /* REMOVED: Mobile sidebar at bottom styling - sidebar is now hidden in mobile */
             #permanentSidebar {
                 display: none !important;
             }
             
-            /* Adjust chat app margin - REMOVED sidebar offset */
             #chatApp {
                 margin-left: 0 !important;
                 width: 100% !important;
-                margin-bottom: 60px; /* Space for bottom navbar */
+                margin-bottom: 60px;
             }
             
-            /* Adjust content areas - REMOVED sidebar offset */
             #chatsContent,
             #toolsContent {
                 margin-left: 0 !important;
                 width: 100% !important;
-                height: calc(100vh - 60px) !important; /* Account for mobile navbar */
-                padding-bottom: 60px !important; /* Space for mobile navbar */
+                height: calc(100vh - 60px) !important;
+                padding-bottom: 60px !important;
             }
             
-            /* WhatsApp behavior: Fullscreen views take full height */
             body.in-chat-view .iframe-container,
             body.in-status-view .iframe-container,
             body.in-group-view .iframe-container,
@@ -416,50 +380,43 @@
                 bottom: 0 !important;
             }
             
-            /* Make sure iframe pages don't hide sidebar */
             .content-area.iframe-container {
                 left: 0 !important;
                 width: 100% !important;
-                height: 100vh !important; /* Full screen height */
-                padding-bottom: 60px; /* Space for mobile navbar */
+                height: 100vh !important;
+                padding-bottom: 60px;
             }
             
-            /* Chat filter tabs for mobile - UPDATED: Increased icon size */
             .chat-filter-tabs-header {
                 margin: 0 auto;
                 background: rgba(255, 255, 255, 0.1);
             }
             
             .chat-filter-tab-header {
-                width: 44px; /* Increased from 36px */
-                height: 44px; /* Increased from 36px */
-                font-size: 18px; /* Increased from 16px */
+                width: 44px;
+                height: 44px;
+                font-size: 18px;
             }
             
-            /* Hide desktop chat header icons on mobile when not in chat */
             #chatHeader .flex.space-x-3 {
                 display: none !important;
             }
             
-            /* Show chat header icons only when in chat area on mobile */
             #chatArea:not(.hidden) #chatHeader .flex.space-x-3 {
                 display: flex !important;
             }
             
-            /* FIX: Ensure iframe content is properly displayed on mobile */
             .content-iframe {
                 width: 100% !important;
                 height: 100% !important;
                 overflow: auto !important;
             }
             
-            /* FIX: Ensure iframe content is scrollable on mobile */
             .iframe-container {
                 overflow: auto !important;
                 -webkit-overflow-scrolling: touch !important;
             }
             
-            /* Notification badges for mobile nav */
             .mobile-nav-badge {
                 position: absolute;
                 top: 5px;
@@ -476,7 +433,6 @@
                 z-index: 1001;
             }
             
-            /* FIXED: Mobile group icon in header */
             .mobile-group-icon {
                 display: inline-flex !important;
                 align-items: center;
@@ -493,7 +449,6 @@
                 color: white !important;
             }
             
-            /* Mobile menu button (three dashes) for specific pages */
             .mobile-menu-button {
                 display: none !important;
                 margin-right: 10px;
@@ -503,12 +458,10 @@
                 color: white !important;
             }
             
-            /* Show mobile menu button only on specific pages in mobile view */
             body.in-chat-view .mobile-menu-button {
                 display: inline-flex !important;
             }
             
-            /* WhatsApp-like back button */
             .back-button {
                 display: inline-flex !important;
                 align-items: center;
@@ -526,7 +479,6 @@
                 color: white !important;
             }
             
-            /* WhatsApp behavior: Show back button in fullscreen views, hide menu button */
             body.in-chat-view .mobile-menu-button,
             body.in-status-view .mobile-menu-button,
             body.in-group-view .mobile-menu-button {
@@ -540,7 +492,6 @@
             }
         }
         
-        /* Tablet optimizations */
         @media (min-width: 768px) and (max-width: 1023px) {
             .iframe-container {
                 left: 60px;
@@ -552,7 +503,6 @@
                 width: 60px;
             }
             
-            /* Tablet sidebar adjustments */
             .nav-icon {
                 padding: 0.5rem !important;
                 font-size: 1.25rem !important;
@@ -570,13 +520,11 @@
                 display: flex !important;
             }
             
-            /* Hide mobile nav bar on tablet */
             #mobileNavBar {
                 display: none !important;
             }
         }
         
-        /* Desktop optimizations */
         @media (min-width: 1024px) {
             .iframe-container {
                 left: 60px;
@@ -588,7 +536,6 @@
                 width: 60px;
             }
             
-            /* Desktop sidebar adjustments */
             .nav-icon {
                 padding: 0.5rem !important;
                 font-size: 1.25rem !important;
@@ -606,37 +553,31 @@
                 display: flex !important;
             }
             
-            /* Hide mobile nav bar on desktop */
             #mobileNavBar {
                 display: none !important;
             }
         }
         
-        /* Ensure sidebar stays on top of everything */
         #permanentSidebar {
             box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
         }
         
-        /* Adjust chat app margin for sidebar */
         #chatApp {
             margin-left: 60px;
             width: calc(100% - 60px);
         }
         
-        /* Adjust content areas for sidebar */
         #chatsContent,
         #toolsContent {
             margin-left: 0;
             width: 100%;
         }
         
-        /* Make sure iframe pages don't hide sidebar */
         .content-area.iframe-container {
             left: 60px;
             width: calc(100% - 60px);
         }
         
-        /* Friend list item */
         .friend-item {
             transition: all 0.2s ease;
             cursor: pointer;
@@ -653,7 +594,6 @@
             border-left: 4px solid #4f46e5;
         }
         
-        /* Scroll to bottom button */
         .scroll-to-bottom {
             position: fixed;
             bottom: 100px;
@@ -677,7 +617,6 @@
             box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
         }
         
-        /* Toggle switch */
         .toggle-switch {
             position: relative;
             display: inline-block;
@@ -723,7 +662,6 @@
             transform: translateX(26px);
         }
         
-        /* Emoji picker */
         .emoji-picker {
             background: white;
             border: 1px solid #e5e7eb;
@@ -749,7 +687,6 @@
             transform: scale(1.1);
         }
         
-        /* Upload progress */
         .upload-progress {
             width: 100px;
             height: 4px;
@@ -764,7 +701,6 @@
             transition: width 0.3s ease;
         }
         
-        /* Mood tags */
         .mood-tag {
             display: inline-flex;
             align-items: center;
@@ -800,7 +736,6 @@
             color: #5b21b6;
         }
         
-        /* Interest tags */
         .interest-tag {
             display: inline-flex;
             align-items: center;
@@ -813,7 +748,6 @@
             color: #4b5563;
         }
         
-        /* Goal progress */
         .goal-progress {
             height: 6px;
             background-color: #e5e7eb;
@@ -828,7 +762,6 @@
             transition: width 0.3s ease;
         }
         
-        /* Poll results */
         .poll-option {
             background-color: #f9fafb;
             border-radius: 8px;
@@ -851,7 +784,6 @@
             transition: width 0.5s ease;
         }
         
-        /* Message status indicators */
         .message-status {
             display: inline-flex;
             align-items: center;
@@ -876,10 +808,9 @@
             color: #10b981;
         }
         
-        /* Offline indicator - REMOVED VISIBLE STYLING */
         .offline-indicator {
             position: fixed;
-            top: -100px; /* Hide completely off-screen */
+            top: -100px;
             left: 0;
             right: 0;
             height: 0;
@@ -889,7 +820,6 @@
             z-index: -1;
         }
         
-        /* Notification badges for mobile nav */
         .mobile-nav-badge {
             position: absolute;
             top: 5px;
@@ -906,12 +836,10 @@
             z-index: 1001;
         }
         
-        /* Mobile profile button */
         .mobile-profile-button {
             display: none;
         }
         
-        /* Chat filter tabs - old style (keeping for reference) */
         .chat-filter-tabs {
             display: flex;
             background-color: #f9fafb;
@@ -946,7 +874,6 @@
             background-color: #4338ca;
         }
         
-        /* Unread chat indicator */
         .unread-indicator {
             position: absolute;
             top: 0.5rem;
@@ -958,7 +885,6 @@
             animation: pulse 1.5s infinite;
         }
         
-        /* Chat item states for filtering */
         .chat-item.sent {
             border-left: 3px solid #667eea;
         }
@@ -971,7 +897,6 @@
             background-color: #f0f9ff;
         }
         
-        /* Offline message styling */
         .message-offline-indicator {
             font-size: 10px;
             color: #9ca3af;
@@ -979,7 +904,6 @@
             font-style: italic;
         }
         
-        /* FIX: Ensure attach button works properly */
         #attachBtn {
             position: relative;
             overflow: hidden;
@@ -995,7 +919,6 @@
             cursor: pointer;
         }
         
-        /* FIX: Ensure iframe content is properly displayed */
         iframe {
             display: block;
             width: 100%;
@@ -1003,27 +926,23 @@
             border: none;
         }
         
-        /* FIX: Mobile iframe content visibility */
         @media (max-width: 767px) {
             .content-iframe {
                 position: relative !important;
                 z-index: 1 !important;
             }
             
-            /* Ensure iframe content is scrollable */
             .iframe-container iframe {
                 min-height: 100vh !important;
             }
         }
         
-        /* Chat loading skeleton */
         .chat-skeleton {
             animation: pulse 2s infinite;
             background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
             background-size: 200% 100%;
         }
         
-        /* Notification badge */
         .notification-badge {
             position: absolute;
             top: -5px;
@@ -1040,7 +959,6 @@
             font-weight: bold;
         }
         
-        /* Call notification */
         .call-notification {
             position: fixed;
             top: 10px;
@@ -1059,14 +977,12 @@
             to { transform: translateX(0); opacity: 1; }
         }
         
-        /* No messages state */
         .no-filter-results {
             text-align: center;
             padding: 40px 20px;
             color: #6b7280;
         }
         
-        /* User loading skeleton */
         .user-skeleton {
             width: 100px;
             height: 20px;
@@ -1075,9 +991,6 @@
             animation: pulse 2s infinite;
         }
         
-        /* ====== CRITICAL FIXES - START ====== */
-        
-        /* Fix for white flashes during navigation */
         .content-area, .iframe-container {
             opacity: 0;
             animation: fadeInSmooth 0.3s ease-out forwards;
@@ -1088,7 +1001,6 @@
             to { opacity: 1; }
         }
         
-        /* Fix for iframe loading flashes */
         .content-iframe {
             opacity: 0;
             transition: opacity 0.2s ease;
@@ -1098,7 +1010,6 @@
             opacity: 1;
         }
         
-        /* Fix for mobile group icon in header */
         .mobile-group-icon {
             display: none;
         }
@@ -1112,19 +1023,16 @@
                 display: none !important;
             }
             
-            /* Ensure mobile filter buttons are always clickable */
             .chat-filter-tab-header {
                 pointer-events: auto !important;
                 touch-action: manipulation !important;
             }
             
-            /* Prevent layout shift during navigation */
             body {
                 overflow-x: hidden;
                 width: 100%;
             }
             
-            /* Fix for iframe loading on mobile */
             .iframe-container {
                 background: white;
                 backface-visibility: hidden;
@@ -1132,7 +1040,6 @@
                 transform: translateZ(0);
             }
             
-            /* Fix mobile navigation for 6 icons */
             .mobile-nav-icon {
                 padding: 10px 8px;
                 font-size: 0;
@@ -1143,7 +1050,6 @@
             }
         }
         
-        /* Desktop group icon positioning */
         @media (min-width: 768px) {
             .mobile-group-icon {
                 display: none !important;
@@ -1154,14 +1060,12 @@
             }
         }
         
-        /* Fix for filter buttons active states */
         .chat-filter-tab-header.active {
             background: rgba(255, 255, 255, 0.3) !important;
             transform: scale(1.05);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
         
-        /* ====== OFFLINE CHAT ENHANCEMENTS ====== */
         .message-input-enabled {
             background-color: #ffffff;
             border: 2px solid #667eea;
@@ -1202,7 +1106,6 @@
             border-left: 4px solid #34d399;
         }
         
-        /* ====== SETTINGS INTEGRATION STYLES ====== */
         .theme-dark {
             background-color: #1f2937;
             color: #f9fafb;
@@ -1274,7 +1177,6 @@
             background-color: #f9fafb !important;
         }
         
-        /* ====== CROSS-SCREEN COMMUNICATION STYLES ====== */
         .incoming-call-alert {
             position: fixed;
             top: 20px;
@@ -1304,7 +1206,6 @@
             max-width: 300px;
         }
         
-        /* Global notification for all screens */
         .global-notification {
             position: fixed;
             top: 10px;
@@ -1344,7 +1245,6 @@
             cursor: pointer;
         }
         
-        /* Global incoming call notification */
         .global-call-notification {
             position: fixed;
             top: 70px;
@@ -1393,7 +1293,6 @@
             background: rgba(239, 68, 68, 0.8);
         }
         
-        /* ====== WHATSAPP-LIKE BACK NAVIGATION ====== */
         .back-button {
             display: none !important;
         }
@@ -1403,7 +1302,6 @@
                 display: none !important;
             }
             
-            /* WhatsApp behavior: Show back button in fullscreen views */
             body.in-chat-view .back-button,
             body.in-status-view .back-button,
             body.in-group-view .back-button,
@@ -1411,7 +1309,6 @@
                 display: inline-flex !important;
             }
             
-            /* WhatsApp behavior: Hide menu button in fullscreen views */
             body.in-chat-view .mobile-menu-button,
             body.in-status-view .mobile-menu-button,
             body.in-group-view .mobile-menu-button,
@@ -1419,22 +1316,16 @@
                 display: none !important;
             }
         }
-        
-        /* ====== CRITICAL FIXES - END ====== */
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
-    <!-- Soft Authentication Check Script -->
     <script>
-        // Suppress console warnings for CDN
         const originalWarn = console.warn;
         console.warn = function(...args) {
             if (typeof args[0] === 'string') {
-                // Suppress Tailwind CDN warnings
                 if (args[0].includes('Tailwind') && args[0].includes('CDN')) {
                     return;
                 }
-                // Suppress other CDN warnings
                 if (args[0].includes('CDN') || args[0].includes('Content Security Policy')) {
                     return;
                 }
@@ -1443,11 +1334,8 @@
         };
     </script>
 
-    <!-- ====== IFRAME AUTHENTICATION HANDLER ====== -->
     <script>
-        // Iframe Authentication Manager - For iframe pages only
         const IframeAuthManager = {
-            // State tracking
             state: {
                 isAuthenticated: false,
                 isBootstrapped: false,
@@ -1458,64 +1346,41 @@
                 pendingApiCalls: []
             },
             
-            // Event listeners collection
             eventListeners: {
                 authReady: [],
                 dataReady: [],
                 userDataLoaded: []
             },
             
-            /**
-             * Initialize iframe authentication
-             * Called when iframe receives BOOTSTRAP_REQUEST
-             */
             async initialize() {
                 console.log('🔄 [IframeAuthManager] Initializing iframe authentication...');
                 
-                // Mark as bootstrapped
                 this.state.isBootstrapped = true;
-                
-                // Create auth promise
                 this.state.authPromise = this.waitForAuthentication();
                 
-                // Wait for authentication
                 try {
                     const authResult = await this.state.authPromise;
                     console.log('✅ [IframeAuthManager] Authentication ready:', authResult.user ? authResult.user.name : 'Unknown');
                     
-                    // Set state
                     this.state.isAuthenticated = true;
                     this.state.user = authResult.user;
                     this.state.token = authResult.token;
                     
-                    // Trigger auth ready events
                     this.triggerEvent('authReady', authResult);
-                    
-                    // Process pending API calls
                     await this.processPendingApiCalls();
-                    
-                    // Trigger data ready events
                     this.triggerEvent('dataReady', authResult);
                     
                     return authResult;
                 } catch (error) {
                     console.error('❌ [IframeAuthManager] Authentication failed:', error);
-                    
-                    // Notify parent about auth failure
                     this.notifyParentAuthFailure();
-                    
                     throw error;
                 }
             },
             
-            /**
-             * Wait for authentication to be ready
-             * Uses multiple fallback methods
-             */
             async waitForAuthentication() {
                 console.log('⏳ [IframeAuthManager] Waiting for authentication...');
                 
-                // Method 1: Use AuthManager from parent (if available)
                 if (typeof window.AuthManager !== 'undefined') {
                     console.log('🔍 [IframeAuthManager] Using window.AuthManager');
                     try {
@@ -1529,7 +1394,6 @@
                     }
                 }
                 
-                // Method 2: Use bootstrapIframe function
                 if (typeof window.bootstrapIframe === 'function') {
                     console.log('🔍 [IframeAuthManager] Using bootstrapIframe');
                     try {
@@ -1545,7 +1409,6 @@
                     }
                 }
                 
-                // Method 3: Check localStorage directly
                 console.log('🔍 [IframeAuthManager] Checking localStorage directly');
                 const tokenKeys = ['access_token', 'moodchat_token', 'auth_token'];
                 let token = null;
@@ -1572,7 +1435,6 @@
                 }
                 
                 if (token && user) {
-                    // Validate with API if api.js is available
                     if (typeof window.api === 'function') {
                         try {
                             const response = await window.api('/api/auth/me', 'GET');
@@ -1589,7 +1451,6 @@
                     return { user, token };
                 }
                 
-                // Method 4: Wait for message from parent
                 console.log('🔍 [IframeAuthManager] Waiting for auth message from parent');
                 return new Promise((resolve, reject) => {
                     const timeoutId = setTimeout(() => {
@@ -1615,7 +1476,6 @@
                     
                     window.addEventListener('message', messageHandler);
                     
-                    // Request auth data from parent
                     window.parent.postMessage({
                         type: 'REQUEST_AUTH_DATA',
                         timestamp: Date.now()
@@ -1623,24 +1483,17 @@
                 });
             },
             
-            /**
-             * Execute API call with authentication
-             * Waits for auth if not ready yet
-             */
             async executeApiCall(apiFunction, ...args) {
-                // If auth is ready, execute immediately
                 if (this.state.isAuthenticated && this.state.token) {
                     return apiFunction(...args);
                 }
                 
-                // If auth is in progress, wait for it
                 if (this.state.authPromise) {
                     console.log('⏳ [IframeAuthManager] API call waiting for authentication...');
                     await this.state.authPromise;
                     return apiFunction(...args);
                 }
                 
-                // Otherwise, queue the call
                 return new Promise((resolve, reject) => {
                     this.state.pendingApiCalls.push({
                         apiFunction,
@@ -1651,9 +1504,6 @@
                 });
             },
             
-            /**
-             * Process pending API calls after auth is ready
-             */
             async processPendingApiCalls() {
                 if (this.state.pendingApiCalls.length === 0) return;
                 
@@ -1671,17 +1521,11 @@
                 this.state.pendingApiCalls = [];
             },
             
-            /**
-             * Register data fetch promise
-             */
             registerDataFetch(promise) {
                 this.state.dataFetchPromises.push(promise);
                 return promise;
             },
             
-            /**
-             * Wait for all data to be fetched
-             */
             async waitForAllData() {
                 if (this.state.dataFetchPromises.length === 0) {
                     return [];
@@ -1699,9 +1543,6 @@
                 }
             },
             
-            /**
-             * Add event listener
-             */
             on(event, callback) {
                 if (!this.eventListeners[event]) {
                     this.eventListeners[event] = [];
@@ -1709,9 +1550,6 @@
                 this.eventListeners[event].push(callback);
             },
             
-            /**
-             * Trigger event
-             */
             triggerEvent(event, data) {
                 if (this.eventListeners[event]) {
                     this.eventListeners[event].forEach(callback => {
@@ -1724,9 +1562,6 @@
                 }
             },
             
-            /**
-             * Notify parent about authentication failure
-             */
             notifyParentAuthFailure() {
                 try {
                     window.parent.postMessage({
@@ -1739,79 +1574,51 @@
                 }
             },
             
-            /**
-             * Get current user (synchronous)
-             */
             getCurrentUser() {
                 return this.state.user;
             },
             
-            /**
-             * Get current token (synchronous)
-             */
             getCurrentToken() {
                 return this.state.token;
             },
             
-            /**
-             * Check if authenticated (synchronous)
-             */
             isAuthenticated() {
                 return this.state.isAuthenticated;
             },
             
-            /**
-             * Check if bootstrapped (synchronous)
-             */
             isBootstrapped() {
                 return this.state.isBootstrapped;
             }
         };
         
-        // Make globally available
         window.IframeAuthManager = IframeAuthManager;
         
-        // ====== SAFE DATA FETCHER ======
-        // Use this instead of direct API calls in iframes
         window.safeApiFetch = async function(endpoint, method = 'GET', data = null) {
             console.log(`🔍 [safeApiFetch] Requesting: ${method} ${endpoint}`);
             
-            // Wait for authentication
             await IframeAuthManager.state.authPromise;
             
-            // Check if api.js is available
             if (typeof window.api !== 'function') {
                 throw new Error('api.js not available for making authenticated requests');
             }
             
-            // Make the API call
             return window.api(endpoint, method, data);
         };
         
-        // ====== SAFE UI UPDATER ======
-        // Use this to update UI after data is fetched
         window.updateUIAfterAuth = async function(uiUpdateFunction) {
             console.log('🎨 [updateUIAfterAuth] Scheduling UI update');
             
-            // Wait for authentication
             await IframeAuthManager.state.authPromise;
-            
-            // Wait for any pending data fetches
             await IframeAuthManager.waitForAllData();
             
-            // Execute UI update
             return uiUpdateFunction();
         };
         
-        // ====== IFRAME MESSAGE HANDLER ======
         window.addEventListener('message', function(event) {
-            // Handle bootstrap request from parent
             if (event.data && event.data.type === 'BOOTSTRAP_REQUEST') {
                 console.log('🚀 [iframe] Received BOOTSTRAP_REQUEST from parent');
                 
-                // Initialize auth manager
                 IframeAuthManager.initialize().then(authResult => {
-                    // Notify parent that bootstrap is complete
                     window.parent.postMessage({
                         type: 'BOOTSTRAP_COMPLETE',
                         success: true,
@@ -1819,7 +1626,6 @@
                         timestamp: Date.now()
                     }, '*');
                     
-                    // Notify iframe is loaded
                     window.parent.postMessage({
                         type: 'iframe_loaded',
                         iframeId: window.frameElement ? window.frameElement.id : 'unknown',
@@ -1829,7 +1635,6 @@
                 }).catch(error => {
                     console.error('❌ [iframe] Bootstrap failed:', error);
                     
-                    // Notify parent about failure
                     window.parent.postMessage({
                         type: 'BOOTSTRAP_FAILED',
                         error: error.message,
@@ -1838,31 +1643,20 @@
                 });
             }
             
-            // Handle auth data from parent
             if (event.data && event.data.type === 'AUTH_DATA') {
                 console.log('🔐 [iframe] Received AUTH_DATA from parent');
                 
-                // Update auth manager state
                 if (event.data.user && event.data.token) {
                     IframeAuthManager.state.isAuthenticated = true;
                     IframeAuthManager.state.user = event.data.user;
                     IframeAuthManager.state.token = event.data.token;
                     
-                    // Resolve auth promise if it exists
                     if (IframeAuthManager.state.authPromise) {
-                        // Create a resolver for the promise
-                        const resolver = {
-                            resolve: null,
-                            reject: null
-                        };
-                        
-                        // Replace the promise with a resolved one
                         IframeAuthManager.state.authPromise = Promise.resolve({
                             user: event.data.user,
                             token: event.data.token
                         });
                         
-                        // Trigger auth ready events
                         IframeAuthManager.triggerEvent('authReady', {
                             user: event.data.user,
                             token: event.data.token
@@ -1871,7 +1665,6 @@
                 }
             }
             
-            // Handle go_back message
             if (event.data && event.data.type === 'go_back') {
                 console.log('🔙 [iframe] Received go_back command');
                 if (typeof window.goBack === 'function') {
@@ -1881,7 +1674,6 @@
                 }
             }
             
-            // Handle get_fullscreen_status message
             if (event.data && event.data.type === 'get_fullscreen_status') {
                 const isFullscreen = document.body.classList.contains('in-chat-view') ||
                                    document.body.classList.contains('in-status-view') ||
@@ -1896,12 +1688,9 @@
             }
         });
         
-        // ====== IFRAME LOAD COMPLETE NOTIFICATION ======
-        // Notify parent that iframe is loaded
         window.addEventListener('load', function() {
             console.log('📄 [iframe] Document loaded, notifying parent');
             
-            // Small delay to ensure DOM is ready
             setTimeout(() => {
                 window.parent.postMessage({
                     type: 'iframe_loaded',
@@ -1915,12 +1704,9 @@
         console.log('✅ [iframe] Authentication system initialized');
     </script>
 
-    <!-- Global Notification Container (Shows on all screens) -->
     <div id="globalNotificationContainer" class="fixed top-4 right-4 z-10000 space-y-2">
-        <!-- Global notifications will be added here -->
     </div>
 
-    <!-- Global Incoming Call Notification -->
     <div id="globalCallNotification" class="global-call-notification hidden">
         <div class="notification-content">
             <div class="flex items-center">
@@ -1941,13 +1727,10 @@
         </div>
     </div>
 
-    <!-- Notification Container for cross-screen notifications -->
     <div id="notificationContainer" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
-    <!-- Call Notifications Container -->
     <div id="callNotificationContainer" class="fixed top-4 left-4 z-50 space-y-2"></div>
     
-    <!-- Cross-screen incoming call alert -->
     <div id="crossScreenCallAlert" class="incoming-call-alert hidden">
         <div class="flex items-center justify-between">
             <div>
@@ -1958,7 +1741,6 @@
         </div>
     </div>
     
-    <!-- Cross-screen chat notification -->
     <div id="crossScreenChatNotification" class="cross-screen-notification hidden">
         <div class="flex items-center">
             <i class="fas fa-comment-alt mr-3 text-purple-500"></i>
@@ -1969,7 +1751,6 @@
         </div>
     </div>
 
-    <!-- Loading Screen - Shows only briefly (1 second max) -->
     <div id="loadingScreen" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
         <div class="text-center">
             <div class="w-16 h-16 bg-gradient-to-r from-purple-500 to-green-500 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
@@ -1980,9 +1761,7 @@
         </div>
     </div>
 
-    <!-- Permanent Sidebar - Always Visible on Desktop/Laptop (Hidden on Mobile) -->
     <div id="permanentSidebar" class="fixed left-0 top-0 bottom-0 w-16 bg-gray-900 z-40 flex flex-col items-center py-6 space-y-8 hidden md:flex">
-        <!-- Profile section removed from sidebar -->
         
         <div class="flex-1 flex flex-col items-center space-y-8">
             <button class="nav-icon text-white text-2xl p-3 rounded-2xl bg-purple-700" data-page="messages" title="Messages">
@@ -1994,7 +1773,6 @@
                 <span id="sidebarStatusBadge" class="notification-badge hidden"></span>
             </button>
             
-            <!-- Group icon in desktop sidebar -->
             <button class="nav-icon text-gray-400 hover:text-white text-2xl p-3 rounded-2xl hover:bg-gray-800 transition-all desktop-group-icon" data-page="group" title="Groups">
                 <i class="fas fa-users"></i>
                 <span id="sidebarGroupBadge" class="notification-badge hidden"></span>
@@ -2020,8 +1798,6 @@
         </button>
     </div>
 
-    <!-- ====== WHATSAPP-LIKE BOTTOM NAVIGATION BAR ====== -->
-    <!-- Mobile only - Shows all icons like WhatsApp -->
     <div id="mobileNavBar" class="mobile-nav-bar">
         <button class="mobile-nav-icon active" data-page="messages" title="Messages">
             <i class="fas fa-comments"></i>
@@ -2033,7 +1809,6 @@
             <span id="mobileCallBadge" class="mobile-nav-badge hidden"></span>
         </button>
         
-        <!-- Group icon in mobile navigation -->
         <button class="mobile-nav-icon" data-page="group" title="Groups">
             <i class="fas fa-users"></i>
             <span id="mobileGroupBadge" class="mobile-nav-badge hidden"></span>
@@ -2054,49 +1829,40 @@
             <span id="mobileToolsBadge" class="mobile-nav-badge hidden"></span>
         </button>
         
-        <!-- ADDED: Settings icon in mobile navigation -->
         <button class="mobile-nav-icon" data-page="settings" title="Settings">
             <i class="fas fa-cog"></i>
             <span id="mobileSettingsBadge" class="mobile-nav-badge hidden"></span>
         </button>
     </div>
 
-    <!-- Messages Page Iframe (Replaces Chats) -->
     <div id="messagesContent" class="content-area iframe-container hidden">
         <iframe id="messagesIframe" class="content-iframe" src="message.html" title="Messages"></iframe>
     </div>
 
-    <!-- Status Page Iframe -->
     <div id="statusContent" class="content-area iframe-container hidden">
         <iframe id="statusIframe" class="content-iframe" src="status.html" title="Status"></iframe>
     </div>
 
-    <!-- Group Page Iframe -->
     <div id="groupContent" class="content-area iframe-container hidden">
         <iframe id="groupIframe" class="content-iframe" src="group.html" title="Groups"></iframe>
     </div>
 
-    <!-- Friends Page Iframe -->
     <div id="friendsContent" class="content-area iframe-container hidden">
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" title="Friends"></iframe>
     </div>
 
-    <!-- Calls Page Iframe -->
     <div id="callsContent" class="content-area iframe-container hidden">
         <iframe id="callsIframe" class="content-iframe" src="calls.html" title="Calls"></iframe>
     </div>
 
-    <!-- Settings Page Iframe -->
     <div id="settingsContent" class="content-area iframe-container hidden">
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" title="Settings"></iframe>
     </div>
 
-    <!-- Tools Page Iframe -->
     <div id="toolsContent" class="content-area iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" title="Tools"></iframe>
     </div>
 
-    <!-- Video Conference -->
     <div class="video-conference" id="videoConference">
         <div class="conference-grid" id="conferenceGrid">
         </div>
@@ -2113,7 +1879,6 @@
         </div>
     </div>
 
-    <!-- Video Call Container -->
     <div id="videoCallContainer" class="hidden fixed inset-0 bg-black bg-opacity-80 z-50 flex flex-col items-center justify-center p-4">
         <video id="remoteVideo" autoplay playsinline class="w-full max-w-md rounded-lg mb-4"></video>
         <video id="localVideo" autoplay muted playsinline class="absolute bottom-4 right-4 w-32 h-48 object-cover rounded-lg border-2 border-white"></video>
@@ -2139,7 +1904,6 @@
         </div>
     </div>
 
-    <!-- Incoming Call Popup -->
     <div id="incomingCallPopup" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
             <h3 class="text-lg font-semibold mb-2">Incoming Call</h3>
@@ -2152,7 +1916,6 @@
         </div>
     </div>
 
-    <!-- Call Container -->
     <div id="callContainer" class="hidden fixed inset-0 bg-black z-40 flex-col">
         <video id="remoteVideo" class="w-full h-full object-cover" autoplay playsinline></video>
         
@@ -2171,7 +1934,6 @@
         </div>
     </div>
 
-    <!-- Mood Modal -->
     <div id="moodModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
         <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
             <h2 class="text-xl font-bold mb-4">Select Your Mood</h2>
@@ -2188,7 +1950,6 @@
         </div>
     </div>
 
-    <!-- Quick Actions Modal -->
     <div id="quickActionsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
         <div class="bg-white w-11/12 max-w-md rounded-2xl p-6 shadow-lg">
             <h2 class="text-xl font-bold mb-4">Quick Actions</h2>
@@ -2205,9 +1966,7 @@
     </div>
 
     <script>
-    // ====== SIMPLIFIED APP STATE ======
     const AppState = {
-        // Core state
         api: {
             ready: false,
             reference: null
@@ -2221,14 +1980,11 @@
             online: navigator.onLine
         },
         
-        // Initialize
         initialize() {
             console.log('AppState initializing...');
             
-            // Check online status
             this.connectivity.online = navigator.onLine;
             
-            // Check if we have auth from localStorage
             const token = localStorage.getItem('access_token') || 
                          localStorage.getItem('moodchat_token') || 
                          localStorage.getItem('auth_token');
@@ -2252,13 +2008,11 @@
             });
         },
         
-        // Set authentication
         setAuthenticated(user, token) {
             this.auth.authenticated = true;
             this.auth.user = user;
             this.auth.token = token;
             
-            // Store in localStorage
             localStorage.setItem('kynecta_user', JSON.stringify(user));
             localStorage.setItem('access_token', token);
             localStorage.setItem('moodchat_token', token);
@@ -2267,13 +2021,11 @@
             console.log('AppState: User authenticated', user.name);
         },
         
-        // Clear authentication
         clearAuthentication() {
             this.auth.authenticated = false;
             this.auth.user = null;
             this.auth.token = null;
             
-            // Clear localStorage
             localStorage.removeItem('kynecta_user');
             localStorage.removeItem('access_token');
             localStorage.removeItem('moodchat_token');
@@ -2283,7 +2035,6 @@
             console.log('AppState: Authentication cleared');
         },
         
-        // Set API ready
         setApiReady(apiRef) {
             this.api.ready = true;
             this.api.reference = apiRef;
@@ -2291,7 +2042,6 @@
         }
     };
     
-    // ====== AUTHENTICATION MANAGER ======
     const AuthManager = {
         state: {
             isAuthenticated: false,
@@ -2303,7 +2053,6 @@
         initialize() {
             console.log('AuthManager initializing...');
             
-            // Check localStorage for existing auth
             const token = localStorage.getItem('access_token') || 
                          localStorage.getItem('moodchat_token') || 
                          localStorage.getItem('auth_token');
@@ -2332,7 +2081,6 @@
             this.state.user = user;
             this.state.token = token;
             
-            // Store in localStorage
             localStorage.setItem('kynecta_user', JSON.stringify(user));
             localStorage.setItem('access_token', token);
             localStorage.setItem('moodchat_token', token);
@@ -2346,7 +2094,6 @@
             this.state.user = null;
             this.state.token = null;
             
-            // Clear localStorage
             localStorage.removeItem('kynecta_user');
             localStorage.removeItem('access_token');
             localStorage.removeItem('moodchat_token');
@@ -2376,8 +2123,6 @@
         }
     };
     
-    // ====== NAVIGATION SYSTEM ======
-    
     let currentPage = 'messages';
     let iframesLoaded = {};
     let appVersion = '1.0.0';
@@ -2394,7 +2139,6 @@
     let apiCheckInterval = null;
     let loadingTimeout = null;
     
-    // ====== HELPER FUNCTIONS ======
     function closeModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
@@ -2402,28 +2146,19 @@
         }
     }
     
-    // ====== QUICK PAGE INITIALIZATION ======
     function quickInitialize() {
         console.log('Quick initialization starting...');
         
-        // Hide loading screen after brief delay
         setTimeout(() => {
             hideLoading();
         }, 1000);
         
-        // Initialize AppState immediately
         AppState.initialize();
-        
-        // Initialize AuthManager immediately
         AuthManager.initialize();
-        
-        // Setup basic navigation immediately
         setupNavigation();
         
-        // Show sidebar and mobile nav
         document.getElementById('permanentSidebar').classList.remove('hidden');
         
-        // Show mobile nav on mobile
         if (window.innerWidth < 768) {
             const mobileNavBar = document.getElementById('mobileNavBar');
             if (mobileNavBar) {
@@ -2431,29 +2166,20 @@
             }
         }
         
-        // Pre-load iframes in background
         preloadIframes();
-        
-        // Switch to messages page immediately
         switchPage('messages');
-        
-        // Mark app as initialized
         appInitialized = true;
         
         console.log('Quick initialization complete - page is ready');
-        
-        // Start background authentication check
         startBackgroundAuthCheck();
     }
     
     function startBackgroundAuthCheck() {
         console.log('Starting background authentication check...');
         
-        // Check API readiness in background
         setTimeout(() => {
             checkApiReadiness();
             
-            // Validate auth in background
             if (AuthManager.state.isAuthenticated && typeof window.api === 'function') {
                 console.log('Background: Validating authentication...');
                 window.api('/api/auth/me', 'GET')
@@ -2462,8 +2188,6 @@
                             console.log('Background: Auth validation successful');
                             AppState.setAuthenticated(response.user, AuthManager.state.token);
                             AuthManager.setAuthenticated(response.user, AuthManager.state.token);
-                            
-                            // Notify iframes about updated auth
                             notifyAllIframesAboutAuth(response.user, AuthManager.state.token);
                         }
                     })
@@ -2474,18 +2198,15 @@
         }, 2000);
     }
     
-    // ====== IFRAME MESSAGE HANDLING ======
     function handleIframeMessage(event) {
         if (event.data && event.data.type) {
             console.log('Parent received from iframe:', event.data.type);
             
             switch(event.data.type) {
                 case 'iframe_loaded':
-                    // Mark iframe as loaded
                     const iframeId = event.data.iframeId || 'unknown';
                     iframesLoaded[iframeId] = true;
                     
-                    // Send auth data to iframe if available
                     const token = AuthManager.getCurrentToken();
                     const user = AuthManager.getCurrentUser();
                     
@@ -2498,13 +2219,11 @@
                                 timestamp: Date.now()
                             }, '*');
                         } catch (e) {
-                            // Silently ignore
                         }
                     }
                     break;
                     
                 case 'REQUEST_AUTH_DATA':
-                    // Send auth data to requesting iframe
                     const authToken = AuthManager.getCurrentToken();
                     const authUser = AuthManager.getCurrentUser();
                     
@@ -2519,19 +2238,15 @@
                     break;
                     
                 case 'USER_LOGIN':
-                    // Handle login from iframe
                     if (event.data.user && event.data.token) {
                         AppState.setAuthenticated(event.data.user, event.data.token);
                         AuthManager.setAuthenticated(event.data.user, event.data.token);
                         showGlobalNotification(`Welcome ${event.data.user.name || 'User'}!`, 'success', 3000);
-                        
-                        // Notify all iframes about new auth data
                         notifyAllIframesAboutAuth(event.data.user, event.data.token);
                     }
                     break;
                     
                 case 'USER_LOGOUT':
-                    // Handle logout from iframe
                     handleLogout();
                     break;
                     
@@ -2606,13 +2321,11 @@
                     break;
                     
                 default:
-                    // Ignore other messages
                     break;
             }
         }
     }
     
-    // Notify all iframes about auth data
     function notifyAllIframesAboutAuth(user, token) {
         document.querySelectorAll('.content-iframe').forEach(iframe => {
             try {
@@ -2625,7 +2338,6 @@
                     }, '*');
                 }
             } catch (e) {
-                // Silently ignore cross-origin errors
             }
         });
     }
@@ -2633,10 +2345,8 @@
     document.addEventListener('DOMContentLoaded', function() {
         console.log('DOM loaded, starting quick initialization...');
         
-        // Show loading screen briefly
         showLoading();
         
-        // Set a timeout to hide loading screen even if something fails
         loadingTimeout = setTimeout(() => {
             console.log('Loading timeout - showing app anyway');
             hideLoading();
@@ -2645,12 +2355,10 @@
             }
         }, 3000);
         
-        // Start quick initialization
         quickInitialize();
     });
     
     function checkApiReadiness() {
-        // Check if api.js is available
         if (typeof window.parent.api !== 'undefined') {
             AppState.setApiReady(window.parent.api);
             window.api = window.parent.api;
@@ -2827,7 +2535,6 @@
                     type: 'get_fullscreen_status'
                 }, '*');
             } catch (e) {
-                // Silently ignore
             }
         }
     }
@@ -2889,10 +2596,7 @@
             }
         }
         
-        // Setup back button
         setupBackButton();
-        
-        // Setup fullscreen page detection
         setupFullscreenPageDetection();
     }
     
@@ -2922,7 +2626,6 @@
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
                     
-                    // Send auth data to iframe
                     const token = AuthManager.getCurrentToken();
                     const user = AuthManager.getCurrentUser();
                     
@@ -2935,7 +2638,6 @@
                                 timestamp: Date.now()
                             }, '*');
                         } catch (e) {
-                            // Silently ignore cross-origin errors
                         }
                     }
                 };
@@ -2946,7 +2648,6 @@
                     this.classList.add('loaded');
                 };
                 
-                // Set src to start loading
                 element.src = iframeSrc;
             }
         });
@@ -2984,7 +2685,6 @@
                 if (iframesLoaded[`${pageName}Iframe`]) {
                     iframe.classList.add('loaded');
                     
-                    // Send auth data to iframe
                     const token = AuthManager.getCurrentToken();
                     const user = AuthManager.getCurrentUser();
                     
@@ -2997,7 +2697,6 @@
                                 timestamp: Date.now()
                             }, '*');
                         } catch (e) {
-                            // Silently ignore cross-origin errors
                         }
                     }
                 }
@@ -3012,19 +2711,15 @@
     function handleLogout() {
         console.log('Logging out user');
         
-        // Clear AppState
         AppState.clearAuthentication();
         
-        // Clear AuthManager
         if (window.AuthManager) {
             window.AuthManager.clearAuth();
         }
         
-        // Clear window objects
         window.accessToken = null;
         delete window.currentUser;
         
-        // Notify all iframes about logout
         document.querySelectorAll('.content-iframe').forEach(iframe => {
             try {
                 if (iframe.contentWindow) {
@@ -3034,11 +2729,9 @@
                     }, '*');
                 }
             } catch (e) {
-                // Silently ignore cross-origin errors
             }
         });
         
-        // Redirect to login
         window.location.href = '../index.html';
     }
     
@@ -3074,7 +2767,6 @@
     }
     
     function hideLoading() {
-        // Clear any pending timeout
         if (loadingTimeout) {
             clearTimeout(loadingTimeout);
             loadingTimeout = null;
@@ -3127,12 +2819,8 @@
         }
     }
     
-    // ====== EVENT LISTENERS ======
-    
-    // Setup message listener for iframes
     window.addEventListener('message', handleIframeMessage);
     
-    // Handle window resize
     window.addEventListener('resize', function() {
         if (window.innerWidth < 768) {
             setTimeout(() => {
@@ -3148,7 +2836,6 @@
         }
     });
     
-    // Handle online/offline events
     window.addEventListener('online', function() {
         AppState.connectivity.online = true;
         showGlobalNotification('Back online', 'success', 3000);
@@ -3159,7 +2846,6 @@
         showGlobalNotification('You are offline', 'warning', 5000);
     });
     
-    // Make functions globally available
     window.removeNotification = removeNotification;
     window.showBottomNavigation = showBottomNavigation;
     window.hideBottomNavigation = hideBottomNavigation;

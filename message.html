@@ -242,6 +242,47 @@
             cursor: pointer;
             margin-top: 10px;
         }
+        
+        /* Background fetch indicator */
+        .background-fetch-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 132, 255, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 10000;
+            display: none;
+        }
+        
+        .background-fetch-indicator.active {
+            display: flex;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .background-fetch-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -262,6 +303,12 @@
         <button class="auth-error-btn" id="authErrorLoginBtn">
             <i class="fas fa-sign-in-alt"></i> Go to Login
         </button>
+    </div>
+    
+    <!-- Background Fetch Indicator -->
+    <div class="background-fetch-indicator hidden" id="backgroundFetchIndicator">
+        <div class="background-fetch-spinner"></div>
+        <span>Fetching data...</span>
     </div>
     
     <!-- Offline Overlay -->
@@ -735,7 +782,7 @@
     
     <script type="module">
         // =============================================
-        // COMPLETE CHAT SYSTEM WITH BACKGROUND AUTH
+        // COMPLETE CHAT SYSTEM WITH ENHANCED BACKGROUND AUTH
         // =============================================
         
         // Global variables
@@ -775,21 +822,28 @@
         let dragStartY = 0;
         let isDraggingToCancel = false;
         
-        // Token and Authentication variables
+        // Enhanced Authentication variables
         let accessToken = null;
         let refreshToken = null;
         let tokenRefreshInProgress = false;
         let isInitialized = false;
         let isAuthChecking = false;
+        let isApiReady = false;
+        let backgroundFetchActive = false;
+        let userFetchPromise = null;
+        let authCheckComplete = false;
         
-        // Local Storage Keys for tokens
+        // Token Storage Keys (Multi-location support)
         const TOKEN_STORAGE_KEYS = {
             ACCESS_TOKEN: 'accessToken',
             REFRESH_TOKEN: 'refreshToken',
             USER_DATA: 'user_data',
             USER_ID: 'user_id',
             USER_EMAIL: 'user_email',
-            USER_NAME: 'user_name'
+            USER_NAME: 'user_name',
+            MOODCHAT_TOKEN: 'moodchat_token',
+            AUTH_USER: 'authUser',
+            KNECTA_TOKEN: 'knecta_access_token'
         };
         
         // Local Storage Keys
@@ -851,14 +905,14 @@
         const multiSendAttachmentPreview = document.getElementById('multiSendAttachmentPreview');
         const scheduleAttachmentPreview = document.getElementById('scheduleAttachmentPreview');
         const apiLoadingOverlay = document.getElementById('apiLoadingOverlay');
-        const apiStatusText = document.getElementById('apiStatusText');
         const authErrorOverlay = document.getElementById('authErrorOverlay');
         const authErrorTitle = document.getElementById('authErrorTitle');
         const authErrorMessage = document.getElementById('authErrorMessage');
         const authErrorLoginBtn = document.getElementById('authErrorLoginBtn');
+        const backgroundFetchIndicator = document.getElementById('backgroundFetchIndicator');
         
         // =============================================
-        // BACKGROUND AUTHENTICATION SYSTEM
+        // ENHANCED BACKGROUND AUTHENTICATION SYSTEM
         // =============================================
         
         /**
@@ -881,86 +935,121 @@
                 `;
             }
             
-            // Setup event listeners
+            // Setup event listeners immediately
             setupEventListeners();
             
             // Initialize emoji picker
             initEmojiPicker();
             
-            // Start background auth check
-            startBackgroundAuthCheck();
+            // Start enhanced background auth check (non-blocking)
+            startEnhancedBackgroundAuth();
             
             console.log('Chat UI initialized successfully');
         }
         
         /**
-         * Start background authentication check
+         * Start enhanced background authentication check
          */
-        async function startBackgroundAuthCheck() {
+        async function startEnhancedBackgroundAuth() {
             if (isAuthChecking) return;
             
             isAuthChecking = true;
-            console.log('Starting background authentication check...');
+            console.log('Starting enhanced background authentication check...');
             
             try {
-                // Check if we have cached user data first
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    try {
-                        currentUser = JSON.parse(cachedUser);
-                        console.log('Found cached user, proceeding with UI...');
-                        await proceedWithInitialization();
+                // Show background fetch indicator
+                showBackgroundFetchIndicator();
+                
+                // Step 1: Try to load user from multiple storage locations in parallel
+                const storageCheckPromises = [
+                    checkLocalStorageForUser(),
+                    checkSessionStorageForUser(),
+                    checkCookiesForUser()
+                ];
+                
+                const storageResults = await Promise.allSettled(storageCheckPromises);
+                
+                // Check if any storage location has valid user data
+                for (const result of storageResults) {
+                    if (result.status === 'fulfilled' && result.value) {
+                        currentUser = result.value;
+                        console.log('Found user in storage:', currentUser);
+                        
+                        // Update UI immediately with cached user
+                        updateUIWithUser(currentUser);
+                        
+                        // Hide loading overlay if shown
+                        if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
+                        
+                        // Start background data fetch
+                        startBackgroundDataFetch();
+                        
+                        // Validate token in background
+                        validateTokenInBackground();
+                        
+                        isAuthChecking = false;
+                        hideBackgroundFetchIndicator();
                         return;
-                    } catch (e) {
-                        console.log('Cached user data invalid, checking API...');
                     }
                 }
                 
-                // Wait for api.js to be available
+                // Step 2: Wait for API to be ready
                 await waitForApiReady();
                 
-                // Check authentication with API
-                if (window.api && typeof window.api.isAuthenticated === 'function') {
-                    const isAuthenticated = await window.api.isAuthenticated();
-                    if (isAuthenticated) {
-                        console.log('API authentication successful');
-                        await loadUserFromAPI();
-                        await proceedWithInitialization();
-                        return;
-                    }
-                }
-                
-                // Try to get user via getCurrentUser
+                // Step 3: Try to get user from API
                 if (window.api && typeof window.api.getCurrentUser === 'function') {
                     try {
+                        console.log('Attempting to fetch user from API...');
                         const userData = await window.api.getCurrentUser();
+                        
                         if (userData && userData.user) {
-                            console.log('Got user data from API');
                             currentUser = userData.user;
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                            await proceedWithInitialization();
+                            console.log('Got user data from API:', currentUser);
+                            
+                            // Save to all storage locations for future use
+                            saveUserToAllStorage(currentUser);
+                            
+                            // Update UI immediately
+                            updateUIWithUser(currentUser);
+                            
+                            // Start background data fetch
+                            startBackgroundDataFetch();
+                            
+                            // Hide loading overlay
+                            if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
+                            
+                            isAuthChecking = false;
+                            hideBackgroundFetchIndicator();
                             return;
                         }
                     } catch (error) {
-                        console.log('Could not get user from API:', error);
+                        console.log('API user fetch failed:', error.message);
                     }
                 }
                 
-                // Check localStorage tokens as fallback
-                const tokensLoaded = loadTokens();
-                if (tokensLoaded && accessToken) {
-                    console.log('Found tokens in localStorage');
+                // Step 4: Check for tokens and validate them
+                const tokens = loadTokensFromAllLocations();
+                if (tokens.accessToken) {
+                    console.log('Found tokens, attempting validation...');
                     
-                    // Try to validate with API
                     try {
-                        if (window.api && typeof window.api.getCurrentUser === 'function') {
-                            const userData = await window.api.getCurrentUser();
-                            if (userData && userData.user) {
-                                currentUser = userData.user;
-                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                                console.log('Token validation successful');
-                                await proceedWithInitialization();
-                                return;
+                        // Try to validate token with API
+                        if (window.api && typeof window.api.validateToken === 'function') {
+                            const isValid = await window.api.validateToken(tokens.accessToken);
+                            
+                            if (isValid) {
+                                // Token is valid, try to get user
+                                const userData = await window.api.getCurrentUser();
+                                if (userData && userData.user) {
+                                    currentUser = userData.user;
+                                    saveUserToAllStorage(currentUser);
+                                    updateUIWithUser(currentUser);
+                                    startBackgroundDataFetch();
+                                    
+                                    isAuthChecking = false;
+                                    hideBackgroundFetchIndicator();
+                                    return;
+                                }
                             }
                         }
                     } catch (error) {
@@ -968,38 +1057,266 @@
                     }
                 }
                 
-                // No authentication found, show error after a delay
+                // Step 5: No authentication found, show error after delay
                 setTimeout(() => {
                     if (!currentUser) {
-                        showAuthError('Authentication Required', 'Please login to access the chat system.', true);
+                        showAuthError(
+                            'Authentication Required', 
+                            'Please login to access the chat system.', 
+                            true
+                        );
                     }
-                }, 2000);
+                    hideBackgroundFetchIndicator();
+                }, 3000);
                 
             } catch (error) {
-                console.error('Background auth check error:', error);
+                console.error('Enhanced background auth check error:', error);
+                hideBackgroundFetchIndicator();
             } finally {
                 isAuthChecking = false;
             }
         }
         
         /**
-         * Wait for api.js to be ready
+         * Check localStorage for user data
+         */
+        async function checkLocalStorageForUser() {
+            try {
+                // Check multiple possible storage keys
+                const possibleKeys = [
+                    LOCAL_STORAGE_KEYS.USER,
+                    TOKEN_STORAGE_KEYS.USER_DATA,
+                    'currentUser',
+                    'user',
+                    'auth_user'
+                ];
+                
+                for (const key of possibleKeys) {
+                    const userData = localStorage.getItem(key);
+                    if (userData) {
+                        try {
+                            const parsed = JSON.parse(userData);
+                            if (parsed && (parsed.uid || parsed.id || parsed.email)) {
+                                console.log('Found user in localStorage key:', key);
+                                return parsed;
+                            }
+                        } catch (e) {
+                            // Continue to next key
+                        }
+                    }
+                }
+                
+                return null;
+            } catch (error) {
+                console.error('Error checking localStorage:', error);
+                return null;
+            }
+        }
+        
+        /**
+         * Check sessionStorage for user data
+         */
+        async function checkSessionStorageForUser() {
+            try {
+                const possibleKeys = [
+                    'session_user',
+                    'temp_user',
+                    'auth_session'
+                ];
+                
+                for (const key of possibleKeys) {
+                    const userData = sessionStorage.getItem(key);
+                    if (userData) {
+                        try {
+                            const parsed = JSON.parse(userData);
+                            if (parsed && (parsed.uid || parsed.id || parsed.email)) {
+                                console.log('Found user in sessionStorage key:', key);
+                                return parsed;
+                            }
+                        } catch (e) {
+                            // Continue to next key
+                        }
+                    }
+                }
+                
+                return null;
+            } catch (error) {
+                console.error('Error checking sessionStorage:', error);
+                return null;
+            }
+        }
+        
+        /**
+         * Check cookies for user data
+         */
+        async function checkCookiesForUser() {
+            try {
+                const cookies = document.cookie.split(';');
+                for (const cookie of cookies) {
+                    const [name, value] = cookie.trim().split('=');
+                    if (name === 'user' || name === 'auth_user' || name === 'currentUser') {
+                        try {
+                            const decoded = decodeURIComponent(value);
+                            const parsed = JSON.parse(decoded);
+                            if (parsed && (parsed.uid || parsed.id || parsed.email)) {
+                                console.log('Found user in cookies:', name);
+                                return parsed;
+                            }
+                        } catch (e) {
+                            // Continue to next cookie
+                        }
+                    }
+                }
+                return null;
+            } catch (error) {
+                console.error('Error checking cookies:', error);
+                return null;
+            }
+        }
+        
+        /**
+         * Load tokens from all possible locations
+         */
+        function loadTokensFromAllLocations() {
+            const tokens = {
+                accessToken: null,
+                refreshToken: null
+            };
+            
+            try {
+                // Check localStorage
+                const possibleAccessTokenKeys = [
+                    TOKEN_STORAGE_KEYS.ACCESS_TOKEN,
+                    TOKEN_STORAGE_KEYS.MOODCHAT_TOKEN,
+                    TOKEN_STORAGE_KEYS.KNECTA_TOKEN,
+                    'auth_token',
+                    'token'
+                ];
+                
+                const possibleRefreshTokenKeys = [
+                    TOKEN_STORAGE_KEYS.REFRESH_TOKEN,
+                    'refresh_token',
+                    'refreshToken'
+                ];
+                
+                // Find access token
+                for (const key of possibleAccessTokenKeys) {
+                    const token = localStorage.getItem(key) || 
+                                 sessionStorage.getItem(key) ||
+                                 getCookie(key);
+                    if (token) {
+                        tokens.accessToken = token;
+                        break;
+                    }
+                }
+                
+                // Find refresh token
+                for (const key of possibleRefreshTokenKeys) {
+                    const token = localStorage.getItem(key) || 
+                                 sessionStorage.getItem(key) ||
+                                 getCookie(key);
+                    if (token) {
+                        tokens.refreshToken = token;
+                        break;
+                    }
+                }
+                
+                console.log('Loaded tokens from all locations:', {
+                    hasAccessToken: !!tokens.accessToken,
+                    hasRefreshToken: !!tokens.refreshToken
+                });
+                
+            } catch (error) {
+                console.error('Error loading tokens from all locations:', error);
+            }
+            
+            return tokens;
+        }
+        
+        /**
+         * Get cookie value by name
+         */
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+        
+        /**
+         * Save user to all storage locations
+         */
+        function saveUserToAllStorage(user) {
+            if (!user) return;
+            
+            try {
+                // Save to localStorage
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(user));
+                localStorage.setItem(TOKEN_STORAGE_KEYS.USER_DATA, JSON.stringify(user));
+                
+                // Save to sessionStorage for immediate access
+                sessionStorage.setItem('current_user_session', JSON.stringify(user));
+                
+                // Update UI elements that show user info
+                updateUIWithUser(user);
+                
+                console.log('User saved to all storage locations');
+            } catch (error) {
+                console.error('Error saving user to storage:', error);
+            }
+        }
+        
+        /**
+         * Update UI with user data
+         */
+        function updateUIWithUser(user) {
+            if (!user) return;
+            
+            // Update any UI elements that show user info
+            const userElements = document.querySelectorAll('[data-user-info]');
+            userElements.forEach(element => {
+                const prop = element.dataset.userInfo;
+                if (user[prop]) {
+                    element.textContent = user[prop];
+                }
+            });
+            
+            // Update avatar if present
+            const avatarElements = document.querySelectorAll('[data-user-avatar]');
+            avatarElements.forEach(element => {
+                if (user.photoURL) {
+                    element.style.backgroundImage = `url('${user.photoURL}')`;
+                    element.innerHTML = '';
+                } else if (user.displayName) {
+                    const initials = user.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
+                    element.innerHTML = `<span>${initials}</span>`;
+                }
+            });
+            
+            console.log('UI updated with user data');
+        }
+        
+        /**
+         * Wait for API to be ready with timeout
          */
         async function waitForApiReady() {
             return new Promise((resolve) => {
                 if (window.api) {
+                    isApiReady = true;
                     resolve(true);
                     return;
                 }
                 
                 let attempts = 0;
-                const maxAttempts = 30;
+                const maxAttempts = 50; // 5 seconds max
+                const checkInterval = 100; // Check every 100ms
                 
                 const checkApi = () => {
                     attempts++;
                     
                     if (window.api) {
                         console.log('API ready after', attempts, 'attempts');
+                        isApiReady = true;
                         resolve(true);
                         return;
                     }
@@ -1010,7 +1327,7 @@
                         return;
                     }
                     
-                    setTimeout(checkApi, 100);
+                    setTimeout(checkApi, checkInterval);
                 };
                 
                 checkApi();
@@ -1018,118 +1335,148 @@
         }
         
         /**
-         * Load user from API
+         * Validate token in background (non-blocking)
          */
-        async function loadUserFromAPI() {
+        async function validateTokenInBackground() {
+            if (!currentUser) return;
+            
             try {
-                if (window.api && typeof window.api.getCurrentUser === 'function') {
-                    const userData = await window.api.getCurrentUser();
-                    if (userData && userData.user) {
-                        currentUser = userData.user;
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                        localStorage.setItem(TOKEN_STORAGE_KEYS.USER_DATA, JSON.stringify(currentUser));
-                        return true;
-                    }
+                const tokens = loadTokensFromAllLocations();
+                if (!tokens.accessToken) return;
+                
+                // Validate token with API in background
+                if (window.api && typeof window.api.validateToken === 'function') {
+                    setTimeout(async () => {
+                        try {
+                            const isValid = await window.api.validateToken(tokens.accessToken);
+                            if (!isValid) {
+                                console.log('Token validation failed in background');
+                                // Token is invalid, clear it
+                                clearInvalidTokens();
+                            } else {
+                                console.log('Token validated successfully in background');
+                            }
+                        } catch (error) {
+                            console.log('Background token validation error:', error);
+                        }
+                    }, 1000); // Delay to avoid blocking UI
                 }
-                return false;
             } catch (error) {
-                console.error('Error loading user from API:', error);
-                return false;
+                console.error('Error in background token validation:', error);
             }
         }
         
         /**
-         * Load tokens from localStorage
+         * Clear invalid tokens
          */
-        function loadTokens() {
+        function clearInvalidTokens() {
             try {
-                accessToken = localStorage.getItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN);
-                refreshToken = localStorage.getItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN);
+                const keysToClear = [
+                    TOKEN_STORAGE_KEYS.ACCESS_TOKEN,
+                    TOKEN_STORAGE_KEYS.REFRESH_TOKEN,
+                    TOKEN_STORAGE_KEYS.MOODCHAT_TOKEN,
+                    TOKEN_STORAGE_KEYS.KNECTA_TOKEN,
+                    'auth_token',
+                    'token'
+                ];
                 
-                if (!accessToken) {
-                    // Try alternative keys
-                    accessToken = localStorage.getItem('knecta_access_token') || 
-                                 localStorage.getItem('moodchat_token') || 
-                                 localStorage.getItem('auth_token');
-                }
+                keysToClear.forEach(key => {
+                    localStorage.removeItem(key);
+                    sessionStorage.removeItem(key);
+                });
                 
-                if (accessToken) {
-                    localStorage.setItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
-                }
-                
-                if (refreshToken) {
-                    localStorage.setItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
-                }
-                
-                return !!accessToken;
+                console.log('Invalid tokens cleared');
             } catch (error) {
-                console.error('Error loading tokens:', error);
-                return false;
+                console.error('Error clearing tokens:', error);
             }
         }
         
         /**
-         * Proceed with initialization after authentication
+         * Start background data fetch
          */
-        async function proceedWithInitialization() {
-            if (isInitialized) return;
+        async function startBackgroundDataFetch() {
+            if (!currentUser || backgroundFetchActive) return;
             
-            console.log('Proceeding with full initialization...');
+            backgroundFetchActive = true;
+            console.log('Starting background data fetch...');
             
             try {
-                // Load initial data
-                await Promise.all([
-                    loadContacts(),
+                // Fetch all data in parallel
+                const fetchPromises = [
                     loadChats(),
+                    loadContacts(),
                     loadUserSettings()
-                ]);
+                ];
                 
-                // Load additional data
-                loadChatThemes();
-                loadMessageDrafts();
-                loadScheduledMessages();
-                loadOfflineQueue();
-                
-                // Check for auto-load parameters from URL
-                const urlUser = getUserFromURL();
-                if (urlUser) {
-                    await openChatPanel(urlUser.userId, urlUser.username, urlUser.userAvatar);
-                } else {
-                    // Check for active chat session
-                    const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
-                    if (chatSession) {
-                        const session = JSON.parse(chatSession);
-                        await loadChatByFriendId(session.friendId);
+                // Execute promises but don't wait for all
+                Promise.allSettled(fetchPromises).then(results => {
+                    console.log('Background data fetch completed:', results.map(r => r.status));
+                    
+                    // Load additional data
+                    loadChatThemes();
+                    loadMessageDrafts();
+                    loadScheduledMessages();
+                    loadOfflineQueue();
+                    
+                    // Check for auto-load parameters
+                    const urlUser = getUserFromURL();
+                    if (urlUser) {
+                        openChatPanel(urlUser.userId, urlUser.username, urlUser.userAvatar);
+                    } else {
+                        const chatSession = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_CHAT);
+                        if (chatSession) {
+                            const session = JSON.parse(chatSession);
+                            loadChatByFriendId(session.friendId);
+                        }
                     }
-                }
-                
-                updateChatCategoryBadges();
-                
-                // Start background sync
-                startBackgroundSync();
-                
-                // Check for offline messages to sync
-                checkOfflineQueue();
-                
-                // Check for scheduled messages
-                checkScheduledMessages();
-                
-                // Setup scroll detection
-                setupScrollDetection();
-                
-                // Check network status
-                updateNetworkStatus();
-                
-                isInitialized = true;
-                
-                // Show success notification
-                setTimeout(() => {
-                    showNotification('Chat system ready', 'success');
-                }, 1000);
+                    
+                    updateChatCategoryBadges();
+                    
+                    // Start background sync
+                    startBackgroundSync();
+                    
+                    // Check for offline messages
+                    checkOfflineQueue();
+                    
+                    // Check for scheduled messages
+                    checkScheduledMessages();
+                    
+                    // Setup scroll detection
+                    setupScrollDetection();
+                    
+                    // Check network status
+                    updateNetworkStatus();
+                    
+                    isInitialized = true;
+                    backgroundFetchActive = false;
+                    
+                    // Show success notification
+                    setTimeout(() => {
+                        showNotification('Chat system ready', 'success');
+                    }, 1000);
+                });
                 
             } catch (error) {
-                console.error('Error in full initialization:', error);
-                showNotification('Error loading chat data', 'error');
+                console.error('Error in background data fetch:', error);
+                backgroundFetchActive = false;
+            }
+        }
+        
+        /**
+         * Show background fetch indicator
+         */
+        function showBackgroundFetchIndicator() {
+            if (backgroundFetchIndicator) {
+                backgroundFetchIndicator.classList.add('active');
+            }
+        }
+        
+        /**
+         * Hide background fetch indicator
+         */
+        function hideBackgroundFetchIndicator() {
+            if (backgroundFetchIndicator) {
+                backgroundFetchIndicator.classList.remove('active');
             }
         }
         
@@ -1164,6 +1511,9 @@
                     authErrorOverlay.style.opacity = '1';
                 }, 10);
             }
+            
+            // Hide loading overlay
+            if (apiLoadingOverlay) apiLoadingOverlay.classList.add('hidden');
         }
         
         /**
@@ -1172,44 +1522,82 @@
         function redirectToLogin() {
             console.log('Redirecting to login page');
             
-            // Clear auth data
-            localStorage.removeItem(TOKEN_STORAGE_KEYS.ACCESS_TOKEN);
-            localStorage.removeItem(TOKEN_STORAGE_KEYS.REFRESH_TOKEN);
-            localStorage.removeItem(TOKEN_STORAGE_KEYS.USER_DATA);
-            localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+            // Clear all auth data
+            clearAllAuthData();
             
             // Redirect
             window.location.href = '/';
         }
         
+        /**
+         * Clear all authentication data
+         */
+        function clearAllAuthData() {
+            try {
+                // Clear localStorage
+                const localStorageKeys = Object.values(TOKEN_STORAGE_KEYS)
+                    .concat(Object.values(LOCAL_STORAGE_KEYS))
+                    .concat(['auth_token', 'token', 'refresh_token', 'currentUser', 'user']);
+                
+                localStorageKeys.forEach(key => {
+                    localStorage.removeItem(key);
+                });
+                
+                // Clear sessionStorage
+                sessionStorage.clear();
+                
+                // Clear cookies
+                document.cookie.split(';').forEach(cookie => {
+                    const name = cookie.split('=')[0].trim();
+                    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+                });
+                
+                console.log('All authentication data cleared');
+            } catch (error) {
+                console.error('Error clearing auth data:', error);
+            }
+        }
+        
         // =============================================
-        // API CALL FUNCTIONS
+        // API CALL FUNCTIONS WITH ENHANCED ERROR HANDLING
         // =============================================
         
-        // Generic API request function
+        // Generic API request function with enhanced error handling
         async function makeApiRequest(endpoint, options = {}) {
             try {
                 if (!window.api) {
                     throw new Error('API service not available');
                 }
                 
+                // Check if we're offline
+                if (!navigator.onLine) {
+                    throw new Error('You are offline. Please check your internet connection.');
+                }
+                
                 const method = options.method || 'GET';
                 const body = options.body ? JSON.parse(options.body) : undefined;
+                const headers = options.headers || {};
                 
                 let response;
                 
+                // Add authentication header if token exists
+                const tokens = loadTokensFromAllLocations();
+                if (tokens.accessToken && !headers.Authorization && !headers.authorization) {
+                    headers.Authorization = `Bearer ${tokens.accessToken}`;
+                }
+                
                 switch (method) {
                     case 'GET':
-                        response = await window.api.get(endpoint);
+                        response = await window.api.get(endpoint, { headers });
                         break;
                     case 'POST':
-                        response = await window.api.post(endpoint, body);
+                        response = await window.api.post(endpoint, body, { headers });
                         break;
                     case 'PUT':
-                        response = await window.api.put(endpoint, body);
+                        response = await window.api.put(endpoint, body, { headers });
                         break;
                     case 'DELETE':
-                        response = await window.api.delete(endpoint);
+                        response = await window.api.delete(endpoint, { headers });
                         break;
                     default:
                         throw new Error(`Unsupported method: ${method}`);
@@ -1220,15 +1608,33 @@
             } catch (error) {
                 console.error('API request error:', error);
                 
-                if (error.message.includes('Authentication') || error.message.includes('401')) {
-                    showAuthError('Authentication Error', 'Please login to continue.', true);
+                // Handle authentication errors
+                if (error.message.includes('Authentication') || 
+                    error.message.includes('401') || 
+                    error.message.includes('403')) {
+                    
+                    // Clear invalid tokens
+                    clearInvalidTokens();
+                    
+                    // Show auth error but don't block UI
+                    setTimeout(() => {
+                        showAuthError('Session Expired', 'Please login again to continue.', true);
+                    }, 1000);
+                    
+                    throw new Error('Authentication failed. Please login again.');
+                }
+                
+                // Handle network errors
+                if (error.message.includes('offline') || error.message.includes('Network')) {
+                    showNotification('You are offline. Changes will sync when you reconnect.', 'warning');
+                    throw error;
                 }
                 
                 throw error;
             }
         }
         
-        // API methods for chat functionality
+        // API methods for chat functionality with enhanced error handling
         const api = {
             getCurrentUser: async function() {
                 try {
@@ -1242,6 +1648,19 @@
                 } catch (error) {
                     console.error('Error getting current user:', error);
                     throw error;
+                }
+            },
+            
+            validateToken: async function(token) {
+                try {
+                    if (window.api && typeof window.api.validateToken === 'function') {
+                        return await window.api.validateToken(token);
+                    }
+                    // If API doesn't have validateToken, assume token is valid
+                    return true;
+                } catch (error) {
+                    console.error('Error validating token:', error);
+                    return false;
                 }
             },
             
@@ -1573,7 +1992,7 @@
         }
         
         // =============================================
-        // CORE CHAT FUNCTIONS
+        // CORE CHAT FUNCTIONS (UNCHANGED)
         // =============================================
         
         function loadUserSettings() {
@@ -5136,13 +5555,13 @@ Message ID: ${message.id.substring(0, 8)}...
         // =============================================
         
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, initializing chat system...');
+            console.log('DOM loaded, initializing enhanced chat system...');
             
             // Initialize app immediately without waiting for auth
             initializeAppImmediately();
         });
         
-        console.log('Chat system initialized successfully');
+        console.log('Enhanced chat system initialized successfully');
     </script>
     
 </body>

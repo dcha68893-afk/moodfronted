@@ -173,19 +173,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadCachedDataInstantly();
         
         // Wait for authentication to be ready in background
-        waitForAuthReady().then(async () => {
-            try {
-                // Initialize marketplace with authenticated data
-                await initializeEnhancedMarketplace();
-                console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
-            } catch (error) {
-                console.error('Marketplace initialization failed:', error);
-                // Continue with cached data
-            }
-        }).catch(error => {
-            console.error('Auth ready failed:', error);
+        await waitForAuthReady();
+        
+        try {
+            // Initialize marketplace with authenticated data
+            await initializeEnhancedMarketplace();
+            console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
+        } catch (error) {
+            console.error('Marketplace initialization failed:', error);
             // Continue with cached data
-        });
+        }
         
     } catch (error) {
         console.error('Initialization failed:', error);

@@ -400,153 +400,372 @@ const TOKEN_KEYS = {
 const API_BASE_URL = '';
 
 // =============================================
-// BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
+// ENHANCED BOOTSTRAP WITH FAST TOKEN VALIDATION
 // =============================================
 
 async function bootstrapIframe() {
-    console.log('=== BOOTSTRAP IFRAME START ===');
+    console.log('=== ENHANCED BOOTSTRAP IFRAME START ===');
     
     try {
-        // First, wait for api.js to be ready
-        if (!window.knectaAPI) {
-            console.log('Waiting for api.js to load...');
-            await waitForApiJs();
-        }
-        
-        // Check if jQuery is available for spectrum.min.js dependencies
-        if (typeof jQuery === 'undefined') {
-            console.error('jQuery is not loaded. Status system cannot initialize.');
-            errorUI.classList.add('active');
-            document.getElementById('errorTitle').textContent = 'jQuery Error';
-            document.getElementById('errorMessage').textContent = 'Required library (jQuery) is not loaded. Please refresh the page.';
-            return false;
-        }
-        
-        // Read tokens from localStorage with fallback
-        const tokenData = readTokensFromStorage();
+        // Phase 1: Fast token discovery (parallel)
+        const tokenData = await discoverTokensFast();
         
         if (!tokenData.accessToken) {
-            console.error('No access token found');
+            console.error('No access token found in any storage location');
             handleAuthError('Please log in to access status features');
             return false;
         }
         
-        // Set access token for api.js
-        accessToken = tokenData.accessToken;
-        refreshToken = tokenData.refreshToken;
+        // Phase 2: Immediate UI update with cached user data
+        await updateUIWithCachedUserData();
         
-        // Validate token using api.js /api/auth/me endpoint
-        try {
-            const response = await window.knectaAPI.get('/api/auth/me');
-            
-            if (!response || !response.user) {
-                console.error('Token validation failed - no user data');
-                throw new Error('Token validation failed');
-            }
-            
-            // Set current user
-            currentUser = response.user;
-            userData = currentUser;
-            authValidated = true;
-            
-            console.log('User authenticated via api.js:', currentUser.id);
-            
-            // Save user to cache
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                uid: currentUser.id,
-                id: currentUser.id,
-                displayName: currentUser.displayName,
-                email: currentUser.email,
-                photoURL: currentUser.photoURL
-            }));
-            
-            // Setup event listeners
-            setupEventListeners();
-            
-            // Initialize UI components
-            initializeUIComponents();
-            
-            // Show loading state
-            showNotification('Connecting to server...', 'info');
-            
-            // Initialize status system (but don't block UI)
-            setTimeout(() => {
-                initializeStatusSystem();
-            }, 100);
-            
-            console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
-            return true;
-            
-        } catch (apiError) {
-            console.error('API validation error:', apiError);
-            
-            // Try token refresh if we have a refresh token
-            if (refreshToken) {
-                console.log('Attempting token refresh...');
-                try {
-                    const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
-                        refreshToken: refreshToken
-                    });
-                    
-                    if (refreshResponse && refreshResponse.accessToken) {
-                        // Save new tokens
-                        accessToken = refreshResponse.accessToken;
-                        if (refreshResponse.refreshToken) {
-                            refreshToken = refreshResponse.refreshToken;
-                        }
-                        
-                        // Retry auth
-                        const retryResponse = await window.knectaAPI.get('/api/auth/me');
-                        if (retryResponse && retryResponse.user) {
-                            currentUser = retryResponse.user;
-                            userData = currentUser;
-                            authValidated = true;
-                            
-                            // Save tokens and user
-                            localStorage.setItem(TOKEN_KEYS.ACCESS_TOKEN, accessToken);
-                            if (refreshToken) {
-                                localStorage.setItem(TOKEN_KEYS.REFRESH_TOKEN, refreshToken);
-                            }
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-                                uid: currentUser.id,
-                                id: currentUser.id,
-                                displayName: currentUser.displayName,
-                                email: currentUser.email,
-                                photoURL: currentUser.photoURL
-                            }));
-                            
-                            // Setup event listeners and initialize
-                            setupEventListeners();
-                            initializeUIComponents();
-                            showNotification('Connecting to server...', 'info');
-                            setTimeout(() => {
-                                initializeStatusSystem();
-                            }, 100);
-                            return true;
-                        }
-                    }
-                } catch (refreshError) {
-                    console.error('Token refresh failed:', refreshError);
-                }
-            }
-            
-            // If all authentication attempts fail
-            handleAuthError('Session expired. Please log in again.');
-            return false;
-        }
+        // Phase 3: Background token validation (non-blocking)
+        validateTokenInBackground(tokenData);
+        
+        // Phase 4: Initialize UI components immediately
+        setupEventListeners();
+        initializeUIComponents();
+        loadCachedDataInstantly();
+        
+        console.log('=== ENHANCED BOOTSTRAP IFRAME COMPLETE ===');
+        return true;
         
     } catch (error) {
-        console.error('Bootstrap error:', error);
+        console.error('Enhanced bootstrap error:', error);
         handleAuthError('Failed to initialize. Please try again.');
         return false;
     }
 }
 
-// Wait for api.js to load
+// Fast token discovery from all possible storage locations
+async function discoverTokensFast() {
+    const tokenData = {
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiry: null
+    };
+    
+    // Parallel token discovery from all possible locations
+    const tokenPromises = [
+        // Priority 1: api.js global state
+        new Promise(resolve => {
+            try {
+                if (window.knectaAPI && window.knectaAPI.getToken) {
+                    const token = window.knectaAPI.getToken();
+                    if (token) {
+                        tokenData.accessToken = token;
+                        console.log('Found token via api.js getToken()');
+                    }
+                }
+                resolve();
+            } catch (e) {
+                resolve();
+            }
+        }),
+        
+        // Priority 2: localStorage keys
+        new Promise(resolve => {
+            try {
+                const possibleAccessTokenKeys = [
+                    'accessToken',
+                    'moodchat_token',
+                    'knecta_access_token',
+                    'token',
+                    'auth_token',
+                    'knecta_token'
+                ];
+                
+                for (const key of possibleAccessTokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                        tokenData.accessToken = token;
+                        console.log(`Found token in localStorage: ${key}`);
+                        break;
+                    }
+                }
+                
+                // Check refresh token
+                const possibleRefreshTokenKeys = [
+                    'refreshToken',
+                    'knecta_refresh_token',
+                    'refresh_token'
+                ];
+                
+                for (const key of possibleRefreshTokenKeys) {
+                    const token = localStorage.getItem(key);
+                    if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                        tokenData.refreshToken = token;
+                        break;
+                    }
+                }
+                
+                resolve();
+            } catch (e) {
+                resolve();
+            }
+        }),
+        
+        // Priority 3: sessionStorage
+        new Promise(resolve => {
+            try {
+                const possibleKeys = [
+                    'accessToken',
+                    'moodchat_token',
+                    'knecta_access_token'
+                ];
+                
+                for (const key of possibleKeys) {
+                    const token = sessionStorage.getItem(key);
+                    if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                        tokenData.accessToken = token;
+                        console.log(`Found token in sessionStorage: ${key}`);
+                        break;
+                    }
+                }
+                resolve();
+            } catch (e) {
+                resolve();
+            }
+        })
+    ];
+    
+    await Promise.all(tokenPromises);
+    
+    // Check token expiry
+    const expiryKey = 'knecta_token_expiry';
+    const expiry = localStorage.getItem(expiryKey);
+    if (expiry && expiry !== 'undefined' && expiry !== 'null') {
+        tokenData.tokenExpiry = new Date(expiry);
+    }
+    
+    console.log('Token discovery complete:', {
+        hasAccessToken: !!tokenData.accessToken,
+        hasRefreshToken: !!tokenData.refreshToken,
+        tokenExpiry: tokenData.tokenExpiry
+    });
+    
+    return tokenData;
+}
+
+// Update UI immediately with cached user data
+async function updateUIWithCachedUserData() {
+    try {
+        // Check for user data in multiple locations
+        const userSources = [
+            // 1. localStorage user cache
+            () => {
+                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+                if (cachedUser) {
+                    return JSON.parse(cachedUser);
+                }
+                return null;
+            },
+            
+            // 2. api.js user state
+            () => {
+                if (window.knectaAPI && window.knectaAPI.getCurrentUser) {
+                    return window.knectaAPI.getCurrentUser();
+                }
+                return null;
+            },
+            
+            // 3. authUser in localStorage
+            () => {
+                const authUser = localStorage.getItem('authUser');
+                if (authUser) {
+                    return JSON.parse(authUser);
+                }
+                return null;
+            },
+            
+            // 4. knecta_user in localStorage
+            () => {
+                const knectaUser = localStorage.getItem('knecta_user');
+                if (knectaUser) {
+                    return JSON.parse(knectaUser);
+                }
+                return null;
+            }
+        ];
+        
+        // Try each source in parallel
+        for (const source of userSources) {
+            try {
+                const user = source();
+                if (user && user.id) {
+                    currentUser = user;
+                    userData = user;
+                    
+                    // Update UI immediately
+                    updateUserUIInstantly();
+                    
+                    console.log('UI updated with cached user:', user.id);
+                    return;
+                }
+            } catch (e) {
+                // Continue to next source
+            }
+        }
+        
+        console.log('No cached user data found');
+        
+    } catch (error) {
+        console.error('Error updating UI with cached user:', error);
+    }
+}
+
+// Update user UI instantly without waiting for API
+function updateUserUIInstantly() {
+    if (!currentUser) return;
+    
+    // Update user avatar if elements exist
+    const avatarElements = document.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar');
+    avatarElements.forEach(avatar => {
+        if (currentUser.photoURL) {
+            avatar.style.backgroundImage = `url('${currentUser.photoURL}')`;
+            avatar.innerHTML = '';
+        } else if (currentUser.displayName) {
+            const initials = currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+            avatar.innerHTML = `<span>${initials}</span>`;
+        }
+    });
+    
+    // Update user name if elements exist
+    const nameElements = document.querySelectorAll('.user-name, .status-user-name');
+    nameElements.forEach(element => {
+        if (currentUser.displayName) {
+            element.textContent = currentUser.displayName;
+        }
+    });
+    
+    // Update my status preview
+    updateMyStatusPreview();
+    
+    // Enable create status button
+    const createStatusBtn = document.getElementById('createStatusBtn');
+    if (createStatusBtn) {
+        createStatusBtn.disabled = false;
+    }
+}
+
+// Background token validation (non-blocking)
+async function validateTokenInBackground(tokenData) {
+    // Don't block UI - run in background
+    setTimeout(async () => {
+        try {
+            console.log('Starting background token validation...');
+            
+            // Wait for api.js if not ready
+            if (!window.knectaAPI) {
+                await waitForApiJs();
+            }
+            
+            if (!window.knectaAPI) {
+                console.error('api.js not available for token validation');
+                return;
+            }
+            
+            // Use the token we found
+            accessToken = tokenData.accessToken;
+            refreshToken = tokenData.refreshToken;
+            
+            // Validate token via api.js
+            try {
+                const response = await window.knectaAPI.get('/api/auth/me');
+                
+                if (response && response.user) {
+                    // Token is valid - update user data
+                    currentUser = response.user;
+                    userData = currentUser;
+                    authValidated = true;
+                    
+                    // Cache the validated user
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                        uid: currentUser.id,
+                        id: currentUser.id,
+                        displayName: currentUser.displayName,
+                        email: currentUser.email,
+                        photoURL: currentUser.photoURL
+                    }));
+                    
+                    // Update UI with fresh data
+                    updateUserUIInstantly();
+                    
+                    // Load fresh data from API
+                    loadInitialData();
+                    
+                    console.log('Background token validation successful:', currentUser.id);
+                    showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
+                    
+                } else {
+                    throw new Error('Invalid user data in response');
+                }
+                
+            } catch (apiError) {
+                console.error('Token validation failed:', apiError);
+                
+                // Try token refresh if available
+                if (refreshToken) {
+                    try {
+                        const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
+                            refreshToken: refreshToken
+                        });
+                        
+                        if (refreshResponse && refreshResponse.accessToken) {
+                            // Update tokens
+                            accessToken = refreshResponse.accessToken;
+                            localStorage.setItem('accessToken', accessToken);
+                            
+                            if (refreshResponse.refreshToken) {
+                                refreshToken = refreshResponse.refreshToken;
+                                localStorage.setItem('refreshToken', refreshToken);
+                            }
+                            
+                            // Retry validation with new token
+                            const retryResponse = await window.knectaAPI.get('/api/auth/me');
+                            if (retryResponse && retryResponse.user) {
+                                currentUser = retryResponse.user;
+                                userData = currentUser;
+                                authValidated = true;
+                                
+                                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                                    uid: currentUser.id,
+                                    id: currentUser.id,
+                                    displayName: currentUser.displayName,
+                                    email: currentUser.email,
+                                    photoURL: currentUser.photoURL
+                                }));
+                                
+                                updateUserUIInstantly();
+                                loadInitialData();
+                                
+                                console.log('Token refresh successful');
+                                return;
+                            }
+                        }
+                    } catch (refreshError) {
+                        console.error('Token refresh failed:', refreshError);
+                    }
+                }
+                
+                // If validation fails, we still keep the cached UI
+                // User can still interact with offline features
+                showNotification('Using offline mode. Some features may be limited.', 'warning');
+                isOfflineMode = true;
+            }
+            
+        } catch (error) {
+            console.error('Background validation error:', error);
+            // Don't show error to user - they can still use cached data
+        }
+    }, 100); // Small delay to ensure UI is responsive first
+}
+
+// Wait for api.js with timeout
 function waitForApiJs() {
     return new Promise((resolve, reject) => {
         let attempts = 0;
-        const maxAttempts = 50; // 5 seconds max wait
+        const maxAttempts = 30; // 3 seconds max
         
         const checkApi = () => {
             attempts++;
@@ -558,8 +777,8 @@ function waitForApiJs() {
             }
             
             if (attempts >= maxAttempts) {
-                console.error('api.js failed to load after maximum attempts');
-                reject(new Error('api.js failed to load'));
+                console.warn('api.js not loaded after maximum attempts, proceeding without it');
+                resolve(); // Resolve anyway to not block
                 return;
             }
             
@@ -570,152 +789,103 @@ function waitForApiJs() {
     });
 }
 
-// Read tokens from localStorage with fallback logic
-function readTokensFromStorage() {
-    const tokenData = {
-        accessToken: null,
-        refreshToken: null,
-        tokenExpiry: null
-    };
-    
-    // Try multiple possible token locations with priority
-    const possibleAccessTokenKeys = [
-        'accessToken',           // Primary
-        'moodchat_token',        // Fallback
-        'knecta_access_token',   // Legacy
-        'token',                 // Generic
-        'auth_token'             // Generic
-    ];
-    
-    const possibleRefreshTokenKeys = [
-        'refreshToken',          // Primary
-        'knecta_refresh_token',  // Legacy
-        'refresh_token'          // Generic
-    ];
-    
-    // Find access token
-    for (const key of possibleAccessTokenKeys) {
-        const token = localStorage.getItem(key);
-        if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
-            tokenData.accessToken = token;
-            break;
-        }
-    }
-    
-    // Find refresh token
-    for (const key of possibleRefreshTokenKeys) {
-        const token = localStorage.getItem(key);
-        if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
-            tokenData.refreshToken = token;
-            break;
-        }
-    }
-    
-    // Check token expiry
-    const expiryKey = 'knecta_token_expiry';
-    const expiry = localStorage.getItem(expiryKey);
-    if (expiry && expiry !== 'undefined' && expiry !== 'null') {
-        tokenData.tokenExpiry = new Date(expiry);
-    }
-    
-    console.log('Tokens read from storage:', {
-        hasAccessToken: !!tokenData.accessToken,
-        hasRefreshToken: !!tokenData.refreshToken,
-        tokenExpiry: tokenData.tokenExpiry
-    });
-    
-    return tokenData;
-}
-
-// Initialize the application with proper iframe handling
+// Initialize the application with enhanced bootstrap
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('Status page loaded');
+    console.log('Status page loaded - Enhanced initialization');
     
-    // Immediately show UI (don't wait for auth)
+    // Immediately show UI with cached data
     loadCachedDataInstantly();
-    
-    // Setup basic event listeners that don't require auth
     setupBasicEventListeners();
     
-    // Start bootstrap process in background
+    // Start enhanced bootstrap process
     setTimeout(async () => {
-        const success = await bootstrapIframe();
-        
-        if (!success) {
-            console.error('Bootstrap failed');
-            return;
-        }
-        
-        // Clear any error UI
-        errorUI.classList.remove('active');
-    }, 500); // Small delay to ensure DOM is ready
+        await bootstrapIframe();
+    }, 50); // Minimal delay for DOM readiness
 });
 
 // =============================================
-// AUTHENTICATION FUNCTIONS
+// ENHANCED AUTHENTICATION FUNCTIONS
 // =============================================
 
-// Handle authentication error
 function handleAuthError(message) {
     console.error('Authentication failed:', message);
-    errorUI.classList.add('active');
-    document.getElementById('errorTitle').textContent = 'Authentication Required';
-    document.getElementById('errorMessage').textContent = message;
     
-    // Update retry button to redirect to login
-    const retryBtn = document.getElementById('retryConnectionBtn');
-    if (retryBtn) {
-        retryBtn.textContent = 'Go to Login';
-        retryBtn.onclick = function() {
-            // Clear all auth data
-            const keysToRemove = [
-                'accessToken', 'moodchat_token', 'knecta_access_token', 'token', 'auth_token',
-                'refreshToken', 'knecta_refresh_token', 'refresh_token',
-                'knecta_token_expiry', 'knecta_current_user'
-            ];
-            
-            keysToRemove.forEach(key => {
-                localStorage.removeItem(key);
-            });
-            
-            // Redirect to login page
-            const loginUrl = '/index.html';
-            if (window.top !== window.self) {
-                window.top.location.href = loginUrl;
-            } else {
-                window.location.href = loginUrl;
-            }
-        };
-    }
-    
-    // Update offline mode button
-    const offlineBtn = document.getElementById('offlineModeBtn');
-    if (offlineBtn) {
-        offlineBtn.style.display = 'block';
+    // Only show error if we have no cached data
+    if (statuses.length === 0 && myStatuses.length === 0) {
+        errorUI.classList.add('active');
+        document.getElementById('errorTitle').textContent = 'Authentication Required';
+        document.getElementById('errorMessage').textContent = message;
+        
+        const retryBtn = document.getElementById('retryConnectionBtn');
+        if (retryBtn) {
+            retryBtn.textContent = 'Go to Login';
+            retryBtn.onclick = function() {
+                // Clear all auth data
+                const keysToRemove = [
+                    'accessToken', 'moodchat_token', 'knecta_access_token', 'token', 'auth_token',
+                    'refreshToken', 'knecta_refresh_token', 'refresh_token',
+                    'knecta_token_expiry', 'knecta_current_user', 'authUser', 'knecta_user'
+                ];
+                
+                keysToRemove.forEach(key => {
+                    localStorage.removeItem(key);
+                    sessionStorage.removeItem(key);
+                });
+                
+                const loginUrl = '/index.html';
+                if (window.top !== window.self) {
+                    window.top.location.href = loginUrl;
+                } else {
+                    window.location.href = loginUrl;
+                }
+            };
+        }
+        
+        const offlineBtn = document.getElementById('offlineModeBtn');
+        if (offlineBtn) {
+            offlineBtn.style.display = 'block';
+        }
+    } else {
+        // We have cached data, just show warning
+        showNotification('Using cached data. Some features may be limited.', 'warning');
+        isOfflineMode = true;
     }
 }
 
-// Make authenticated API call using api.js
+// Enhanced authenticated request with better error handling
 async function makeAuthenticatedRequest(endpoint, options = {}) {
-    // Ensure we have a valid token
+    // If offline mode, queue for later
+    if (isOfflineMode) {
+        console.log('Offline mode: Queueing request for', endpoint);
+        return Promise.reject(new Error('Offline mode'));
+    }
+    
+    // Ensure we have a token
     if (!accessToken) {
-        console.error('No access token available for API call');
-        throw new Error('Authentication required');
+        // Try to get token from storage
+        const tokenData = await discoverTokensFast();
+        if (tokenData.accessToken) {
+            accessToken = tokenData.accessToken;
+        } else {
+            throw new Error('No access token available');
+        }
     }
     
     // Ensure api.js is available
     if (!window.knectaAPI) {
-        console.error('api.js is not loaded');
-        throw new Error('API library not available');
+        await waitForApiJs();
+        if (!window.knectaAPI) {
+            throw new Error('API library not available');
+        }
     }
     
     try {
         console.log('Making authenticated API call via api.js to:', endpoint);
         
         let response;
+        const method = options.method?.toUpperCase() || 'GET';
         
-        // Handle different HTTP methods
-        switch (options.method?.toUpperCase() || 'GET') {
+        switch (method) {
             case 'GET':
                 response = await window.knectaAPI.get(endpoint);
                 break;
@@ -729,7 +899,7 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
                 response = await window.knectaAPI.delete(endpoint);
                 break;
             default:
-                throw new Error(`Unsupported method: ${options.method}`);
+                throw new Error(`Unsupported method: ${method}`);
         }
         
         return response;
@@ -737,55 +907,57 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
     } catch (error) {
         console.error('API request error via api.js:', error);
         
-        // Check if it's an auth error
-        if (error.message?.includes('401') || error.message?.includes('Unauthorized') || 
-            error.message?.includes('Authentication') || error.message?.includes('Session')) {
-            
-            console.log('Auth error detected, attempting token refresh...');
-            
-            // Attempt token refresh if we have a refresh token
-            if (refreshToken) {
-                try {
-                    const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
-                        refreshToken: refreshToken
-                    });
+        // Check for auth errors
+        const isAuthError = error.message?.includes('401') || 
+                           error.message?.includes('403') ||
+                           error.message?.includes('Unauthorized') || 
+                           error.message?.includes('Authentication') || 
+                           error.message?.includes('Session');
+        
+        if (isAuthError && refreshToken) {
+            try {
+                console.log('Auth error detected, attempting token refresh...');
+                
+                const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
+                    refreshToken: refreshToken
+                });
+                
+                if (refreshResponse && refreshResponse.accessToken) {
+                    // Save new tokens
+                    accessToken = refreshResponse.accessToken;
+                    localStorage.setItem('accessToken', accessToken);
                     
-                    if (refreshResponse && refreshResponse.accessToken) {
-                        // Save new tokens
-                        accessToken = refreshResponse.accessToken;
-                        localStorage.setItem(TOKEN_KEYS.ACCESS_TOKEN, accessToken);
-                        
-                        if (refreshResponse.refreshToken) {
-                            refreshToken = refreshResponse.refreshToken;
-                            localStorage.setItem(TOKEN_KEYS.REFRESH_TOKEN, refreshToken);
-                        }
-                        
-                        // Retry the original request
-                        console.log('Token refreshed, retrying original request...');
-                        return await makeAuthenticatedRequest(endpoint, options);
+                    if (refreshResponse.refreshToken) {
+                        refreshToken = refreshResponse.refreshToken;
+                        localStorage.setItem('refreshToken', refreshToken);
                     }
-                } catch (refreshError) {
-                    console.error('Token refresh failed:', refreshError);
+                    
+                    // Retry the original request
+                    console.log('Token refreshed, retrying original request...');
+                    return await makeAuthenticatedRequest(endpoint, options);
                 }
+            } catch (refreshError) {
+                console.error('Token refresh failed:', refreshError);
             }
-            
-            // If refresh fails or no refresh token, clear auth and redirect
-            handleAuthError('Session expired. Please log in again.');
-            throw new Error('Authentication failed');
         }
         
-        // For other errors, show notification but don't redirect
-        showNotification('Network error. Please check your connection.', 'error');
+        // If we get here, auth failed
+        if (isAuthError) {
+            console.log('Authentication failed, switching to offline mode');
+            isOfflineMode = true;
+            showNotification('Network issue. Using offline mode.', 'warning');
+        }
+        
         throw error;
     }
 }
 
-// Initialize status system
+// Initialize status system with fallback
 async function initializeStatusSystem() {
     console.log('=== INITIALIZING STATUS SYSTEM ===');
     
     try {
-        // Load initial data from API via api.js
+        // Try to load fresh data
         await loadInitialData();
         
         // Update UI
@@ -793,18 +965,25 @@ async function initializeStatusSystem() {
         updateStreakCounter();
         updateMoodChart();
         
-        // Render initial status list
+        // Render status list
         renderStatusListInstantly();
         
-        showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
+        if (currentUser) {
+            showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
+        }
+        
         console.log('=== STATUS SYSTEM INITIALIZED SUCCESSFULLY ===');
         
     } catch (error) {
         console.error('Error initializing status system:', error);
-        showNotification('Could not connect to server', 'error');
         
         // Fallback to cached data
         loadCachedDataInstantly();
+        
+        if (!isOfflineMode) {
+            showNotification('Could not connect to server. Using cached data.', 'warning');
+            isOfflineMode = true;
+        }
     }
 }
 
@@ -818,6 +997,9 @@ function loadCachedDataInstantly() {
         if (cachedUser) {
             currentUser = JSON.parse(cachedUser);
             console.log('Loaded user from cache');
+            
+            // Update UI immediately
+            updateUserUIInstantly();
         }
         
         // Load statuses
@@ -1667,111 +1849,89 @@ async function loadInitialData() {
     try {
         console.log('Loading initial data from API via api.js...');
         
+        // Parallel data loading
+        const loadPromises = [];
+        
         // Load statuses
-        try {
-            const statusesResponse = await makeAuthenticatedRequest('/api/statuses');
-            if (statusesResponse && statusesResponse.statuses) {
-                statuses = statusesResponse.statuses;
-                console.log('Loaded statuses from API:', statuses.length);
-                
-                // Filter by privacy and sort by time
-                statuses = filterStatusesByPrivacy(statuses);
-                statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                
-                // Save to cache
-                localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-                
-                // Update UI
-                updateCurrentSection();
+        loadPromises.push((async () => {
+            try {
+                const statusesResponse = await makeAuthenticatedRequest('/api/statuses');
+                if (statusesResponse && statusesResponse.statuses) {
+                    statuses = statusesResponse.statuses;
+                    console.log('Loaded statuses from API:', statuses.length);
+                    
+                    // Filter by privacy and sort by time
+                    statuses = filterStatusesByPrivacy(statuses);
+                    statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                    
+                    // Save to cache
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
+                    
+                    // Update UI
+                    updateCurrentSection();
+                }
+            } catch (statusesError) {
+                console.error('Error loading statuses from API:', statusesError);
+                // Keep cached data if API fails
             }
-        } catch (statusesError) {
-            console.error('Error loading statuses from API:', statusesError);
-            // Keep cached data if API fails
-        }
+        })());
         
         // Load my statuses
-        try {
-            const myStatusesResponse = await makeAuthenticatedRequest('/api/statuses/my');
-            if (myStatusesResponse && myStatusesResponse.statuses) {
-                myStatuses = myStatusesResponse.statuses;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-                updateMyStatusPreview();
+        loadPromises.push((async () => {
+            try {
+                const myStatusesResponse = await makeAuthenticatedRequest('/api/statuses/my');
+                if (myStatusesResponse && myStatusesResponse.statuses) {
+                    myStatuses = myStatusesResponse.statuses;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+                    updateMyStatusPreview();
+                }
+            } catch (myStatusesError) {
+                console.error('Error loading my statuses from API:', myStatusesError);
             }
-        } catch (myStatusesError) {
-            console.error('Error loading my statuses from API:', myStatusesError);
-        }
+        })());
         
         // Load highlights
-        try {
-            const highlightsResponse = await makeAuthenticatedRequest('/api/statuses/highlights');
-            if (highlightsResponse && highlightsResponse.highlights) {
-                highlights = highlightsResponse.highlights;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+        loadPromises.push((async () => {
+            try {
+                const highlightsResponse = await makeAuthenticatedRequest('/api/statuses/highlights');
+                if (highlightsResponse && highlightsResponse.highlights) {
+                    highlights = highlightsResponse.highlights;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+                }
+            } catch (highlightsError) {
+                console.error('Error loading highlights from API:', highlightsError);
             }
-        } catch (highlightsError) {
-            console.error('Error loading highlights from API:', highlightsError);
-        }
+        })());
         
         // Load drafts
-        try {
-            const draftsResponse = await makeAuthenticatedRequest('/api/statuses/drafts');
-            if (draftsResponse && draftsResponse.drafts) {
-                drafts = draftsResponse.drafts;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+        loadPromises.push((async () => {
+            try {
+                const draftsResponse = await makeAuthenticatedRequest('/api/statuses/drafts');
+                if (draftsResponse && draftsResponse.drafts) {
+                    drafts = draftsResponse.drafts;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+                }
+            } catch (draftsError) {
+                console.error('Error loading drafts from API:', draftsError);
             }
-        } catch (draftsError) {
-            console.error('Error loading drafts from API:', draftsError);
-        }
+        })());
         
         // Load scheduled statuses
-        try {
-            const scheduledResponse = await makeAuthenticatedRequest('/api/statuses/scheduled');
-            if (scheduledResponse && scheduledResponse.scheduled) {
-                scheduledStatuses = scheduledResponse.scheduled;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
-                updateScheduledStatusesList();
-            }
-        } catch (scheduledError) {
-            console.error('Error loading scheduled statuses from API:', scheduledError);
-        }
-        
-        // Load muted users
-        try {
-            const mutedResponse = await makeAuthenticatedRequest('/api/users/muted');
-            if (mutedResponse && mutedResponse.users) {
-                mutedUsers = new Set(mutedResponse.users.map(user => user.id));
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
-            }
-        } catch (mutedError) {
-            console.error('Error loading muted users from API:', mutedError);
-        }
-        
-        // Load mood data
-        try {
-            const moodResponse = await makeAuthenticatedRequest('/api/statuses/mood-data');
-            if (moodResponse && moodResponse.data) {
-                moodChartData = moodResponse.data;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MOOD_DATA, JSON.stringify(moodChartData));
-                updateMoodChart();
-            }
-        } catch (moodError) {
-            console.error('Error loading mood data from API:', moodError);
-        }
-        
-        // Load streak data
-        try {
-            const streakResponse = await makeAuthenticatedRequest('/api/statuses/streak');
-            if (streakResponse && streakResponse.streak !== undefined) {
-                streakCount = streakResponse.streak;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
-                const streakElement = document.getElementById('streakCount');
-                if (streakElement) {
-                    streakElement.textContent = streakCount;
+        loadPromises.push((async () => {
+            try {
+                const scheduledResponse = await makeAuthenticatedRequest('/api/statuses/scheduled');
+                if (scheduledResponse && scheduledResponse.scheduled) {
+                    scheduledStatuses = scheduledResponse.scheduled;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
+                    updateScheduledStatusesList();
                 }
+            } catch (scheduledError) {
+                console.error('Error loading scheduled statuses from API:', scheduledError);
             }
-        } catch (streakError) {
-            console.error('Error loading streak data from API:', streakError);
-        }
+        })());
+        
+        // Wait for all data to load
+        await Promise.all(loadPromises);
         
         // Clear error UI if data loaded successfully
         errorUI.classList.remove('active');
@@ -4546,4 +4706,4 @@ function stopAutoAdvance() {
     }
 }
 
-console.log('Status system initialized successfully with bootstrap iframe pattern');
+console.log('Enhanced status system initialized successfully');
