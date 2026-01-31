@@ -11,7 +11,11 @@ const CORE_STATIC_ASSETS = [
   '/index.html',
   '/manifest.json',
   '/moodchat-192x192.png',
-  '/moodchat-512x512.png'
+  '/moodchat-512x512.png',
+  '/api.js',
+  '/Tool.css',
+  '/Tool.js',
+  '/group.js'
 ];
 
 const STATIC_ASSET_PATTERNS = [
@@ -46,38 +50,58 @@ const HTML_NAVIGATION_PATTERNS = [
   /\/logout$/i
 ];
 
+// Track logged bypass requests to avoid repeated logs
+const loggedBypasses = new Set();
+const loggedCacheHits = new Set();
+
 // ========== CRITICAL SAFETY GUARDS ==========
 
 function mustBypassCompletely(request) {
   const url = request.url;
+  const requestKey = `${request.method}:${url}`;
   
   // 🚫 NEVER intercept navigation requests
   if (request.mode === 'navigate') {
-    console.log('[Service Worker] Bypassing (navigation request):', url);
+    if (!loggedBypasses.has(requestKey)) {
+      console.log('[Service Worker] Bypassing (navigation request):', url);
+      loggedBypasses.add(requestKey);
+    }
     return true;
   }
   
   // 🚫 NEVER intercept HTML documents
   if (request.destination === 'document') {
-    console.log('[Service Worker] Bypassing (document request):', url);
+    if (!loggedBypasses.has(requestKey)) {
+      console.log('[Service Worker] Bypassing (document request):', url);
+      loggedBypasses.add(requestKey);
+    }
     return true;
   }
   
-  // 🚫 NEVER intercept HTML files
+  // 🚫 NEVER intercept HTML files or iframe pages
   if (HTML_NAVIGATION_PATTERNS.some(pattern => pattern.test(url))) {
-    console.log('[Service Worker] Bypassing (HTML/route):', url);
+    if (!loggedBypasses.has(requestKey)) {
+      console.log('[Service Worker] Bypassing (HTML/route):', url);
+      loggedBypasses.add(requestKey);
+    }
     return true;
   }
   
   // 🚫 NEVER cache non-GET requests
   if (request.method !== 'GET') {
-    console.log('[Service Worker] Bypassing (non-GET):', url);
+    if (!loggedBypasses.has(requestKey)) {
+      console.log('[Service Worker] Bypassing (non-GET):', url);
+      loggedBypasses.add(requestKey);
+    }
     return true;
   }
   
   // 🚫 NEVER cache API/auth requests
   if (BYPASS_PATTERNS.some(pattern => pattern.test(url))) {
-    console.log('[Service Worker] Bypassing (API/auth):', url);
+    if (!loggedBypasses.has(requestKey)) {
+      console.log('[Service Worker] Bypassing (API/auth):', url);
+      loggedBypasses.add(requestKey);
+    }
     return true;
   }
   
@@ -99,6 +123,11 @@ function isLocalAsset(url) {
   }
 }
 
+// Check if response is already cached
+function isAlreadyCached(request, cache) {
+  return cache.match(request).then(response => !!response);
+}
+
 // ========== SAFE REQUEST HANDLER ==========
 
 async function handleApiRequest(request) {
@@ -114,6 +143,17 @@ async function handleApiRequest(request) {
     // 🛡️ NEVER treat auth errors as offline
     if (response.status === 401 || response.status === 403) {
       return response;
+    }
+    
+    // 🛡️ Preserve authorization headers
+    if (request.headers.has('Authorization')) {
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set('Authorization', request.headers.get('Authorization'));
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
     }
     
     return response;
@@ -133,13 +173,22 @@ async function handleApiRequest(request) {
 
 async function handleStaticAsset(request) {
   const cache = await caches.open(CACHE_NAME);
+  const requestKey = request.url;
   
-  const cachedResponse = await cache.match(request);
-  if (cachedResponse) {
-    const isStale = isCacheStale(cachedResponse);
-    if (!isStale) {
-      console.log('[Service Worker] Static asset from cache:', request.url);
-      return cachedResponse;
+  // Check if already cached to avoid double caching
+  const alreadyCached = await isAlreadyCached(request, cache);
+  
+  if (alreadyCached) {
+    const cachedResponse = await cache.match(request);
+    if (cachedResponse) {
+      const isStale = isCacheStale(cachedResponse);
+      if (!isStale) {
+        if (!loggedCacheHits.has(requestKey)) {
+          console.log('[Service Worker] Static asset from cache:', request.url);
+          loggedCacheHits.add(requestKey);
+        }
+        return cachedResponse;
+      }
     }
   }
   
@@ -147,14 +196,21 @@ async function handleStaticAsset(request) {
     const networkResponse = await fetch(request);
     
     if (networkResponse.ok) {
-      await cache.put(request, networkResponse.clone());
-      console.log('[Service Worker] Static asset cached:', request.url);
+      // Only cache if not already cached to avoid repeated fetches
+      if (!alreadyCached) {
+        await cache.put(request, networkResponse.clone());
+        console.log('[Service Worker] Static asset cached:', request.url);
+      }
       return networkResponse;
     }
     
-    if (cachedResponse) {
-      console.log('[Service Worker] Using stale cache (network failed):', request.url);
-      return cachedResponse;
+    // If network fails but we have cache, use it
+    if (alreadyCached) {
+      const cachedResponse = await cache.match(request);
+      if (cachedResponse) {
+        console.log('[Service Worker] Using stale cache (network failed):', request.url);
+        return cachedResponse;
+      }
     }
     
     throw new Error('Network failed and no cache available');
@@ -198,9 +254,15 @@ self.addEventListener('install', event => {
             const assetUrl = asset === '/' ? '/index.html' : asset;
             
             if (isLocalAsset(assetUrl)) {
-              // 🛡️ Skip caching if it's HTML navigation
+              // 🛡️ Skip caching if it's HTML navigation or iframe page
               if (HTML_NAVIGATION_PATTERNS.some(pattern => pattern.test(assetUrl))) {
                 return { asset: assetUrl, status: 'skipped', reason: 'html-navigation' };
+              }
+              
+              // Check if already cached to avoid double caching
+              const alreadyCached = await isAlreadyCached(assetUrl, cache);
+              if (alreadyCached) {
+                return { asset: assetUrl, status: 'already-cached' };
               }
               
               const response = await fetch(assetUrl, {
@@ -221,10 +283,11 @@ self.addEventListener('install', event => {
         
         const results = await Promise.allSettled(cachePromises);
         const successCount = results.filter(r => 
-          r.status === 'fulfilled' && r.value && r.value.status === 'cached'
+          r.status === 'fulfilled' && r.value && 
+          (r.value.status === 'cached' || r.value.status === 'already-cached')
         ).length;
         
-        console.log(`[Service Worker] Installation complete. Cached ${successCount}/${CORE_STATIC_ASSETS.length} core assets`);
+        console.log(`[Service Worker] Installation complete. ${successCount}/${CORE_STATIC_ASSETS.length} core assets available in cache`);
         
         return self.skipWaiting();
       } catch (error) {
@@ -273,15 +336,25 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const request = event.request;
+  const url = request.url;
+  
+  // Clear old logs periodically to prevent memory buildup
+  if (loggedBypasses.size > 1000) loggedBypasses.clear();
+  if (loggedCacheHits.size > 1000) loggedCacheHits.clear();
   
   // 🛡️ CRITICAL: Apply all bypass guards first
   if (mustBypassCompletely(request)) {
-    event.respondWith(fetch(request));
+    // For API endpoints with authorization, preserve headers
+    if (BYPASS_PATTERNS.some(pattern => pattern.test(url))) {
+      event.respondWith(handleApiRequest(request));
+    } else {
+      event.respondWith(fetch(request));
+    }
     return;
   }
   
   // 🛡️ ONLY handle local static assets
-  if (!isLocalAsset(request.url) || !isStaticAsset(request.url)) {
+  if (!isLocalAsset(url) || !isStaticAsset(url)) {
     event.respondWith(fetch(request));
     return;
   }
@@ -355,6 +428,12 @@ self.addEventListener('message', event => {
         timestamp: Date.now()
       });
       break;
+      
+    case 'CLEAR_LOGS':
+      loggedBypasses.clear();
+      loggedCacheHits.clear();
+      console.log('[Service Worker] Logs cleared');
+      break;
   }
 });
 
@@ -365,6 +444,7 @@ async function cleanupOldCacheEntries() {
     const cache = await caches.open(CACHE_NAME);
     const keys = await cache.keys();
     const oneWeekAgo = Date.now() - CACHE_MAX_AGE;
+    let cleanedCount = 0;
     
     for (const request of keys) {
       const response = await cache.match(request);
@@ -374,9 +454,14 @@ async function cleanupOldCacheEntries() {
           const cachedDate = new Date(dateHeader).getTime();
           if (cachedDate < oneWeekAgo) {
             await cache.delete(request);
+            cleanedCount++;
           }
         }
       }
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`[Service Worker] Cleaned ${cleanedCount} old cache entries`);
     }
   } catch (error) {
     console.log('[Service Worker] Cleanup error:', error);

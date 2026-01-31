@@ -163,7 +163,7 @@ let isAuthReady = false;
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('=== TOOLS.HTML INITIALIZATION STARTED ===');
+    console.log('[Tool.js] Marketplace iframe initialization started');
     
     try {
         // Setup event listeners first (non-data dependent)
@@ -172,85 +172,127 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Load cached data for instant display
         loadCachedDataInstantly();
         
-        // Wait for authentication to be ready in background
-        await waitForAuthReady();
+        // Start background authentication
+        initializeBackgroundAuth();
         
-        try {
-            // Initialize marketplace with authenticated data
-            await initializeEnhancedMarketplace();
-            console.log('=== TOOLS.HTML INITIALIZATION COMPLETE ===');
-        } catch (error) {
-            console.error('Marketplace initialization failed:', error);
-            // Continue with cached data
-        }
+        // Background data fetching
+        setTimeout(() => {
+            loadEnhancedMarketplaceData();
+        }, 1000);
         
     } catch (error) {
-        console.error('Initialization failed:', error);
+        console.error('[Tool.js] Initialization failed:', error);
         showNotification('Failed to load marketplace. Please try again.', 'error');
     }
 });
 
-// Wait for authentication to be ready
-async function waitForAuthReady() {
-    console.log('Waiting for authentication to be ready...');
+// Get valid token from multiple sources
+function getValidToken() {
+    // Try parent first
+    let token = null;
     
-    // Check if api.js is loaded and has the auth ready mechanism
-    if (typeof window.apiCall === 'function') {
-        // Use the api.js authentication ready mechanism if available
-        if (typeof window.waitForAuthReady === 'function') {
-            await window.waitForAuthReady();
+    try {
+        if (window.parent && window.parent.AppState && window.parent.AppState.accessToken) {
+            token = window.parent.AppState.accessToken;
+            console.log('[Tool.js] Token from parent AppState');
         }
-        isAuthReady = true;
-        console.log('Authentication ready via api.js');
-    } else {
-        // Fallback: Use our own bootstrap mechanism
-        console.log('api.js auth mechanism not found, using fallback bootstrap');
-        await bootstrapIframe();
-        isAuthReady = true;
+    } catch (e) {
+        // Parent not accessible, try localStorage
     }
     
-    // Get token from storage
-    accessToken = getTokenFromStorage();
+    // Try localStorage
+    if (!token) {
+        token = localStorage.getItem('accessToken') || 
+                localStorage.getItem('knecta_auth_token') || 
+                sessionStorage.getItem('accessToken');
+    }
     
-    if (!accessToken) {
-        console.warn('No access token after auth ready - continuing offline');
-        // Don't throw, allow offline mode
+    // If still no token, check parent localStorage via try-catch
+    if (!token && window.parent) {
+        try {
+            token = window.parent.localStorage.getItem('accessToken');
+        } catch (e) {
+            // Cross-origin restriction
+        }
+    }
+    
+    return token;
+}
+
+// Initialize background authentication
+async function initializeBackgroundAuth() {
+    console.log('[Tool.js] Starting background authentication');
+    
+    try {
+        const token = getValidToken();
+        
+        if (!token) {
+            console.warn('[Tool.js] No token found, continuing offline');
+            isAuthReady = true;
+            return;
+        }
+        
+        accessToken = token;
+        
+        // Try to validate token with backend in background
+        if (typeof window.apiCall === 'function') {
+            try {
+                const userResponse = await window.apiCall('GET', '/api/auth/me');
+                if (userResponse && userResponse.user) {
+                    currentUser = userResponse.user;
+                    userData = userResponse.user;
+                    
+                    // Save to localStorage
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+                    
+                    console.log('[Tool.js] User authenticated:', currentUser.displayName || currentUser.email);
+                }
+            } catch (error) {
+                console.warn('[Tool.js] Background auth failed:', error);
+                // Continue with cached user
+            }
+        }
+        
+        isAuthReady = true;
+        console.log('[Tool.js] Background auth completed');
+        
+    } catch (error) {
+        console.error('[Tool.js] Auth initialization error:', error);
+        isAuthReady = true; // Don't block UI
     }
 }
 
 // SINGLE BOOTSTRAP FUNCTION - Removes parent dependency and race conditions
 async function bootstrapIframe() {
-    console.log('=== BOOTSTRAPPING MARKETPLACE IFRAME ===');
+    console.log('[Tool.js] Bootstrapping marketplace iframe');
     
     if (isBootstrapped) {
-        console.log('Already bootstrapped');
+        console.log('[Tool.js] Already bootstrapped');
         return;
     }
     
     // 1. Read token from localStorage using fallback logic
-    accessToken = getTokenFromStorage();
+    accessToken = getValidToken();
     
     if (!accessToken) {
-        console.log('No access token found, continuing offline');
-        // Don't throw - allow offline mode
+        console.log('[Tool.js] No access token found, continuing offline');
         isBootstrapped = true;
         return;
     }
     
     // 2. Validate token expiration
     if (isTokenExpired(accessToken)) {
-        console.log('Access token expired, attempting refresh');
+        console.log('[Tool.js] Access token expired, attempting refresh');
         try {
             await attemptTokenRefresh();
-            // Get fresh token after refresh
-            accessToken = getTokenFromStorage();
+            accessToken = getValidToken();
         } catch (error) {
-            console.warn('Token refresh failed, continuing offline:', error);
+            console.warn('[Tool.js] Token refresh failed, continuing offline:', error);
         }
     }
     
     // 3. Call /api/auth/me to verify user (if possible)
-    console.log('Verifying user with /api/auth/me');
     try {
         const userResponse = await makeApiCall('GET', '/api/auth/me');
         
@@ -258,48 +300,28 @@ async function bootstrapIframe() {
             currentUser = userResponse.user;
             userData = userResponse.user;
             
-            // Save user to localStorage
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
             
-            console.log('User verified:', currentUser.displayName || currentUser.email);
+            console.log('[Tool.js] User verified:', currentUser.displayName || currentUser.email);
         }
         
     } catch (error) {
-        console.warn('Failed to verify user, continuing offline:', error);
+        console.warn('[Tool.js] Failed to verify user, continuing offline:', error);
     }
     
-    // 4. Mark as bootstrapped
     isBootstrapped = true;
-    console.log('Marketplace iframe bootstrapped successfully');
+    console.log('[Tool.js] Marketplace iframe bootstrapped successfully');
 }
 
 // Helper function to get token from storage with fallback logic
 function getTokenFromStorage() {
-    console.log('Getting token from storage...');
-    
-    // Try multiple token sources in order of priority
-    const tokenSources = [
-        localStorage.getItem('accessToken'),
-        localStorage.getItem('knecta_auth_token'),
-        localStorage.getItem('moodchat_token'),
-        sessionStorage.getItem('accessToken')
-    ];
-    
-    for (const token of tokenSources) {
-        if (token && token.trim() !== '') {
-            console.log('Found token in storage');
-            return token;
-        }
-    }
-    
-    console.warn('No valid token found in storage');
-    return null;
+    return getValidToken();
 }
 
 // Helper function to clear authentication storage
 function clearAuthStorage() {
-    console.log('Clearing authentication storage...');
+    console.log('[Tool.js] Clearing authentication storage');
     
     const tokensToRemove = [
         'accessToken',
@@ -314,7 +336,6 @@ function clearAuthStorage() {
         sessionStorage.removeItem(token);
     });
     
-    // Clear user data
     localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
     
@@ -329,50 +350,47 @@ function isTokenExpired(token) {
     if (!token) return true;
     
     try {
-        // Decode JWT token to check expiration
         const parts = token.split('.');
         if (parts.length !== 3) {
-            console.warn('Invalid JWT token format');
+            console.warn('[Tool.js] Invalid JWT token format');
             return true;
         }
         
         const payload = JSON.parse(atob(parts[1]));
-        const expirationTime = payload.exp * 1000; // Convert to milliseconds
+        const expirationTime = payload.exp * 1000;
         const currentTime = Date.now();
         
-        // Add 60 second buffer
         const isExpired = expirationTime < (currentTime + 60000);
         
         if (isExpired) {
-            console.log('Token expired:', new Date(expirationTime), 'Current:', new Date(currentTime));
+            console.log('[Tool.js] Token expired');
         }
         
         return isExpired;
         
     } catch (error) {
-        console.error('Error parsing token:', error);
-        return true; // If we can't parse it, assume expired
+        console.error('[Tool.js] Error parsing token:', error);
+        return true;
     }
 }
 
 // Attempt to refresh the access token
 async function attemptTokenRefresh() {
     if (tokenRefreshInProgress) {
-        console.log('Token refresh already in progress');
+        console.log('[Tool.js] Token refresh already in progress');
         return;
     }
     
     tokenRefreshInProgress = true;
     
     try {
-        console.log('Refreshing access token...');
+        console.log('[Tool.js] Refreshing access token');
         
-        // Get refresh token from storage
         refreshToken = localStorage.getItem('refreshToken') || 
                        localStorage.getItem('knecta_refresh_token');
         
         if (!refreshToken) {
-            console.log('No refresh token available');
+            console.log('[Tool.js] No refresh token available');
             clearAuthStorage();
             return;
         }
@@ -382,13 +400,11 @@ async function attemptTokenRefresh() {
         });
         
         if (response && response.accessToken) {
-            // Save new tokens
             accessToken = response.accessToken;
             if (response.refreshToken) {
                 refreshToken = response.refreshToken;
             }
             
-            // Store tokens
             localStorage.setItem('accessToken', accessToken);
             localStorage.setItem('knecta_auth_token', accessToken);
             if (refreshToken) {
@@ -396,16 +412,14 @@ async function attemptTokenRefresh() {
                 localStorage.setItem('knecta_refresh_token', refreshToken);
             }
             
-            console.log('Access token refreshed successfully');
-            showNotification('Session refreshed', 'success');
+            console.log('[Tool.js] Access token refreshed successfully');
             
         } else {
             throw new Error('No access token in response');
         }
         
     } catch (error) {
-        console.error('Token refresh failed:', error);
-        showNotification('Session expired. Please login again.', 'error');
+        console.error('[Tool.js] Token refresh failed:', error);
         clearAuthStorage();
         throw error;
         
@@ -416,11 +430,10 @@ async function attemptTokenRefresh() {
 
 // Unified API call function using api.js
 async function makeApiCall(method, endpoint, data = null) {
-    console.log(`Making API call: ${method} ${endpoint}`);
+    const token = getValidToken();
     
-    // Ensure we have a token
-    if (!accessToken) {
-        accessToken = getTokenFromStorage();
+    if (!token && endpoint !== '/api/auth/refresh') {
+        throw { status: 401, message: 'Authentication required' };
     }
     
     // Use api.js for all API calls if available
@@ -429,9 +442,8 @@ async function makeApiCall(method, endpoint, data = null) {
             const response = await window.apiCall(method, endpoint, data);
             return response;
         } catch (error) {
-            console.error(`API call failed via api.js: ${method} ${endpoint}`, error);
+            console.error(`[Tool.js] API call failed via api.js: ${method} ${endpoint}`, error);
             
-            // If it's an auth error, clear storage
             if (error.status === 401 || error.status === 403) {
                 clearAuthStorage();
             }
@@ -440,20 +452,21 @@ async function makeApiCall(method, endpoint, data = null) {
         }
     } else {
         // Fallback for when api.js is not available
-        console.warn('api.js not loaded, using fallback fetch');
         return await makeFallbackApiCall(method, endpoint, data);
     }
 }
 
 // Fallback API call for when api.js is not available
 async function makeFallbackApiCall(method, endpoint, data = null) {
-    if (!accessToken) {
+    const token = getValidToken();
+    
+    if (!token) {
         throw { status: 401, message: 'Authentication required' };
     }
     
     try {
         const headers = {
-            'Authorization': `Bearer ${accessToken}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         };
         
@@ -475,11 +488,10 @@ async function makeFallbackApiCall(method, endpoint, data = null) {
             };
         }
         
-        const responseData = await response.json();
-        return responseData;
+        return await response.json();
         
     } catch (error) {
-        console.error(`Fallback API call failed: ${method} ${endpoint}`, error);
+        console.error(`[Tool.js] Fallback API call failed: ${method} ${endpoint}`, error);
         throw error;
     }
 }
@@ -494,36 +506,33 @@ async function safeApiCall(method, endpoint, data = null) {
     try {
         return await makeApiCall(method, endpoint, data);
     } catch (error) {
-        console.error('Safe API call failed:', error);
+        console.error('[Tool.js] Safe API call failed:', error);
         return null;
     }
 }
 
 // Redirect to login page
 function redirectToLogin() {
-    console.log('Redirecting to login...');
+    console.log('[Tool.js] Redirecting to login');
     
-    // Store current location for redirect back after login
     const currentPath = window.location.pathname + window.location.search;
     localStorage.setItem('login_redirect', currentPath);
     
-    // Clear any existing tokens
     clearAuthStorage();
     
-    // Redirect to login page
     window.location.href = '/index.html';
 }
 
 // Load cached data for instant display
 function loadCachedDataInstantly() {
-    console.log('=== INSTANT MARKETPLACE CACHE LOAD START ===');
+    console.log('[Tool.js] Loading cached marketplace data');
     
     try {
         // Load user from cache immediately
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
             currentUser = JSON.parse(cachedUser);
-            console.log('Loaded user from cache:', currentUser.displayName);
+            console.log('[Tool.js] Loaded user from cache');
         }
         
         // Load user profile from cache
@@ -707,61 +716,39 @@ function loadCachedDataInstantly() {
             paymentMethods = JSON.parse(paymentMethodsCache);
         }
         
-        console.log('=== INSTANT MARKETPLACE CACHE LOAD COMPLETE ===');
+        console.log('[Tool.js] Instant marketplace cache load complete');
         
         // Render initial listings
         renderMarketplaceList();
         updateAvailableListingsCount();
         
     } catch (error) {
-        console.error('Error in instant cache load:', error);
+        console.error('[Tool.js] Error in instant cache load:', error);
     }
 }
 
 async function initializeEnhancedMarketplace() {
-    console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION START ===');
+    console.log('[Tool.js] Enhanced marketplace initialization');
     
-    // Check for dark mode preference
     checkDarkMode();
-    
-    // Check premium status
     await checkUserPremiumStatus();
-    
-    // Load enhanced marketplace data
     await loadEnhancedMarketplaceData();
-    
-    // Load service categories
     loadServiceCategories();
-    
-    // Load groups for selection
     loadGroupsForSelection();
-    
-    // Load friends for selection
     loadFriendsForSelection();
-    
-    // Check for expired listings
     cleanupExpiredListings();
-    
-    // Initialize analytics chart
     initializeAnalyticsChart();
-    
-    // Generate heatmap
     generateHeatmap();
     
-    console.log('=== ENHANCED MARKETPLACE SYSTEM INITIALIZATION COMPLETE ===');
-    
-    // Show notification
-    showNotification('Marketplace loaded successfully', 'success');
+    console.log('[Tool.js] Enhanced marketplace initialization complete');
 }
 
 async function checkUserPremiumStatus() {
     try {
-        // Check local storage first
         const localSubscription = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         if (localSubscription) {
             userSubscription = JSON.parse(localSubscription);
             
-            // Check if subscription is still valid
             if (userSubscription.expiresAt && new Date(userSubscription.expiresAt) < new Date()) {
                 userSubscription = null;
                 localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
@@ -771,8 +758,6 @@ async function checkUserPremiumStatus() {
             }
         }
         
-        // Check with backend
-        console.log('Checking premium status with backend');
         const response = await safeApiCall('GET', '/api/user/subscription');
         if (response && response.subscription) {
             userSubscription = response.subscription;
@@ -781,16 +766,14 @@ async function checkUserPremiumStatus() {
         }
         
     } catch (error) {
-        console.error('Error checking premium status:', error);
-        // Don't throw, allow marketplace to work without premium status
+        console.error('[Tool.js] Error checking premium status:', error);
     }
 }
 
 async function loadEnhancedMarketplaceData() {
     try {
-        console.log('Loading enhanced marketplace data');
+        console.log('[Tool.js] Loading enhanced marketplace data in background');
         
-        // Load data in parallel where possible
         const promises = [
             loadListingsFromBackend(),
             loadUserGroups(),
@@ -802,49 +785,41 @@ async function loadEnhancedMarketplaceData() {
             loadSpotlightListingsFromBackend()
         ];
         
-        // Wait for all promises to settle (not necessarily all successful)
         await Promise.allSettled(promises);
         
         updateListingCounts();
-        showNotification('Marketplace data refreshed', 'success');
+        console.log('[Tool.js] Marketplace data refreshed in background');
         
     } catch (error) {
-        console.error('Error loading marketplace data:', error);
-        // Generate sample data for demo/offline mode
+        console.error('[Tool.js] Error loading marketplace data:', error);
         generateSampleMarketplaceData();
     }
 }
 
 async function loadListingsFromBackend() {
     try {
-        console.log('Loading listings from backend');
         const response = await safeApiCall('GET', '/api/marketplace/listings');
         
         if (response && response.listings) {
             allListings = response.listings;
-            
-            // Filter out expired listings
             allListings = allListings.filter(listing => !isListingExpired(listing));
             
-            // Update UI
             renderMarketplaceList();
             updateAvailableListingsCount();
             
-            console.log(`Loaded ${allListings.length} listings from backend`);
+            console.log(`[Tool.js] Loaded ${allListings.length} listings from backend`);
             
-            // Save to cache
             localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
         }
         
     } catch (error) {
-        console.error('Error loading listings from backend:', error);
+        console.error('[Tool.js] Error loading listings from backend:', error);
         throw error;
     }
 }
 
 async function loadUserGroups() {
     try {
-        console.log('Loading user groups from backend');
         const response = await safeApiCall('GET', '/api/user/groups');
         
         if (response && response.groups) {
@@ -853,13 +828,12 @@ async function loadUserGroups() {
         }
         
     } catch (error) {
-        console.error('Error loading user groups:', error);
+        console.error('[Tool.js] Error loading user groups:', error);
     }
 }
 
 async function loadUserFriends() {
     try {
-        console.log('Loading user friends from backend');
         const response = await safeApiCall('GET', '/api/user/friends');
         
         if (response && response.friends) {
@@ -868,15 +842,13 @@ async function loadUserFriends() {
         }
         
     } catch (error) {
-        console.error('Error loading user friends:', error);
+        console.error('[Tool.js] Error loading user friends:', error);
     }
 }
 
 async function loadTeamMembers() {
     try {
-        // Only load if user has team subscription
         if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team')) {
-            console.log('Loading team members from backend');
             const response = await safeApiCall('GET', '/api/team/members');
             
             if (response && response.members) {
@@ -886,13 +858,12 @@ async function loadTeamMembers() {
         }
         
     } catch (error) {
-        console.error('Error loading team members:', error);
+        console.error('[Tool.js] Error loading team members:', error);
     }
 }
 
 async function loadLeaderboard() {
     try {
-        console.log('Loading leaderboard from backend');
         const response = await safeApiCall('GET', '/api/marketplace/leaderboard');
         
         if (response && response.leaderboard) {
@@ -901,14 +872,13 @@ async function loadLeaderboard() {
         }
         
     } catch (error) {
-        console.error('Error loading leaderboard:', error);
+        console.error('[Tool.js] Error loading leaderboard:', error);
     }
 }
 
 async function loadAnalyticsData() {
     try {
         if (isUserPremium()) {
-            console.log('Loading analytics data from backend');
             const response = await safeApiCall('GET', '/api/marketplace/analytics');
             
             if (response && response.analytics) {
@@ -919,13 +889,12 @@ async function loadAnalyticsData() {
         }
         
     } catch (error) {
-        console.error('Error loading analytics:', error);
+        console.error('[Tool.js] Error loading analytics:', error);
     }
 }
 
 async function loadPremiumFeatures() {
     try {
-        console.log('Loading premium features from backend');
         const response = await safeApiCall('GET', '/api/premium/features');
         
         if (response && response.features) {
@@ -934,13 +903,12 @@ async function loadPremiumFeatures() {
         }
         
     } catch (error) {
-        console.error('Error loading premium features:', error);
+        console.error('[Tool.js] Error loading premium features:', error);
     }
 }
 
 async function loadSpotlightListingsFromBackend() {
     try {
-        console.log('Loading spotlight listings from backend');
         const response = await safeApiCall('GET', '/api/marketplace/spotlight');
         
         if (response && response.spotlightListings) {
@@ -949,7 +917,7 @@ async function loadSpotlightListingsFromBackend() {
         }
         
     } catch (error) {
-        console.error('Error loading spotlight listings:', error);
+        console.error('[Tool.js] Error loading spotlight listings:', error);
     }
 }
 
@@ -959,30 +927,24 @@ function updatePremiumStatusUI() {
         const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
         if (premiumOptionsBtn) premiumOptionsBtn.innerHTML = '<i class="fas fa-crown"></i> Premium';
         
-        // Show premium features in create modal
         document.querySelectorAll('.premium-feature').forEach(feature => {
             feature.style.display = 'block';
         });
         
-        // Show premium tabs
         const publishPremiumBtn = document.getElementById('publishPremiumBtn');
         if (publishPremiumBtn) publishPremiumBtn.style.display = 'flex';
         
-        // Enable premium uploads
         const uploadInfo = document.querySelector('#digitalUploadArea p:nth-child(4)');
         if (uploadInfo) uploadInfo.textContent = 'Max: 500MB';
         
-        // Show AR preview option
         const arPreview = document.getElementById('arPreviewFeature');
         if (arPreview) arPreview.style.display = 'block';
         
-        // Show team features
         if (userSubscription.plan === 'business' || userSubscription.plan === 'team') {
             const teamNotes = document.getElementById('teamNotesFeature');
             if (teamNotes) teamNotes.style.display = 'block';
         }
         
-        // Show analytics features
         const analyticsAlerts = document.getElementById('analyticsAlertsFeature');
         if (analyticsAlerts) analyticsAlerts.style.display = 'block';
         
@@ -991,7 +953,6 @@ function updatePremiumStatusUI() {
         const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
         if (premiumOptionsBtn) premiumOptionsBtn.innerHTML = '<i class="fas fa-crown"></i> Premium';
         
-        // Hide premium features
         document.querySelectorAll('.premium-feature').forEach(feature => {
             feature.style.display = 'none';
         });
@@ -1090,13 +1051,11 @@ function renderMarketplaceList() {
         return;
     }
     
-    // Apply mood filter if set
     let filteredListings = allListings;
     if (currentMoodFilter) {
         filteredListings = filterListingsByMood(allListings, currentMoodFilter);
     }
     
-    // Sort listings: featured/boosted first, then regular
     filteredListings.sort((a, b) => {
         const aIsFeatured = a.featured || a.boosted;
         const bIsFeatured = b.featured || b.boosted;
@@ -1104,11 +1063,9 @@ function renderMarketplaceList() {
         if (aIsFeatured && !bIsFeatured) return -1;
         if (!aIsFeatured && bIsFeatured) return 1;
         
-        // Then sort by creation date (newest first)
         return new Date(b.createdAt) - new Date(a.createdAt);
     });
     
-    // Render each listing
     filteredListings.forEach(listing => {
         if (isListingVisibleToUser(listing)) {
             addListingItem(listing);
@@ -1117,45 +1074,35 @@ function renderMarketplaceList() {
 }
 
 function isListingVisibleToUser(listing) {
-    // Check if listing is expired
     if (isListingExpired(listing)) {
         return false;
     }
     
-    // Check trust circles
     if (listing.visibility === TRUST_CIRCLES.FRIENDS) {
-        // Only show to friends
         return userFriends.some(friend => friend.id === listing.userId) || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.GROUPS) {
-        // Only show to group members
         return listing.allowedGroups && listing.allowedGroups.some(groupId => 
             userGroups.some(group => group.id === groupId)
         ) || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.SELECTED) {
-        // Only show to selected people
         return listing.allowedUsers && listing.allowedUsers.includes(currentUser?.id) || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.PREMIUM) {
-        // Only show to premium users
         return isUserPremium() || listing.userId === currentUser?.id;
     } else if (listing.visibility === TRUST_CIRCLES.MICRO) {
-        // Show to selected premium users
         return (isUserPremium() && listing.allowedUsers && listing.allowedUsers.includes(currentUser?.id)) || listing.userId === currentUser?.id;
     }
     
-    // Public listings are visible to all
     return true;
 }
 
 function filterListingsByMood(listings, mood) {
     switch (mood) {
         case MOOD_CONTEXTS.HELP:
-            // Show listings with urgent availability
             return listings.filter(listing => 
                 listing.availability === AVAILABILITY.URGENT || 
                 listing.moodContext === MOOD_CONTEXTS.URGENT
             );
         case MOOD_CONTEXTS.LEARN:
-            // Show digital items and educational services
             return listings.filter(listing => 
                 listing.type === LISTING_TYPES.DIGITAL ||
                 listing.category?.toLowerCase().includes('tutor') ||
@@ -1163,13 +1110,11 @@ function filterListingsByMood(listings, mood) {
                 listing.title?.toLowerCase().includes('learn')
             );
         case MOOD_CONTEXTS.URGENT:
-            // Show listings that need quick response
             return listings.filter(listing => 
                 listing.availability === AVAILABILITY.URGENT ||
                 listing.expiresSoon
             );
         case MOOD_CONTEXTS.CREATIVE:
-            // Show creative services and digital art
             return listings.filter(listing => 
                 listing.category?.toLowerCase().includes('art') ||
                 listing.category?.toLowerCase().includes('design') ||
@@ -1177,7 +1122,6 @@ function filterListingsByMood(listings, mood) {
                 listing.template === 'creative'
             );
         case MOOD_CONTEXTS.BUSINESS:
-            // Show business and premium services
             return listings.filter(listing => 
                 listing.category?.toLowerCase().includes('business') ||
                 listing.category?.toLowerCase().includes('consult') ||
@@ -1186,7 +1130,6 @@ function filterListingsByMood(listings, mood) {
                 listing.premium === true
             );
         default:
-            // Browse mode - show all
             return listings;
     }
 }
@@ -1252,8 +1195,6 @@ function getTrustIndicator(userId, trustLevel) {
         return `<span class="trust-indicator ${TRUST_INDICATORS[trustLevel.toUpperCase()]?.class || 'trust-new'}">${TRUST_INDICATORS[trustLevel.toUpperCase()]?.text || 'New'}</span>`;
     }
     
-    // In real implementation, fetch trust data for the user
-    // For now, return a simple indicator
     return '<span class="trust-indicator trust-new">New</span>';
 }
 
@@ -1264,13 +1205,11 @@ function isUserPremium() {
 function viewListingDetail(listingData) {
     if (!marketplaceDetailPanel) return;
     
-    // Update detail panel
     const detailName = document.getElementById('detailName');
     const detailTime = document.getElementById('detailTime');
     if (detailName) detailName.textContent = listingData.user?.displayName || 'User';
     if (detailTime) detailTime.textContent = formatTimeAgo(new Date(listingData.createdAt));
     
-    // Update avatar
     const detailAvatar = document.getElementById('detailAvatar');
     if (detailAvatar) {
         if (listingData.user?.photoURL) {
@@ -1282,23 +1221,18 @@ function viewListingDetail(listingData) {
         }
     }
     
-    // Clear previous content
     const detailContent = document.getElementById('marketplaceDetailContent');
     if (!detailContent) return;
     
     detailContent.innerHTML = '';
     
-    // Load listing detail based on type
     loadListingDetail(listingData, detailContent);
     
-    // Show detail panel
     marketplaceDetailPanel.classList.add('active');
     
-    // Store current listing ID
     window.currentListingId = listingData.id;
     window.currentListingData = listingData;
     
-    // Track view
     trackListingView(listingData.id);
 }
 
@@ -1307,7 +1241,6 @@ function loadListingDetail(listingData, container) {
     
     let detailHTML = '';
     
-    // Add video intro if available (premium feature)
     if (listingData.videoIntro) {
         detailHTML += `
             <div class="file-preview" style="margin-bottom: 20px;">
@@ -1327,7 +1260,6 @@ function loadListingDetail(listingData, container) {
         `;
     }
     
-    // Add AR preview placeholder for premium users
     if (listingData.arPreview && isUserPremium()) {
         detailHTML += `
             <div class="ar-preview-container" style="margin-bottom: 20px;">
@@ -1475,7 +1407,6 @@ function loadListingDetail(listingData, container) {
     
     container.innerHTML = detailHTML;
     
-    // Add download button for digital items
     if (listingData.type === LISTING_TYPES.DIGITAL && listingData.fileUrl) {
         const downloadBtn = document.createElement('button');
         downloadBtn.className = 'action-btn primary';
@@ -1487,7 +1418,6 @@ function loadListingDetail(listingData, container) {
         container.appendChild(downloadBtn);
     }
     
-    // Add tip button event listener
     const tipBtn = document.getElementById('tipBtn');
     if (tipBtn) {
         tipBtn.addEventListener('click', () => {
@@ -1501,11 +1431,8 @@ function loadListingDetail(listingData, container) {
 
 async function downloadDigitalFile(listingId, fileUrl, fileName) {
     try {
-        // Track download
-        console.log('Tracking download');
         await safeApiCall('POST', `/api/marketplace/listings/${listingId}/download`);
         
-        // Create download link
         const link = document.createElement('a');
         link.href = fileUrl;
         link.download = fileName || fileUrl.split('/').pop();
@@ -1516,7 +1443,7 @@ async function downloadDigitalFile(listingId, fileUrl, fileName) {
         showNotification('Download started', 'success');
         
     } catch (error) {
-        console.error('Error downloading file:', error);
+        console.error('[Tool.js] Error downloading file:', error);
         showNotification('Download failed', 'error');
     }
 }
@@ -1566,7 +1493,6 @@ async function createPremiumServiceListing(title, description, premiumOptions = 
         updatedAt: new Date().toISOString()
     };
     
-    // Process premium features
     if (premiumOptions.featured) {
         await processFeaturedListing(listing);
     }
@@ -1575,52 +1501,39 @@ async function createPremiumServiceListing(title, description, premiumOptions = 
         await processBoostedListing(listing);
     }
     
-    // Add to my listings
     myListings.unshift(listing);
     
-    // Update local storage
     saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
     
-    // Save to premium listings
     const premiumListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || '[]');
     premiumListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
     
-    // Add to all listings for visibility
     allListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
-    // Send to backend using authenticated API if available
     try {
-        console.log('Posting premium service listing to backend');
         const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
         if (response && response.listing) {
             listing.id = response.listing.id || listingId;
-            console.log('Premium service listing posted to backend');
         }
     } catch (error) {
-        console.log('Offline: Premium listing saved locally');
         queueForSync(listing, 'premium_listing');
     }
     
-    // Update UI
     updateMyListingsPreview();
     addListingItem(listing);
     updateAvailableListingsCount();
     
-    // Update streak
     updateListingStreak();
     
-    // Update all listings
     allListings.unshift(listing);
     localStorage.setItem('knecta_marketplace_listings', JSON.stringify(allListings));
     
-    // Update trust stats
     updateTrustStats('listingCreated');
     
     showNotification('Premium service listing published successfully', 'success');
     
-    // Process payment if needed
     if (premiumOptions.featured || premiumOptions.boosted) {
         processPremiumPayment(listing, premiumOptions);
     }
@@ -1666,7 +1579,6 @@ async function createPremiumDigitalListing(title, description, fileData, premium
         updatedAt: new Date().toISOString()
     };
     
-    // Process premium features
     if (premiumOptions.featured) {
         await processFeaturedListing(listing);
     }
@@ -1675,48 +1587,36 @@ async function createPremiumDigitalListing(title, description, fileData, premium
         await processBoostedListing(listing);
     }
     
-    // Add to my listings
     myListings.unshift(listing);
     
-    // Update local storage
     saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
     
-    // Save to premium listings
     const premiumListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || '[]');
     premiumListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
     
-    // Add to all listings for visibility
     allListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
-    // Send to backend using authenticated API if available
     try {
-        console.log('Posting premium digital listing to backend');
         const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
         if (response && response.listing) {
             listing.id = response.listing.id || listingId;
-            console.log('Premium digital listing posted to backend');
         }
     } catch (error) {
-        console.log('Offline: Premium listing saved locally');
         queueForSync(listing, 'premium_listing');
     }
     
-    // Update UI
     updateMyListingsPreview();
     addListingItem(listing);
     updateAvailableListingsCount();
     
-    // Update streak
     updateListingStreak();
     
-    // Update trust stats
     updateTrustStats('listingCreated');
     
     showNotification('Premium digital listing published successfully', 'success');
     
-    // Process payment if needed
     if (premiumOptions.featured || premiumOptions.boosted) {
         processPremiumPayment(listing, premiumOptions);
     }
@@ -1726,34 +1626,28 @@ async function createPremiumDigitalListing(title, description, fileData, premium
 
 async function processFeaturedListing(listing) {
     try {
-        // Add to spotlight listings
         const spotlightListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS) || '[]');
         spotlightListings.unshift(listing);
         localStorage.setItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, JSON.stringify(spotlightListings));
         
-        // Update UI
         renderSpotlightListings(spotlightListings);
         
-        // Send to backend
-        console.log('Processing featured listing');
         await safeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
         
     } catch (error) {
-        console.error('Error processing featured listing:', error);
+        console.error('[Tool.js] Error processing featured listing:', error);
     }
 }
 
 async function processBoostedListing(listing) {
     try {
-        // Send boost request to backend
-        console.log('Processing boosted listing');
         await safeApiCall('POST', '/api/marketplace/boost', { 
             listingId: listing.id,
             duration: '24h'
         });
         
     } catch (error) {
-        console.error('Error processing boosted listing:', error);
+        console.error('[Tool.js] Error processing boosted listing:', error);
     }
 }
 
@@ -1761,7 +1655,6 @@ async function processPremiumPayment(listing, options) {
     const paymentAmount = calculatePremiumCost(options);
     
     try {
-        console.log('Processing premium payment');
         const paymentData = {
             amount: paymentAmount,
             currency: 'USD',
@@ -1782,7 +1675,7 @@ async function processPremiumPayment(listing, options) {
         }
         
     } catch (error) {
-        console.error('Payment processing failed:', error);
+        console.error('[Tool.js] Payment processing failed:', error);
         showNotification('Payment failed. Please try again.', 'error');
     }
     
@@ -1792,10 +1685,10 @@ async function processPremiumPayment(listing, options) {
 function calculatePremiumCost(options) {
     let cost = 0;
     
-    if (options.featured) cost += 5; // $5 per day
-    if (options.boosted) cost += 3; // $3 per day
-    if (options.verified) cost += 10; // $10 one-time
-    if (options.autoRenew) cost += 1; // $1 per day
+    if (options.featured) cost += 5;
+    if (options.boosted) cost += 3;
+    if (options.verified) cost += 10;
+    if (options.autoRenew) cost += 1;
     
     return cost;
 }
@@ -1805,7 +1698,6 @@ async function sendTip(listingId, amount, customAmount = null) {
     const finalAmount = customAmount || amount;
     
     try {
-        console.log('Sending tip');
         const tipData = {
             listingId: listingId,
             amount: finalAmount,
@@ -1818,14 +1710,13 @@ async function sendTip(listingId, amount, customAmount = null) {
         if (response && response.success) {
             showNotification(`Tip of $${finalAmount} sent successfully!`, 'success');
             
-            // Update analytics
             updateAnalyticsData('tipReceived', finalAmount);
             
             return true;
         }
         
     } catch (error) {
-        console.error('Error sending tip:', error);
+        console.error('[Tool.js] Error sending tip:', error);
         showNotification('Failed to send tip. Please try again.', 'error');
     }
     
@@ -1868,7 +1759,6 @@ function initializeAnalyticsChart() {
 function updateAnalyticsDashboard() {
     if (!analyticsData) return;
     
-    // Update summary cards
     const analyticsViews = document.getElementById('analyticsViews');
     const analyticsSaves = document.getElementById('analyticsSaves');
     const analyticsShares = document.getElementById('analyticsShares');
@@ -1883,7 +1773,6 @@ function updateAnalyticsDashboard() {
     if (analyticsConversion) analyticsConversion.textContent = analyticsData.conversionRate ? `${analyticsData.conversionRate}%` : '0%';
     if (analyticsEngagement) analyticsEngagement.textContent = analyticsData.avgEngagement ? `${analyticsData.avgEngagement}s` : '0s';
     
-    // Update changes
     updateChangeIndicator('viewsChange', analyticsData.viewsChange);
     updateChangeIndicator('savesChange', analyticsData.savesChange);
     updateChangeIndicator('sharesChange', analyticsData.sharesChange);
@@ -1891,7 +1780,6 @@ function updateAnalyticsDashboard() {
     updateChangeIndicator('conversionChange', analyticsData.conversionChange);
     updateChangeIndicator('engagementChange', analyticsData.engagementChange);
     
-    // Update competitor insights for premium users
     if (isUserPremium() && analyticsData.competitorInsights) {
         const competitorInsights = document.getElementById('competitorInsights');
         if (competitorInsights) {
@@ -1925,13 +1813,11 @@ function generateHeatmap() {
     
     heatmapGrid.innerHTML = '';
     
-    // Generate 7x24 heatmap cells (7 days, 24 hours)
     for (let hour = 0; hour < 24; hour++) {
         for (let day = 0; day < 7; day++) {
             const cell = document.createElement('div');
             cell.className = 'heatmap-cell';
             
-            // Simulated engagement data (in real app, use actual data)
             const engagement = Math.floor(Math.random() * 100);
             const intensity = Math.min(Math.floor(engagement / 20), 4);
             
@@ -1963,7 +1849,6 @@ function updateAnalyticsData(type, value) {
     analyticsData[type] += value;
     localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
     
-    // Update dashboard if open
     if (analyticsModal && analyticsModal.classList.contains('active')) {
         updateAnalyticsDashboard();
     }
@@ -1975,7 +1860,6 @@ function updateListingStreak() {
     const yesterday = new Date(Date.now() - 86400000).toDateString();
     
     if (!streakData.lastListingDate) {
-        // First listing ever
         streakData = {
             currentStreak: 1,
             longestStreak: 1,
@@ -1983,10 +1867,8 @@ function updateListingStreak() {
             totalListings: 1
         };
     } else if (streakData.lastListingDate === today) {
-        // Already listed today
         streakData.totalListings++;
     } else if (streakData.lastListingDate === yesterday) {
-        // Listed yesterday - continue streak
         streakData.currentStreak++;
         streakData.totalListings++;
         streakData.lastListingDate = today;
@@ -1995,19 +1877,15 @@ function updateListingStreak() {
             streakData.longestStreak = streakData.currentStreak;
         }
     } else {
-        // Streak broken
         streakData.currentStreak = 1;
         streakData.totalListings++;
         streakData.lastListingDate = today;
     }
     
-    // Save streak data
     localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK_DATA, JSON.stringify(streakData));
     
-    // Update UI
     updateStreakIndicator();
     
-    // Check for streak rewards
     checkStreakRewards();
 }
 
@@ -2022,8 +1900,7 @@ function checkStreakRewards() {
         showNotification(rewards[streakData.currentStreak], 'success');
         
         if (streakData.currentStreak === 30) {
-            // Award temporary premium access
-            awardTemporaryPremium(7); // 7 days
+            awardTemporaryPremium(7);
         }
     }
 }
@@ -2099,7 +1976,6 @@ async function uploadBulkListings(listings) {
     for (let i = 0; i < listings.length; i++) {
         const listing = listings[i];
         
-        // Add to UI
         const item = document.createElement('div');
         item.className = 'bulk-upload-item';
         item.innerHTML = `
@@ -2113,8 +1989,6 @@ async function uploadBulkListings(listings) {
         bulkUploadList.appendChild(item);
         
         try {
-            // Upload listing
-            console.log('Uploading bulk listing');
             const response = await safeApiCall('POST', '/api/marketplace/listings/bulk', listing);
             
             if (response && response.success) {
@@ -2127,13 +2001,11 @@ async function uploadBulkListings(listings) {
         }
     }
     
-    // Save updated listings
     saveToLocalStorage(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
     saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
     
     showNotification(`Processed ${listings.length} listings`, 'success');
     
-    // Update UI
     renderMarketplaceList();
     updateAvailableListingsCount();
     updateMyListingsPreview();
@@ -2237,7 +2109,6 @@ function renderLeaderboard() {
             leaderboardItem.querySelector('.team-member-avatar').innerHTML = '';
         }
         
-        // Add podium styling for top 3
         if (index === 0) {
             leaderboardItem.style.background = 'linear-gradient(45deg, #FFD700, #FFA500)';
             leaderboardItem.style.color = '#000';
@@ -2255,11 +2126,9 @@ function renderLeaderboard() {
 // Export Functions
 async function exportAnalytics(format) {
     try {
-        console.log('Exporting analytics');
         const response = await safeApiCall('GET', `/api/analytics/export?format=${format}`);
         
         if (response && response.downloadUrl) {
-            // Create download link
             const link = document.createElement('a');
             link.href = response.downloadUrl;
             link.download = `analytics_${new Date().toISOString().split('T')[0]}.${format}`;
@@ -2270,7 +2139,7 @@ async function exportAnalytics(format) {
             showNotification(`Exported as ${format.toUpperCase()}`, 'success');
         }
     } catch (error) {
-        console.error('Export failed:', error);
+        console.error('[Tool.js] Export failed:', error);
         showNotification('Export failed', 'error');
     }
 }
@@ -2304,7 +2173,7 @@ async function backupMarketplaceData() {
         showNotification('Backup created successfully', 'success');
         
     } catch (error) {
-        console.error('Backup failed:', error);
+        console.error('[Tool.js] Backup failed:', error);
         showNotification('Backup failed', 'error');
     }
 }
@@ -2316,12 +2185,10 @@ async function restoreMarketplaceData(file) {
         reader.onload = async function(e) {
             const backupData = JSON.parse(e.target.result);
             
-            // Validate backup data
             if (!backupData.timestamp || !backupData.myListings) {
                 throw new Error('Invalid backup file');
             }
             
-            // Restore data
             myListings = backupData.myListings || [];
             savedItems = backupData.savedItems || [];
             privateNotes = backupData.privateNotes || [];
@@ -2330,7 +2197,6 @@ async function restoreMarketplaceData(file) {
             analyticsData = backupData.analyticsData || {};
             premiumFeatures = backupData.premiumFeatures || {};
             
-            // Save to localStorage
             saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
             saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
             saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
@@ -2339,7 +2205,6 @@ async function restoreMarketplaceData(file) {
             saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
             saveToLocalStorage(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, premiumFeatures);
             
-            // Update UI
             updateMyListingsPreview();
             renderMarketplaceList();
             updateAvailableListingsCount();
@@ -2350,7 +2215,7 @@ async function restoreMarketplaceData(file) {
         reader.readAsText(file);
         
     } catch (error) {
-        console.error('Restore failed:', error);
+        console.error('[Tool.js] Restore failed:', error);
         showNotification('Restore failed: Invalid backup file', 'error');
     }
 }
@@ -2367,11 +2232,10 @@ function cleanupExpiredListings() {
         allListings = allListings.filter(listing => !isListingExpired(listing));
         localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
         
-        // Also clean up my listings
         myListings = myListings.filter(listing => !isListingExpired(listing));
         saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         
-        console.log(`Cleaned up ${expiredListings.length} expired listings`);
+        console.log(`[Tool.js] Cleaned up ${expiredListings.length} expired listings`);
     }
 }
 
@@ -2409,7 +2273,7 @@ function saveToLocalStorage(key, data) {
     try {
         localStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
-        console.error('Error saving to localStorage:', error);
+        console.error('[Tool.js] Error saving to localStorage:', error);
     }
 }
 
@@ -2473,7 +2337,6 @@ function updateMoodFilterIndicator() {
 function loadServiceCategories() {
     const serviceTitleInput = document.getElementById('serviceTitle');
     if (serviceTitleInput) {
-        // Create datalist for suggestions
         const datalist = document.createElement('datalist');
         datalist.id = 'serviceCategories';
         
@@ -2577,17 +2440,14 @@ function updateAvailableListingsCount() {
 }
 
 function trackListingView(listingId) {
-    // Track view locally
     if (!analyticsData.views) analyticsData.views = 0;
     analyticsData.views++;
     saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
     
-    // Send to backend
     try {
-        console.log('Tracking listing view');
         safeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
     } catch (error) {
-        console.error('Error tracking view:', error);
+        console.error('[Tool.js] Error tracking view:', error);
     }
 }
 
@@ -2622,42 +2482,31 @@ function createServiceListing(title, description, options = {}) {
         updatedAt: new Date().toISOString()
     };
     
-    // Add to my listings
     myListings.unshift(listing);
     
-    // Update local storage
     saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
     
-    // Add to all listings for visibility
     allListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
-    // Send to backend
     try {
-        console.log('Posting service listing to backend');
         safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
             if (response && response.listing) {
                 listing.id = response.listing.id || listingId;
-                console.log('Service listing posted to backend');
             }
         }).catch(error => {
-            console.log('Offline: Listing saved locally');
             queueForSync(listing, 'listing');
         });
     } catch (error) {
-        console.log('Offline: Listing saved locally');
         queueForSync(listing, 'listing');
     }
     
-    // Update UI
     updateMyListingsPreview();
     addListingItem(listing);
     updateAvailableListingsCount();
     
-    // Update streak
     updateListingStreak();
     
-    // Update trust stats
     updateTrustStats('listingCreated');
     
     showNotification('Service listing published successfully', 'success');
@@ -2694,42 +2543,31 @@ function createDigitalListing(title, description, fileData, options = {}) {
         updatedAt: new Date().toISOString()
     };
     
-    // Add to my listings
     myListings.unshift(listing);
     
-    // Update local storage
     saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
     
-    // Add to all listings for visibility
     allListings.unshift(listing);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
     
-    // Send to backend
     try {
-        console.log('Posting digital listing to backend');
         safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
             if (response && response.listing) {
                 listing.id = response.listing.id || listingId;
-                console.log('Digital listing posted to backend');
             }
         }).catch(error => {
-            console.log('Offline: Listing saved locally');
             queueForSync(listing, 'listing');
         });
     } catch (error) {
-        console.log('Offline: Listing saved locally');
         queueForSync(listing, 'listing');
     }
     
-    // Update UI
     updateMyListingsPreview();
     addListingItem(listing);
     updateAvailableListingsCount();
     
-    // Update streak
     updateListingStreak();
     
-    // Update trust stats
     updateTrustStats('listingCreated');
     
     showNotification('Digital listing published successfully', 'success');
@@ -2739,7 +2577,6 @@ function createDigitalListing(title, description, fileData, options = {}) {
 
 // Sample data generation for demo/offline mode
 function generateSampleMarketplaceData() {
-    // Generate sample users for marketplace
     const sampleUsers = [
         { id: 'user_1', displayName: 'Alex Johnson', photoURL: '', trustLevel: 'reliable', isPremium: true },
         { id: 'user_2', displayName: 'Maria Garcia', photoURL: '', trustLevel: 'verified', isPremium: true },
@@ -2751,10 +2588,8 @@ function generateSampleMarketplaceData() {
         { id: 'user_8', displayName: 'Sophia Taylor', photoURL: '', trustLevel: 'verified', isPremium: true }
     ];
     
-    // Save sample users
     localStorage.setItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS, JSON.stringify(sampleUsers));
     
-    // Generate sample listings if none exist
     if (allListings.length === 0) {
         const sampleListings = [
             {
@@ -2867,18 +2702,15 @@ function generateSampleMarketplaceData() {
         allListings = sampleListings;
         localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
         
-        // Generate sample spotlight listings
         const spotlightListings = sampleListings.filter(l => l.featured);
         localStorage.setItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, JSON.stringify(spotlightListings));
         renderSpotlightListings(spotlightListings);
         
-        // Generate sample friends
         if (userFriends.length === 0) {
             userFriends = sampleUsers.slice(0, 4);
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_FRIENDS, JSON.stringify(userFriends));
         }
         
-        // Generate sample groups
         if (userGroups.length === 0) {
             userGroups = [
                 { id: 'group_1', name: 'Students Union', memberCount: 45 },
@@ -2888,7 +2720,6 @@ function generateSampleMarketplaceData() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(userGroups));
         }
         
-        // Generate sample analytics
         if (Object.keys(analyticsData).length === 0) {
             analyticsData = {
                 views: 245,
@@ -2907,7 +2738,6 @@ function generateSampleMarketplaceData() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
         }
         
-        // Generate sample leaderboard
         if (leaderboardData.length === 0) {
             leaderboardData = sampleUsers.map((user, index) => ({
                 ...user,
@@ -2924,13 +2754,12 @@ function generateSampleMarketplaceData() {
         updateAvailableListingsCount();
         updateListingCounts();
         
-        console.log('Sample marketplace data generated for demo');
+        console.log('[Tool.js] Sample marketplace data generated for demo');
     }
 }
 
 // Enhanced Event Listeners Setup
 function setupEnhancedEventListeners() {
-    // Category tabs
     const allTab = document.getElementById('allTab');
     const servicesTab = document.getElementById('servicesTab');
     const digitalTab = document.getElementById('digitalTab');
@@ -3004,7 +2833,6 @@ function setupEnhancedEventListeners() {
         renderSpotlightTab();
     });
     
-    // Create listing buttons
     const createListingBtn = document.getElementById('createListingBtn');
     if (createListingBtn) createListingBtn.addEventListener('click', () => {
         showCreateListingModal();
@@ -3034,7 +2862,6 @@ function setupEnhancedEventListeners() {
         showPremiumOptionsModal();
     });
     
-    // View analytics
     const viewAnalyticsBtn = document.getElementById('viewAnalyticsBtn');
     if (viewAnalyticsBtn) viewAnalyticsBtn.addEventListener('click', () => {
         if (isUserPremium()) {
@@ -3045,19 +2872,16 @@ function setupEnhancedEventListeners() {
         }
     });
     
-    // View saved items
     const viewSavedBtn = document.getElementById('viewSavedBtn');
     if (viewSavedBtn) viewSavedBtn.addEventListener('click', () => {
         showSavedItemsModal();
     });
     
-    // View notes
     const viewNotesBtn = document.getElementById('viewNotesBtn');
     if (viewNotesBtn) viewNotesBtn.addEventListener('click', () => {
         showMyNotesModal();
     });
     
-    // Create listing modal tabs
     document.querySelectorAll('.create-listing-tab').forEach(tab => {
         tab.addEventListener('click', function() {
             const tabName = this.dataset.tab;
@@ -3076,12 +2900,10 @@ function setupEnhancedEventListeners() {
                 tabContent.classList.add('active');
             }
             
-            // Show/hide selection containers based on trust circle
             if (tabName === 'circles') {
                 updateTrustCircleSelection();
             }
             
-            // Handle premium features visibility
             if (tabName === 'premium' && !isUserPremium()) {
                 const publishPremiumBtn = document.getElementById('publishPremiumBtn');
                 const publishListingBtn = document.getElementById('publishListingBtn');
@@ -3101,7 +2923,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Availability options
     document.querySelectorAll('.availability-option').forEach(option => {
         option.addEventListener('click', function() {
             document.querySelectorAll('.availability-option').forEach(opt => {
@@ -3112,7 +2933,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Trust circle options
     document.querySelectorAll('.circle-option').forEach(option => {
         option.addEventListener('click', function() {
             document.querySelectorAll('.circle-option').forEach(opt => {
@@ -3124,7 +2944,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Template options
     document.querySelectorAll('.template-option').forEach(option => {
         option.addEventListener('click', function() {
             if (this.classList.contains('premium') && !isUserPremium()) {
@@ -3140,7 +2959,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Mood options
     document.querySelectorAll('.mood-option').forEach(option => {
         option.addEventListener('click', function() {
             if (this.classList.contains('premium') && !isUserPremium()) {
@@ -3156,7 +2974,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Duration options
     document.querySelectorAll('.duration-option').forEach(option => {
         option.addEventListener('click', function() {
             if (this.classList.contains('premium') && !isUserPremium()) {
@@ -3172,7 +2989,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Schedule options
     document.querySelectorAll('.schedule-option').forEach(option => {
         option.addEventListener('click', function() {
             document.querySelectorAll('.schedule-option').forEach(opt => {
@@ -3183,7 +2999,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Export options
     document.querySelectorAll('.export-option').forEach(option => {
         option.addEventListener('click', function() {
             if (this.classList.contains('premium') && !isUserPremium()) {
@@ -3200,7 +3015,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // File upload
     const digitalUploadArea = document.getElementById('digitalUploadArea');
     const digitalUploadInput = document.getElementById('digitalUploadInput');
     
@@ -3237,7 +3051,6 @@ function setupEnhancedEventListeners() {
         });
     }
     
-    // Bulk upload
     const bulkUploadArea = document.getElementById('bulkUploadArea');
     const bulkUploadInput = document.getElementById('bulkUploadInput');
     
@@ -3257,7 +3070,6 @@ function setupEnhancedEventListeners() {
         });
     }
     
-    // Video upload button
     const uploadVideoBtn = document.getElementById('uploadVideoBtn');
     if (uploadVideoBtn) {
         uploadVideoBtn.addEventListener('click', () => {
@@ -3278,7 +3090,6 @@ function setupEnhancedEventListeners() {
         });
     }
     
-    // Publish listing buttons
     const publishListingBtn = document.getElementById('publishListingBtn');
     if (publishListingBtn) publishListingBtn.addEventListener('click', () => {
         publishListingFromModal();
@@ -3289,13 +3100,11 @@ function setupEnhancedEventListeners() {
         publishPremiumListingFromModal();
     });
     
-    // Save draft button
     const saveDraftBtn = document.getElementById('saveDraftBtn');
     if (saveDraftBtn) saveDraftBtn.addEventListener('click', () => {
         saveCurrentAsDraft();
     });
     
-    // Close modals
     const closeCreateListingModal = document.getElementById('closeCreateListingModal');
     if (closeCreateListingModal) closeCreateListingModal.addEventListener('click', () => {
         if (createListingModal) createListingModal.classList.remove('active');
@@ -3341,13 +3150,11 @@ function setupEnhancedEventListeners() {
         if (trustStatsModal) trustStatsModal.classList.remove('active');
     });
     
-    // Back button in detail panel
     const backBtn = document.getElementById('backBtn');
     if (backBtn) backBtn.addEventListener('click', () => {
         if (marketplaceDetailPanel) marketplaceDetailPanel.classList.remove('active');
     });
     
-    // Detail panel actions
     const saveListingBtn = document.getElementById('saveListingBtn');
     if (saveListingBtn) saveListingBtn.addEventListener('click', () => {
         const listingId = getCurrentListingId();
@@ -3380,14 +3187,12 @@ function setupEnhancedEventListeners() {
         }
     });
     
-    // Tip button
     const tipBtn = document.getElementById('tipBtn');
     if (tipBtn) tipBtn.addEventListener('click', () => {
         const tipAmounts = document.getElementById('tipAmounts');
         if (tipAmounts) tipAmounts.classList.toggle('show');
     });
     
-    // Tip options
     document.querySelectorAll('.tip-option').forEach(option => {
         option.addEventListener('click', async function() {
             const listingId = getCurrentListingId();
@@ -3425,13 +3230,11 @@ function setupEnhancedEventListeners() {
         }
     });
     
-    // Detail menu button
     const detailMenuBtn = document.getElementById('detailMenuBtn');
     if (detailMenuBtn) detailMenuBtn.addEventListener('click', () => {
         showDetailMenu();
     });
     
-    // People search
     const peopleSearch = document.getElementById('peopleSearch');
     if (peopleSearch) {
         peopleSearch.addEventListener('input', (e) => {
@@ -3439,13 +3242,11 @@ function setupEnhancedEventListeners() {
         });
     }
     
-    // Mood filter indicator click
     const moodFilterIndicator = document.getElementById('moodFilterIndicator');
     if (moodFilterIndicator) moodFilterIndicator.addEventListener('click', () => {
         clearMoodFilter();
     });
     
-    // Analytics refresh button
     const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
     if (refreshAnalyticsBtn) refreshAnalyticsBtn.addEventListener('click', async () => {
         try {
@@ -3456,14 +3257,12 @@ function setupEnhancedEventListeners() {
         }
     });
     
-    // Analytics export button
     const exportAnalyticsBtn = document.getElementById('exportAnalyticsBtn');
     if (exportAnalyticsBtn) exportAnalyticsBtn.addEventListener('click', () => {
         const selectedFormat = document.querySelector('.export-option.selected')?.dataset.format || 'csv';
         exportAnalytics(selectedFormat);
     });
     
-    // Premium subscription buttons
     document.querySelectorAll('[data-plan-select]').forEach(button => {
         button.addEventListener('click', function() {
             const plan = this.dataset.planSelect;
@@ -3471,7 +3270,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Payment methods
     document.querySelectorAll('.payment-method').forEach(method => {
         method.addEventListener('click', function() {
             document.querySelectorAll('.payment-method').forEach(m => {
@@ -3484,32 +3282,27 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Complete payment button
     const completePaymentBtn = document.getElementById('completePaymentBtn');
     if (completePaymentBtn) completePaymentBtn.addEventListener('click', async () => {
         await processSubscriptionPayment();
     });
     
-    // Cancel payment button
     const cancelPaymentBtn = document.getElementById('cancelPaymentBtn');
     if (cancelPaymentBtn) cancelPaymentBtn.addEventListener('click', () => {
         const paymentContainer = document.getElementById('paymentContainer');
         if (paymentContainer) paymentContainer.style.display = 'none';
     });
     
-    // Free trial button
     const startFreeTrialBtn = document.getElementById('startFreeTrialBtn');
     if (startFreeTrialBtn) startFreeTrialBtn.addEventListener('click', async () => {
         await startFreeTrial();
     });
     
-    // Restore purchase button
     const restorePurchaseBtn = document.getElementById('restorePurchaseBtn');
     if (restorePurchaseBtn) restorePurchaseBtn.addEventListener('click', async () => {
         await restorePurchase();
     });
     
-    // Team management buttons
     const inviteTeamMemberBtn = document.getElementById('inviteTeamMemberBtn');
     if (inviteTeamMemberBtn) inviteTeamMemberBtn.addEventListener('click', () => {
         inviteTeamMember();
@@ -3520,7 +3313,6 @@ function setupEnhancedEventListeners() {
         await saveTeamChanges();
     });
     
-    // Leaderboard refresh
     const refreshLeaderboardBtn = document.getElementById('refreshLeaderboardBtn');
     if (refreshLeaderboardBtn) refreshLeaderboardBtn.addEventListener('click', async () => {
         await loadLeaderboard();
@@ -3528,7 +3320,6 @@ function setupEnhancedEventListeners() {
         showNotification('Leaderboard refreshed', 'success');
     });
     
-    // Reaction picker
     document.querySelectorAll('.reaction-option').forEach(option => {
         option.addEventListener('click', function() {
             if (this.classList.contains('premium') && !isUserPremium()) {
@@ -3545,7 +3336,6 @@ function setupEnhancedEventListeners() {
         });
     });
     
-    // Network status for offline support
     window.addEventListener('online', () => {
         showNotification('Back online - syncing marketplace data', 'info');
         syncOfflineMarketplaceData();
@@ -3555,12 +3345,10 @@ function setupEnhancedEventListeners() {
         showNotification('Marketplace working offline', 'info');
     });
     
-    // Before unload
     window.addEventListener('beforeunload', () => {
         saveAllMarketplaceData();
     });
     
-    // Backup and restore buttons (added dynamically)
     setupBackupRestoreButtons();
 }
 
@@ -3592,7 +3380,6 @@ function handleFileUpload(file) {
     const preview = document.getElementById('digitalPreview');
     if (!preview) return;
     
-    // Check file type and size
     const allowedTypes = ['.pdf', '.doc', '.docx', '.zip', '.jpg', '.jpeg', '.png', '.mp3', '.wav', '.mp4', '.mov', '.avi'];
     const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
     
@@ -3608,11 +3395,9 @@ function handleFileUpload(file) {
         return;
     }
     
-    // Show upload progress
     const progressBar = document.getElementById('uploadProgress');
     if (progressBar) progressBar.style.width = '0%';
     
-    // Create preview
     const reader = new FileReader();
     reader.onloadstart = function() {
         if (progressBar) progressBar.style.width = '10%';
@@ -3663,7 +3448,6 @@ function handleFileUpload(file) {
             preview.appendChild(icon);
         }
         
-        // Add file info
         const fileInfo = document.createElement('div');
         fileInfo.className = 'file-info';
         fileInfo.innerHTML = `
@@ -3683,7 +3467,6 @@ function handleFileUpload(file) {
         
         preview.appendChild(fileInfo);
         
-        // Store file data
         window.selectedDigitalFile = {
             name: file.name,
             size: file.size,
@@ -3744,7 +3527,6 @@ function showCreateListingModal() {
     
     createListingModal.classList.add('active');
     
-    // Reset form
     const serviceTitle = document.getElementById('serviceTitle');
     const serviceDescription = document.getElementById('serviceDescription');
     const servicePrice = document.getElementById('servicePrice');
@@ -3773,7 +3555,6 @@ function showCreateListingModal() {
     if (templatePrimaryColor) templatePrimaryColor.value = '#0084ff';
     if (templateFont) templateFont.value = 'Default';
     
-    // Reset selections
     document.querySelectorAll('.availability-option').forEach(opt => {
         opt.classList.remove('selected');
     });
@@ -3793,13 +3574,11 @@ function showCreateListingModal() {
         opt.classList.remove('selected');
     });
     
-    // Clear file preview
     const digitalPreview = document.getElementById('digitalPreview');
     if (digitalPreview) {
         digitalPreview.innerHTML = '';
     }
     
-    // Reset premium checkboxes
     const featuredListingCheckbox = document.getElementById('featuredListingCheckbox');
     const boostListingCheckbox = document.getElementById('boostListingCheckbox');
     const priorityMessagingCheckbox = document.getElementById('priorityMessagingCheckbox');
@@ -3829,7 +3608,6 @@ function showCreateListingModal() {
     window.selectedDigitalFile = null;
     window.selectedVideoIntro = null;
     
-    // Set default selections
     const freeAvailability = document.querySelector('.availability-option[data-availability="free"]');
     const friendsCircle = document.querySelector('.circle-option[data-circle="friends"]');
     const basicTemplate = document.querySelector('.template-option[data-template="basic"]');
@@ -3842,7 +3620,6 @@ function showCreateListingModal() {
     if (browseMood) browseMood.classList.add('selected');
     if (sevenDayDuration) sevenDayDuration.classList.add('selected');
     
-    // Show/hide premium features based on user status
     updatePremiumFeaturesVisibility();
 }
 
@@ -3903,7 +3680,6 @@ function publishListingFromModal() {
     
     const tabName = activeTab.dataset.tab;
     
-    // Get common options
     const price = tabName === 'service' ? 
         document.getElementById('servicePrice')?.value.trim() : 
         document.getElementById('digitalPrice')?.value.trim();
@@ -3919,7 +3695,6 @@ function publishListingFromModal() {
     const privateNotes = document.getElementById('sellerNotes')?.value.trim() || '';
     const teamNotes = document.getElementById('teamNotes')?.value.trim() || '';
     
-    // Get allowed groups/users based on visibility
     let allowedGroups = [];
     let allowedUsers = [];
     
@@ -3931,7 +3706,6 @@ function publishListingFromModal() {
             .map(opt => opt.dataset.friendId);
     }
     
-    // Get visibility schedule
     const visibilityStart = document.getElementById('visibilityStart')?.value;
     const visibilityEnd = document.getElementById('visibilityEnd')?.value;
     const visibilitySchedule = (visibilityStart && visibilityEnd) ? {
@@ -4005,7 +3779,6 @@ function publishListingFromModal() {
             return;
     }
     
-    // Close modal
     if (createListingModal) createListingModal.classList.remove('active');
 }
 
@@ -4015,15 +3788,13 @@ function publishPremiumListingFromModal() {
     
     const tabName = activeTab.dataset.tab;
     
-    // Get premium options
     const featured = document.getElementById('featuredListingCheckbox')?.checked || false;
     const boosted = document.getElementById('boostListingCheckbox')?.checked || false;
     const priorityMessaging = document.getElementById('priorityMessagingCheckbox')?.checked || false;
     const autoRenew = document.getElementById('autoRenewCheckbox')?.checked || false;
     const verified = document.getElementById('verifiedBadgeCheckbox')?.checked || false;
-    const acceptsTips = true; // Premium listings always accept tips
+    const acceptsTips = true;
     
-    // Get common options
     const price = tabName === 'service' ? 
         document.getElementById('serviceTitle')?.value.trim() : 
         document.getElementById('digitalTitle')?.value.trim();
@@ -4039,15 +3810,12 @@ function publishPremiumListingFromModal() {
     const privateNotes = document.getElementById('sellerNotes')?.value.trim() || '';
     const teamNotes = document.getElementById('teamNotes')?.value.trim() || '';
     
-    // Get template settings
     const template = window.selectedTemplate || TEMPLATE_TYPES.BASIC;
     const templateColor = document.getElementById('templatePrimaryColor')?.value || '#0084ff';
     const templateFont = document.getElementById('templateFont')?.value || 'Default';
     
-    // Get recurring promotions
     const schedule = window.selectedSchedule || 'daily';
     
-    // Get allowed groups/users based on visibility
     let allowedGroups = [];
     let allowedUsers = [];
     
@@ -4059,7 +3827,6 @@ function publishPremiumListingFromModal() {
             .map(opt => opt.dataset.friendId);
     }
     
-    // Get visibility schedule
     const visibilityStart = document.getElementById('visibilityStart')?.value;
     const visibilityEnd = document.getElementById('visibilityEnd')?.value;
     const visibilitySchedule = (visibilityStart && visibilityEnd) ? {
@@ -4067,7 +3834,6 @@ function publishPremiumListingFromModal() {
         end: new Date(visibilityEnd).toISOString()
     } : null;
     
-    // Get team members if business plan
     let teamMembersList = [];
     if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team')) {
         teamMembersList = teamMembers.map(member => ({
@@ -4149,7 +3915,7 @@ function publishPremiumListingFromModal() {
                 verified: verified,
                 acceptsTips: acceptsTips,
                 autoRenew: autoRenew,
-                arPreview: true, // Premium digital items get AR preview
+                arPreview: true,
                 videoIntro: window.selectedVideoIntro?.url,
                 teamMembers: teamMembersList,
                 allowedGroups: allowedGroups,
@@ -4169,7 +3935,6 @@ function publishPremiumListingFromModal() {
             return;
     }
     
-    // Close modal
     if (createListingModal) createListingModal.classList.remove('active');
 }
 
@@ -4251,7 +4016,6 @@ function saveCurrentAsDraft() {
             return;
     }
     
-    // Add notes
     draftData.privateNotes = document.getElementById('sellerNotes')?.value.trim() || '';
     draftData.teamNotes = document.getElementById('teamNotes')?.value.trim() || '';
     draftData.savedAt = new Date().toISOString();
@@ -4272,15 +4036,12 @@ function showPaymentForm(plan) {
 }
 
 function showPaymentFormForMethod(method) {
-    // Hide all payment forms
     const cardPaymentForm = document.getElementById('cardPaymentForm');
     if (cardPaymentForm) cardPaymentForm.style.display = 'none';
     
-    // Show selected payment form
     if (method === 'card') {
         if (cardPaymentForm) cardPaymentForm.style.display = 'block';
     }
-    // Add other payment methods as needed
 }
 
 async function processSubscriptionPayment() {
@@ -4292,7 +4053,6 @@ async function processSubscriptionPayment() {
     }
     
     try {
-        console.log('Processing subscription payment');
         const paymentData = {
             plan: window.selectedPlan,
             paymentMethod: selectedMethod,
@@ -4321,14 +4081,13 @@ async function processSubscriptionPayment() {
         }
         
     } catch (error) {
-        console.error('Payment failed:', error);
+        console.error('[Tool.js] Payment failed:', error);
         showNotification('Payment failed. Please try again.', 'error');
     }
 }
 
 async function startFreeTrial() {
     try {
-        console.log('Starting free trial');
         const response = await safeApiCall('POST', '/api/subscriptions/trial');
         
         if (response && response.success) {
@@ -4342,14 +4101,13 @@ async function startFreeTrial() {
         }
         
     } catch (error) {
-        console.error('Free trial failed:', error);
+        console.error('[Tool.js] Free trial failed:', error);
         showNotification('Free trial not available', 'error');
     }
 }
 
 async function restorePurchase() {
     try {
-        console.log('Restoring purchase');
         const response = await safeApiCall('POST', '/api/subscriptions/restore');
         
         if (response && response.success) {
@@ -4365,7 +4123,7 @@ async function restorePurchase() {
         }
         
     } catch (error) {
-        console.error('Restore failed:', error);
+        console.error('[Tool.js] Restore failed:', error);
         showNotification('Restore failed', 'error');
     }
 }
@@ -4375,7 +4133,6 @@ async function inviteTeamMember() {
     if (!email) return;
     
     try {
-        console.log('Inviting team member');
         const response = await safeApiCall('POST', '/api/team/invite', { email });
         
         if (response && response.success) {
@@ -4383,15 +4140,13 @@ async function inviteTeamMember() {
         }
         
     } catch (error) {
-        console.error('Invitation failed:', error);
+        console.error('[Tool.js] Invitation failed:', error);
         showNotification('Invitation failed', 'error');
     }
 }
 
 async function saveTeamChanges() {
     try {
-        console.log('Saving team changes');
-        // Collect role changes
         const roleChanges = [];
         document.querySelectorAll('select[data-member-id]').forEach(select => {
             roleChanges.push({
@@ -4408,17 +4163,16 @@ async function saveTeamChanges() {
         }
         
     } catch (error) {
-        console.error('Team update failed:', error);
+        console.error('[Tool.js] Team update failed:', error);
         showNotification('Team update failed', 'error');
     }
 }
 
 async function addReaction(listingId, reaction) {
     try {
-        console.log('Adding reaction');
         const response = await safeApiCall('POST', `/api/marketplace/listings/${listingId}/reactions`, {
             reaction: reaction,
-            premium: reaction.length > 2 // Premium reactions are usually longer emoji sequences
+            premium: reaction.length > 2
         });
         
         if (response && response.success) {
@@ -4427,17 +4181,15 @@ async function addReaction(listingId, reaction) {
         }
         
     } catch (error) {
-        console.error('Reaction failed:', error);
+        console.error('[Tool.js] Reaction failed:', error);
         showNotification('Failed to add reaction', 'error');
     }
 }
 
 function setupBackupRestoreButtons() {
-    // Add backup button to my listings section if premium user
     if (isUserPremium()) {
         const actionsContainer = document.querySelector('.my-listings-actions');
         if (actionsContainer) {
-            // Check if buttons already exist
             if (!document.getElementById('backupDataBtn')) {
                 const backupBtn = document.createElement('button');
                 backupBtn.className = 'my-listing-action-btn secondary';
@@ -4562,16 +4314,13 @@ async function syncOfflineMarketplaceData() {
         const item = marketplaceItems[i];
         try {
             if (item.type === 'marketplace_listing') {
-                console.log('Syncing marketplace listing');
                 await safeApiCall('POST', '/api/marketplace/listings', item.data);
                 syncQueue.splice(syncQueue.indexOf(item), 1);
             } else if (item.type === 'marketplace_premium_listing') {
-                console.log('Syncing premium marketplace listing');
                 await safeApiCall('POST', '/api/marketplace/listings/premium', item.data);
                 syncQueue.splice(syncQueue.indexOf(item), 1);
             }
         } catch (error) {
-            console.log('Sync failed for marketplace item:', item);
             item.retryCount = (item.retryCount || 0) + 1;
             
             if (item.retryCount > 3) {
@@ -4602,7 +4351,7 @@ function saveAllMarketplaceData() {
         saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
     }
     
-    console.log('All marketplace data saved to localStorage');
+    console.log('[Tool.js] All marketplace data saved to localStorage');
 }
 
 // Utility functions for missing features
@@ -4629,7 +4378,6 @@ function showAddNoteDialog(listingId) {
 }
 
 function showDetailMenu() {
-    // Simple context menu for listing details
     const menuItems = [
         'Report Listing',
         'Block User',
@@ -4642,7 +4390,6 @@ function showDetailMenu() {
         const index = parseInt(selected) - 1;
         if (index >= 0 && index < menuItems.length) {
             if (index === 2) {
-                // Copy link
                 navigator.clipboard.writeText(window.location.href);
                 showNotification('Link copied to clipboard', 'success');
             } else {
@@ -4658,7 +4405,6 @@ function reserveListing(listingId) {
 
 function openChat(userId, userName) {
     showNotification(`Opening chat with ${userName}`, 'info');
-    // In a real app, this would open a chat window
 }
 
 function shareListing(listing) {
@@ -4718,14 +4464,13 @@ function showSavedItemsModal() {
         });
     }
     
-    // Add clear all button functionality
     const clearSavedBtn = document.getElementById('clearSavedBtn');
     if (clearSavedBtn) {
         clearSavedBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear all saved items?')) {
                 savedItems = [];
                 saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-                showSavedItemsModal(); // Refresh the modal
+                showSavedItemsModal();
                 showNotification('All saved items cleared', 'success');
             }
         });
@@ -4764,7 +4509,6 @@ function showMyNotesModal() {
         });
     }
     
-    // Add new note button functionality
     const addNewNoteBtn = document.getElementById('addNewNoteBtn');
     if (addNewNoteBtn) {
         addNewNoteBtn.addEventListener('click', () => {
@@ -4775,14 +4519,14 @@ function showMyNotesModal() {
                     createdAt: new Date().toISOString()
                 });
                 saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
-                showMyNotesModal(); // Refresh the modal
+                showMyNotesModal();
                 showNotification('Note added', 'success');
             }
         });
     }
 }
 
-console.log('Enhanced marketplace system initialized successfully');
-console.log('Premium features enabled: Featured Listings, Advanced Analytics, Team Tools, AR Previews, Bulk Uploads, Backup & Restore');
-console.log('Direct token access enabled: Yes');
-console.log('Bootstrapped:', isBootstrapped);
+console.log('[Tool.js] Enhanced marketplace system initialized successfully');
+console.log('[Tool.js] Premium features enabled: Featured Listings, Advanced Analytics, Team Tools, AR Previews, Bulk Uploads, Backup & Restore');
+console.log('[Tool.js] Direct token access enabled: Yes');
+console.log('[Tool.js] Bootstrapped:', isBootstrapped);

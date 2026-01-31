@@ -12,7 +12,6 @@
     
     <script src="/js/api.js"></script>
 
-
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -744,7 +743,7 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
-    <!-- Load api.js first, then initialize the page -->
+    <!-- Enhanced JavaScript Module for Production-Ready Friend Page -->
     <script type="module">
         // Import api.js module
         import * as apiModule from "/js/api.js";
@@ -753,9 +752,6 @@
         window.apiCall = apiModule.apiCall;
         window.apiReady = true;
         
-        // Initialize page silently in background
-        console.log('API module loaded - Starting silent initialization');
-        
         // Enhanced user data synchronization
         window.userDataSync = {
             currentUser: null,
@@ -763,12 +759,10 @@
             lastSync: 0,
             syncInterval: null,
             
-            // Initialize user sync
             init: function() {
                 this.loadUserFromStorage();
                 this.startSyncInterval();
                 
-                // Listen for storage events from other tabs
                 window.addEventListener('storage', (e) => {
                     if (e.key === 'knecta_current_user' || e.key === 'moodchat_token' || e.key === 'accessToken') {
                         this.loadUserFromStorage();
@@ -777,12 +771,10 @@
                 });
             },
             
-            // Load user from any storage location
             loadUserFromStorage: function() {
                 const tokenKeys = ['moodchat_token', 'accessToken', 'knecta_token', 'token'];
                 const userKeys = ['knecta_current_user', 'authUser', 'currentUser'];
                 
-                // Try to find token
                 for (const key of tokenKeys) {
                     const token = localStorage.getItem(key) || sessionStorage.getItem(key);
                     if (token) {
@@ -791,7 +783,6 @@
                     }
                 }
                 
-                // Try to find user data
                 for (const key of userKeys) {
                     const userData = localStorage.getItem(key) || sessionStorage.getItem(key);
                     if (userData) {
@@ -805,24 +796,19 @@
                     }
                 }
                 
-                // If we have token but no user data, try to fetch from API
                 if (this.token && !this.currentUser && window.apiCall) {
                     this.fetchUserFromAPI();
                 }
             },
             
-            // Fetch user from API using token
             fetchUserFromAPI: async function() {
                 try {
                     const response = await window.apiCall('/api/auth/me');
                     if (response && response.user) {
                         this.currentUser = response.user;
                         this.lastSync = Date.now();
-                        
-                        // Save to all storage locations for consistency
                         localStorage.setItem('knecta_current_user', JSON.stringify(this.currentUser));
                         localStorage.setItem('authUser', JSON.stringify(this.currentUser));
-                        
                         this.updateUI();
                     }
                 } catch (error) {
@@ -830,57 +816,152 @@
                 }
             },
             
-            // Update UI with current user data
             updateUI: function() {
                 if (this.currentUser) {
-                    // Dispatch custom event for other parts of the app
                     const event = new CustomEvent('userDataUpdated', { 
                         detail: { user: this.currentUser } 
                     });
                     window.dispatchEvent(event);
                     
-                    // Update any user-specific UI elements
                     if (typeof window.updateUserUI === 'function') {
                         window.updateUserUI(this.currentUser);
                     }
                 }
             },
             
-            // Start periodic sync
             startSyncInterval: function() {
                 if (this.syncInterval) clearInterval(this.syncInterval);
-                
                 this.syncInterval = setInterval(() => {
                     this.loadUserFromStorage();
-                    
-                    // Refresh from API every 5 minutes if we have a token
                     if (this.token && Date.now() - this.lastSync > 300000) {
                         this.fetchUserFromAPI();
                     }
-                }, 60000); // Check every minute
+                }, 60000);
             },
             
-            // Get current user
             getUser: function() {
                 return this.currentUser;
             },
             
-            // Get token
             getToken: function() {
                 return this.token;
             }
         };
         
-        // Initialize user sync
         window.userDataSync.init();
     </script>
     
     <script>
+        // Production-Ready Friend Page JavaScript
+        // Enhanced with robust authentication, API integration, and error handling
+        
         // =============================================
-        // SILENT BACKGROUND INITIALIZATION
+        // GLOBAL UTILITY FUNCTIONS
         // =============================================
         
-        // Global variables
+        // Secure token retrieval from multiple sources
+        function getValidToken() {
+            if (window.parent && window.parent.AppState && window.parent.AppState.token) {
+                return window.parent.AppState.token;
+            }
+            
+            if (window.userDataSync && window.userDataSync.getToken()) {
+                return window.userDataSync.getToken();
+            }
+            
+            const possibleTokenKeys = [
+                'moodchat_token',
+                'accessToken',
+                'token',
+                'knecta_token'
+            ];
+            
+            for (const key of possibleTokenKeys) {
+                const token = localStorage.getItem(key);
+                if (token && token !== 'null' && token !== 'undefined' && token.trim() !== '') {
+                    return token;
+                }
+            }
+            
+            return null;
+        }
+        
+        // Secure current user retrieval
+        function getCurrentUser() {
+            if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
+                return window.parent.AppState.currentUser;
+            }
+            
+            if (window.userDataSync && window.userDataSync.getUser()) {
+                return window.userDataSync.getUser();
+            }
+            
+            const userKeys = ['knecta_current_user', 'authUser', 'currentUser'];
+            for (const key of userKeys) {
+                const userData = localStorage.getItem(key);
+                if (userData) {
+                    try {
+                        return JSON.parse(userData);
+                    } catch (e) {
+                        console.log('Error parsing user data:', e);
+                    }
+                }
+            }
+            
+            return null;
+        }
+        
+        // Background authentication validation with retry logic
+        async function validateAuth() {
+            try {
+                const token = getValidToken();
+                if (!token) {
+                    console.log('[Friend Page] No token found');
+                    return false;
+                }
+                
+                if (typeof window.apiCall === 'function') {
+                    const response = await window.apiCall('/api/auth/verify', null, true);
+                    if (response && response.valid) {
+                        console.log('[Friend Page] Authentication valid');
+                        return true;
+                    }
+                }
+                
+                return false;
+            } catch (error) {
+                console.log('[Friend Page] Auth validation error:', error);
+                return false;
+            }
+        }
+        
+        // Exponential backoff retry for API calls
+        async function apiCallWithRetry(apiPath, options = {}, maxRetries = 3) {
+            let lastError;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    if (attempt > 0) {
+                        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                    
+                    const response = await window.apiCall(apiPath, options, true);
+                    return response;
+                } catch (error) {
+                    lastError = error;
+                    console.log(`[Friend Page] API attempt ${attempt + 1} failed:`, error);
+                    
+                    if (attempt === maxRetries - 1) {
+                        throw lastError;
+                    }
+                }
+            }
+        }
+        
+        // =============================================
+        // GLOBAL VARIABLES
+        // =============================================
+        
         let currentUser = null;
         let userData = null;
         let friends = [];
@@ -905,12 +986,9 @@
         let qrCodeScanner = null;
         let isInitialized = false;
         let initializationStarted = false;
+        let backgroundSyncInterval = null;
         
-        // Token management
-        let accessToken = null;
-        let refreshToken = null;
-        
-        // Friend categories
+        // Friend categories configuration
         const friendCategories = {
             'acquaintance': {
                 name: 'Acquaintance',
@@ -956,6 +1034,27 @@
             }
         };
         
+        // Local Storage Keys
+        const LOCAL_STORAGE_KEYS = {
+            USER: 'knecta_current_user',
+            USER_TOKEN: 'knecta_user_token',
+            FRIENDS: 'knecta_friends_cache',
+            CONTACTS: 'knecta_contacts_cache',
+            REQUESTS: 'knecta_friend_requests_cache',
+            SENT_REQUESTS: 'knecta_sent_requests_cache',
+            TEMPORARY_FRIENDS: 'knecta_temporary_friends_cache',
+            PINNED_FRIENDS: 'knecta_pinned_friends_cache',
+            MUTED_FRIENDS: 'knecta_muted_friends_cache',
+            LAST_SYNC: 'knecta_friends_last_sync',
+            USER_PROFILE: 'knecta_user_profile_cache',
+            UNIQUE_QR_CODE: 'knecta_unique_qr_code',
+            MUTUAL_FRIENDS_CACHE: 'knecta_mutual_friends_cache',
+            USER_GROUPS: 'knecta_user_groups_cache',
+            LAST_INTERACTIONS: 'knecta_last_interactions',
+            PRIVATE_NOTES: 'knecta_private_notes',
+            ALL_USERS_CACHE: 'knecta_all_users_cache'
+        };
+        
         // DOM Elements
         const friendDetailsPanel = document.getElementById('friendDetailsPanel');
         const addFriendModal = document.getElementById('addFriendModal');
@@ -983,153 +1082,62 @@
         const pinnedList = document.getElementById('pinnedList');
         const mutedList = document.getElementById('mutedList');
         
-        // Local Storage Keys
-        const LOCAL_STORAGE_KEYS = {
-            USER: 'knecta_current_user',
-            USER_TOKEN: 'knecta_user_token',
-            FRIENDS: 'knecta_friends_cache',
-            CONTACTS: 'knecta_contacts_cache',
-            REQUESTS: 'knecta_friend_requests_cache',
-            SENT_REQUESTS: 'knecta_sent_requests_cache',
-            TEMPORARY_FRIENDS: 'knecta_temporary_friends_cache',
-            PINNED_FRIENDS: 'knecta_pinned_friends_cache',
-            MUTED_FRIENDS: 'knecta_muted_friends_cache',
-            LAST_SYNC: 'knecta_friends_last_sync',
-            USER_PROFILE: 'knecta_user_profile_cache',
-            UNIQUE_QR_CODE: 'knecta_unique_qr_code',
-            MUTUAL_FRIENDS_CACHE: 'knecta_mutual_friends_cache',
-            USER_GROUPS: 'knecta_user_groups_cache',
-            LAST_INTERACTIONS: 'knecta_last_interactions',
-            PRIVATE_NOTES: 'knecta_private_notes',
-            ALL_USERS_CACHE: 'knecta_all_users_cache'
-        };
-        
         // =============================================
-        // ENHANCED USER AUTHENTICATION & DATA FETCH
+        // ENHANCED INITIALIZATION
         // =============================================
         
         async function enhancedInitialize() {
             if (initializationStarted) return;
             initializationStarted = true;
             
-            console.log('=== STARTING ENHANCED INITIALIZATION ===');
+            console.log('[Friend Page] STARTING ENHANCED INITIALIZATION');
             
             try {
-                // 1. Wait for api.js with timeout
-                await waitForApiWithTimeout(5000);
+                // 1. Immediate UI from cache
+                currentUser = getCurrentUser();
+                userData = currentUser;
                 
-                // 2. Fast user detection from multiple sources
-                const userDetected = await fastUserDetection();
-                
-                if (!userDetected) {
-                    console.log('No user detected, checking API silently...');
-                    // Try silent API check without redirecting immediately
-                    setTimeout(() => {
-                        if (!currentUser) {
-                            // Only redirect after 2 seconds if still no user
-                            setTimeout(() => {
-                                window.location.href = '../index.html';
-                            }, 2000);
-                        }
-                    }, 100);
-                }
-                
-                // 3. Load cached data immediately for instant UI
+                // 2. Setup UI immediately
+                setupEventListeners();
                 loadCachedDataInstantly();
                 
-                // 4. Setup UI immediately for responsiveness
-                setupEventListeners();
-                
-                // 5. Generate QR code in background
+                // 3. Generate QR code
                 setTimeout(generateUniqueQRCode, 100);
+                
+                // 4. Wait for API
+                await waitForApiWithTimeout(5000);
+                
+                // 5. Background authentication
+                setTimeout(async () => {
+                    const isAuthenticated = await validateAuth();
+                    if (!isAuthenticated && !currentUser) {
+                        console.log('[Friend Page] Authentication failed');
+                        setTimeout(() => {
+                            window.location.href = '../index.html';
+                        }, 2000);
+                    }
+                }, 500);
                 
                 // 6. Start parallel data loading
                 startParallelDataLoading();
                 
+                // 7. Start background sync
+                startBackgroundSync();
+                
                 apiReady = true;
                 isInitialized = true;
                 
-                console.log('=== ENHANCED INITIALIZATION COMPLETE ===');
+                console.log('[Friend Page] ENHANCED INITIALIZATION COMPLETE');
                 return true;
                 
             } catch (error) {
-                console.error('Enhanced initialization error:', error);
-                // Even on error, show cached data and functional UI
+                console.error('[Friend Page] Enhanced initialization error:', error);
                 loadCachedDataInstantly();
                 setupEventListeners();
                 apiReady = false;
                 isInitialized = true;
                 return false;
             }
-        }
-        
-        // Fast user detection from all sources
-        async function fastUserDetection() {
-            // Method 1: Check window.userDataSync first
-            if (window.userDataSync && window.userDataSync.getUser()) {
-                currentUser = window.userDataSync.getUser();
-                userData = currentUser;
-                console.log('User found via userDataSync');
-                return true;
-            }
-            
-            // Method 2: Check localStorage directly
-            const userKeys = ['knecta_current_user', 'authUser', 'currentUser', 'moodchat_user'];
-            for (const key of userKeys) {
-                const userDataStr = localStorage.getItem(key);
-                if (userDataStr) {
-                    try {
-                        currentUser = JSON.parse(userDataStr);
-                        userData = currentUser;
-                        console.log(`User found via localStorage key: ${key}`);
-                        
-                        // Sync to userDataSync
-                        if (window.userDataSync) {
-                            window.userDataSync.currentUser = currentUser;
-                            window.userDataSync.updateUI();
-                        }
-                        return true;
-                    } catch (e) {
-                        console.log(`Error parsing user data from ${key}:`, e);
-                    }
-                }
-            }
-            
-            // Method 3: Check sessionStorage
-            for (const key of userKeys) {
-                const userDataStr = sessionStorage.getItem(key);
-                if (userDataStr) {
-                    try {
-                        currentUser = JSON.parse(userDataStr);
-                        userData = currentUser;
-                        console.log(`User found via sessionStorage key: ${key}`);
-                        return true;
-                    } catch (e) {
-                        console.log(`Error parsing user data from sessionStorage ${key}:`, e);
-                    }
-                }
-            }
-            
-            // Method 4: Try API if available
-            if (window.apiCall && typeof window.apiCall === 'function') {
-                try {
-                    const response = await window.apiCall('/api/auth/me');
-                    if (response && response.user) {
-                        currentUser = response.user;
-                        userData = currentUser;
-                        console.log('User found via API');
-                        
-                        // Save to localStorage for future use
-                        localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-                        return true;
-                    }
-                } catch (error) {
-                    console.log('API auth check failed:', error);
-                    // Don't throw, just return false
-                }
-            }
-            
-            return false;
         }
         
         // Wait for API with timeout
@@ -1140,14 +1148,11 @@
                     return;
                 }
                 
-                let elapsed = 0;
-                const interval = 100;
-                const maxChecks = timeout / interval;
                 let checkCount = 0;
+                const maxChecks = timeout / 100;
                 
                 const checkApi = () => {
                     checkCount++;
-                    elapsed += interval;
                     
                     if (window.apiCall && typeof window.apiCall === 'function') {
                         resolve();
@@ -1155,292 +1160,51 @@
                     }
                     
                     if (checkCount >= maxChecks) {
-                        console.log('API wait timeout after', timeout, 'ms');
-                        resolve(); // Resolve anyway to continue
+                        console.log('[Friend Page] API wait timeout after', timeout, 'ms');
+                        resolve();
                         return;
                     }
                     
-                    setTimeout(checkApi, interval);
+                    setTimeout(checkApi, 100);
                 };
                 
                 checkApi();
             });
         }
         
-        // Start parallel data loading
-        function startParallelDataLoading() {
-            // Start all data loads in parallel
-            const loadPromises = [];
+        // Start background synchronization
+        function startBackgroundSync() {
+            if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
             
-            // Load friends data
-            loadPromises.push(loadFriendsFromBackend().catch(e => console.log('Friends load error:', e)));
-            
-            // Load friend requests
-            loadPromises.push(loadFriendRequestsFromBackend().catch(e => console.log('Requests load error:', e)));
-            
-            // Load sent requests
-            loadPromises.push(loadSentRequestsFromBackend().catch(e => console.log('Sent requests load error:', e)));
-            
-            // Load pinned friends
-            loadPromises.push(loadPinnedFriendsFromBackend().catch(e => console.log('Pinned friends load error:', e)));
-            
-            // Load muted friends
-            loadPromises.push(loadMutedFriendsFromBackend().catch(e => console.log('Muted friends load error:', e)));
-            
-            // Load contacts
-            loadPromises.push(loadContactsFromBackend().catch(e => console.log('Contacts load error:', e)));
-            
-            // Load groups
-            loadPromises.push(loadGroupsFromBackend().catch(e => console.log('Groups load error:', e)));
-            
-            // Load all users
-            loadPromises.push(fetchAllUsersFromBackend().catch(e => console.log('All users load error:', e)));
-            
-            // When all loads complete, update UI
-            Promise.allSettled(loadPromises).then(() => {
-                updateCurrentSection();
-                showNotification('Friends data loaded', 'success');
-            });
+            backgroundSyncInterval = setInterval(async () => {
+                if (!apiReady || !getValidToken()) return;
+                
+                try {
+                    await loadFriendsFromBackend();
+                    await loadFriendRequestsFromBackend();
+                    await loadSentRequestsFromBackend();
+                    
+                    if (allFriendsSection.classList.contains('active')) {
+                        updateCurrentSection();
+                    }
+                } catch (error) {
+                    console.log('[Friend Page] Background sync error:', error);
+                }
+            }, 30000); // Sync every 30 seconds
         }
         
         // =============================================
-        // ENHANCED DATA LOADING FUNCTIONS
+        // INSTANT UI RENDERING FROM CACHE
         // =============================================
         
-        async function loadFriendsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/friends', null, true); // silent=true
-                
-                if (response && response.friends) {
-                    friends = response.friends;
-                    
-                    // Sort by online status first, then name
-                    friends.sort((a, b) => {
-                        if (a.online !== b.online) return b.online ? 1 : -1;
-                        return (a.displayName || '').localeCompare(b.displayName || '');
-                    });
-                    
-                    // Update counts
-                    document.getElementById('friendsCount').textContent = friends.length;
-                    updateFriendCounts();
-                    
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-                }
-            } catch (error) {
-                // Use cached data
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
-                if (cached) {
-                    friends = JSON.parse(cached);
-                    updateFriendCounts();
-                }
-            }
-        }
-        
-        async function loadFriendRequestsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/friend-requests/incoming', null, true);
-                
-                if (response && response.requests) {
-                    friendRequests = response.requests;
-                    document.getElementById('requestsCount').textContent = friendRequests.length;
-                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
-                }
-            } catch (error) {
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
-                if (cached) {
-                    friendRequests = JSON.parse(cached);
-                    document.getElementById('requestsCount').textContent = friendRequests.length;
-                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
-                }
-            }
-        }
-        
-        async function loadSentRequestsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/friend-requests/sent', null, true);
-                
-                if (response && response.requests) {
-                    sentRequests = response.requests;
-                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
-                }
-            } catch (error) {
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
-                if (cached) {
-                    sentRequests = JSON.parse(cached);
-                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
-                }
-            }
-        }
-        
-        async function loadPinnedFriendsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/friends/pinned', null, true);
-                
-                if (response && response.friends) {
-                    pinnedFriends = response.friends;
-                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
-                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-                }
-            } catch (error) {
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
-                if (cached) {
-                    pinnedFriends = JSON.parse(cached);
-                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
-                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
-                }
-            }
-        }
-        
-        async function loadMutedFriendsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/friends/muted', null, true);
-                
-                if (response && response.friends) {
-                    mutedFriends = response.friends;
-                    document.getElementById('mutedCount').textContent = mutedFriends.length;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-                }
-            } catch (error) {
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
-                if (cached) {
-                    mutedFriends = JSON.parse(cached);
-                    document.getElementById('mutedCount').textContent = mutedFriends.length;
-                }
-            }
-        }
-        
-        async function loadContactsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/contacts/synced', null, true);
-                
-                if (response && response.contacts) {
-                    contacts = response.contacts;
-                    document.getElementById('contactsCount').textContent = contacts.length;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                }
-            } catch (error) {
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
-                if (cached) {
-                    contacts = JSON.parse(cached);
-                    document.getElementById('contactsCount').textContent = contacts.length;
-                }
-            }
-        }
-        
-        async function loadGroupsFromBackend() {
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/groups/user', null, true);
-                
-                if (response && response.groups) {
-                    groups = response.groups;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
-                }
-            } catch (error) {
-                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
-                if (cached) groups = JSON.parse(cached);
-            }
-        }
-        
-        async function fetchAllUsersFromBackend() {
-            try {
-                // Check cache first
-                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
-                const lastSync = localStorage.getItem('all_users_last_sync');
-                const now = Date.now();
-                
-                // Use cache if less than 5 minutes old
-                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 5 * 60 * 1000) {
-                    allUsers = JSON.parse(cachedAllUsers);
-                    return;
-                }
-                
-                // Fetch from backend
-                if (typeof window.apiCall !== 'function') {
-                    throw new Error('API not ready');
-                }
-                
-                const response = await window.apiCall('/api/users/all?limit=100', null, true);
-                
-                if (response && response.users) {
-                    // Filter out current user
-                    const currentUserId = currentUser?.id;
-                    allUsers = response.users.filter(user => {
-                        return user.id !== currentUserId;
-                    });
-                    
-                    // Sort users
-                    allUsers.sort((a, b) => {
-                        if (a.online !== b.online) return b.online ? 1 : -1;
-                        return (a.displayName || '').localeCompare(b.displayName || '');
-                    });
-                    
-                    // Cache results
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE, JSON.stringify(allUsers));
-                    localStorage.setItem('all_users_last_sync', Date.now().toString());
-                }
-                
-            } catch (error) {
-                // Use cached data
-                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
-                if (cachedAllUsers) {
-                    allUsers = JSON.parse(cachedAllUsers);
-                }
-            }
-        }
-        
-        // =============================================
-        // INSTANT UI RENDERING
-        // =============================================
-        
-        // Load cached data instantly for immediate UI display
         function loadCachedDataInstantly() {
             try {
-                // Load user from cache
                 const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    currentUser = JSON.parse(cachedUser);
-                }
+                if (cachedUser) currentUser = JSON.parse(cachedUser);
                 
-                // Load user profile
                 const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-                if (cachedProfile) {
-                    userData = JSON.parse(cachedProfile);
-                }
+                if (cachedProfile) userData = JSON.parse(cachedProfile);
                 
-                // Load friends
                 const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
                 if (friendsData) {
                     friends = JSON.parse(friendsData);
@@ -1448,7 +1212,6 @@
                     renderFriendsListInstantly();
                 }
                 
-                // Load other cached data
                 const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
                 if (contactsData) {
                     contacts = JSON.parse(contactsData);
@@ -1468,9 +1231,6 @@
                     document.getElementById('sentRequestsCount').textContent = sentRequests.length;
                 }
                 
-                const tempFriendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.TEMPORARY_FRIENDS);
-                if (tempFriendsData) temporaryFriends = JSON.parse(tempFriendsData);
-                
                 const pinnedData = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
                 if (pinnedData) {
                     pinnedFriends = JSON.parse(pinnedData);
@@ -1484,30 +1244,23 @@
                     document.getElementById('mutedCount').textContent = mutedFriends.length;
                 }
                 
-                // Load all users cache
                 const allUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
-                if (allUsersData) {
-                    allUsers = JSON.parse(allUsersData);
-                }
+                if (allUsersData) allUsers = JSON.parse(allUsersData);
                 
-                // Load mutual friends cache
                 const mutualCache = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTUAL_FRIENDS_CACHE);
                 if (mutualCache) mutualFriendsCache = JSON.parse(mutualCache);
                 
-                // Load groups
                 const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
                 if (groupsData) groups = JSON.parse(groupsData);
                 
-                // Load last interactions
                 const interactionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_INTERACTIONS);
                 if (interactionsData) window.lastInteractions = JSON.parse(interactionsData);
                 
-                // Load private notes
                 const notesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
                 if (notesData) window.privateNotes = JSON.parse(notesData);
                 
             } catch (error) {
-                console.log('Error loading cached data:', error);
+                console.log('[Friend Page] Error loading cached data:', error);
             }
         }
         
@@ -1515,10 +1268,8 @@
         function renderFriendsListInstantly() {
             if (!allFriendsList) return;
             
-            // Clear any loading placeholders
             allFriendsList.innerHTML = '';
             
-            // Combine all friends, contacts, and pinned friends for display
             const allToDisplay = [
                 ...pinnedFriends,
                 ...friends,
@@ -1548,7 +1299,7 @@
             allFriendsList.classList.add('instant-load');
         }
         
-        // Add friend item instantly (for immediate display)
+        // Add friend item instantly
         function addFriendItemInstant(friendData, container, type) {
             const friendItem = document.createElement('div');
             friendItem.className = 'friend-item';
@@ -1650,16 +1401,246 @@
         }
         
         // =============================================
+        // PARALLEL DATA LOADING
+        // =============================================
+        
+        function startParallelDataLoading() {
+            const loadPromises = [];
+            
+            loadPromises.push(loadFriendsFromBackend().catch(e => console.log('[Friend Page] Friends load error:', e)));
+            loadPromises.push(loadFriendRequestsFromBackend().catch(e => console.log('[Friend Page] Requests load error:', e)));
+            loadPromises.push(loadSentRequestsFromBackend().catch(e => console.log('[Friend Page] Sent requests load error:', e)));
+            loadPromises.push(loadPinnedFriendsFromBackend().catch(e => console.log('[Friend Page] Pinned friends load error:', e)));
+            loadPromises.push(loadMutedFriendsFromBackend().catch(e => console.log('[Friend Page] Muted friends load error:', e)));
+            loadPromises.push(loadContactsFromBackend().catch(e => console.log('[Friend Page] Contacts load error:', e)));
+            loadPromises.push(loadGroupsFromBackend().catch(e => console.log('[Friend Page] Groups load error:', e)));
+            loadPromises.push(fetchAllUsersFromBackend().catch(e => console.log('[Friend Page] All users load error:', e)));
+            
+            Promise.allSettled(loadPromises).then(() => {
+                updateCurrentSection();
+                showNotification('Friends data loaded', 'success');
+            });
+        }
+        
+        async function loadFriendsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/friends', null, 2);
+                
+                if (response && response.friends) {
+                    friends = response.friends;
+                    friends.sort((a, b) => {
+                        if (a.online !== b.online) return b.online ? 1 : -1;
+                        return (a.displayName || '').localeCompare(b.displayName || '');
+                    });
+                    
+                    document.getElementById('friendsCount').textContent = friends.length;
+                    updateFriendCounts();
+                    
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
+                if (cached) {
+                    friends = JSON.parse(cached);
+                    updateFriendCounts();
+                }
+            }
+        }
+        
+        async function loadFriendRequestsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/friend-requests/incoming', null, 2);
+                
+                if (response && response.requests) {
+                    friendRequests = response.requests;
+                    document.getElementById('requestsCount').textContent = friendRequests.length;
+                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
+                if (cached) {
+                    friendRequests = JSON.parse(cached);
+                    document.getElementById('requestsCount').textContent = friendRequests.length;
+                    document.getElementById('requestsSectionCount').textContent = friendRequests.length;
+                }
+            }
+        }
+        
+        async function loadSentRequestsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/friend-requests/sent', null, 2);
+                
+                if (response && response.requests) {
+                    sentRequests = response.requests;
+                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
+                if (cached) {
+                    sentRequests = JSON.parse(cached);
+                    document.getElementById('sentRequestsCount').textContent = sentRequests.length;
+                }
+            }
+        }
+        
+        async function loadPinnedFriendsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/friends/pinned', null, 2);
+                
+                if (response && response.friends) {
+                    pinnedFriends = response.friends;
+                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
+                if (cached) {
+                    pinnedFriends = JSON.parse(cached);
+                    document.getElementById('pinnedCount').textContent = pinnedFriends.length;
+                    document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
+                }
+            }
+        }
+        
+        async function loadMutedFriendsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/friends/muted', null, 2);
+                
+                if (response && response.friends) {
+                    mutedFriends = response.friends;
+                    document.getElementById('mutedCount').textContent = mutedFriends.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
+                if (cached) {
+                    mutedFriends = JSON.parse(cached);
+                    document.getElementById('mutedCount').textContent = mutedFriends.length;
+                }
+            }
+        }
+        
+        async function loadContactsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/contacts/synced', null, 2);
+                
+                if (response && response.contacts) {
+                    contacts = response.contacts;
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
+                if (cached) {
+                    contacts = JSON.parse(cached);
+                    document.getElementById('contactsCount').textContent = contacts.length;
+                }
+            }
+        }
+        
+        async function loadGroupsFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/groups/user', null, 2);
+                
+                if (response && response.groups) {
+                    groups = response.groups;
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
+                }
+            } catch (error) {
+                const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
+                if (cached) groups = JSON.parse(cached);
+            }
+        }
+        
+        async function fetchAllUsersFromBackend() {
+            try {
+                const token = getValidToken();
+                if (!token) throw new Error('No valid token');
+                
+                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
+                const lastSync = localStorage.getItem('all_users_last_sync');
+                const now = Date.now();
+                
+                if (cachedAllUsers && lastSync && (now - parseInt(lastSync)) < 5 * 60 * 1000) {
+                    allUsers = JSON.parse(cachedAllUsers);
+                    return;
+                }
+                
+                if (typeof window.apiCall !== 'function') throw new Error('API not ready');
+                
+                const response = await apiCallWithRetry('/api/users/all?limit=100', null, 2);
+                
+                if (response && response.users) {
+                    const currentUserId = currentUser?.id;
+                    allUsers = response.users.filter(user => user.id !== currentUserId);
+                    
+                    allUsers.sort((a, b) => {
+                        if (a.online !== b.online) return b.online ? 1 : -1;
+                        return (a.displayName || '').localeCompare(b.displayName || '');
+                    });
+                    
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE, JSON.stringify(allUsers));
+                    localStorage.setItem('all_users_last_sync', Date.now().toString());
+                }
+                
+            } catch (error) {
+                const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
+                if (cachedAllUsers) {
+                    allUsers = JSON.parse(cachedAllUsers);
+                }
+            }
+        }
+        
+        // =============================================
         // EVENT LISTENERS SETUP
         // =============================================
         
         function setupEventListeners() {
-            // Close mutual friends modal
+            // Mutual friends modal
             document.getElementById('closeMutualFriendsModal').addEventListener('click', () => {
                 mutualFriendsModal.classList.remove('active');
             });
             
-            // Camera scanner event listeners
+            // Camera scanner
             document.getElementById('closeCameraBtn').addEventListener('click', () => {
                 stopCameraScanner();
                 cameraScannerModal.classList.remove('active');
@@ -1800,7 +1781,7 @@
                             return;
                         }
                         
-                        const response = await window.apiCall(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
+                        const response = await apiCallWithRetry(`/api/users/search?username=${encodeURIComponent(usernameInput)}`);
                         
                         if (!response || !response.user) {
                             showNotification('User not found', 'error');
@@ -1897,6 +1878,7 @@
             window.addEventListener('beforeunload', () => {
                 saveFriendsToLocalStorage();
                 stopCameraScanner();
+                if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
             });
             
             // Listen for user data updates
@@ -1905,7 +1887,6 @@
                     currentUser = event.detail.user;
                     userData = currentUser;
                     
-                    // Update UI if needed
                     if (isInitialized) {
                         updateCurrentSection();
                     }
@@ -1917,73 +1898,9 @@
         }
         
         // =============================================
-        // UTILITY FUNCTIONS
+        // CORE UI FUNCTIONS
         // =============================================
         
-        // Get tokens from localStorage
-        function getTokensFromStorage() {
-            try {
-                let accessToken = null;
-                let refreshToken = null;
-                
-                // Try multiple possible storage locations
-                const possibleTokenKeys = [
-                    'moodchat_token',
-                    'accessToken',
-                    'token',
-                    'knecta_token'
-                ];
-                
-                for (const key of possibleTokenKeys) {
-                    const token = localStorage.getItem(key);
-                    if (token) {
-                        accessToken = token;
-                        break;
-                    }
-                }
-                
-                refreshToken = localStorage.getItem('refreshToken') || 
-                              localStorage.getItem('refresh_token');
-                
-                return { accessToken, refreshToken };
-            } catch (error) {
-                return { accessToken: null, refreshToken: null };
-            }
-        }
-        
-        // API call wrapper that uses api.js
-        async function callApi(endpoint, options = {}) {
-            try {
-                // Ensure api.js is loaded
-                if (typeof window.apiCall === 'function') {
-                    return await window.apiCall(endpoint, options);
-                } else {
-                    throw new Error('API not available');
-                }
-                
-            } catch (error) {
-                throw error;
-            }
-        }
-        
-        // Clear authentication tokens
-        function clearAuthTokens() {
-            const tokenKeys = [
-                'moodchat_token',
-                'accessToken',
-                'token',
-                'knecta_token',
-                'refreshToken',
-                'refresh_token'
-            ];
-            
-            tokenKeys.forEach(key => {
-                localStorage.removeItem(key);
-                sessionStorage.removeItem(key);
-            });
-        }
-        
-        // Update friend counts
         function updateFriendCounts() {
             document.getElementById('totalFriends').textContent = friends.length;
             
@@ -1993,7 +1910,6 @@
             document.getElementById('pinnedFriends').textContent = pinnedFriends.length;
         }
         
-        // Update current section
         function updateCurrentSection() {
             updateFriendCounts();
             
@@ -2057,7 +1973,6 @@
             }
         }
         
-        // Render contacts
         function renderContacts() {
             contactsList.innerHTML = '';
             
@@ -2077,7 +1992,6 @@
             });
         }
         
-        // Add friend item to list
         function addFriendItem(friendData, container, type) {
             if (currentCategoryFilter !== 'all' && friendData.category !== currentCategoryFilter) {
                 if (currentCategoryFilter === 'pinned' && !pinnedFriends.some(f => f.id === friendData.id)) {
@@ -2222,7 +2136,6 @@
             container.appendChild(friendItem);
         }
         
-        // Render friends
         function renderFriends() {
             friendsList.innerHTML = '';
             
@@ -2251,7 +2164,6 @@
             });
         }
         
-        // Render friend requests
         function renderFriendRequests() {
             requestsList.innerHTML = '';
             
@@ -2271,7 +2183,6 @@
             });
         }
         
-        // Render sent requests
         function renderSentRequests() {
             sentRequestsList.innerHTML = '';
             
@@ -2291,7 +2202,6 @@
             });
         }
         
-        // Add friend request item
         function addFriendRequestItem(requestData, container, type) {
             const requestItem = document.createElement('div');
             requestItem.className = 'friend-item';
@@ -2377,7 +2287,6 @@
             container.appendChild(requestItem);
         }
         
-        // Handle friend actions
         function handleFriendAction(action, friendData, type, button) {
             const userId = button.dataset.userId;
             const userName = button.dataset.userName;
@@ -2420,7 +2329,6 @@
             }
         }
         
-        // Handle request actions
         function handleRequestAction(action, requestData, button) {
             switch(action) {
                 case 'accept':
@@ -2441,7 +2349,10 @@
             }
         }
         
-        // Filter friends by category
+        // =============================================
+        // FILTERING AND SEARCH
+        // =============================================
+        
         function filterFriendsByCategory(category) {
             currentCategoryFilter = category;
             updateCurrentSection();
@@ -2456,13 +2367,11 @@
             }
         }
         
-        // Search friends
         function searchFriends(searchTerm) {
             currentSearchTerm = searchTerm.toLowerCase().trim();
             updateCurrentSection();
         }
         
-        // Check if friend matches search
         function matchesSearch(friendData, searchTerm) {
             if (!searchTerm) return true;
             
@@ -2476,7 +2385,10 @@
             return searchIn.includes(searchTerm);
         }
         
-        // Render all users list in the "All Users" tab
+        // =============================================
+        // ALL USERS TAB
+        // =============================================
+        
         function renderAllUsersList() {
             const allUsersListElement = document.getElementById('allUsersList');
             const allUsersStatusElement = document.getElementById('allUsersStatus');
@@ -2523,7 +2435,6 @@
             });
         }
         
-        // Create user search item for "All Users" tab
         function createUserSearchItem(user) {
             const userId = user.id;
             const initials = user.displayName ? 
@@ -2624,7 +2535,10 @@
             return userItem;
         }
         
-        // Navigation functions
+        // =============================================
+        // NAVIGATION FUNCTIONS
+        // =============================================
+        
         function navigateToChat(userId, userName) {
             const encodedName = encodeURIComponent(userName);
             window.location.href = `../message.html?user=${userId}&name=${encodedName}`;
@@ -2635,9 +2549,18 @@
             window.location.href = `../calls.html?user=${userId}&name=${encodedName}&type=${callType}`;
         }
         
-        // Send friend request
+        // =============================================
+        // FRIEND REQUEST MANAGEMENT
+        // =============================================
+        
         async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     showNotification('API not ready', 'error');
                     return;
@@ -2652,14 +2575,13 @@
                     isBusiness: isBusiness
                 };
                 
-                const response = await window.apiCall('/api/friend-requests/send', {
+                const response = await apiCallWithRetry('/api/friend-requests/send', {
                     method: 'POST',
                     body: JSON.stringify(requestData)
                 });
                 
                 if (response && response.success) {
-                    // Refresh sent requests
-                    const sentResponse = await window.apiCall('/api/friend-requests/sent');
+                    const sentResponse = await apiCallWithRetry('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -2667,10 +2589,7 @@
                         localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                     }
                     
-                    // Refresh all users
                     fetchAllUsersFromBackend();
-                    
-                    // Update UI
                     updateCurrentSection();
                     
                     showNotification('Friend request sent successfully', 'success');
@@ -2684,22 +2603,25 @@
             }
         }
         
-        // Accept friend request
         async function acceptFriendRequestOnline(requestId, friendId) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     showNotification('API not ready', 'error');
                     return;
                 }
                 
-                const response = await window.apiCall(`/api/friend-requests/${requestId}/accept`, {
+                const response = await apiCallWithRetry(`/api/friend-requests/${requestId}/accept`, {
                     method: 'POST'
                 });
                 
                 if (response && response.success) {
-                    // Refresh data
                     startParallelDataLoading();
-                    
                     showNotification('Friend request accepted', 'success');
                     friendRequestModal.classList.remove('active');
                 } else {
@@ -2711,21 +2633,25 @@
             }
         }
         
-        // Decline friend request
         async function declineFriendRequest(requestData) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     showNotification('API not ready', 'error');
                     return;
                 }
                 
-                const response = await window.apiCall(`/api/friend-requests/${requestData.id}/decline`, {
+                const response = await apiCallWithRetry(`/api/friend-requests/${requestData.id}/decline`, {
                     method: 'POST'
                 });
                 
                 if (response && response.success) {
-                    // Refresh friend requests
-                    const requestsResponse = await window.apiCall('/api/friend-requests/incoming');
+                    const requestsResponse = await apiCallWithRetry('/api/friend-requests/incoming');
                     
                     if (requestsResponse && requestsResponse.requests) {
                         friendRequests = requestsResponse.requests;
@@ -2734,10 +2660,7 @@
                         localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
                     }
                     
-                    // Refresh all users
                     fetchAllUsersFromBackend();
-                    
-                    // Update UI
                     updateCurrentSection();
                     
                     showNotification('Friend request declined', 'success');
@@ -2751,21 +2674,25 @@
             }
         }
         
-        // Cancel friend request
         async function cancelFriendRequest(requestData) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     showNotification('API not ready', 'error');
                     return;
                 }
                 
-                const response = await window.apiCall(`/api/friend-requests/${requestData.id}`, {
+                const response = await apiCallWithRetry(`/api/friend-requests/${requestData.id}`, {
                     method: 'DELETE'
                 });
                 
                 if (response && response.success) {
-                    // Refresh sent requests
-                    const sentResponse = await window.apiCall('/api/friend-requests/sent');
+                    const sentResponse = await apiCallWithRetry('/api/friend-requests/sent');
                     
                     if (sentResponse && sentResponse.requests) {
                         sentRequests = sentResponse.requests;
@@ -2773,10 +2700,7 @@
                         localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                     }
                     
-                    // Refresh all users
                     fetchAllUsersFromBackend();
-                    
-                    // Update UI
                     updateCurrentSection();
                     
                     showNotification('Friend request cancelled', 'success');
@@ -2789,15 +2713,24 @@
             }
         }
         
-        // Show mutual friends
+        // =============================================
+        // MUTUAL FRIENDS
+        // =============================================
+        
         async function showMutualFriends(userId, userName) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     showNotification('API not ready', 'error');
                     return;
                 }
                 
-                const response = await window.apiCall(`/api/friends/mutual/${userId}`);
+                const response = await apiCallWithRetry(`/api/friends/mutual/${userId}`);
                 
                 if (response && response.mutualFriends) {
                     const mutualFriends = response.mutualFriends;
@@ -2817,7 +2750,6 @@
             }
         }
         
-        // Display mutual friends modal
         function displayMutualFriendsModal(mutualFriends, userName) {
             const mutualCountText = document.getElementById('mutualCountText');
             const mutualFriendsList = document.getElementById('mutualFriendsList');
@@ -2863,7 +2795,10 @@
             mutualFriendsModal.classList.add('active');
         }
         
-        // Show friend details
+        // =============================================
+        // FRIEND DETAILS AND PROFILE
+        // =============================================
+        
         function showFriendDetails(friendData, type) {
             selectedFriend = friendData;
             document.querySelector('.friend-details-title').textContent = 'Friend Details';
@@ -2871,7 +2806,6 @@
             loadFriendDetails(friendData, type);
         }
         
-        // Load friend details
         async function loadFriendDetails(friendData, type) {
             const detailsContent = document.getElementById('friendDetailsContent');
             detailsContent.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 15px;"></i><p>Loading friend details...</p></div>';
@@ -2883,7 +2817,7 @@
                     try {
                         const friendId = friendData.id;
                         if (typeof window.apiCall === 'function') {
-                            const response = await window.apiCall(`/api/users/${friendId}`);
+                            const response = await apiCallWithRetry(`/api/users/${friendId}`);
                             if (response && response.user) {
                                 detailedData = { ...detailedData, ...response.user };
                             }
@@ -3219,7 +3153,6 @@
             }
         }
         
-        // Show friend request profile
         function showFriendRequestProfile(requestData) {
             const userData = requestData.user || requestData.sender || requestData.receiver || requestData;
             const userId = userData.id;
@@ -3353,7 +3286,10 @@
             }
         }
         
-        // Show friend options
+        // =============================================
+        // FRIEND OPTIONS AND MANAGEMENT
+        // =============================================
+        
         function showFriendOptions(friendData) {
             const optionsModal = document.createElement('div');
             optionsModal.className = 'add-friend-modal active';
@@ -3451,9 +3387,14 @@
             });
         }
         
-        // Toggle pin friend
         async function togglePinFriend(friendData) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 const friendId = friendData.id;
                 const isPinned = pinnedFriends.some(f => f.id === friendId);
                 
@@ -3463,7 +3404,7 @@
                         return;
                     }
                     
-                    const response = await window.apiCall(`/api/friends/${friendId}/pin`, {
+                    const response = await apiCallWithRetry(`/api/friends/${friendId}/pin`, {
                         method: 'DELETE'
                     });
                     if (response && response.success) {
@@ -3476,7 +3417,7 @@
                         return;
                     }
                     
-                    const response = await window.apiCall(`/api/friends/${friendId}/pin`, {
+                    const response = await apiCallWithRetry(`/api/friends/${friendId}/pin`, {
                         method: 'POST'
                     });
                     if (response && response.success) {
@@ -3496,9 +3437,14 @@
             }
         }
         
-        // Toggle mute friend
         async function toggleMuteFriend(friendData) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 const friendId = friendData.id;
                 const isMuted = mutedFriends.some(f => f.id === friendId);
                 
@@ -3508,7 +3454,7 @@
                         return;
                     }
                     
-                    const response = await window.apiCall(`/api/friends/${friendId}/mute`, {
+                    const response = await apiCallWithRetry(`/api/friends/${friendId}/mute`, {
                         method: 'DELETE'
                     });
                     if (response && response.success) {
@@ -3521,7 +3467,7 @@
                         return;
                     }
                     
-                    const response = await window.apiCall(`/api/friends/${friendId}/mute`, {
+                    const response = await apiCallWithRetry(`/api/friends/${friendId}/mute`, {
                         method: 'POST'
                     });
                     if (response && response.success) {
@@ -3540,7 +3486,6 @@
             }
         }
         
-        // Save private note
         function savePrivateNote(friendId, note) {
             try {
                 if (!window.privateNotes) {
@@ -3556,7 +3501,6 @@
             }
         }
         
-        // Get last interaction text
         function getLastInteraction(friendId) {
             if (!window.lastInteractions) {
                 window.lastInteractions = {};
@@ -3581,7 +3525,182 @@
             return `${Math.floor(daysAgo / 7)}w ago`;
         }
         
-        // Show notification
+        function showChangeCategoryModal(friendData) {
+            const modal = document.createElement('div');
+            modal.className = 'add-friend-modal active';
+            modal.innerHTML = `
+                <div class="add-friend-container">
+                    <div class="add-friend-header">
+                        <h3>Change Category</h3>
+                        <button class="add-friend-btn close-category-modal">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div class="input-group">
+                            <label class="input-label">Select New Category</label>
+                            <select class="text-input" id="newCategorySelect">
+                                <option value="acquaintance">Acquaintance</option>
+                                <option value="friend" selected>Friend</option>
+                                <option value="close-friend">Close Friend</option>
+                                <option value="family">Family</option>
+                                <option value="business">Business</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+                        <button class="action-btn secondary close-category-btn">Cancel</button>
+                        <button class="action-btn primary" id="saveCategoryBtn">Save Category</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            modal.querySelector('.close-category-modal').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            modal.querySelector('.close-category-btn').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            modal.querySelector('#saveCategoryBtn').addEventListener('click', async () => {
+                const newCategory = modal.querySelector('#newCategorySelect').value;
+                
+                try {
+                    const token = getValidToken();
+                    if (!token) {
+                        showNotification('Authentication required', 'error');
+                        return;
+                    }
+                    
+                    if (typeof window.apiCall !== 'function') {
+                        showNotification('API not ready', 'error');
+                        return;
+                    }
+                    
+                    const response = await apiCallWithRetry(`/api/friends/${friendData.id}/category`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ category: newCategory })
+                    });
+                    
+                    if (response && response.success) {
+                        const friendIndex = friends.findIndex(f => f.id === friendData.id);
+                        if (friendIndex !== -1) {
+                            friends[friendIndex].category = newCategory;
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                        }
+                        
+                        updateCurrentSection();
+                        showNotification('Category updated successfully', 'success');
+                    }
+                } catch (error) {
+                    showNotification('Failed to update category', 'error');
+                }
+                
+                document.body.removeChild(modal);
+            });
+        }
+        
+        function viewChatHistory(friendData) {
+            navigateToChat(friendData.id, friendData.displayName || 'User');
+        }
+        
+        function viewCallHistory(friendData) {
+            navigateToCall(friendData.id, friendData.displayName || 'User');
+        }
+        
+        async function removeFriend(friendData) {
+            if (!confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
+                return;
+            }
+            
+            try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await apiCallWithRetry(`/api/friends/${friendData.id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response && response.success) {
+                    friends = friends.filter(f => f.id !== friendData.id);
+                    pinnedFriends = pinnedFriends.filter(f => f.id !== friendData.id);
+                    mutedFriends = mutedFriends.filter(f => f.id !== friendData.id);
+                    
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                    
+                    updateCurrentSection();
+                    updateFriendCounts();
+                    
+                    showNotification('Friend removed successfully', 'success');
+                } else {
+                    showNotification('Failed to remove friend', 'error');
+                }
+                
+            } catch (error) {
+                showNotification('Failed to remove friend', 'error');
+            }
+        }
+        
+        async function blockUser(friendData) {
+            if (!confirm(`Are you sure you want to block ${friendData.displayName}? This will remove them from your friends and prevent them from contacting you.`)) {
+                return;
+            }
+            
+            try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
+                if (typeof window.apiCall !== 'function') {
+                    showNotification('API not ready', 'error');
+                    return;
+                }
+                
+                const response = await apiCallWithRetry(`/api/users/${friendData.id}/block`, {
+                    method: 'POST'
+                });
+                
+                if (response && response.success) {
+                    friends = friends.filter(f => f.id !== friendData.id);
+                    pinnedFriends = pinnedFriends.filter(f => f.id !== friendData.id);
+                    mutedFriends = mutedFriends.filter(f => f.id !== friendData.id);
+                    
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
+                    
+                    updateCurrentSection();
+                    updateFriendCounts();
+                    
+                    showNotification('User blocked successfully', 'success');
+                } else {
+                    showNotification('Failed to block user', 'error');
+                }
+                
+            } catch (error) {
+                showNotification('Failed to block user', 'error');
+            }
+        }
+        
+        // =============================================
+        // NOTIFICATION SYSTEM
+        // =============================================
+        
         function showNotification(message, type = 'success') {
             const notificationText = document.getElementById('notificationText');
             if (!notificationText) return;
@@ -3596,7 +3715,10 @@
             }, 3000);
         }
         
-        // Show start chat modal
+        // =============================================
+        // START CHAT MODAL
+        // =============================================
+        
         function showStartChatModal() {
             startChatModal.classList.add('active');
             populateChatFriendsList();
@@ -3605,7 +3727,6 @@
             document.getElementById('searchChatUser').value = '';
         }
         
-        // Populate chat friends list
         function populateChatFriendsList() {
             const chatFriendsList = document.getElementById('chatFriendsList');
             if (!chatFriendsList) return;
@@ -3670,7 +3791,6 @@
             });
         }
         
-        // Search chat friends
         function searchChatFriends(searchTerm) {
             const items = document.querySelectorAll('#chatFriendsList .friend-item');
             const term = searchTerm.toLowerCase();
@@ -3687,7 +3807,10 @@
             });
         }
         
-        // Save friends to local storage
+        // =============================================
+        // DATA PERSISTENCE
+        // =============================================
+        
         function saveFriendsToLocalStorage() {
             try {
                 localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
@@ -3703,17 +3826,22 @@
             }
         }
         
-        // Simulate contact sync
         async function simulateContactSync() {
             showNotification('Syncing contacts...', 'info');
             
             try {
+                const token = getValidToken();
+                if (!token) {
+                    showNotification('Authentication required', 'error');
+                    return;
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     showNotification('API not ready', 'error');
                     return;
                 }
                 
-                const response = await window.apiCall('/api/contacts/sync');
+                const response = await apiCallWithRetry('/api/contacts/sync');
                 
                 if (response && response.contacts) {
                     contacts = response.contacts;
@@ -3744,168 +3872,9 @@
             }
         }
         
-        function showChangeCategoryModal(friendData) {
-            const modal = document.createElement('div');
-            modal.className = 'add-friend-modal active';
-            modal.innerHTML = `
-                <div class="add-friend-container">
-                    <div class="add-friend-header">
-                        <h3>Change Category</h3>
-                        <button class="add-friend-btn close-category-modal">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                    <div style="padding: 25px;">
-                        <div class="input-group">
-                            <label class="input-label">Select New Category</label>
-                            <select class="text-input" id="newCategorySelect">
-                                <option value="acquaintance">Acquaintance</option>
-                                <option value="friend" selected>Friend</option>
-                                <option value="close-friend">Close Friend</option>
-                                <option value="family">Family</option>
-                                <option value="business">Business</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between;">
-                        <button class="action-btn secondary close-category-btn">Cancel</button>
-                        <button class="action-btn primary" id="saveCategoryBtn">Save Category</button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(modal);
-            
-            modal.querySelector('.close-category-modal').addEventListener('click', () => {
-                document.body.removeChild(modal);
-            });
-            
-            modal.querySelector('.close-category-btn').addEventListener('click', () => {
-                document.body.removeChild(modal);
-            });
-            
-            modal.querySelector('#saveCategoryBtn').addEventListener('click', async () => {
-                const newCategory = modal.querySelector('#newCategorySelect').value;
-                
-                try {
-                    if (typeof window.apiCall !== 'function') {
-                        showNotification('API not ready', 'error');
-                        return;
-                    }
-                    
-                    const response = await window.apiCall(`/api/friends/${friendData.id}/category`, {
-                        method: 'PUT',
-                        body: JSON.stringify({ category: newCategory })
-                    });
-                    
-                    if (response && response.success) {
-                        // Update local data
-                        const friendIndex = friends.findIndex(f => f.id === friendData.id);
-                        if (friendIndex !== -1) {
-                            friends[friendIndex].category = newCategory;
-                            localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                        }
-                        
-                        updateCurrentSection();
-                        showNotification('Category updated successfully', 'success');
-                    }
-                } catch (error) {
-                    showNotification('Failed to update category', 'error');
-                }
-                
-                document.body.removeChild(modal);
-            });
-        }
-        
-        function viewChatHistory(friendData) {
-            navigateToChat(friendData.id, friendData.displayName || 'User');
-        }
-        
-        function viewCallHistory(friendData) {
-            navigateToCall(friendData.id, friendData.displayName || 'User');
-        }
-        
-        // Remove friend
-        async function removeFriend(friendData) {
-            if (!confirm(`Are you sure you want to remove ${friendData.displayName} from your friends?`)) {
-                return;
-            }
-            
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    showNotification('API not ready', 'error');
-                    return;
-                }
-                
-                const response = await window.apiCall(`/api/friends/${friendData.id}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response && response.success) {
-                    // Remove from local arrays
-                    friends = friends.filter(f => f.id !== friendData.id);
-                    pinnedFriends = pinnedFriends.filter(f => f.id !== friendData.id);
-                    mutedFriends = mutedFriends.filter(f => f.id !== friendData.id);
-                    
-                    // Update localStorage
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-                    
-                    // Update UI
-                    updateCurrentSection();
-                    updateFriendCounts();
-                    
-                    showNotification('Friend removed successfully', 'success');
-                } else {
-                    showNotification('Failed to remove friend', 'error');
-                }
-                
-            } catch (error) {
-                showNotification('Failed to remove friend', 'error');
-            }
-        }
-        
-        // Block user
-        async function blockUser(friendData) {
-            if (!confirm(`Are you sure you want to block ${friendData.displayName}? This will remove them from your friends and prevent them from contacting you.`)) {
-                return;
-            }
-            
-            try {
-                if (typeof window.apiCall !== 'function') {
-                    showNotification('API not ready', 'error');
-                    return;
-                }
-                
-                const response = await window.apiCall(`/api/users/${friendData.id}/block`, {
-                    method: 'POST'
-                });
-                
-                if (response && response.success) {
-                    // Remove from local arrays
-                    friends = friends.filter(f => f.id !== friendData.id);
-                    pinnedFriends = pinnedFriends.filter(f => f.id !== friendData.id);
-                    mutedFriends = mutedFriends.filter(f => f.id !== friendData.id);
-                    
-                    // Update localStorage
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-                    
-                    // Update UI
-                    updateCurrentSection();
-                    updateFriendCounts();
-                    
-                    showNotification('User blocked successfully', 'success');
-                } else {
-                    showNotification('Failed to block user', 'error');
-                }
-                
-            } catch (error) {
-                showNotification('Failed to block user', 'error');
-            }
-        }
+        // =============================================
+        // TEMPORARY, PINNED, AND MUTED FRIENDS
+        // =============================================
         
         function renderTemporaryFriends() {
             temporaryList.innerHTML = `
@@ -3951,7 +3920,10 @@
             });
         }
         
-        // Camera functions
+        // =============================================
+        // CAMERA AND QR CODE FUNCTIONS
+        // =============================================
+        
         async function startCameraScanner() {
             try {
                 const videoElement = document.getElementById('cameraVideo');
@@ -3977,7 +3949,6 @@
                 cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
                 videoElement.srcObject = cameraStream;
                 
-                // Start real QR code scanning
                 startRealQRCodeScanning(videoElement, canvasElement);
                 showNotification('Camera started successfully', 'success');
                 
@@ -3996,7 +3967,6 @@
             }
         }
         
-        // REAL QR Code scanning using jsQR library
         function startRealQRCodeScanning(videoElement, canvasElement) {
             const canvas = canvasElement;
             const context = canvas.getContext('2d');
@@ -4015,19 +3985,15 @@
                     
                     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
                     
-                    // Use jsQR library for real QR code detection
                     try {
                         const code = jsQR(imageData.data, imageData.width, imageData.height, {
                             inversionAttempts: "dontInvert",
                         });
                         
                         if (code) {
-                            // Draw rectangle around QR code
                             drawQRCodeRect(code.location, context);
-                            
-                            // Process the QR code data
                             processScannedQRCodeReal(code.data);
-                            return; // Stop scanning after successful detection
+                            return;
                         }
                     } catch (error) {
                         // Silently fail
@@ -4054,16 +4020,13 @@
         
         function processScannedQRCodeReal(qrData) {
             try {
-                // Parse QR code data (expected JSON format)
                 let parsedData;
                 try {
                     parsedData = JSON.parse(qrData);
                 } catch (e) {
-                    // If not JSON, treat as plain text
                     parsedData = { data: qrData };
                 }
                 
-                // Validate QR code data structure
                 if (!parsedData.type || parsedData.type !== 'knecta_friend_request') {
                     showNotification('Invalid QR code format', 'error');
                     return;
@@ -4074,10 +4037,8 @@
                     return;
                 }
                 
-                // Show the friend request modal with real data
                 showFriendRequestFromQRReal(parsedData);
                 
-                // Stop scanning
                 stopCameraScanner();
                 cameraScannerModal.classList.remove('active');
                 
@@ -4089,7 +4050,6 @@
         }
         
         function showFriendRequestFromQRReal(qrData) {
-            // Try to get user info from backend
             fetchUserInfoFromQR(qrData.userId).then(userInfo => {
                 document.getElementById('requestAvatar').innerHTML = `
                     <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
@@ -4108,7 +4068,6 @@
                 
                 friendRequestModal.classList.add('active');
             }).catch(error => {
-                // Fallback to QR data if user info fetch fails
                 document.getElementById('requestAvatar').innerHTML = `
                     <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
                         ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
@@ -4130,11 +4089,16 @@
         
         async function fetchUserInfoFromQR(userId) {
             try {
+                const token = getValidToken();
+                if (!token) {
+                    throw new Error('No valid token');
+                }
+                
                 if (typeof window.apiCall !== 'function') {
                     throw new Error('API not ready');
                 }
                 
-                const response = await window.apiCall(`/api/users/${userId}`);
+                const response = await apiCallWithRetry(`/api/users/${userId}`);
                 
                 if (response && response.user) {
                     return response.user;
@@ -4195,7 +4159,10 @@
             showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
         }
         
-        // Generate unique QR code for current user
+        // =============================================
+        // QR CODE GENERATION
+        // =============================================
+        
         function generateUniqueQRCode() {
             try {
                 const qrContainer = document.getElementById('qrCodeContainer');
@@ -4214,13 +4181,11 @@
                     return;
                 }
                 
-                // Get current user data
                 const user = currentUser || userData;
                 if (!user) {
                     return;
                 }
                 
-                // Generate QR data with unique user information
                 const qrData = JSON.stringify({
                     type: 'knecta_friend_request',
                     userId: user.id,
@@ -4242,7 +4207,6 @@
                         correctLevel: QRCode.CorrectLevel.H
                     });
                     
-                    // Store the QR code data for later verification
                     localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
                     
                 } catch (qrError) {
@@ -4269,7 +4233,6 @@
             }
         }
         
-        // Generate verification hash for QR code security
         function generateVerificationHash(userId, username) {
             const secret = 'knecta_secret_2024';
             const data = userId + username + Date.now();
@@ -4282,7 +4245,10 @@
             return Math.abs(hash).toString(16);
         }
         
-        // Utility functions
+        // =============================================
+        // UTILITY FUNCTIONS
+        // =============================================
+        
         function escapeHtml(text) {
             if (!text) return '';
             const div = document.createElement('div');
@@ -4332,7 +4298,6 @@
         // =============================================
         
         document.addEventListener('DOMContentLoaded', function() {
-            // Start enhanced initialization in background
             setTimeout(enhancedInitialize, 100);
         });
     </script>

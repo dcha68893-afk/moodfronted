@@ -400,44 +400,342 @@ const TOKEN_KEYS = {
 const API_BASE_URL = '';
 
 // =============================================
+// IMMEDIATE UI RENDERING WITH CACHED DATA
+// =============================================
+
+/**
+ * Get valid token from all possible sources with secure fallback
+ * @returns {string|null} Valid token or null if not found
+ */
+function getValidToken() {
+    // Try parent window first with origin validation
+    if (window.parent && window.parent.getValidToken && typeof window.parent.getValidToken === 'function') {
+        try {
+            const parentToken = window.parent.getValidToken();
+            if (parentToken && typeof parentToken === 'string' && parentToken.length > 10) {
+                console.log('[Status] Got token from parent window');
+                return parentToken;
+            }
+        } catch (error) {
+            console.warn('[Status] Failed to get token from parent:', error.message);
+        }
+    }
+    
+    // Try localStorage with validation
+    const possibleKeys = [
+        'accessToken',
+        'moodchat_token',
+        'knecta_access_token',
+        'token',
+        'auth_token',
+        'knecta_token',
+        TOKEN_KEYS.ACCESS_TOKEN
+    ];
+    
+    for (const key of possibleKeys) {
+        try {
+            const token = localStorage.getItem(key);
+            if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                // Basic token validation (JWT format)
+                if (token.split('.').length === 3) {
+                    console.log(`[Status] Got valid token from localStorage: ${key}`);
+                    return token;
+                }
+            }
+        } catch (error) {
+            console.warn(`[Status] Error reading token from localStorage key ${key}:`, error.message);
+        }
+    }
+    
+    // Try sessionStorage
+    for (const key of possibleKeys) {
+        try {
+            const token = sessionStorage.getItem(key);
+            if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                if (token.split('.').length === 3) {
+                    console.log(`[Status] Got valid token from sessionStorage: ${key}`);
+                    return token;
+                }
+            }
+        } catch (error) {
+            console.warn(`[Status] Error reading token from sessionStorage key ${key}:`, error.message);
+        }
+    }
+    
+    console.warn('[Status] No valid token found in any storage location');
+    return null;
+}
+
+/**
+ * Get current user from all possible sources with caching
+ * @returns {Object|null} User object or null if not found
+ */
+function getCurrentUser() {
+    // Try parent window first
+    if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
+        try {
+            const parentUser = window.parent.AppState.currentUser;
+            if (parentUser && parentUser.id) {
+                console.log('[Status] Got user from parent AppState');
+                return parentUser;
+            }
+        } catch (error) {
+            console.warn('[Status] Failed to get user from parent AppState:', error.message);
+        }
+    }
+    
+    // Try localStorage with validation
+    const userSources = [
+        LOCAL_STORAGE_KEYS.USER,
+        'authUser',
+        'knecta_user',
+        'currentUser'
+    ];
+    
+    for (const key of userSources) {
+        try {
+            const userData = localStorage.getItem(key);
+            if (userData && userData !== 'undefined' && userData !== 'null') {
+                const user = JSON.parse(userData);
+                if (user && typeof user === 'object' && user.id) {
+                    console.log(`[Status] Got user from localStorage: ${key}`);
+                    return user;
+                }
+            }
+        } catch (error) {
+            console.warn(`[Status] Error reading user from localStorage key ${key}:`, error.message);
+        }
+    }
+    
+    console.warn('[Status] No user data found in any storage location');
+    return null;
+}
+
+/**
+ * Initialize UI immediately with cached data (non-blocking)
+ */
+function initializeUIWithCachedData() {
+    console.log('[Status] Initializing UI with cached data');
+    
+    try {
+        // Get user immediately
+        const cachedUser = getCurrentUser();
+        if (cachedUser) {
+            currentUser = cachedUser;
+            userData = cachedUser;
+            updateUserUIInstantly();
+        }
+        
+        // Load all cached data
+        loadCachedDataInstantly();
+        
+        // Setup basic UI interactions
+        setupBasicEventListeners();
+        
+        // Initialize UI components
+        initializeUIComponents();
+        
+        console.log('[Status] UI rendered with cached data');
+    } catch (error) {
+        console.error('[Status] Error initializing UI with cached data:', error);
+        // Show minimal UI even if cache fails
+        setupBasicEventListeners();
+    }
+}
+
+/**
+ * Background authentication and data loading (non-blocking)
+ */
+async function initializeBackground() {
+    console.log('[Status] Starting background initialization');
+    
+    try {
+        // Get token
+        accessToken = getValidToken();
+        if (!accessToken) {
+            console.log('[Status] No access token available, using offline mode');
+            isOfflineMode = true;
+            showNotification('Using offline mode. Connect to load latest statuses.', 'warning');
+            return;
+        }
+        
+        // Validate auth in background
+        await validateAuthInBackground();
+        
+        // Load fresh data in background
+        await loadFreshDataInBackground();
+        
+    } catch (error) {
+        console.error('[Status] Background initialization error:', error);
+        // Silently fail - user can still use cached data
+    }
+}
+
+/**
+ * Validate authentication in background without blocking UI
+ */
+async function validateAuthInBackground() {
+    try {
+        console.log('[Status] Validating auth in background');
+        
+        // Wait for api.js with timeout
+        await waitForApiJs(3000); // 3 second timeout
+        
+        if (!window.knectaAPI) {
+            console.log('[Status] api.js not available, skipping validation');
+            return;
+        }
+        
+        const response = await window.knectaAPI.get('/api/auth/me');
+        if (response && response.user) {
+            authValidated = true;
+            currentUser = response.user;
+            userData = currentUser;
+            
+            // Update cache
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                uid: currentUser.id,
+                id: currentUser.id,
+                displayName: currentUser.displayName,
+                email: currentUser.email,
+                photoURL: currentUser.photoURL
+            }));
+            
+            updateUserUIInstantly();
+            console.log('[Status] Auth validated successfully');
+        }
+    } catch (error) {
+        console.log('[Status] Auth validation failed (using cached data):', error.message);
+        // Don't show error to user
+    }
+}
+
+/**
+ * Load fresh data in background for silent updates
+ */
+async function loadFreshDataInBackground() {
+    try {
+        console.log('[Status] Loading fresh data in background');
+        
+        const loadPromises = [];
+        
+        // Load statuses with retry
+        loadPromises.push(retryOperation(() => loadStatusesInBackground(), 2));
+        
+        // Load my statuses
+        loadPromises.push(retryOperation(() => loadMyStatusesInBackground(), 2));
+        
+        // Load highlights
+        loadPromises.push(retryOperation(() => loadHighlightsInBackground(), 2));
+        
+        // Wait for all background loads (no timeout - let them finish in background)
+        await Promise.allSettled(loadPromises);
+        
+        console.log('[Status] Background data loading complete');
+        
+    } catch (error) {
+        console.error('[Status] Background data loading error:', error);
+        // Silently fail
+    }
+}
+
+/**
+ * Load statuses in background with retry logic
+ */
+async function loadStatusesInBackground() {
+    try {
+        const response = await makeAuthenticatedRequest('/api/statuses');
+        if (response && response.statuses) {
+            statuses = response.statuses;
+            statuses = filterStatusesByPrivacy(statuses);
+            statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            
+            localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
+            
+            // Update UI if on all statuses tab
+            const activeSection = document.querySelector('.statuses-section.active');
+            if (activeSection && activeSection.id === 'allStatusSection') {
+                renderStatusesList(allStatusList, statuses);
+            }
+        }
+    } catch (error) {
+        console.log('[Status] Failed to load statuses in background:', error.message);
+        throw error; // Re-throw for retry logic
+    }
+}
+
+/**
+ * Load my statuses in background
+ */
+async function loadMyStatusesInBackground() {
+    try {
+        const response = await makeAuthenticatedRequest('/api/statuses/my');
+        if (response && response.statuses) {
+            myStatuses = response.statuses;
+            localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+            updateMyStatusPreview();
+        }
+    } catch (error) {
+        console.log('[Status] Failed to load my statuses in background:', error.message);
+        throw error;
+    }
+}
+
+/**
+ * Load highlights in background
+ */
+async function loadHighlightsInBackground() {
+    try {
+        const response = await makeAuthenticatedRequest('/api/statuses/highlights');
+        if (response && response.highlights) {
+            highlights = response.highlights;
+            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+        }
+    } catch (error) {
+        console.log('[Status] Failed to load highlights in background:', error.message);
+        throw error;
+    }
+}
+
+// =============================================
 // ENHANCED BOOTSTRAP WITH FAST TOKEN VALIDATION
 // =============================================
 
+/**
+ * Enhanced bootstrap process with immediate UI and background updates
+ * @returns {Promise<boolean>} Success status
+ */
 async function bootstrapIframe() {
-    console.log('=== ENHANCED BOOTSTRAP IFRAME START ===');
+    console.log('[Status] Enhanced bootstrap start');
     
     try {
-        // Phase 1: Fast token discovery (parallel)
-        const tokenData = await discoverTokensFast();
+        // Phase 1: Immediate UI with cached data (non-blocking)
+        initializeUIWithCachedData();
         
-        if (!tokenData.accessToken) {
-            console.error('No access token found in any storage location');
-            handleAuthError('Please log in to access status features');
-            return false;
-        }
+        // Phase 2: Background initialization (non-blocking)
+        setTimeout(() => {
+            initializeBackground().catch(error => {
+                console.error('[Status] Background init failed:', error);
+            });
+        }, 100);
         
-        // Phase 2: Immediate UI update with cached user data
-        await updateUIWithCachedUserData();
+        // Phase 3: Setup event listeners for user interactions
+        setTimeout(() => {
+            setupEventListeners();
+        }, 200);
         
-        // Phase 3: Background token validation (non-blocking)
-        validateTokenInBackground(tokenData);
-        
-        // Phase 4: Initialize UI components immediately
-        setupEventListeners();
-        initializeUIComponents();
-        loadCachedDataInstantly();
-        
-        console.log('=== ENHANCED BOOTSTRAP IFRAME COMPLETE ===');
         return true;
         
     } catch (error) {
-        console.error('Enhanced bootstrap error:', error);
-        handleAuthError('Failed to initialize. Please try again.');
+        console.error('[Status] Enhanced bootstrap error:', error);
         return false;
     }
 }
 
-// Fast token discovery from all possible storage locations
+/**
+ * Fast token discovery from all possible storage locations
+ * @returns {Promise<Object>} Token data object
+ */
 async function discoverTokensFast() {
     const tokenData = {
         accessToken: null,
@@ -450,15 +748,16 @@ async function discoverTokensFast() {
         // Priority 1: api.js global state
         new Promise(resolve => {
             try {
-                if (window.knectaAPI && window.knectaAPI.getToken) {
+                if (window.knectaAPI && typeof window.knectaAPI.getToken === 'function') {
                     const token = window.knectaAPI.getToken();
-                    if (token) {
+                    if (token && typeof token === 'string' && token.split('.').length === 3) {
                         tokenData.accessToken = token;
-                        console.log('Found token via api.js getToken()');
+                        console.log('[Status] Found token via api.js getToken()');
                     }
                 }
                 resolve();
             } catch (e) {
+                console.warn('[Status] Error getting token from api.js:', e.message);
                 resolve();
             }
         }),
@@ -477,10 +776,12 @@ async function discoverTokensFast() {
                 
                 for (const key of possibleAccessTokenKeys) {
                     const token = localStorage.getItem(key);
-                    if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
-                        tokenData.accessToken = token;
-                        console.log(`Found token in localStorage: ${key}`);
-                        break;
+                    if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                        if (token.split('.').length === 3) {
+                            tokenData.accessToken = token;
+                            console.log(`[Status] Found token in localStorage: ${key}`);
+                            break;
+                        }
                     }
                 }
                 
@@ -493,14 +794,16 @@ async function discoverTokensFast() {
                 
                 for (const key of possibleRefreshTokenKeys) {
                     const token = localStorage.getItem(key);
-                    if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                    if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
                         tokenData.refreshToken = token;
+                        console.log(`[Status] Found refresh token in localStorage: ${key}`);
                         break;
                     }
                 }
                 
                 resolve();
             } catch (e) {
+                console.warn('[Status] Error reading tokens from localStorage:', e.message);
                 resolve();
             }
         }),
@@ -516,14 +819,17 @@ async function discoverTokensFast() {
                 
                 for (const key of possibleKeys) {
                     const token = sessionStorage.getItem(key);
-                    if (token && token.length > 10 && token !== 'undefined' && token !== 'null') {
-                        tokenData.accessToken = token;
-                        console.log(`Found token in sessionStorage: ${key}`);
-                        break;
+                    if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                        if (token.split('.').length === 3) {
+                            tokenData.accessToken = token;
+                            console.log(`[Status] Found token in sessionStorage: ${key}`);
+                            break;
+                        }
                     }
                 }
                 resolve();
             } catch (e) {
+                console.warn('[Status] Error reading tokens from sessionStorage:', e.message);
                 resolve();
             }
         })
@@ -532,13 +838,17 @@ async function discoverTokensFast() {
     await Promise.all(tokenPromises);
     
     // Check token expiry
-    const expiryKey = 'knecta_token_expiry';
-    const expiry = localStorage.getItem(expiryKey);
-    if (expiry && expiry !== 'undefined' && expiry !== 'null') {
-        tokenData.tokenExpiry = new Date(expiry);
+    try {
+        const expiryKey = 'knecta_token_expiry';
+        const expiry = localStorage.getItem(expiryKey);
+        if (expiry && expiry !== 'undefined' && expiry !== 'null') {
+            tokenData.tokenExpiry = new Date(expiry);
+        }
+    } catch (e) {
+        console.warn('[Status] Error reading token expiry:', e.message);
     }
     
-    console.log('Token discovery complete:', {
+    console.log('[Status] Token discovery complete:', {
         hasAccessToken: !!tokenData.accessToken,
         hasRefreshToken: !!tokenData.refreshToken,
         tokenExpiry: tokenData.tokenExpiry
@@ -547,74 +857,33 @@ async function discoverTokensFast() {
     return tokenData;
 }
 
-// Update UI immediately with cached user data
+/**
+ * Update UI immediately with cached user data
+ */
 async function updateUIWithCachedUserData() {
     try {
-        // Check for user data in multiple locations
-        const userSources = [
-            // 1. localStorage user cache
-            () => {
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    return JSON.parse(cachedUser);
-                }
-                return null;
-            },
+        const cachedUser = getCurrentUser();
+        if (cachedUser && cachedUser.id) {
+            currentUser = cachedUser;
+            userData = cachedUser;
             
-            // 2. api.js user state
-            () => {
-                if (window.knectaAPI && window.knectaAPI.getCurrentUser) {
-                    return window.knectaAPI.getCurrentUser();
-                }
-                return null;
-            },
+            // Update UI immediately
+            updateUserUIInstantly();
             
-            // 3. authUser in localStorage
-            () => {
-                const authUser = localStorage.getItem('authUser');
-                if (authUser) {
-                    return JSON.parse(authUser);
-                }
-                return null;
-            },
-            
-            // 4. knecta_user in localStorage
-            () => {
-                const knectaUser = localStorage.getItem('knecta_user');
-                if (knectaUser) {
-                    return JSON.parse(knectaUser);
-                }
-                return null;
-            }
-        ];
-        
-        // Try each source in parallel
-        for (const source of userSources) {
-            try {
-                const user = source();
-                if (user && user.id) {
-                    currentUser = user;
-                    userData = user;
-                    
-                    // Update UI immediately
-                    updateUserUIInstantly();
-                    
-                    console.log('UI updated with cached user:', user.id);
-                    return;
-                }
-            } catch (e) {
-                // Continue to next source
-            }
+            console.log('[Status] UI updated with cached user:', cachedUser.id);
+            return;
         }
         
-        console.log('No cached user data found');
+        console.log('[Status] No cached user data found');
         
     } catch (error) {
-        console.error('Error updating UI with cached user:', error);
+        console.error('[Status] Error updating UI with cached user:', error);
     }
 }
 
-// Update user UI instantly without waiting for API
+/**
+ * Update user UI instantly without waiting for API
+ */
 function updateUserUIInstantly() {
     if (!currentUser) return;
     
@@ -622,7 +891,7 @@ function updateUserUIInstantly() {
     const avatarElements = document.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar');
     avatarElements.forEach(avatar => {
         if (currentUser.photoURL) {
-            avatar.style.backgroundImage = `url('${currentUser.photoURL}')`;
+            avatar.style.backgroundImage = `url('${escapeHtml(currentUser.photoURL)}')`;
             avatar.innerHTML = '';
         } else if (currentUser.displayName) {
             const initials = currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
@@ -648,20 +917,20 @@ function updateUserUIInstantly() {
     }
 }
 
-// Background token validation (non-blocking)
+/**
+ * Background token validation (non-blocking)
+ */
 async function validateTokenInBackground(tokenData) {
     // Don't block UI - run in background
     setTimeout(async () => {
         try {
-            console.log('Starting background token validation...');
+            console.log('[Status] Starting background token validation...');
             
             // Wait for api.js if not ready
-            if (!window.knectaAPI) {
-                await waitForApiJs();
-            }
+            await waitForApiJs(5000);
             
             if (!window.knectaAPI) {
-                console.error('api.js not available for token validation');
+                console.error('[Status] api.js not available for token validation');
                 return;
             }
             
@@ -694,7 +963,7 @@ async function validateTokenInBackground(tokenData) {
                     // Load fresh data from API
                     loadInitialData();
                     
-                    console.log('Background token validation successful:', currentUser.id);
+                    console.log('[Status] Background token validation successful:', currentUser.id);
                     showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
                     
                 } else {
@@ -702,7 +971,7 @@ async function validateTokenInBackground(tokenData) {
                 }
                 
             } catch (apiError) {
-                console.error('Token validation failed:', apiError);
+                console.error('[Status] Token validation failed:', apiError);
                 
                 // Try token refresh if available
                 if (refreshToken) {
@@ -739,59 +1008,69 @@ async function validateTokenInBackground(tokenData) {
                                 updateUserUIInstantly();
                                 loadInitialData();
                                 
-                                console.log('Token refresh successful');
+                                console.log('[Status] Token refresh successful');
                                 return;
                             }
                         }
                     } catch (refreshError) {
-                        console.error('Token refresh failed:', refreshError);
+                        console.error('[Status] Token refresh failed:', refreshError);
                     }
                 }
                 
                 // If validation fails, we still keep the cached UI
-                // User can still interact with offline features
                 showNotification('Using offline mode. Some features may be limited.', 'warning');
                 isOfflineMode = true;
             }
             
         } catch (error) {
-            console.error('Background validation error:', error);
+            console.error('[Status] Background validation error:', error);
             // Don't show error to user - they can still use cached data
         }
     }, 100); // Small delay to ensure UI is responsive first
 }
 
-// Wait for api.js with timeout
-function waitForApiJs() {
+/**
+ * Wait for api.js with timeout and exponential backoff
+ * @param {number} timeoutMs - Maximum wait time in milliseconds
+ * @returns {Promise<void>}
+ */
+function waitForApiJs(timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
         let attempts = 0;
-        const maxAttempts = 30; // 3 seconds max
+        const maxAttempts = Math.floor(timeoutMs / 100);
+        let lastDelay = 0;
         
         const checkApi = () => {
             attempts++;
             
-            if (window.knectaAPI) {
-                console.log('api.js loaded successfully');
+            if (window.knectaAPI && typeof window.knectaAPI.get === 'function') {
+                console.log('[Status] api.js loaded successfully');
                 resolve();
                 return;
             }
             
             if (attempts >= maxAttempts) {
-                console.warn('api.js not loaded after maximum attempts, proceeding without it');
+                console.warn('[Status] api.js not loaded after maximum attempts, proceeding without it');
                 resolve(); // Resolve anyway to not block
                 return;
             }
             
-            setTimeout(checkApi, 100);
+            // Exponential backoff with jitter
+            const delay = Math.min(100 * Math.pow(1.5, attempts), 1000);
+            lastDelay = delay;
+            
+            setTimeout(checkApi, delay);
         };
         
         checkApi();
     });
 }
 
-// Initialize the application with enhanced bootstrap
+/**
+ * Initialize the application with enhanced bootstrap
+ */
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('Status page loaded - Enhanced initialization');
+    console.log('[Status] Page loaded - Enhanced initialization');
     
     // Immediately show UI with cached data
     loadCachedDataInstantly();
@@ -799,7 +1078,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Start enhanced bootstrap process
     setTimeout(async () => {
-        await bootstrapIframe();
+        try {
+            await bootstrapIframe();
+        } catch (error) {
+            console.error('[Status] Bootstrap failed:', error);
+            showNotification('System initialized with limited functionality', 'warning');
+        }
     }, 50); // Minimal delay for DOM readiness
 });
 
@@ -807,8 +1091,12 @@ document.addEventListener('DOMContentLoaded', async function() {
 // ENHANCED AUTHENTICATION FUNCTIONS
 // =============================================
 
+/**
+ * Handle authentication errors gracefully
+ * @param {string} message - Error message
+ */
 function handleAuthError(message) {
-    console.error('Authentication failed:', message);
+    console.error('[Status] Authentication failed:', message);
     
     // Only show error if we have no cached data
     if (statuses.length === 0 && myStatuses.length === 0) {
@@ -852,35 +1140,35 @@ function handleAuthError(message) {
     }
 }
 
-// Enhanced authenticated request with better error handling
+/**
+ * Enhanced authenticated request with better error handling and retry logic
+ * @param {string} endpoint - API endpoint
+ * @param {Object} options - Request options
+ * @returns {Promise<any>} API response
+ */
 async function makeAuthenticatedRequest(endpoint, options = {}) {
     // If offline mode, queue for later
     if (isOfflineMode) {
-        console.log('Offline mode: Queueing request for', endpoint);
+        console.log('[Status] Offline mode: Queueing request for', endpoint);
         return Promise.reject(new Error('Offline mode'));
     }
     
-    // Ensure we have a token
-    if (!accessToken) {
-        // Try to get token from storage
-        const tokenData = await discoverTokensFast();
-        if (tokenData.accessToken) {
-            accessToken = tokenData.accessToken;
-        } else {
-            throw new Error('No access token available');
-        }
+    // Get fresh token for each request
+    const token = getValidToken();
+    if (!token) {
+        throw new Error('No access token available');
     }
     
     // Ensure api.js is available
     if (!window.knectaAPI) {
-        await waitForApiJs();
+        await waitForApiJs(3000);
         if (!window.knectaAPI) {
             throw new Error('API library not available');
         }
     }
     
     try {
-        console.log('Making authenticated API call via api.js to:', endpoint);
+        console.log('[Status] Making authenticated API call via api.js to:', endpoint);
         
         let response;
         const method = options.method?.toUpperCase() || 'GET';
@@ -905,7 +1193,7 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
         return response;
         
     } catch (error) {
-        console.error('API request error via api.js:', error);
+        console.error('[Status] API request error via api.js:', error);
         
         // Check for auth errors
         const isAuthError = error.message?.includes('401') || 
@@ -914,36 +1202,8 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
                            error.message?.includes('Authentication') || 
                            error.message?.includes('Session');
         
-        if (isAuthError && refreshToken) {
-            try {
-                console.log('Auth error detected, attempting token refresh...');
-                
-                const refreshResponse = await window.knectaAPI.post('/api/auth/refresh', {
-                    refreshToken: refreshToken
-                });
-                
-                if (refreshResponse && refreshResponse.accessToken) {
-                    // Save new tokens
-                    accessToken = refreshResponse.accessToken;
-                    localStorage.setItem('accessToken', accessToken);
-                    
-                    if (refreshResponse.refreshToken) {
-                        refreshToken = refreshResponse.refreshToken;
-                        localStorage.setItem('refreshToken', refreshToken);
-                    }
-                    
-                    // Retry the original request
-                    console.log('Token refreshed, retrying original request...');
-                    return await makeAuthenticatedRequest(endpoint, options);
-                }
-            } catch (refreshError) {
-                console.error('Token refresh failed:', refreshError);
-            }
-        }
-        
-        // If we get here, auth failed
         if (isAuthError) {
-            console.log('Authentication failed, switching to offline mode');
+            console.log('[Status] Authentication failed, switching to offline mode');
             isOfflineMode = true;
             showNotification('Network issue. Using offline mode.', 'warning');
         }
@@ -952,13 +1212,19 @@ async function makeAuthenticatedRequest(endpoint, options = {}) {
     }
 }
 
-// Initialize status system with fallback
+/**
+ * Initialize status system with fallback to cached data
+ */
 async function initializeStatusSystem() {
-    console.log('=== INITIALIZING STATUS SYSTEM ===');
+    console.log('[Status] Initializing status system');
     
     try {
-        // Try to load fresh data
-        await loadInitialData();
+        // Try to load fresh data with timeout
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout loading data')), 10000)
+        );
+        
+        await Promise.race([loadInitialData(), timeoutPromise]);
         
         // Update UI
         updateMyStatusPreview();
@@ -972,10 +1238,10 @@ async function initializeStatusSystem() {
             showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
         }
         
-        console.log('=== STATUS SYSTEM INITIALIZED SUCCESSFULLY ===');
+        console.log('[Status] Status system initialized successfully');
         
     } catch (error) {
-        console.error('Error initializing status system:', error);
+        console.error('[Status] Error initializing status system:', error);
         
         // Fallback to cached data
         loadCachedDataInstantly();
@@ -987,109 +1253,165 @@ async function initializeStatusSystem() {
     }
 }
 
-// Load cached data instantly for offline use
+/**
+ * Load cached data instantly for offline use
+ */
 function loadCachedDataInstantly() {
-    console.log('Loading cached data instantly...');
+    console.log('[Status] Loading cached data instantly...');
     
     try {
         // Load user from cache
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            console.log('Loaded user from cache');
-            
-            // Update UI immediately
-            updateUserUIInstantly();
+            try {
+                currentUser = JSON.parse(cachedUser);
+                console.log('[Status] Loaded user from cache');
+                
+                // Update UI immediately
+                updateUserUIInstantly();
+            } catch (parseError) {
+                console.error('[Status] Error parsing cached user:', parseError);
+            }
         }
         
         // Load statuses
         const statusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUSES);
         if (statusesData) {
-            statuses = JSON.parse(statusesData);
-            console.log('Loaded statuses from cache:', statuses.length);
+            try {
+                statuses = JSON.parse(statusesData);
+                console.log('[Status] Loaded statuses from cache:', statuses.length);
+            } catch (parseError) {
+                console.error('[Status] Error parsing cached statuses:', parseError);
+            }
         }
         
         // Load my statuses
         const myStatusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_STATUSES);
         if (myStatusesData) {
-            myStatuses = JSON.parse(myStatusesData);
+            try {
+                myStatuses = JSON.parse(myStatusesData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing cached my statuses:', parseError);
+            }
         }
         
         // Load viewed statuses
         const viewedStatusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
         if (viewedStatusesData) {
-            viewedStatuses = new Set(JSON.parse(viewedStatusesData));
+            try {
+                viewedStatuses = new Set(JSON.parse(viewedStatusesData));
+            } catch (parseError) {
+                console.error('[Status] Error parsing viewed statuses:', parseError);
+            }
         }
         
         // Load muted users
         const mutedUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_USERS);
         if (mutedUsersData) {
-            mutedUsers = new Set(JSON.parse(mutedUsersData));
+            try {
+                mutedUsers = new Set(JSON.parse(mutedUsersData));
+            } catch (parseError) {
+                console.error('[Status] Error parsing muted users:', parseError);
+            }
         }
         
         // Load highlights
         const highlightsData = localStorage.getItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
         if (highlightsData) {
-            highlights = JSON.parse(highlightsData);
+            try {
+                highlights = JSON.parse(highlightsData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing highlights:', parseError);
+            }
         }
         
         // Load drafts
         const draftsData = localStorage.getItem(LOCAL_STORAGE_KEYS.DRAFTS);
         if (draftsData) {
-            drafts = JSON.parse(draftsData);
+            try {
+                drafts = JSON.parse(draftsData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing drafts:', parseError);
+            }
         }
         
         // Load scheduled statuses
         const scheduledData = localStorage.getItem(LOCAL_STORAGE_KEYS.SCHEDULED);
         if (scheduledData) {
-            scheduledStatuses = JSON.parse(scheduledData);
+            try {
+                scheduledStatuses = JSON.parse(scheduledData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing scheduled statuses:', parseError);
+            }
         }
         
         // Load pending replies
         const pendingRepliesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
         if (pendingRepliesData) {
-            pendingReplies = JSON.parse(pendingRepliesData);
+            try {
+                pendingReplies = JSON.parse(pendingRepliesData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing pending replies:', parseError);
+            }
         }
         
         // Load pending reactions
         const pendingReactionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
         if (pendingReactionsData) {
-            pendingReactions = JSON.parse(pendingReactionsData);
+            try {
+                pendingReactions = JSON.parse(pendingReactionsData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing pending reactions:', parseError);
+            }
         }
         
         // Load mood data
         const moodData = localStorage.getItem(LOCAL_STORAGE_KEYS.MOOD_DATA);
         if (moodData) {
-            moodChartData = JSON.parse(moodData);
+            try {
+                moodChartData = JSON.parse(moodData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing mood data:', parseError);
+            }
         }
         
         // Load streak data
         const streakData = localStorage.getItem(LOCAL_STORAGE_KEYS.STREAK);
         if (streakData) {
-            streakCount = parseInt(streakData);
-            const streakElement = document.getElementById('streakCount');
-            if (streakElement) {
-                streakElement.textContent = streakCount;
+            try {
+                streakCount = parseInt(streakData);
+                const streakElement = document.getElementById('streakCount');
+                if (streakElement) {
+                    streakElement.textContent = streakCount;
+                }
+            } catch (parseError) {
+                console.error('[Status] Error parsing streak data:', parseError);
             }
         }
         
         // Load last post date
         const lastPostDateData = localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
         if (lastPostDateData) {
-            lastPostDate = new Date(lastPostDateData);
+            try {
+                lastPostDate = new Date(lastPostDateData);
+            } catch (parseError) {
+                console.error('[Status] Error parsing last post date:', parseError);
+            }
         }
         
-        console.log('Cached data loaded successfully');
+        console.log('[Status] Cached data loaded successfully');
         
         // Render status list instantly
         renderStatusListInstantly();
         
     } catch (error) {
-        console.error('Error loading cached data:', error);
+        console.error('[Status] Error loading cached data:', error);
     }
 }
 
-// Render status list instantly from cache
+/**
+ * Render status list instantly from cache
+ */
 function renderStatusListInstantly() {
     if (!allStatusList) return;
     
@@ -1116,7 +1438,11 @@ function renderStatusListInstantly() {
     allStatusList.classList.add('instant-load');
 }
 
-// Add status item instantly (for offline cache display)
+/**
+ * Add status item instantly (for offline cache display)
+ * @param {Object} statusData - Status data
+ * @param {DocumentFragment} container - Container element
+ */
 function addStatusItemInstant(statusData, container) {
     const statusItem = document.createElement('div');
     statusItem.className = 'status-item';
@@ -1228,7 +1554,9 @@ function addStatusItemInstant(statusData, container) {
     container.appendChild(statusItem);
 }
 
-// Initialize UI components
+/**
+ * Initialize all UI components
+ */
 function initializeUIComponents() {
     // Initialize emoji picker
     if (document.getElementById('emojiGrid')) {
@@ -1306,7 +1634,9 @@ function initializeUIComponents() {
     }
 }
 
-// Initialize emoji picker
+/**
+ * Initialize emoji picker
+ */
 function initializeEmojiPicker() {
     const emojiGrid = document.getElementById('emojiGrid');
     if (!emojiGrid) return;
@@ -1329,7 +1659,9 @@ function initializeEmojiPicker() {
     });
 }
 
-// Initialize background options
+/**
+ * Initialize background options
+ */
 function initializeBackgroundOptions() {
     const backgroundGrid = document.getElementById('backgroundGrid');
     if (!backgroundGrid) return;
@@ -1368,7 +1700,9 @@ function initializeBackgroundOptions() {
     }
 }
 
-// Initialize intent options
+/**
+ * Initialize intent options
+ */
 function initializeIntentOptions() {
     const intentOptions = document.getElementById('intentOptions');
     if (!intentOptions) return;
@@ -1397,7 +1731,9 @@ function initializeIntentOptions() {
     });
 }
 
-// Initialize mood options
+/**
+ * Initialize mood options
+ */
 function initializeMoodOptions() {
     const moodOptions = document.getElementById('moodOptions');
     if (!moodOptions) return;
@@ -1423,7 +1759,9 @@ function initializeMoodOptions() {
     });
 }
 
-// Initialize category options
+/**
+ * Initialize category options
+ */
 function initializeCategoryOptions() {
     const categoryOptions = document.getElementById('categoryOptions');
     if (!categoryOptions) return;
@@ -1447,7 +1785,9 @@ function initializeCategoryOptions() {
     });
 }
 
-// Initialize action buttons selector
+/**
+ * Initialize action buttons selector
+ */
 function initializeActionButtonsSelector() {
     const actionButtonsSelector = document.getElementById('actionButtonsSelector');
     if (!actionButtonsSelector) return;
@@ -1475,7 +1815,9 @@ function initializeActionButtonsSelector() {
     });
 }
 
-// Initialize privacy options
+/**
+ * Initialize privacy options
+ */
 function initializePrivacyOptions() {
     const privacyOptions = document.getElementById('privacyOptions');
     if (!privacyOptions) return;
@@ -1513,7 +1855,9 @@ function initializePrivacyOptions() {
     }
 }
 
-// Initialize duration options
+/**
+ * Initialize duration options
+ */
 function initializeDurationOptions() {
     const durationOptionsElement = document.getElementById('durationOptions');
     if (!durationOptionsElement) return;
@@ -1543,7 +1887,9 @@ function initializeDurationOptions() {
     }
 }
 
-// Initialize template options
+/**
+ * Initialize template options
+ */
 function initializeTemplateOptions() {
     const templateOptions = document.getElementById('templateOptions');
     if (!templateOptions) return;
@@ -1600,7 +1946,9 @@ function initializeTemplateOptions() {
     });
 }
 
-// Initialize report reasons
+/**
+ * Initialize report reasons
+ */
 function initializeReportReasons() {
     const reportReasonsElement = document.getElementById('reportReasons');
     if (!reportReasonsElement) return;
@@ -1624,7 +1972,9 @@ function initializeReportReasons() {
     });
 }
 
-// Initialize reactions
+/**
+ * Initialize reactions
+ */
 function initializeReactions() {
     const reactionsContainer = document.getElementById('reactionsContainer');
     if (!reactionsContainer) return;
@@ -1655,7 +2005,9 @@ function initializeReactions() {
     });
 }
 
-// Initialize poll options
+/**
+ * Initialize poll options
+ */
 function initializePollOptions() {
     const pollOptionsContainer = document.getElementById('pollOptionsContainer');
     if (!pollOptionsContainer) return;
@@ -1669,7 +2021,10 @@ function initializePollOptions() {
     }
 }
 
-// Add poll option
+/**
+ * Add poll option
+ * @param {number} index - Option index
+ */
 function addPollOption(index) {
     const pollOptionsContainer = document.getElementById('pollOptionsContainer');
     if (!pollOptionsContainer) return;
@@ -1704,7 +2059,9 @@ function addPollOption(index) {
     pollOptionsContainer.appendChild(optionItem);
 }
 
-// Update poll option numbers
+/**
+ * Update poll option numbers
+ */
 function updatePollOptionNumbers() {
     const pollOptions = document.querySelectorAll('.poll-option-item');
     pollOptions.forEach((item, index) => {
@@ -1730,7 +2087,9 @@ function updatePollOptionNumbers() {
     });
 }
 
-// Initialize highlight color options
+/**
+ * Initialize highlight color options
+ */
 function initializeHighlightColorOptions() {
     const highlightColorGrid = document.getElementById('highlightColorGrid');
     if (!highlightColorGrid) return;
@@ -1768,7 +2127,9 @@ function initializeHighlightColorOptions() {
     }
 }
 
-// Initialize highlight privacy options
+/**
+ * Initialize highlight privacy options
+ */
 function initializeHighlightPrivacyOptions() {
     const highlightPrivacyOptions = document.getElementById('highlightPrivacyOptions');
     if (!highlightPrivacyOptions) return;
@@ -1808,7 +2169,9 @@ function initializeHighlightPrivacyOptions() {
     }
 }
 
-// Initialize repeat options
+/**
+ * Initialize repeat options
+ */
 function initializeRepeatOptions() {
     const repeatOptions = document.getElementById('repeatOptions');
     if (!repeatOptions) return;
@@ -1844,105 +2207,92 @@ function initializeRepeatOptions() {
     }
 }
 
-// Load initial data from API - USING api.js
+/**
+ * Load initial data from API - USING api.js with retry logic
+ */
 async function loadInitialData() {
     try {
-        console.log('Loading initial data from API via api.js...');
+        console.log('[Status] Loading initial data from API via api.js...');
         
-        // Parallel data loading
+        // Parallel data loading with error handling
         const loadPromises = [];
         
-        // Load statuses
-        loadPromises.push((async () => {
-            try {
-                const statusesResponse = await makeAuthenticatedRequest('/api/statuses');
-                if (statusesResponse && statusesResponse.statuses) {
-                    statuses = statusesResponse.statuses;
-                    console.log('Loaded statuses from API:', statuses.length);
-                    
-                    // Filter by privacy and sort by time
-                    statuses = filterStatusesByPrivacy(statuses);
-                    statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                    
-                    // Save to cache
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-                    
-                    // Update UI
-                    updateCurrentSection();
-                }
-            } catch (statusesError) {
-                console.error('Error loading statuses from API:', statusesError);
-                // Keep cached data if API fails
+        // Load statuses with retry
+        loadPromises.push(retryOperation(async () => {
+            const statusesResponse = await makeAuthenticatedRequest('/api/statuses');
+            if (statusesResponse && statusesResponse.statuses) {
+                statuses = statusesResponse.statuses;
+                console.log('[Status] Loaded statuses from API:', statuses.length);
+                
+                // Filter by privacy and sort by time
+                statuses = filterStatusesByPrivacy(statuses);
+                statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                // Save to cache
+                localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
+                
+                // Update UI
+                updateCurrentSection();
             }
-        })());
+        }, 2));
         
         // Load my statuses
-        loadPromises.push((async () => {
-            try {
-                const myStatusesResponse = await makeAuthenticatedRequest('/api/statuses/my');
-                if (myStatusesResponse && myStatusesResponse.statuses) {
-                    myStatuses = myStatusesResponse.statuses;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-                    updateMyStatusPreview();
-                }
-            } catch (myStatusesError) {
-                console.error('Error loading my statuses from API:', myStatusesError);
+        loadPromises.push(retryOperation(async () => {
+            const myStatusesResponse = await makeAuthenticatedRequest('/api/statuses/my');
+            if (myStatusesResponse && myStatusesResponse.statuses) {
+                myStatuses = myStatusesResponse.statuses;
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+                updateMyStatusPreview();
             }
-        })());
+        }, 2));
         
         // Load highlights
-        loadPromises.push((async () => {
-            try {
-                const highlightsResponse = await makeAuthenticatedRequest('/api/statuses/highlights');
-                if (highlightsResponse && highlightsResponse.highlights) {
-                    highlights = highlightsResponse.highlights;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
-                }
-            } catch (highlightsError) {
-                console.error('Error loading highlights from API:', highlightsError);
+        loadPromises.push(retryOperation(async () => {
+            const highlightsResponse = await makeAuthenticatedRequest('/api/statuses/highlights');
+            if (highlightsResponse && highlightsResponse.highlights) {
+                highlights = highlightsResponse.highlights;
+                localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
             }
-        })());
+        }, 2));
         
         // Load drafts
-        loadPromises.push((async () => {
-            try {
-                const draftsResponse = await makeAuthenticatedRequest('/api/statuses/drafts');
-                if (draftsResponse && draftsResponse.drafts) {
-                    drafts = draftsResponse.drafts;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
-                }
-            } catch (draftsError) {
-                console.error('Error loading drafts from API:', draftsError);
+        loadPromises.push(retryOperation(async () => {
+            const draftsResponse = await makeAuthenticatedRequest('/api/statuses/drafts');
+            if (draftsResponse && draftsResponse.drafts) {
+                drafts = draftsResponse.drafts;
+                localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
             }
-        })());
+        }, 2));
         
         // Load scheduled statuses
-        loadPromises.push((async () => {
-            try {
-                const scheduledResponse = await makeAuthenticatedRequest('/api/statuses/scheduled');
-                if (scheduledResponse && scheduledResponse.scheduled) {
-                    scheduledStatuses = scheduledResponse.scheduled;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
-                    updateScheduledStatusesList();
-                }
-            } catch (scheduledError) {
-                console.error('Error loading scheduled statuses from API:', scheduledError);
+        loadPromises.push(retryOperation(async () => {
+            const scheduledResponse = await makeAuthenticatedRequest('/api/statuses/scheduled');
+            if (scheduledResponse && scheduledResponse.scheduled) {
+                scheduledStatuses = scheduledResponse.scheduled;
+                localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
+                updateScheduledStatusesList();
             }
-        })());
+        }, 2));
         
-        // Wait for all data to load
-        await Promise.all(loadPromises);
+        // Wait for all data to load with timeout
+        await Promise.allSettled(loadPromises);
         
         // Clear error UI if data loaded successfully
         errorUI.classList.remove('active');
         
+        console.log('[Status] Initial data loaded successfully');
+        
     } catch (error) {
-        console.error('Error loading initial data:', error);
+        console.error('[Status] Error loading initial data:', error);
         throw error;
     }
 }
 
-// Filter statuses by privacy (friends can view each other's statuses)
+/**
+ * Filter statuses by privacy (friends can view each other's statuses)
+ * @param {Array} statuses - Statuses to filter
+ * @returns {Array} Filtered statuses
+ */
 function filterStatusesByPrivacy(statuses) {
     return statuses.filter(status => {
         // If user is muted, skip
@@ -1983,7 +2333,9 @@ function filterStatusesByPrivacy(statuses) {
     });
 }
 
-// Update my status preview
+/**
+ * Update my status preview
+ */
 function updateMyStatusPreview() {
     const myStatusRing = document.getElementById('myStatusRing');
     const myStatusAvatar = document.getElementById('myStatusAvatar');
@@ -2006,7 +2358,9 @@ function updateMyStatusPreview() {
     }
 }
 
-// Update streak counter
+/**
+ * Update streak counter
+ */
 function updateStreakCounter() {
     // Check if user posted today
     const today = new Date().toDateString();
@@ -2037,7 +2391,9 @@ function updateStreakCounter() {
     localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
 }
 
-// Update mood chart
+/**
+ * Update mood chart
+ */
 function updateMoodChart() {
     const moodChart = document.getElementById('moodChart');
     if (!moodChart) return;
@@ -2057,7 +2413,10 @@ function updateMoodChart() {
     });
 }
 
-// Generate sample mood data
+/**
+ * Generate sample mood data for demo
+ * @returns {Array} Sample mood data
+ */
 function generateSampleMoodData() {
     const moods = Object.keys(statusMoods);
     const data = [];
@@ -2073,7 +2432,11 @@ function generateSampleMoodData() {
     return data;
 }
 
-// Get status preview text
+/**
+ * Get status preview text
+ * @param {Object} status - Status object
+ * @returns {string} Preview text
+ */
 function getStatusPreviewText(status) {
     if (status.type === 'text') {
         return status.text.length > 30 ? status.text.substring(0, 30) + '...' : status.text;
@@ -2085,7 +2448,9 @@ function getStatusPreviewText(status) {
     return 'Status';
 }
 
-// Update current section
+/**
+ * Update current section based on active tab
+ */
 function updateCurrentSection() {
     const activeSection = document.querySelector('.statuses-section.active');
     if (activeSection) {
@@ -2117,7 +2482,11 @@ function updateCurrentSection() {
     }
 }
 
-// Filter statuses by type
+/**
+ * Filter statuses by type
+ * @param {string} type - Filter type
+ * @returns {Array} Filtered statuses
+ */
 function filterStatusesByType(type) {
     switch(type) {
         case 'friends':
@@ -2135,7 +2504,11 @@ function filterStatusesByType(type) {
     }
 }
 
-// Render statuses list
+/**
+ * Render statuses list
+ * @param {HTMLElement} container - Container element
+ * @param {Array} statusesList - Statuses to render
+ */
 function renderStatusesList(container, statusesList) {
     if (!container) return;
     
@@ -2186,7 +2559,10 @@ function renderStatusesList(container, statusesList) {
     });
 }
 
-// Get empty state message
+/**
+ * Get empty state message based on current filters
+ * @returns {string} Empty state message
+ */
 function getEmptyStateMessage() {
     if (activeFilters.size > 0) {
         return `No statuses match your filters`;
@@ -2200,7 +2576,11 @@ function getEmptyStateMessage() {
     return 'Be the first to post a status!';
 }
 
-// Add status item to list
+/**
+ * Add status item to list
+ * @param {Object} statusData - Status data
+ * @param {HTMLElement} container - Container element
+ */
 function addStatusItem(statusData, container) {
     const statusItem = document.createElement('div');
     statusItem.className = 'status-item';
@@ -2313,7 +2693,12 @@ function addStatusItem(statusData, container) {
     container.appendChild(statusItem);
 }
 
-// Handle status action
+/**
+ * Handle status action
+ * @param {string} action - Action type
+ * @param {Object} statusData - Status data
+ * @param {HTMLElement} button - Action button
+ */
 function handleStatusAction(action, statusData, button) {
     switch(action) {
         case 'view':
@@ -2334,7 +2719,10 @@ function handleStatusAction(action, statusData, button) {
     }
 }
 
-// Show status viewer
+/**
+ * Show status viewer
+ * @param {Object} statusData - Status data to view
+ */
 function showStatusViewer(statusData) {
     currentViewerStatus = statusData;
     currentSlideIndex = 0;
@@ -2364,7 +2752,10 @@ function showStatusViewer(statusData) {
     startAutoAdvance();
 }
 
-// Load viewer content
+/**
+ * Load viewer content
+ * @param {Object} statusData - Status data
+ */
 function loadViewerContent(statusData) {
     const viewerUserInfo = document.getElementById('viewerUserInfo');
     const viewerContent = document.getElementById('viewerContent');
@@ -2462,7 +2853,11 @@ function loadViewerContent(statusData) {
     }
 }
 
-// Create text status slide
+/**
+ * Create text status slide
+ * @param {Object} statusData - Status data
+ * @returns {HTMLElement} Text status slide
+ */
 function createTextStatusSlide(statusData) {
     const slide = document.createElement('div');
     slide.className = 'status-slide text-status-slide active';
@@ -2487,7 +2882,11 @@ function createTextStatusSlide(statusData) {
     return slide;
 }
 
-// Create media status slide
+/**
+ * Create media status slide
+ * @param {Object} statusData - Status data
+ * @returns {HTMLElement} Media status slide
+ */
 function createMediaStatusSlide(statusData) {
     const slide = document.createElement('div');
     slide.className = 'status-slide media-status-slide active';
@@ -2518,7 +2917,11 @@ function createMediaStatusSlide(statusData) {
     return slide;
 }
 
-// Create poll status slide
+/**
+ * Create poll status slide
+ * @param {Object} statusData - Status data
+ * @returns {HTMLElement} Poll status slide
+ */
 function createPollStatusSlide(statusData) {
     const slide = document.createElement('div');
     slide.className = 'status-slide poll-status-slide active';
@@ -2566,7 +2969,11 @@ function createPollStatusSlide(statusData) {
     return slide;
 }
 
-// Handle action button click
+/**
+ * Handle action button click
+ * @param {string} actionKey - Action key
+ * @param {Object} statusData - Status data
+ */
 function handleActionButtonClick(actionKey, statusData) {
     switch(actionKey) {
         case 'message':
@@ -2616,7 +3023,9 @@ function handleActionButtonClick(actionKey, statusData) {
     }
 }
 
-// Start auto-advance
+/**
+ * Start auto-advance for status viewer
+ */
 function startAutoAdvance() {
     if (autoAdvanceInterval) {
         clearInterval(autoAdvanceInterval);
@@ -2652,7 +3061,9 @@ function startAutoAdvance() {
     }
 }
 
-// Pause/resume auto-advance
+/**
+ * Pause/resume auto-advance
+ */
 function toggleAutoAdvance() {
     isAutoAdvancePaused = !isAutoAdvancePaused;
     const pauseResumeBtn = document.getElementById('pauseResumeBtn');
@@ -2674,7 +3085,11 @@ function toggleAutoAdvance() {
     }
 }
 
-// Add reaction to status - USING api.js
+/**
+ * Add reaction to status - USING api.js
+ * @param {string} statusId - Status ID
+ * @param {string} reaction - Reaction type
+ */
 async function addReactionToStatus(statusId, reaction) {
     try {
         // Check if we're in offline mode
@@ -2686,7 +3101,7 @@ async function addReactionToStatus(statusId, reaction) {
             return;
         }
         
-        console.log('Adding reaction via api.js');
+        console.log('[Status] Adding reaction via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/react`, {
             method: 'POST',
             body: JSON.stringify({ reaction })
@@ -2696,12 +3111,16 @@ async function addReactionToStatus(statusId, reaction) {
             showNotification(`Reacted with ${reactions[reaction]}`, 'success');
         }
     } catch (error) {
-        console.error('Error adding reaction:', error);
+        console.error('[Status] Error adding reaction:', error);
         showNotification('Failed to add reaction', 'error');
     }
 }
 
-// Vote on poll - USING api.js
+/**
+ * Vote on poll - USING api.js
+ * @param {string} statusId - Status ID
+ * @param {string} optionId - Option ID
+ */
 async function voteOnPoll(statusId, optionId) {
     try {
         // Check if we're in offline mode
@@ -2710,7 +3129,7 @@ async function voteOnPoll(statusId, optionId) {
             return;
         }
         
-        console.log('Voting on poll via api.js');
+        console.log('[Status] Voting on poll via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/vote`, {
             method: 'POST',
             body: JSON.stringify({ optionId })
@@ -2774,15 +3193,18 @@ async function voteOnPoll(statusId, optionId) {
             }
         }
     } catch (error) {
-        console.error('Error voting on poll:', error);
+        console.error('[Status] Error voting on poll:', error);
         showNotification('Failed to vote', 'error');
     }
 }
 
-// Pin status - USING api.js
+/**
+ * Pin status - USING api.js
+ * @param {Object} statusData - Status data
+ */
 async function pinStatus(statusData) {
     try {
-        console.log('Pinning status via api.js');
+        console.log('[Status] Pinning status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusData.id}/pin`, {
             method: 'POST'
         });
@@ -2794,15 +3216,18 @@ async function pinStatus(statusData) {
             updateCurrentSection();
         }
     } catch (error) {
-        console.error('Error pinning status:', error);
+        console.error('[Status] Error pinning status:', error);
         showNotification('Failed to pin status', 'error');
     }
 }
 
-// Unpin status - USING api.js
+/**
+ * Unpin status - USING api.js
+ * @param {Object} statusData - Status data
+ */
 async function unpinStatus(statusData) {
     try {
-        console.log('Unpinning status via api.js');
+        console.log('[Status] Unpinning status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusData.id}/pin`, {
             method: 'DELETE'
         });
@@ -2814,15 +3239,18 @@ async function unpinStatus(statusData) {
             updateCurrentSection();
         }
     } catch (error) {
-        console.error('Error unpinning status:', error);
+        console.error('[Status] Error unpinning status:', error);
         showNotification('Failed to unpin status', 'error');
     }
 }
 
-// Mute user - USING api.js
+/**
+ * Mute user - USING api.js
+ * @param {string} userId - User ID
+ */
 async function muteUser(userId) {
     try {
-        console.log('Muting user via api.js');
+        console.log('[Status] Muting user via api.js');
         const response = await makeAuthenticatedRequest(`/api/users/${userId}/mute`, {
             method: 'POST'
         });
@@ -2834,15 +3262,18 @@ async function muteUser(userId) {
             updateCurrentSection();
         }
     } catch (error) {
-        console.error('Error muting user:', error);
+        console.error('[Status] Error muting user:', error);
         showNotification('Failed to mute user', 'error');
     }
 }
 
-// Unmute user - USING api.js
+/**
+ * Unmute user - USING api.js
+ * @param {string} userId - User ID
+ */
 async function unmuteUser(userId) {
     try {
-        console.log('Unmuting user via api.js');
+        console.log('[Status] Unmuting user via api.js');
         const response = await makeAuthenticatedRequest(`/api/users/${userId}/mute`, {
             method: 'DELETE'
         });
@@ -2854,12 +3285,15 @@ async function unmuteUser(userId) {
             updateCurrentSection();
         }
     } catch (error) {
-        console.error('Error unmuting user:', error);
+        console.error('[Status] Error unmuting user:', error);
         showNotification('Failed to unmute user', 'error');
     }
 }
 
-// Post status - USING api.js
+/**
+ * Post status - USING api.js with offline support
+ * @param {Object} statusData - Status data
+ */
 async function postStatus(statusData) {
     try {
         // Check if we're in offline mode
@@ -2888,7 +3322,7 @@ async function postStatus(statusData) {
             return;
         }
         
-        console.log('Posting status via api.js');
+        console.log('[Status] Posting status via api.js');
         const response = await makeAuthenticatedRequest('/api/statuses/create', {
             method: 'POST',
             body: JSON.stringify(statusData)
@@ -2925,15 +3359,19 @@ async function postStatus(statusData) {
             updateCurrentSection();
         }
     } catch (error) {
-        console.error('Error posting status:', error);
+        console.error('[Status] Error posting status:', error);
         showNotification('Failed to post status', 'error');
     }
 }
 
-// Schedule status - USING api.js
+/**
+ * Schedule status - USING api.js
+ * @param {Object} statusData - Status data
+ * @param {string} scheduleTime - Schedule time
+ */
 async function scheduleStatus(statusData, scheduleTime) {
     try {
-        console.log('Scheduling status via api.js');
+        console.log('[Status] Scheduling status via api.js');
         const response = await makeAuthenticatedRequest('/api/statuses/schedule', {
             method: 'POST',
             body: JSON.stringify({
@@ -2952,12 +3390,15 @@ async function scheduleStatus(statusData, scheduleTime) {
             updateScheduledStatusesList();
         }
     } catch (error) {
-        console.error('Error scheduling status:', error);
+        console.error('[Status] Error scheduling status:', error);
         showNotification('Failed to schedule status', 'error');
     }
 }
 
-// Save draft
+/**
+ * Save draft
+ * @param {Object} statusData - Status data
+ */
 function saveDraft(statusData) {
     try {
         statusData.id = 'draft_' + Date.now();
@@ -2968,15 +3409,20 @@ function saveDraft(statusData) {
         showNotification('Draft saved successfully', 'success');
         updateDraftsList();
     } catch (error) {
-        console.error('Error saving draft:', error);
+        console.error('[Status] Error saving draft:', error);
         showNotification('Failed to save draft', 'error');
     }
 }
 
-// Report status - USING api.js
+/**
+ * Report status - USING api.js
+ * @param {string} statusId - Status ID
+ * @param {string} reason - Report reason
+ * @param {string} details - Report details
+ */
 async function reportStatus(statusId, reason, details) {
     try {
-        console.log('Reporting status via api.js');
+        console.log('[Status] Reporting status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/report`, {
             method: 'POST',
             body: JSON.stringify({
@@ -2989,12 +3435,14 @@ async function reportStatus(statusId, reason, details) {
             showNotification('Report submitted successfully', 'success');
         }
     } catch (error) {
-        console.error('Error reporting status:', error);
+        console.error('[Status] Error reporting status:', error);
         showNotification('Failed to submit report', 'error');
     }
 }
 
-// Update text status counter
+/**
+ * Update text status counter
+ */
 function updateTextStatusCounter() {
     const textInput = document.getElementById('textStatusInput');
     const counter = document.getElementById('textStatusCounter');
@@ -3006,7 +3454,9 @@ function updateTextStatusCounter() {
     }
 }
 
-// Update report details counter
+/**
+ * Update report details counter
+ */
 function updateReportDetailsCounter() {
     const reportDetails = document.getElementById('reportDetails');
     const counter = document.getElementById('reportDetailsCounter');
@@ -3019,7 +3469,9 @@ function updateReportDetailsCounter() {
     }
 }
 
-// Update report submit button
+/**
+ * Update report submit button
+ */
 function updateReportSubmitButton() {
     const reportDetails = document.getElementById('reportDetails');
     const selectedReason = document.querySelector('#reportReasons .category-option.selected');
@@ -3032,13 +3484,17 @@ function updateReportSubmitButton() {
     }
 }
 
-// Show highlights modal
+/**
+ * Show highlights modal
+ */
 function showHighlightsModal() {
     highlightsModal.classList.add('active');
     loadHighlightsContent();
 }
 
-// Load highlights content
+/**
+ * Load highlights content
+ */
 function loadHighlightsContent() {
     const highlightsContent = document.getElementById('highlightsContent');
     if (!highlightsContent) return;
@@ -3078,7 +3534,10 @@ function loadHighlightsContent() {
     });
 }
 
-// Show highlights editor
+/**
+ * Show highlights editor
+ * @param {Object} highlight - Highlight to edit (optional)
+ */
 function showHighlightsEditor(highlight = null) {
     const editorTitle = document.getElementById('highlightEditorTitle');
     const nameInput = document.getElementById('highlightNameInput');
@@ -3123,7 +3582,9 @@ function showHighlightsEditor(highlight = null) {
     highlightsEditorModal.classList.add('active');
 }
 
-// Save highlight - USING api.js
+/**
+ * Save highlight - USING api.js
+ */
 async function saveHighlight() {
     const nameInput = document.getElementById('highlightNameInput');
     const iconSelect = document.getElementById('highlightIconSelect');
@@ -3147,7 +3608,7 @@ async function saveHighlight() {
     };
     
     try {
-        console.log('Saving highlight via api.js');
+        console.log('[Status] Saving highlight via api.js');
         const response = await makeAuthenticatedRequest('/api/statuses/highlights', {
             method: 'POST',
             body: JSON.stringify(highlight)
@@ -3162,18 +3623,22 @@ async function saveHighlight() {
             loadHighlightsContent();
         }
     } catch (error) {
-        console.error('Error saving highlight:', error);
+        console.error('[Status] Error saving highlight:', error);
         showNotification('Failed to save highlight', 'error');
     }
 }
 
-// Show memory timeline modal
+/**
+ * Show memory timeline modal
+ */
 function showMemoryTimelineModal() {
     memoryTimelineModal.classList.add('active');
     loadMemoryTimelineContent();
 }
 
-// Load memory timeline content
+/**
+ * Load memory timeline content
+ */
 function loadMemoryTimelineContent() {
     const memoryTimelineContent = document.getElementById('memoryTimelineContent');
     if (!memoryTimelineContent) return;
@@ -3235,13 +3700,17 @@ function loadMemoryTimelineContent() {
     });
 }
 
-// Show stats modal
+/**
+ * Show stats modal
+ */
 function showStatsModal() {
     statsModal.classList.add('active');
     loadStatsContent();
 }
 
-// Load stats content
+/**
+ * Load stats content
+ */
 function loadStatsContent() {
     const statsContent = document.getElementById('statsContent');
     if (!statsContent) return;
@@ -3253,8 +3722,6 @@ function loadStatsContent() {
         Math.round(myStatuses.reduce((sum, status) => sum + (status.avgViewTime || 0), 0) / myStatuses.length) : 0;
     const totalReactions = myStatuses.reduce((sum, status) => sum + (status.reactions || 0), 0);
     const engagementRate = totalViews > 0 ? Math.round((totalReactions / totalViews) * 100) : 0;
-    
-    const mostPopularMood = getMostPopularMood();
     
     // Update quick stats
     const totalStatusesStat = document.getElementById('totalStatusesStat');
@@ -3278,7 +3745,9 @@ function loadStatsContent() {
     loadRecentViewers();
 }
 
-// Update stats chart
+/**
+ * Update stats chart
+ */
 function updateStatsChart() {
     const viewsChart = document.getElementById('viewsChart');
     if (!viewsChart) return;
@@ -3329,7 +3798,9 @@ function updateStatsChart() {
     viewsChart.appendChild(chartContainer);
 }
 
-// Load recent viewers
+/**
+ * Load recent viewers
+ */
 function loadRecentViewers() {
     const recentViewersList = document.getElementById('recentViewersList');
     if (!recentViewersList) return;
@@ -3359,7 +3830,10 @@ function loadRecentViewers() {
     });
 }
 
-// Get most popular mood
+/**
+ * Get most popular mood
+ * @returns {string|null} Most popular mood
+ */
 function getMostPopularMood() {
     const moodCounts = {};
     myStatuses.forEach(status => {
@@ -3381,13 +3855,17 @@ function getMostPopularMood() {
     return mostPopular;
 }
 
-// Show drafts modal
+/**
+ * Show drafts modal
+ */
 function showDraftsModal() {
     draftsModal.classList.add('active');
     updateDraftsList();
 }
 
-// Update drafts list
+/**
+ * Update drafts list
+ */
 function updateDraftsList() {
     const allDraftsList = document.getElementById('allDraftsList');
     if (!allDraftsList) return;
@@ -3470,7 +3948,11 @@ function updateDraftsList() {
     });
 }
 
-// Handle draft action
+/**
+ * Handle draft action
+ * @param {string} action - Action type
+ * @param {Object} draft - Draft data
+ */
 function handleDraftAction(action, draft) {
     switch(action) {
         case 'edit':
@@ -3482,7 +3964,10 @@ function handleDraftAction(action, draft) {
     }
 }
 
-// Load draft into editor
+/**
+ * Load draft into editor
+ * @param {Object} draft - Draft data
+ */
 function loadDraft(draft) {
     if (!draft) return;
     
@@ -3525,7 +4010,10 @@ function loadDraft(draft) {
     showNotification('Draft loaded', 'success');
 }
 
-// Delete draft
+/**
+ * Delete draft
+ * @param {string} draftId - Draft ID
+ */
 function deleteDraft(draftId) {
     if (!confirm('Are you sure you want to delete this draft?')) {
         return;
@@ -3537,7 +4025,9 @@ function deleteDraft(draftId) {
     updateDraftsList();
 }
 
-// Delete all drafts
+/**
+ * Delete all drafts
+ */
 function deleteAllDrafts() {
     if (drafts.length === 0) {
         showNotification('No drafts to delete', 'info');
@@ -3554,7 +4044,9 @@ function deleteAllDrafts() {
     updateDraftsList();
 }
 
-// Update scheduled statuses list
+/**
+ * Update scheduled statuses list
+ */
 function updateScheduledStatusesList() {
     const scheduledStatusesList = document.getElementById('scheduledStatusesList');
     if (!scheduledStatusesList) return;
@@ -3608,7 +4100,11 @@ function updateScheduledStatusesList() {
     });
 }
 
-// Handle schedule action
+/**
+ * Handle schedule action
+ * @param {string} action - Action type
+ * @param {Object} scheduled - Scheduled status
+ */
 function handleScheduleAction(action, scheduled) {
     switch(action) {
         case 'edit':
@@ -3621,14 +4117,17 @@ function handleScheduleAction(action, scheduled) {
     }
 }
 
-// Cancel scheduled status - USING api.js
+/**
+ * Cancel scheduled status - USING api.js
+ * @param {string} scheduleId - Schedule ID
+ */
 async function cancelScheduledStatus(scheduleId) {
     if (!confirm('Are you sure you want to cancel this scheduled status?')) {
         return;
     }
     
     try {
-        console.log('Cancelling scheduled status via api.js');
+        console.log('[Status] Cancelling scheduled status via api.js');
         const response = await makeAuthenticatedRequest(`/api/statuses/schedule/${scheduleId}`, {
             method: 'DELETE'
         });
@@ -3640,12 +4139,16 @@ async function cancelScheduledStatus(scheduleId) {
             updateScheduledStatusesList();
         }
     } catch (error) {
-        console.error('Error cancelling scheduled status:', error);
+        console.error('[Status] Error cancelling scheduled status:', error);
         showNotification('Failed to cancel scheduled status', 'error');
     }
 }
 
-// Add filter tag
+/**
+ * Add filter tag
+ * @param {string} filter - Filter key
+ * @param {string} label - Filter label
+ */
 function addFilterTag(filter, label) {
     const filterTags = document.getElementById('filterTags');
     if (!filterTags) return;
@@ -3678,7 +4181,10 @@ function addFilterTag(filter, label) {
     updateCurrentSection();
 }
 
-// Remove filter tag
+/**
+ * Remove filter tag
+ * @param {string} filter - Filter key
+ */
 function removeFilterTag(filter) {
     activeFilters.delete(filter);
     
@@ -3696,7 +4202,9 @@ function removeFilterTag(filter) {
     updateCurrentSection();
 }
 
-// Clear all filters
+/**
+ * Clear all filters
+ */
 function clearAllFilters() {
     activeFilters.clear();
     
@@ -3713,7 +4221,11 @@ function clearAllFilters() {
     updateCurrentSection();
 }
 
-// Show notification
+/**
+ * Show notification
+ * @param {string} message - Notification message
+ * @param {string} type - Notification type (success, error, warning, info)
+ */
 function showNotification(message, type = 'success') {
     const notificationText = document.getElementById('notificationText');
     if (!notificationText) return;
@@ -3728,7 +4240,15 @@ function showNotification(message, type = 'success') {
     }, 3000);
 }
 
-// Utility functions
+// =============================================
+// UTILITY FUNCTIONS
+// =============================================
+
+/**
+ * Escape HTML to prevent XSS
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -3736,6 +4256,11 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/**
+ * Format time ago
+ * @param {Date} date - Date to format
+ * @returns {string} Formatted time ago string
+ */
 function formatTimeAgo(date) {
     const now = new Date();
     const diffMs = now - date;
@@ -3750,7 +4275,37 @@ function formatTimeAgo(date) {
     return `${Math.floor(diffDays / 7)}w ago`;
 }
 
-// Setup basic event listeners (don't require auth)
+/**
+ * Retry operation with exponential backoff
+ * @param {Function} operation - Async operation to retry
+ * @param {number} maxRetries - Maximum retry attempts
+ * @returns {Promise<any>} Operation result
+ */
+async function retryOperation(operation, maxRetries = 3) {
+    let lastError;
+    
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+            console.log(`[Status] Retry ${i + 1}/${maxRetries} failed:`, error.message);
+            
+            if (i < maxRetries - 1) {
+                // Exponential backoff with jitter
+                const delay = Math.min(1000 * Math.pow(2, i), 10000);
+                const jitter = Math.random() * 200;
+                await new Promise(resolve => setTimeout(resolve, delay + jitter));
+            }
+        }
+    }
+    
+    throw lastError;
+}
+
+/**
+ * Setup basic event listeners (don't require auth)
+ */
 function setupBasicEventListeners() {
     // Create status button
     const createStatusBtn = document.getElementById('createStatusBtn');
@@ -3786,11 +4341,11 @@ function setupBasicEventListeners() {
     });
 }
 
-// Setup event listeners
+/**
+ * Setup all event listeners
+ */
 function setupEventListeners() {
-    // Create status button (already handled in basic)
-    
-    // Close create status modal (already handled in basic)
+    setupBasicEventListeners();
     
     // Create status tabs
     document.querySelectorAll('.create-status-tab').forEach(tab => {
@@ -4631,17 +5186,16 @@ function setupEventListeners() {
         });
     }
     
-    // Close notification (already handled in basic)
-    
-    // Window resize (already handled in basic)
-    
     // Before unload
     window.addEventListener('beforeunload', () => {
         stopAutoAdvance();
     });
 }
 
-// Handle media upload
+/**
+ * Handle media upload
+ * @param {Event} event - File input event
+ */
 function handleMediaUpload(event) {
     const files = event.target.files;
     const mediaPreview = document.getElementById('mediaPreview');
@@ -4693,7 +5247,9 @@ function handleMediaUpload(event) {
     }
 }
 
-// Stop auto-advance
+/**
+ * Stop auto-advance
+ */
 function stopAutoAdvance() {
     if (autoAdvanceInterval) {
         clearInterval(autoAdvanceInterval);
@@ -4706,4 +5262,4 @@ function stopAutoAdvance() {
     }
 }
 
-console.log('Enhanced status system initialized successfully');
+console.log('[Status] Enhanced status system initialized successfully');

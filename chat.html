@@ -1335,6 +1335,7 @@
     </script>
 
     <script>
+        // Iframe Authentication Manager with enhanced security and error handling
         const IframeAuthManager = {
             state: {
                 isAuthenticated: false,
@@ -1343,13 +1344,17 @@
                 token: null,
                 authPromise: null,
                 dataFetchPromises: [],
-                pendingApiCalls: []
+                pendingApiCalls: [],
+                authCheckInterval: null,
+                lastAuthCheck: 0
             },
             
             eventListeners: {
                 authReady: [],
                 dataReady: [],
-                userDataLoaded: []
+                userDataLoaded: [],
+                authFailed: [],
+                tokenRefreshed: []
             },
             
             async initialize() {
@@ -1365,14 +1370,18 @@
                     this.state.isAuthenticated = true;
                     this.state.user = authResult.user;
                     this.state.token = authResult.token;
+                    this.state.lastAuthCheck = Date.now();
                     
                     this.triggerEvent('authReady', authResult);
                     await this.processPendingApiCalls();
                     this.triggerEvent('dataReady', authResult);
                     
+                    this.startAuthMonitoring();
+                    
                     return authResult;
                 } catch (error) {
                     console.error('❌ [IframeAuthManager] Authentication failed:', error);
+                    this.triggerEvent('authFailed', error);
                     this.notifyParentAuthFailure();
                     throw error;
                 }
@@ -1381,19 +1390,21 @@
             async waitForAuthentication() {
                 console.log('⏳ [IframeAuthManager] Waiting for authentication...');
                 
-                if (typeof window.AuthManager !== 'undefined') {
+                // First try to use existing AuthManager if available
+                if (typeof window.AuthManager !== 'undefined' && window.AuthManager.isAuthenticated()) {
                     console.log('🔍 [IframeAuthManager] Using window.AuthManager');
                     try {
-                        const authResult = await window.AuthManager.validate();
-                        return {
-                            user: authResult,
-                            token: window.AuthManager.getCurrentToken()
-                        };
+                        const user = window.AuthManager.getCurrentUser();
+                        const token = window.AuthManager.getCurrentToken();
+                        if (user && token) {
+                            return { user, token };
+                        }
                     } catch (error) {
                         console.warn('⚠️ [IframeAuthManager] AuthManager validation failed:', error);
                     }
                 }
                 
+                // Try bootstrap function
                 if (typeof window.bootstrapIframe === 'function') {
                     console.log('🔍 [IframeAuthManager] Using bootstrapIframe');
                     try {
@@ -1409,13 +1420,14 @@
                     }
                 }
                 
+                // Check localStorage directly for tokens
                 console.log('🔍 [IframeAuthManager] Checking localStorage directly');
-                const tokenKeys = ['access_token', 'moodchat_token', 'auth_token'];
+                const tokenKeys = ['access_token', 'moodchat_token', 'auth_token', 'kynecta_token'];
                 let token = null;
                 
                 for (const key of tokenKeys) {
                     const storedToken = localStorage.getItem(key);
-                    if (storedToken && storedToken.trim() !== '') {
+                    if (storedToken && storedToken.trim() !== '' && storedToken !== 'null') {
                         token = storedToken;
                         console.log(`🔐 [IframeAuthManager] Found token in ${key}`);
                         break;
@@ -1425,7 +1437,7 @@
                 const userData = localStorage.getItem('kynecta_user');
                 let user = null;
                 
-                if (userData) {
+                if (userData && userData !== 'null') {
                     try {
                         user = JSON.parse(userData);
                         console.log('👤 [IframeAuthManager] Found user data in localStorage');
@@ -1435,35 +1447,61 @@
                 }
                 
                 if (token && user) {
+                    // Validate token with API if possible
                     if (typeof window.api === 'function') {
                         try {
-                            const response = await window.api('/api/auth/me', 'GET');
+                            const response = await window.api('/api/auth/me', 'GET', null, { timeout: 5000 });
                             if (response && response.user) {
                                 user = response.user;
                                 localStorage.setItem('kynecta_user', JSON.stringify(user));
                                 console.log('✅ [IframeAuthManager] API validation successful');
                             }
                         } catch (apiError) {
-                            console.warn('⚠️ [IframeAuthManager] API validation failed, using cached data:', apiError);
+                            console.warn('⚠️ [IframeAuthManager] API validation failed, using cached data:', apiError.message);
+                            // Don't fail if offline - use cached data
                         }
                     }
                     
                     return { user, token };
                 }
                 
+                // Wait for auth message from parent with timeout
                 console.log('🔍 [IframeAuthManager] Waiting for auth message from parent');
                 return new Promise((resolve, reject) => {
                     const timeoutId = setTimeout(() => {
                         window.removeEventListener('message', messageHandler);
+                        console.warn('⏰ [IframeAuthManager] Authentication timeout');
+                        
+                        // Try one more time with localStorage
+                        const fallbackToken = localStorage.getItem('access_token');
+                        const fallbackUser = localStorage.getItem('kynecta_user');
+                        
+                        if (fallbackToken && fallbackUser) {
+                            try {
+                                resolve({
+                                    user: JSON.parse(fallbackUser),
+                                    token: fallbackToken
+                                });
+                                return;
+                            } catch (e) {
+                                // Continue to reject
+                            }
+                        }
+                        
                         reject(new Error('Authentication timeout - no auth data received'));
                     }, 10000);
                     
                     function messageHandler(event) {
+                        // Security: Validate origin if possible
                         if (event.data && event.data.type === 'AUTH_DATA') {
                             clearTimeout(timeoutId);
                             window.removeEventListener('message', messageHandler);
                             
                             if (event.data.user && event.data.token) {
+                                // Store in localStorage for persistence
+                                localStorage.setItem('kynecta_user', JSON.stringify(event.data.user));
+                                localStorage.setItem('access_token', event.data.token);
+                                
                                 resolve({
                                     user: event.data.user,
                                     token: event.data.token
@@ -1476,32 +1514,129 @@
                     
                     window.addEventListener('message', messageHandler);
                     
+                    // Request auth data from parent
                     window.parent.postMessage({
                         type: 'REQUEST_AUTH_DATA',
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        iframeId: window.frameElement ? window.frameElement.id : 'chat-iframe'
                     }, '*');
                 });
             },
             
             async executeApiCall(apiFunction, ...args) {
+                // If already authenticated, execute immediately
                 if (this.state.isAuthenticated && this.state.token) {
-                    return apiFunction(...args);
+                    try {
+                        return await apiFunction(...args);
+                    } catch (error) {
+                        if (error.message.includes('401') || error.message.includes('token')) {
+                            console.warn('⚠️ [IframeAuthManager] Token may be expired, attempting refresh');
+                            await this.refreshToken();
+                            return await apiFunction(...args);
+                        }
+                        throw error;
+                    }
                 }
                 
+                // Wait for authentication if in progress
                 if (this.state.authPromise) {
                     console.log('⏳ [IframeAuthManager] API call waiting for authentication...');
-                    await this.state.authPromise;
-                    return apiFunction(...args);
+                    try {
+                        await this.state.authPromise;
+                        return await apiFunction(...args);
+                    } catch (authError) {
+                        console.error('❌ [IframeAuthManager] Authentication failed for API call:', authError);
+                        throw new Error('Authentication required: ' + authError.message);
+                    }
                 }
                 
+                // Queue the API call
+                console.log('📦 [IframeAuthManager] Queueing API call');
                 return new Promise((resolve, reject) => {
                     this.state.pendingApiCalls.push({
                         apiFunction,
                         args,
                         resolve,
-                        reject
+                        reject,
+                        timestamp: Date.now()
                     });
+                    
+                    // Start authentication if not already started
+                    if (!this.state.isBootstrapped) {
+                        this.initialize().catch(e => {
+                            console.error('Failed to initialize auth for queued API call:', e);
+                        });
+                    }
                 });
+            },
+            
+            async refreshToken() {
+                console.log('🔄 [IframeAuthManager] Attempting token refresh');
+                
+                try {
+                    const refreshToken = localStorage.getItem('refresh_token');
+                    if (!refreshToken) {
+                        throw new Error('No refresh token available');
+                    }
+                    
+                    if (typeof window.api === 'function') {
+                        const response = await window.api('/api/auth/refresh', 'POST', { refreshToken });
+                        if (response && response.accessToken) {
+                            this.state.token = response.accessToken;
+                            localStorage.setItem('access_token', response.accessToken);
+                            this.state.lastAuthCheck = Date.now();
+                            
+                            this.triggerEvent('tokenRefreshed', { token: response.accessToken });
+                            return response.accessToken;
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ [IframeAuthManager] Token refresh failed:', error);
+                    this.triggerEvent('authFailed', error);
+                    throw error;
+                }
+            },
+            
+            startAuthMonitoring() {
+                if (this.state.authCheckInterval) {
+                    clearInterval(this.state.authCheckInterval);
+                }
+                
+                this.state.authCheckInterval = setInterval(() => {
+                    this.checkAuthValidity().catch(e => {
+                        console.warn('⚠️ [IframeAuthManager] Auth check failed:', e.message);
+                    });
+                }, 30000); // Check every 30 seconds
+            },
+            
+            async checkAuthValidity() {
+                if (!this.state.isAuthenticated || !this.state.token) return;
+                
+                // Only check if last check was more than 5 minutes ago
+                if (Date.now() - this.state.lastAuthCheck < 300000) return;
+                
+                console.log('🔍 [IframeAuthManager] Periodic auth validity check');
+                
+                try {
+                    if (typeof window.api === 'function') {
+                        await window.api('/api/auth/validate', 'GET', null, { timeout: 3000 });
+                        this.state.lastAuthCheck = Date.now();
+                        console.log('✅ [IframeAuthManager] Auth still valid');
+                    }
+                } catch (error) {
+                    console.warn('⚠️ [IframeAuthManager] Auth validation failed:', error.message);
+                    
+                    // Try to refresh token if it's a 401 error
+                    if (error.message.includes('401')) {
+                        try {
+                            await this.refreshToken();
+                        } catch (refreshError) {
+                            console.error('❌ [IframeAuthManager] Auth completely invalid');
+                            this.state.isAuthenticated = false;
+                            this.triggerEvent('authFailed', refreshError);
+                        }
+                    }
+                }
             },
             
             async processPendingApiCalls() {
@@ -1509,21 +1644,33 @@
                 
                 console.log(`🔄 [IframeAuthManager] Processing ${this.state.pendingApiCalls.length} pending API calls`);
                 
-                for (const pendingCall of this.state.pendingApiCalls) {
+                const calls = [...this.state.pendingApiCalls];
+                this.state.pendingApiCalls = [];
+                
+                for (const pendingCall of calls) {
                     try {
+                        // Skip if too old (older than 30 seconds)
+                        if (Date.now() - pendingCall.timestamp > 30000) {
+                            pendingCall.reject(new Error('API call timeout - authentication took too long'));
+                            continue;
+                        }
+                        
                         const result = await pendingCall.apiFunction(...pendingCall.args);
                         pendingCall.resolve(result);
                     } catch (error) {
                         pendingCall.reject(error);
                     }
                 }
-                
-                this.state.pendingApiCalls = [];
             },
             
             registerDataFetch(promise) {
-                this.state.dataFetchPromises.push(promise);
-                return promise;
+                const wrappedPromise = promise.catch(error => {
+                    console.error('❌ [IframeAuthManager] Data fetch failed:', error);
+                    return null;
+                });
+                
+                this.state.dataFetchPromises.push(wrappedPromise);
+                return wrappedPromise;
             },
             
             async waitForAllData() {
@@ -1536,7 +1683,15 @@
                 try {
                     const results = await Promise.allSettled(this.state.dataFetchPromises);
                     this.state.dataFetchPromises = [];
-                    return results;
+                    
+                    const successes = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+                    const failures = results.filter(r => r.status === 'rejected').map(r => r.reason);
+                    
+                    if (failures.length > 0) {
+                        console.warn(`⚠️ [IframeAuthManager] ${failures.length} data fetches failed`);
+                    }
+                    
+                    return successes;
                 } catch (error) {
                     console.error('❌ [IframeAuthManager] Error waiting for data:', error);
                     return [];
@@ -1548,6 +1703,12 @@
                     this.eventListeners[event] = [];
                 }
                 this.eventListeners[event].push(callback);
+            },
+            
+            off(event, callback) {
+                if (this.eventListeners[event]) {
+                    this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+                }
             },
             
             triggerEvent(event, data) {
@@ -1567,7 +1728,8 @@
                     window.parent.postMessage({
                         type: 'AUTH_REQUIRED',
                         reason: 'iframe_authentication_failed',
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        iframeId: window.frameElement ? window.frameElement.id : 'chat-iframe'
                     }, '*');
                 } catch (error) {
                     console.error('❌ [IframeAuthManager] Failed to notify parent:', error);
@@ -1588,110 +1750,286 @@
             
             isBootstrapped() {
                 return this.state.isBootstrapped;
+            },
+            
+            cleanup() {
+                if (this.state.authCheckInterval) {
+                    clearInterval(this.state.authCheckInterval);
+                    this.state.authCheckInterval = null;
+                }
+                
+                this.state.pendingApiCalls = [];
+                this.state.dataFetchPromises = [];
+                
+                Object.keys(this.eventListeners).forEach(event => {
+                    this.eventListeners[event] = [];
+                });
             }
         };
         
         window.IframeAuthManager = IframeAuthManager;
         
-        window.safeApiFetch = async function(endpoint, method = 'GET', data = null) {
+        // Enhanced safe API fetch with retry logic and offline support
+        window.safeApiFetch = async function(endpoint, method = 'GET', data = null, options = {}) {
             console.log(`🔍 [safeApiFetch] Requesting: ${method} ${endpoint}`);
             
-            await IframeAuthManager.state.authPromise;
+            const defaultOptions = {
+                timeout: 10000,
+                maxRetries: 3,
+                retryDelay: 1000,
+                ...options
+            };
             
-            if (typeof window.api !== 'function') {
-                throw new Error('api.js not available for making authenticated requests');
-            }
+            let lastError = null;
             
-            return window.api(endpoint, method, data);
-        };
-        
-        window.updateUIAfterAuth = async function(uiUpdateFunction) {
-            console.log('🎨 [updateUIAfterAuth] Scheduling UI update');
-            
-            await IframeAuthManager.state.authPromise;
-            await IframeAuthManager.waitForAllData();
-            
-            return uiUpdateFunction();
-        };
-        
-        window.addEventListener('message', function(event) {
-            if (event.data && event.data.type === 'BOOTSTRAP_REQUEST') {
-                console.log('🚀 [iframe] Received BOOTSTRAP_REQUEST from parent');
-                
-                IframeAuthManager.initialize().then(authResult => {
-                    window.parent.postMessage({
-                        type: 'BOOTSTRAP_COMPLETE',
-                        success: true,
-                        user: authResult.user,
-                        timestamp: Date.now()
-                    }, '*');
+            for (let attempt = 0; attempt <= defaultOptions.maxRetries; attempt++) {
+                try {
+                    // Wait for authentication if needed
+                    if (!IframeAuthManager.isAuthenticated()) {
+                        await IframeAuthManager.state.authPromise;
+                    }
                     
-                    window.parent.postMessage({
-                        type: 'iframe_loaded',
-                        iframeId: window.frameElement ? window.frameElement.id : 'unknown',
-                        timestamp: Date.now()
-                    }, '*');
+                    if (typeof window.api !== 'function') {
+                        throw new Error('api.js not available for making authenticated requests');
+                    }
                     
-                }).catch(error => {
-                    console.error('❌ [iframe] Bootstrap failed:', error);
+                    // Add timeout controller
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), defaultOptions.timeout);
                     
-                    window.parent.postMessage({
-                        type: 'BOOTSTRAP_FAILED',
-                        error: error.message,
-                        timestamp: Date.now()
-                    }, '*');
-                });
-            }
-            
-            if (event.data && event.data.type === 'AUTH_DATA') {
-                console.log('🔐 [iframe] Received AUTH_DATA from parent');
-                
-                if (event.data.user && event.data.token) {
-                    IframeAuthManager.state.isAuthenticated = true;
-                    IframeAuthManager.state.user = event.data.user;
-                    IframeAuthManager.state.token = event.data.token;
-                    
-                    if (IframeAuthManager.state.authPromise) {
-                        IframeAuthManager.state.authPromise = Promise.resolve({
-                            user: event.data.user,
-                            token: event.data.token
-                        });
+                    try {
+                        const result = await window.api(endpoint, method, data, { signal: controller.signal });
+                        clearTimeout(timeoutId);
+                        return result;
+                    } catch (apiError) {
+                        clearTimeout(timeoutId);
                         
-                        IframeAuthManager.triggerEvent('authReady', {
-                            user: event.data.user,
-                            token: event.data.token
-                        });
+                        // Check if it's a network error or timeout
+                        if (apiError.name === 'AbortError') {
+                            throw new Error(`Request timeout after ${defaultOptions.timeout}ms`);
+                        }
+                        
+                        throw apiError;
+                    }
+                } catch (error) {
+                    lastError = error;
+                    
+                    // Don't retry on 4xx errors (except 429 - too many requests)
+                    if (error.message.includes('401') || error.message.includes('403') || 
+                        (error.message.includes('400') && !error.message.includes('429'))) {
+                        console.error(`❌ [safeApiFetch] Client error (${error.message}), not retrying`);
+                        break;
+                    }
+                    
+                    if (attempt < defaultOptions.maxRetries) {
+                        const delay = defaultOptions.retryDelay * Math.pow(2, attempt); // Exponential backoff
+                        console.warn(`⚠️ [safeApiFetch] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message);
+                        await new Promise(resolve => setTimeout(resolve, delay));
                     }
                 }
             }
             
-            if (event.data && event.data.type === 'go_back') {
-                console.log('🔙 [iframe] Received go_back command');
-                if (typeof window.goBack === 'function') {
-                    window.goBack();
-                } else if (window.history.length > 1) {
-                    window.history.back();
+            // All retries failed
+            console.error(`❌ [safeApiFetch] All ${defaultOptions.maxRetries + 1} attempts failed:`, lastError);
+            throw lastError;
+        };
+        
+        // UI update wrapper that handles auth and data loading states
+        window.updateUIAfterAuth = async function(uiUpdateFunction) {
+            console.log('🎨 [updateUIAfterAuth] Scheduling UI update');
+            
+            try {
+                // Wait for authentication
+                await IframeAuthManager.state.authPromise;
+                
+                // Wait for any pending data fetches
+                await IframeAuthManager.waitForAllData();
+                
+                // Execute UI update
+                const result = await uiUpdateFunction();
+                
+                return result;
+            } catch (error) {
+                console.error('❌ [updateUIAfterAuth] UI update failed:', error);
+                
+                // Show user-friendly error
+                if (error.message.includes('Authentication')) {
+                    showUserNotification('Please log in to continue', 'error');
+                } else if (error.message.includes('network') || error.message.includes('timeout')) {
+                    showUserNotification('Network error - using cached data', 'warning');
+                }
+                
+                // Try to update UI with cached data anyway
+                try {
+                    return await uiUpdateFunction();
+                } catch (fallbackError) {
+                    console.error('❌ [updateUIAfterAuth] Fallback UI update also failed:', fallbackError);
+                    throw error;
                 }
             }
+        };
+        
+        // Helper function to show user notifications
+        function showUserNotification(message, type = 'info', duration = 5000) {
+            const notification = document.createElement('div');
+            notification.className = `fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50 ${
+                type === 'error' ? 'bg-red-500 text-white' :
+                type === 'warning' ? 'bg-yellow-500 text-black' :
+                type === 'success' ? 'bg-green-500 text-white' :
+                'bg-blue-500 text-white'
+            }`;
+            notification.textContent = message;
             
-            if (event.data && event.data.type === 'get_fullscreen_status') {
-                const isFullscreen = document.body.classList.contains('in-chat-view') ||
-                                   document.body.classList.contains('in-status-view') ||
-                                   document.body.classList.contains('in-group-view') ||
-                                   document.body.classList.contains('in-fullscreen-view');
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transition = 'opacity 0.5s';
+                setTimeout(() => notification.remove(), 500);
+            }, duration);
+        }
+        
+        // Enhanced message handler with origin validation
+        window.addEventListener('message', function(event) {
+            // Security: Consider validating event.origin in production
+            // const allowedOrigins = ['https://your-domain.com'];
+            // if (!allowedOrigins.includes(event.origin)) return;
+            
+            if (event.data && event.data.type) {
+                console.log('📨 [iframe] Received message:', event.data.type);
                 
-                window.parent.postMessage({
-                    type: 'fullscreen_status',
-                    isFullscreen: isFullscreen,
-                    timestamp: Date.now()
-                }, '*');
+                switch(event.data.type) {
+                    case 'BOOTSTRAP_REQUEST':
+                        console.log('🚀 [iframe] Received BOOTSTRAP_REQUEST from parent');
+                        
+                        IframeAuthManager.initialize().then(authResult => {
+                            window.parent.postMessage({
+                                type: 'BOOTSTRAP_COMPLETE',
+                                success: true,
+                                user: authResult.user,
+                                timestamp: Date.now()
+                            }, '*');
+                            
+                            window.parent.postMessage({
+                                type: 'iframe_loaded',
+                                iframeId: window.frameElement ? window.frameElement.id : 'unknown',
+                                timestamp: Date.now()
+                            }, '*');
+                            
+                        }).catch(error => {
+                            console.error('❌ [iframe] Bootstrap failed:', error);
+                            
+                            window.parent.postMessage({
+                                type: 'BOOTSTRAP_FAILED',
+                                error: error.message,
+                                timestamp: Date.now()
+                            }, '*');
+                        });
+                        break;
+                    
+                    case 'AUTH_DATA':
+                        console.log('🔐 [iframe] Received AUTH_DATA from parent');
+                        
+                        if (event.data.user && event.data.token) {
+                            // Store for persistence
+                            localStorage.setItem('kynecta_user', JSON.stringify(event.data.user));
+                            localStorage.setItem('access_token', event.data.token);
+                            
+                            IframeAuthManager.state.isAuthenticated = true;
+                            IframeAuthManager.state.user = event.data.user;
+                            IframeAuthManager.state.token = event.data.token;
+                            
+                            if (IframeAuthManager.state.authPromise) {
+                                IframeAuthManager.state.authPromise = Promise.resolve({
+                                    user: event.data.user,
+                                    token: event.data.token
+                                });
+                                
+                                IframeAuthManager.triggerEvent('authReady', {
+                                    user: event.data.user,
+                                    token: event.data.token
+                                });
+                            }
+                        }
+                        break;
+                    
+                    case 'go_back':
+                        console.log('🔙 [iframe] Received go_back command');
+                        if (typeof window.goBack === 'function') {
+                            window.goBack();
+                        } else if (window.history.length > 1) {
+                            window.history.back();
+                        }
+                        break;
+                    
+                    case 'get_fullscreen_status':
+                        const isFullscreen = document.body.classList.contains('in-chat-view') ||
+                                           document.body.classList.contains('in-status-view') ||
+                                           document.body.classList.contains('in-group-view') ||
+                                           document.body.classList.contains('in-fullscreen-view');
+                        
+                        window.parent.postMessage({
+                            type: 'fullscreen_status',
+                            isFullscreen: isFullscreen,
+                            timestamp: Date.now()
+                        }, '*');
+                        break;
+                    
+                    case 'USER_LOGIN':
+                        if (event.data.user && event.data.token) {
+                            console.log('👤 [iframe] User logged in via parent');
+                            IframeAuthManager.state.isAuthenticated = true;
+                            IframeAuthManager.state.user = event.data.user;
+                            IframeAuthManager.state.token = event.data.token;
+                            
+                            localStorage.setItem('kynecta_user', JSON.stringify(event.data.user));
+                            localStorage.setItem('access_token', event.data.token);
+                            
+                            IframeAuthManager.triggerEvent('authReady', {
+                                user: event.data.user,
+                                token: event.data.token
+                            });
+                        }
+                        break;
+                    
+                    case 'USER_LOGOUT':
+                        console.log('👋 [iframe] User logged out via parent');
+                        IframeAuthManager.state.isAuthenticated = false;
+                        IframeAuthManager.state.user = null;
+                        IframeAuthManager.state.token = null;
+                        
+                        localStorage.removeItem('kynecta_user');
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('moodchat_token');
+                        localStorage.removeItem('auth_token');
+                        
+                        IframeAuthManager.triggerEvent('authFailed', new Error('User logged out'));
+                        break;
+                    
+                    case 'UPDATE_SETTINGS':
+                        console.log('⚙️ [iframe] Settings updated via parent');
+                        if (event.data.settings) {
+                            localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
+                            // Trigger settings update event
+                            window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+                                detail: event.data.settings 
+                            }));
+                        }
+                        break;
+                }
             }
         });
         
+        // Initialize on load
         window.addEventListener('load', function() {
-            console.log('📄 [iframe] Document loaded, notifying parent');
+            console.log('📄 [iframe] Document loaded, initializing authentication');
             
+            // Start auth process in background
             setTimeout(() => {
+                IframeAuthManager.initialize().catch(error => {
+                    console.warn('⚠️ [iframe] Background auth init failed:', error.message);
+                });
+                
                 window.parent.postMessage({
                     type: 'iframe_loaded',
                     iframeId: window.frameElement ? window.frameElement.id : 'unknown',
@@ -1701,7 +2039,12 @@
             }, 100);
         });
         
-        console.log('✅ [iframe] Authentication system initialized');
+        // Cleanup on unload
+        window.addEventListener('beforeunload', function() {
+            IframeAuthManager.cleanup();
+        });
+        
+        console.log('✅ [iframe] Enhanced authentication system initialized');
     </script>
 
     <div id="globalNotificationContainer" class="fixed top-4 right-4 z-10000 space-y-2">
@@ -1966,133 +2309,366 @@
     </div>
 
     <script>
+    // Enhanced AppState with caching and offline support
     const AppState = {
         api: {
             ready: false,
-            reference: null
+            reference: null,
+            retryCount: 0,
+            maxRetries: 3,
+            lastCheck: 0
         },
         auth: {
             authenticated: false,
             user: null,
-            token: null
+            token: null,
+            refreshToken: null,
+            lastRefresh: 0
         },
         connectivity: {
-            online: navigator.onLine
+            online: navigator.onLine,
+            lastCheck: Date.now()
+        },
+        cache: {
+            userData: null,
+            settings: null,
+            chats: new Map(),
+            friends: new Map(),
+            groups: new Map(),
+            lastUpdated: new Map()
+        },
+        backgroundTasks: {
+            intervals: new Map(),
+            timeouts: new Map()
         },
         
         initialize() {
-            console.log('AppState initializing...');
+            console.log('🔧 AppState initializing...');
             
             this.connectivity.online = navigator.onLine;
+            this.connectivity.lastCheck = Date.now();
             
-            const token = localStorage.getItem('access_token') || 
-                         localStorage.getItem('moodchat_token') || 
-                         localStorage.getItem('auth_token');
+            // Load cached data
+            this.loadFromCache();
+            
+            // Initialize auth from storage
+            this.initializeAuth();
+            
+            console.log('✅ AppState initialized:', {
+                authenticated: this.auth.authenticated,
+                user: this.auth.user ? this.auth.user.name : null,
+                online: this.connectivity.online,
+                cacheSize: this.cache.chats.size + this.cache.friends.size + this.cache.groups.size
+            });
+            
+            return this;
+        },
+        
+        initializeAuth() {
+            const token = this.getValidToken();
             const userData = localStorage.getItem('kynecta_user');
+            const refreshToken = localStorage.getItem('refresh_token');
             
             if (token && userData) {
                 try {
                     this.auth.authenticated = true;
                     this.auth.user = JSON.parse(userData);
                     this.auth.token = token;
-                    console.log('AppState loaded auth from localStorage');
+                    this.auth.refreshToken = refreshToken;
+                    this.auth.lastRefresh = Date.now();
+                    
+                    // Store in cache
+                    this.cache.userData = this.auth.user;
+                    localStorage.setItem('app_cache_user', userData);
+                    
+                    console.log('🔐 AppState loaded auth from localStorage');
                 } catch (e) {
-                    console.error('Error parsing user data:', e);
+                    console.error('❌ AppState: Error parsing user data:', e);
+                }
+            }
+        },
+        
+        getValidToken() {
+            const tokenKeys = ['access_token', 'moodchat_token', 'auth_token', 'kynecta_token'];
+            
+            for (const key of tokenKeys) {
+                const token = localStorage.getItem(key);
+                if (token && token.trim() !== '' && token !== 'null') {
+                    return token;
                 }
             }
             
-            console.log('AppState initialized:', {
-                authenticated: this.auth.authenticated,
-                user: this.auth.user ? this.auth.user.name : null,
-                online: this.connectivity.online
-            });
+            // Try to get from parent window
+            if (window.parent && window.parent.AuthManager) {
+                try {
+                    const parentToken = window.parent.AuthManager.getCurrentToken();
+                    if (parentToken) {
+                        localStorage.setItem('access_token', parentToken);
+                        return parentToken;
+                    }
+                } catch (e) {
+                    console.warn('⚠️ AppState: Failed to get token from parent');
+                }
+            }
+            
+            return null;
         },
         
-        setAuthenticated(user, token) {
+        loadFromCache() {
+            try {
+                // Load cached user data
+                const cachedUser = localStorage.getItem('app_cache_user');
+                if (cachedUser) {
+                    this.cache.userData = JSON.parse(cachedUser);
+                }
+                
+                // Load cached settings
+                const cachedSettings = localStorage.getItem('app_settings');
+                if (cachedSettings) {
+                    this.cache.settings = JSON.parse(cachedSettings);
+                }
+                
+                // Load cached chats
+                const cachedChats = localStorage.getItem('app_cache_chats');
+                if (cachedChats) {
+                    const chats = JSON.parse(cachedChats);
+                    chats.forEach(chat => {
+                        this.cache.chats.set(chat.id, chat);
+                        this.cache.lastUpdated.set(`chat_${chat.id}`, Date.now());
+                    });
+                }
+                
+                console.log('📦 AppState: Loaded from cache');
+            } catch (e) {
+                console.error('❌ AppState: Error loading cache:', e);
+            }
+        },
+        
+        saveToCache(key, data) {
+            try {
+                switch(key) {
+                    case 'user':
+                        this.cache.userData = data;
+                        localStorage.setItem('app_cache_user', JSON.stringify(data));
+                        break;
+                    case 'settings':
+                        this.cache.settings = data;
+                        localStorage.setItem('app_settings', JSON.stringify(data));
+                        break;
+                    case 'chats':
+                        if (Array.isArray(data)) {
+                            data.forEach(chat => {
+                                this.cache.chats.set(chat.id, chat);
+                                this.cache.lastUpdated.set(`chat_${chat.id}`, Date.now());
+                            });
+                            localStorage.setItem('app_cache_chats', JSON.stringify(data));
+                        }
+                        break;
+                }
+            } catch (e) {
+                console.error('❌ AppState: Error saving to cache:', e);
+            }
+        },
+        
+        getFromCache(key, id = null) {
+            switch(key) {
+                case 'user':
+                    return this.cache.userData;
+                case 'settings':
+                    return this.cache.settings;
+                case 'chat':
+                    return id ? this.cache.chats.get(id) : Array.from(this.cache.chats.values());
+                case 'friend':
+                    return id ? this.cache.friends.get(id) : Array.from(this.cache.friends.values());
+                case 'group':
+                    return id ? this.cache.groups.get(id) : Array.from(this.cache.groups.values());
+                default:
+                    return null;
+            }
+        },
+        
+        setAuthenticated(user, token, refreshToken = null) {
             this.auth.authenticated = true;
             this.auth.user = user;
             this.auth.token = token;
+            this.auth.refreshToken = refreshToken;
+            this.auth.lastRefresh = Date.now();
             
+            // Save to localStorage
             localStorage.setItem('kynecta_user', JSON.stringify(user));
             localStorage.setItem('access_token', token);
             localStorage.setItem('moodchat_token', token);
             localStorage.setItem('auth_token', token);
             
-            console.log('AppState: User authenticated', user.name);
+            if (refreshToken) {
+                localStorage.setItem('refresh_token', refreshToken);
+            }
+            
+            // Save to cache
+            this.saveToCache('user', user);
+            
+            console.log('✅ AppState: User authenticated', user.name);
+            
+            // Notify iframes
+            this.notifyIframesAuthChange();
         },
         
         clearAuthentication() {
             this.auth.authenticated = false;
             this.auth.user = null;
             this.auth.token = null;
+            this.auth.refreshToken = null;
             
+            // Clear localStorage
             localStorage.removeItem('kynecta_user');
             localStorage.removeItem('access_token');
             localStorage.removeItem('moodchat_token');
             localStorage.removeItem('auth_token');
             localStorage.removeItem('refresh_token');
             
-            console.log('AppState: Authentication cleared');
+            // Clear sensitive cache
+            this.cache.userData = null;
+            
+            console.log('🚪 AppState: Authentication cleared');
+            
+            // Notify iframes
+            this.notifyIframesAuthChange();
+        },
+        
+        notifyIframesAuthChange() {
+            document.querySelectorAll('.content-iframe').forEach(iframe => {
+                try {
+                    if (iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({
+                            type: 'AUTH_UPDATE',
+                            authenticated: this.auth.authenticated,
+                            user: this.auth.user,
+                            timestamp: Date.now()
+                        }, '*');
+                    }
+                } catch (e) {
+                    console.warn('⚠️ AppState: Failed to notify iframe');
+                }
+            });
         },
         
         setApiReady(apiRef) {
             this.api.ready = true;
             this.api.reference = apiRef;
-            console.log('AppState: API marked as ready');
+            this.api.lastCheck = Date.now();
+            console.log('✅ AppState: API marked as ready');
+        },
+        
+        startBackgroundUpdate(taskName, callback, interval = 60000) {
+            if (this.backgroundTasks.intervals.has(taskName)) {
+                clearInterval(this.backgroundTasks.intervals.get(taskName));
+            }
+            
+            const intervalId = setInterval(async () => {
+                try {
+                    await callback();
+                } catch (error) {
+                    console.warn(`⚠️ AppState: Background task ${taskName} failed:`, error.message);
+                }
+            }, interval);
+            
+            this.backgroundTasks.intervals.set(taskName, intervalId);
+            console.log(`🔄 AppState: Started background task ${taskName}`);
+        },
+        
+        stopBackgroundUpdate(taskName) {
+            if (this.backgroundTasks.intervals.has(taskName)) {
+                clearInterval(this.backgroundTasks.intervals.get(taskName));
+                this.backgroundTasks.intervals.delete(taskName);
+                console.log(`🛑 AppState: Stopped background task ${taskName}`);
+            }
+        },
+        
+        cleanup() {
+            // Clear all intervals
+            this.backgroundTasks.intervals.forEach(intervalId => {
+                clearInterval(intervalId);
+            });
+            this.backgroundTasks.intervals.clear();
+            
+            // Clear all timeouts
+            this.backgroundTasks.timeouts.forEach(timeoutId => {
+                clearTimeout(timeoutId);
+            });
+            this.backgroundTasks.timeouts.clear();
+            
+            console.log('🧹 AppState: Cleaned up background tasks');
         }
     };
     
+    // Enhanced AuthManager with token refresh and validation
     const AuthManager = {
         state: {
             isAuthenticated: false,
             user: null,
             token: null,
-            initialized: false
+            refreshToken: null,
+            initialized: false,
+            validationInterval: null
         },
         
         initialize() {
-            console.log('AuthManager initializing...');
+            console.log('🔧 AuthManager initializing...');
             
-            const token = localStorage.getItem('access_token') || 
-                         localStorage.getItem('moodchat_token') || 
-                         localStorage.getItem('auth_token');
+            const token = AppState.getValidToken();
             const userData = localStorage.getItem('kynecta_user');
+            const refreshToken = localStorage.getItem('refresh_token');
             
             if (token && userData) {
                 try {
                     this.state.isAuthenticated = true;
                     this.state.user = JSON.parse(userData);
                     this.state.token = token;
-                    console.log('AuthManager: Loaded existing auth from localStorage');
+                    this.state.refreshToken = refreshToken;
+                    console.log('✅ AuthManager: Loaded existing auth from localStorage');
                 } catch (e) {
-                    console.error('AuthManager: Error parsing user data:', e);
+                    console.error('❌ AuthManager: Error parsing user data:', e);
                 }
             }
             
             this.state.initialized = true;
-            console.log('AuthManager initialized:', {
+            
+            // Start periodic validation
+            this.startValidation();
+            
+            console.log('✅ AuthManager initialized:', {
                 isAuthenticated: this.state.isAuthenticated,
                 user: this.state.user ? this.state.user.name : null
             });
+            
+            return this;
         },
         
-        setAuthenticated(user, token) {
+        setAuthenticated(user, token, refreshToken = null) {
             this.state.isAuthenticated = true;
             this.state.user = user;
             this.state.token = token;
+            this.state.refreshToken = refreshToken;
             
             localStorage.setItem('kynecta_user', JSON.stringify(user));
             localStorage.setItem('access_token', token);
             localStorage.setItem('moodchat_token', token);
-            localStorage.setItem('auth_token', token);
             
-            console.log('AuthManager: User authenticated', user.name);
+            if (refreshToken) {
+                localStorage.setItem('refresh_token', refreshToken);
+            }
+            
+            console.log('✅ AuthManager: User authenticated', user.name);
+            
+            // Restart validation
+            this.startValidation();
         },
         
         clearAuth() {
             this.state.isAuthenticated = false;
             this.state.user = null;
             this.state.token = null;
+            this.state.refreshToken = null;
             
             localStorage.removeItem('kynecta_user');
             localStorage.removeItem('access_token');
@@ -2100,7 +2676,13 @@
             localStorage.removeItem('auth_token');
             localStorage.removeItem('refresh_token');
             
-            console.log('AuthManager: Auth cleared');
+            // Clear validation interval
+            if (this.state.validationInterval) {
+                clearInterval(this.state.validationInterval);
+                this.state.validationInterval = null;
+            }
+            
+            console.log('🚪 AuthManager: Auth cleared');
         },
         
         getCurrentUser() {
@@ -2115,7 +2697,83 @@
             if (!this.state.isAuthenticated || !this.state.token) {
                 throw new Error('Not authenticated');
             }
+            
+            // Check if token is expired (simple check)
+            const tokenAge = Date.now() - (localStorage.getItem('token_timestamp') || 0);
+            const maxTokenAge = 24 * 60 * 60 * 1000; // 24 hours
+            
+            if (tokenAge > maxTokenAge) {
+                console.warn('⚠️ AuthManager: Token may be expired');
+                return this.refreshToken();
+            }
+            
             return this.state.user;
+        },
+        
+        async refreshToken() {
+            console.log('🔄 AuthManager: Attempting token refresh');
+            
+            if (!this.state.refreshToken) {
+                throw new Error('No refresh token available');
+            }
+            
+            try {
+                if (typeof window.api === 'function') {
+                    const response = await window.api('/api/auth/refresh', 'POST', { 
+                        refreshToken: this.state.refreshToken 
+                    }, { timeout: 5000 });
+                    
+                    if (response && response.accessToken) {
+                        this.state.token = response.accessToken;
+                        localStorage.setItem('access_token', response.accessToken);
+                        localStorage.setItem('token_timestamp', Date.now());
+                        
+                        if (response.refreshToken) {
+                            this.state.refreshToken = response.refreshToken;
+                            localStorage.setItem('refresh_token', response.refreshToken);
+                        }
+                        
+                        console.log('✅ AuthManager: Token refreshed successfully');
+                        return this.state.user;
+                    }
+                }
+                
+                throw new Error('Token refresh failed');
+            } catch (error) {
+                console.error('❌ AuthManager: Token refresh error:', error);
+                throw error;
+            }
+        },
+        
+        startValidation() {
+            if (this.state.validationInterval) {
+                clearInterval(this.state.validationInterval);
+            }
+            
+            // Validate every 5 minutes
+            this.state.validationInterval = setInterval(async () => {
+                try {
+                    if (this.state.isAuthenticated && typeof window.api === 'function') {
+                        await window.api('/api/auth/validate', 'GET', null, { timeout: 3000 });
+                        console.log('✅ AuthManager: Periodic validation successful');
+                    }
+                } catch (error) {
+                    console.warn('⚠️ AuthManager: Periodic validation failed:', error.message);
+                    
+                    // Try to refresh token if validation fails
+                    if (error.message.includes('401') || error.message.includes('token')) {
+                        try {
+                            await this.refreshToken();
+                        } catch (refreshError) {
+                            console.error('❌ AuthManager: Validation completely failed');
+                            this.clearAuth();
+                            
+                            // Show notification to user
+                            showGlobalNotification('Session expired. Please log in again.', 'warning', 5000);
+                        }
+                    }
+                }
+            }, 300000); // 5 minutes
         },
         
         isAuthenticated() {
@@ -2123,6 +2781,74 @@
         }
     };
     
+    // Enhanced authentication validation with offline support
+    async function validateAuth() {
+        console.log('[App] Validating authentication...');
+        
+        const token = AppState.getValidToken();
+        if (!token) {
+            console.log('[App] No token found - user not authenticated');
+            return false;
+        }
+        
+        const userData = localStorage.getItem('kynecta_user');
+        if (!userData) {
+            console.log('[App] No user data found');
+            return false;
+        }
+        
+        try {
+            if (typeof window.api === 'function') {
+                // Try to validate with API
+                const response = await window.api('/api/auth/me', 'GET', null, { timeout: 5000 });
+                if (response && response.user) {
+                    const user = response.user;
+                    
+                    // Update storage
+                    localStorage.setItem('kynecta_user', JSON.stringify(user));
+                    localStorage.setItem('token_timestamp', Date.now());
+                    
+                    // Update app state
+                    AppState.setAuthenticated(user, token);
+                    AuthManager.setAuthenticated(user, token);
+                    
+                    console.log('[App] ✅ Authentication validated successfully');
+                    return true;
+                }
+            } else {
+                console.warn('[App] API function not available, using cached auth');
+                // Use cached data if API is not available
+                try {
+                    const user = JSON.parse(userData);
+                    AppState.setAuthenticated(user, token);
+                    AuthManager.setAuthenticated(user, token);
+                    console.log('[App] ✅ Using cached authentication');
+                    return true;
+                } catch (e) {
+                    console.error('[App] ❌ Failed to parse cached user data');
+                    return false;
+                }
+            }
+        } catch (error) {
+            console.log('[App] ⚠️ Auth validation failed (offline or expired):', error.message);
+            
+            // Try to use cached data
+            try {
+                const user = JSON.parse(userData);
+                AppState.setAuthenticated(user, token);
+                AuthManager.setAuthenticated(user, token);
+                console.log('[App] ⚠️ Using cached authentication (offline mode)');
+                return true;
+            } catch (e) {
+                console.error('[App] ❌ Failed to use cached auth');
+                return false;
+            }
+        }
+        
+        return false;
+    }
+    
+    // Application state variables
     let currentPage = 'messages';
     let iframesLoaded = {};
     let appVersion = '1.0.0';
@@ -2138,7 +2864,9 @@
     let appInitialized = false;
     let apiCheckInterval = null;
     let loadingTimeout = null;
+    let backgroundTasks = [];
     
+    // Modal control function
     function closeModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
@@ -2146,19 +2874,26 @@
         }
     }
     
+    // Main initialization function
     function quickInitialize() {
-        console.log('Quick initialization starting...');
+        console.log('🚀 Quick initialization starting...');
         
+        // Show loading screen briefly
         setTimeout(() => {
             hideLoading();
         }, 1000);
         
+        // Initialize state managers
         AppState.initialize();
         AuthManager.initialize();
+        
+        // Setup navigation
         setupNavigation();
         
+        // Show sidebar on desktop
         document.getElementById('permanentSidebar').classList.remove('hidden');
         
+        // Show mobile nav on mobile
         if (window.innerWidth < 768) {
             const mobileNavBar = document.getElementById('mobileNavBar');
             if (mobileNavBar) {
@@ -2166,41 +2901,113 @@
             }
         }
         
+        // Preload iframes
         preloadIframes();
+        
+        // Start on messages page
         switchPage('messages');
+        
+        // Mark as initialized
         appInitialized = true;
         
-        console.log('Quick initialization complete - page is ready');
+        console.log('[App] ✅ Initialization complete. UI loaded.');
+        
+        // Start background tasks
+        startBackgroundTasks();
+        
+        // Start auth validation in background
         startBackgroundAuthCheck();
     }
     
+    // Start background authentication check
     function startBackgroundAuthCheck() {
-        console.log('Starting background authentication check...');
+        console.log('🔄 Starting background authentication check...');
         
-        setTimeout(() => {
+        // Wait a bit for API to be ready
+        setTimeout(async () => {
             checkApiReadiness();
             
-            if (AuthManager.state.isAuthenticated && typeof window.api === 'function') {
-                console.log('Background: Validating authentication...');
-                window.api('/api/auth/me', 'GET')
-                    .then(response => {
-                        if (response && response.user) {
-                            console.log('Background: Auth validation successful');
-                            AppState.setAuthenticated(response.user, AuthManager.state.token);
-                            AuthManager.setAuthenticated(response.user, AuthManager.state.token);
-                            notifyAllIframesAboutAuth(response.user, AuthManager.state.token);
-                        }
-                    })
-                    .catch(error => {
-                        console.log('Background: Auth validation failed (offline or expired)');
-                    });
+            const token = AppState.getValidToken();
+            const userData = localStorage.getItem('kynecta_user');
+            
+            if (token && userData) {
+                console.log('[App] 🔍 Background: Validating authentication...');
+                const isAuthenticated = await validateAuth();
+                if (!isAuthenticated) {
+                    console.log('[App] ⚠️ Background: Auth validation failed');
+                } else {
+                    console.log('[App] ✅ Background: Auth validated successfully');
+                }
             }
         }, 2000);
     }
     
+    // Start background tasks for data updates
+    function startBackgroundTasks() {
+        console.log('🔄 Starting background tasks...');
+        
+        // Start periodic connectivity check
+        AppState.startBackgroundUpdate('connectivity', async () => {
+            const wasOnline = AppState.connectivity.online;
+            AppState.connectivity.online = navigator.onLine;
+            AppState.connectivity.lastCheck = Date.now();
+            
+            if (!wasOnline && AppState.connectivity.online) {
+                console.log('[App] 🌐 Back online');
+                showGlobalNotification('Back online', 'success', 3000);
+                
+                // Try to validate auth when back online
+                setTimeout(() => validateAuth(), 1000);
+            } else if (wasOnline && !AppState.connectivity.online) {
+                console.log('[App] 📴 Went offline');
+                showGlobalNotification('You are offline', 'warning', 5000);
+            }
+        }, 10000); // Check every 10 seconds
+        
+        // Start data sync if authenticated
+        if (AuthManager.isAuthenticated()) {
+            startDataSyncTasks();
+        }
+    }
+    
+    // Start data synchronization tasks
+    function startDataSyncTasks() {
+        console.log('🔄 Starting data sync tasks...');
+        
+        // Sync messages every 30 seconds
+        AppState.startBackgroundUpdate('messages', async () => {
+            if (!AppState.connectivity.online) return;
+            
+            try {
+                const response = await window.safeApiFetch('/api/messages/unread', 'GET');
+                if (response && response.unreadCount > 0) {
+                    updateUnreadBadges(response.unreadCount);
+                }
+            } catch (error) {
+                // Silent fail - it's okay if this fails
+            }
+        }, 30000);
+        
+        // Sync notifications every minute
+        AppState.startBackgroundUpdate('notifications', async () => {
+            if (!AppState.connectivity.online) return;
+            
+            try {
+                const response = await window.safeApiFetch('/api/notifications', 'GET');
+                if (response && response.notifications) {
+                    updateNotificationBadges(response.notifications);
+                }
+            } catch (error) {
+                // Silent fail
+            }
+        }, 60000);
+    }
+    
+    // Handle messages from iframes
     function handleIframeMessage(event) {
+        // Security: Consider validating event.origin in production
         if (event.data && event.data.type) {
-            console.log('Parent received from iframe:', event.data.type);
+            console.log('📨 Parent received from iframe:', event.data.type);
             
             switch(event.data.type) {
                 case 'iframe_loaded':
@@ -2219,6 +3026,7 @@
                                 timestamp: Date.now()
                             }, '*');
                         } catch (e) {
+                            console.warn('⚠️ Failed to send auth data to iframe');
                         }
                     }
                     break;
@@ -2243,6 +3051,9 @@
                         AuthManager.setAuthenticated(event.data.user, event.data.token);
                         showGlobalNotification(`Welcome ${event.data.user.name || 'User'}!`, 'success', 3000);
                         notifyAllIframesAboutAuth(event.data.user, event.data.token);
+                        
+                        // Start data sync tasks
+                        startDataSyncTasks();
                     }
                     break;
                     
@@ -2320,12 +3131,24 @@
                     }
                     break;
                     
+                case 'UPDATE_SETTINGS':
+                    if (event.data.settings) {
+                        localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
+                        AppState.saveToCache('settings', event.data.settings);
+                        
+                        // Notify all iframes about settings change
+                        notifyAllIframesAboutSettings(event.data.settings);
+                    }
+                    break;
+                    
                 default:
+                    console.log('📨 Unhandled message type:', event.data.type);
                     break;
             }
         }
     }
     
+    // Notify all iframes about authentication
     function notifyAllIframesAboutAuth(user, token) {
         document.querySelectorAll('.content-iframe').forEach(iframe => {
             try {
@@ -2338,44 +3161,67 @@
                     }, '*');
                 }
             } catch (e) {
+                console.warn('⚠️ Failed to notify iframe about auth');
             }
         });
     }
     
+    // Notify all iframes about settings changes
+    function notifyAllIframesAboutSettings(settings) {
+        document.querySelectorAll('.content-iframe').forEach(iframe => {
+            try {
+                if (iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({
+                        type: 'UPDATE_SETTINGS',
+                        settings: settings,
+                        timestamp: Date.now()
+                    }, '*');
+                }
+            } catch (e) {
+                console.warn('⚠️ Failed to notify iframe about settings');
+            }
+        });
+    }
+    
+    // DOM loaded handler
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, starting quick initialization...');
+        console.log('📄 DOM loaded, starting quick initialization...');
         
         showLoading();
         
+        // Set timeout for loading screen
         loadingTimeout = setTimeout(() => {
-            console.log('Loading timeout - showing app anyway');
+            console.log('⏰ Loading timeout - showing app anyway');
             hideLoading();
             if (!appInitialized) {
                 quickInitialize();
             }
         }, 3000);
         
+        // Start initialization
         quickInitialize();
     });
     
+    // Check API readiness
     function checkApiReadiness() {
         if (typeof window.parent.api !== 'undefined') {
             AppState.setApiReady(window.parent.api);
             window.api = window.parent.api;
-            console.log('API ready (from parent)');
+            console.log('✅ API ready (from parent)');
             return true;
         }
         
         if (typeof window.api !== 'undefined') {
             AppState.setApiReady(window.api);
-            console.log('API ready (direct)');
+            console.log('✅ API ready (direct)');
             return true;
         }
         
-        console.log('API not ready yet');
+        console.log('⏳ API not ready yet');
         return false;
     }
     
+    // Setup back button functionality
     function setupBackButton() {
         window.goBack = function() {
             if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) {
@@ -2412,6 +3258,7 @@
         };
     }
     
+    // View state management functions
     function setIsInChatView(inChatView) {
         isInChatView = inChatView;
         if (inChatView) {
@@ -2456,8 +3303,9 @@
         }
     }
     
+    // Fullscreen page detection
     function setupFullscreenPageDetection() {
-        console.log('Setting up fullscreen page detection...');
+        console.log('🔍 Setting up fullscreen page detection...');
         
         const iframeObserver = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
@@ -2535,10 +3383,12 @@
                     type: 'get_fullscreen_status'
                 }, '*');
             } catch (e) {
+                console.warn('⚠️ Failed to check iframe for fullscreen status');
             }
         }
     }
     
+    // Bottom navigation control
     function showBottomNavigation() {
         if (window.innerWidth >= 768) return;
         if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) return;
@@ -2560,9 +3410,11 @@
         }
     }
     
+    // Navigation setup
     function setupNavigation() {
-        console.log('Setting up navigation...');
+        console.log('🗺️ Setting up navigation...');
         
+        // Desktop navigation
         document.querySelectorAll('.nav-icon').forEach(icon => {
             icon.addEventListener('click', function() {
                 const page = this.dataset.page;
@@ -2576,6 +3428,7 @@
             });
         });
         
+        // Mobile navigation
         document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
             icon.addEventListener('click', function() {
                 const page = this.dataset.page;
@@ -2589,6 +3442,7 @@
             });
         });
         
+        // Show mobile nav on mobile
         if (window.innerWidth < 768) {
             const mobileNavBar = document.getElementById('mobileNavBar');
             if (mobileNavBar) {
@@ -2596,12 +3450,14 @@
             }
         }
         
+        // Setup back button and fullscreen detection
         setupBackButton();
         setupFullscreenPageDetection();
     }
     
+    // Preload iframes for better performance
     function preloadIframes() {
-        console.log('Preloading iframes in background...');
+        console.log('📦 Preloading iframes in background...');
         
         const iframes = [
             { id: 'messagesIframe', src: 'message.html' },
@@ -2622,7 +3478,7 @@
                 const iframeSrc = iframe.src + cacheBuster;
                 
                 element.onload = function() {
-                    console.log(`${iframe.id} loaded successfully`);
+                    console.log(`✅ ${iframe.id} loaded successfully`);
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
                     
@@ -2638,14 +3494,33 @@
                                 timestamp: Date.now()
                             }, '*');
                         } catch (e) {
+                            console.warn(`⚠️ Failed to send auth data to ${iframe.id}`);
                         }
                     }
                 };
                 
                 element.onerror = function() {
-                    console.error(`Failed to load ${iframe.id}`);
+                    console.error(`❌ Failed to load ${iframe.id}`);
                     iframesLoaded[iframe.id] = true;
                     this.classList.add('loaded');
+                    
+                    // Show error in iframe
+                    try {
+                        this.contentWindow.document.body.innerHTML = `
+                            <div class="flex items-center justify-center h-full">
+                                <div class="text-center p-8">
+                                    <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
+                                    <h3 class="text-xl font-semibold mb-2">Failed to load</h3>
+                                    <p class="text-gray-600">Please check your connection and try again</p>
+                                    <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg">
+                                        Retry
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } catch (e) {
+                        // Iframe security restrictions
+                    }
                 };
                 
                 element.src = iframeSrc;
@@ -2653,24 +3528,30 @@
         });
     }
     
+    // Switch between pages
     function switchPage(pageName) {
-        console.log('Switching to page:', pageName);
+        console.log('🔄 Switching to page:', pageName);
         currentPage = pageName;
         
+        // Exit any fullscreen views
         if (isInChatView) setIsInChatView(false);
         if (isInStatusView) setIsInStatusView(false);
         if (isInGroupView) setIsInGroupView(false);
         if (isInFullscreenView) setIsInFullscreenView(false);
         
+        // Hide loading screen
         hideLoading();
         
+        // Hide all content areas
         const contentAreas = document.querySelectorAll('.content-area');
         contentAreas.forEach(area => {
             area.classList.add('hidden');
         });
         
+        // Update active nav icon
         updateActiveNavIcon(pageName);
         
+        // Show the selected content area
         const iframeContainer = document.getElementById(`${pageName}Content`);
         if (iframeContainer) {
             iframeContainer.classList.remove('hidden');
@@ -2682,6 +3563,7 @@
                 iframe.style.width = '100%';
                 iframe.style.height = '100%';
                 
+                // Send auth data if iframe is loaded
                 if (iframesLoaded[`${pageName}Iframe`]) {
                     iframe.classList.add('loaded');
                     
@@ -2697,29 +3579,31 @@
                                 timestamp: Date.now()
                             }, '*');
                         } catch (e) {
+                            console.warn(`⚠️ Failed to send auth data to ${pageName}Iframe`);
                         }
                     }
                 }
             }
         }
         
+        // Check for fullscreen pages after a delay
         setTimeout(() => {
             checkIframeForFullscreenPage();
         }, 200);
     }
     
+    // Handle user logout
     function handleLogout() {
-        console.log('Logging out user');
+        console.log('👋 Logging out user');
         
+        // Clear authentication
         AppState.clearAuthentication();
+        AuthManager.clearAuth();
         
-        if (window.AuthManager) {
-            window.AuthManager.clearAuth();
-        }
+        // Clear all intervals and timeouts
+        AppState.cleanup();
         
-        window.accessToken = null;
-        delete window.currentUser;
-        
+        // Notify all iframes
         document.querySelectorAll('.content-iframe').forEach(iframe => {
             try {
                 if (iframe.contentWindow) {
@@ -2729,13 +3613,19 @@
                     }, '*');
                 }
             } catch (e) {
+                console.warn('⚠️ Failed to notify iframe about logout');
             }
         });
         
-        window.location.href = '../index.html';
+        // Redirect to login page
+        setTimeout(() => {
+            window.location.href = '../index.html';
+        }, 500);
     }
     
+    // Update active navigation icon
     function updateActiveNavIcon(pageName) {
+        // Desktop icons
         const navIcons = document.querySelectorAll('.nav-icon');
         navIcons.forEach(icon => {
             icon.classList.remove('text-white', 'bg-purple-700');
@@ -2748,6 +3638,7 @@
             activeIcon.classList.add('text-white', 'bg-purple-700');
         }
         
+        // Mobile icons
         const mobileNavIcons = document.querySelectorAll('.mobile-nav-icon');
         mobileNavIcons.forEach(icon => {
             icon.classList.remove('active');
@@ -2759,6 +3650,7 @@
         }
     }
     
+    // Loading screen control
     function showLoading() {
         const loadingScreen = document.getElementById('loadingScreen');
         if (loadingScreen) {
@@ -2778,6 +3670,7 @@
         }
     }
     
+    // Global notification system
     function showGlobalNotification(message, type = 'info', duration = 5000) {
         const container = document.getElementById('globalNotificationContainer');
         if (!container) return;
@@ -2807,6 +3700,7 @@
         
         container.appendChild(notification);
         
+        // Auto-remove after duration
         setTimeout(() => {
             removeNotification(notificationId);
         }, duration);
@@ -2819,6 +3713,66 @@
         }
     }
     
+    // Update unread badges
+    function updateUnreadBadges(unreadCount) {
+        // Update sidebar badge
+        const sidebarBadge = document.getElementById('sidebarStatusBadge');
+        if (sidebarBadge) {
+            if (unreadCount > 0) {
+                sidebarBadge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+                sidebarBadge.classList.remove('hidden');
+            } else {
+                sidebarBadge.classList.add('hidden');
+            }
+        }
+        
+        // Update mobile badge
+        const mobileBadge = document.getElementById('mobileStatusBadge');
+        if (mobileBadge) {
+            if (unreadCount > 0) {
+                mobileBadge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+                mobileBadge.classList.remove('hidden');
+            } else {
+                mobileBadge.classList.add('hidden');
+            }
+        }
+    }
+    
+    // Update notification badges
+    function updateNotificationBadges(notifications) {
+        const unreadNotifications = notifications.filter(n => !n.read).length;
+        
+        // Update badges based on notification type
+        notifications.forEach(notification => {
+            if (!notification.read) {
+                switch(notification.type) {
+                    case 'message':
+                        updateBadge('mobileChatBadge', 1);
+                        break;
+                    case 'call':
+                        updateBadge('mobileCallBadge', 1);
+                        break;
+                    case 'group':
+                        updateBadge('mobileGroupBadge', 1);
+                        break;
+                }
+            }
+        });
+    }
+    
+    function updateBadge(badgeId, count) {
+        const badge = document.getElementById(badgeId);
+        if (badge) {
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+    }
+    
+    // Event listeners
     window.addEventListener('message', handleIframeMessage);
     
     window.addEventListener('resize', function() {
@@ -2838,14 +3792,29 @@
     
     window.addEventListener('online', function() {
         AppState.connectivity.online = true;
+        AppState.connectivity.lastCheck = Date.now();
         showGlobalNotification('Back online', 'success', 3000);
+        
+        // Try to validate auth when back online
+        setTimeout(() => validateAuth(), 1000);
     });
     
     window.addEventListener('offline', function() {
         AppState.connectivity.online = false;
+        AppState.connectivity.lastCheck = Date.now();
         showGlobalNotification('You are offline', 'warning', 5000);
     });
     
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        AppState.cleanup();
+        
+        if (AuthManager.state.validationInterval) {
+            clearInterval(AuthManager.state.validationInterval);
+        }
+    });
+    
+    // Expose functions to global scope
     window.removeNotification = removeNotification;
     window.showBottomNavigation = showBottomNavigation;
     window.hideBottomNavigation = hideBottomNavigation;
@@ -2861,15 +3830,18 @@
     window.AuthManager = AuthManager;
     window.bootstrapIframe = window.bootstrapIframe;
     window.notifyAllIframesAboutAuth = notifyAllIframesAboutAuth;
+    window.getValidToken = AppState.getValidToken.bind(AppState);
+    window.validateAuth = validateAuth;
+    window.showGlobalNotification = showGlobalNotification;
     
-    console.log('Page initialization system loaded');
-    console.log('Initial AppState:', {
+    console.log('✅ Page initialization system loaded');
+    console.log('📊 Initial AppState:', {
         authenticated: AppState.auth.authenticated,
         user: AppState.auth.user,
         apiReady: AppState.api.ready,
         online: AppState.connectivity.online
     });
-    console.log('AuthManager state:', {
+    console.log('🔐 AuthManager state:', {
         isAuthenticated: AuthManager.state.isAuthenticated,
         user: AuthManager.state.user,
         token: AuthManager.state.token ? 'Present' : 'Missing'

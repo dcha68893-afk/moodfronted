@@ -1262,389 +1262,610 @@
         // DOM Elements
         const elements = {};
         
-        // ==================== ENHANCED BOOTSTRAP WITH API.JS INTEGRATION ====================
-        async function bootstrapIframe() {
-            console.log('Bootstrapping calls iframe with enhanced API integration...');
-            
-            // Show connecting status
-            elements.apiStatusIndicator.style.display = 'block';
-            elements.apiStatusIndicator.className = 'api-status-indicator connecting';
-            elements.apiStatusText.textContent = 'Authenticating...';
-            
-            try {
-                // Enhanced: Wait for parent api.js to be ready
-                if (typeof window.waitForAuthReady === 'function') {
-                    console.log('Waiting for auth to be ready via parent API...');
-                    await window.waitForAuthReady();
-                } else {
-                    console.log('Parent API not available, checking tokens directly...');
-                    await checkAuthToken();
-                }
-                
-                // NEW: Fast user validation from multiple storage locations
-                await validateUserFromStorage();
-                
-                console.log('Auth ready, proceeding with initialization...');
-                
-                // Now initialize the app
-                initializeApp();
-                
-            } catch (error) {
-                console.error('Bootstrap error:', error);
-                showApiError('Authentication failed: ' + error.message);
-                handleAuthError();
+        // Enhanced API integration functions
+        class CallAPIIntegration {
+            constructor() {
+                this.maxRetries = 3;
+                this.retryDelay = 1000;
+                this.exponentialBackoff = true;
             }
-        }
-        
-        // NEW: Enhanced user validation from all storage locations
-        async function validateUserFromStorage() {
-            console.log('Validating user from storage...');
             
-            // Check all possible token locations
-            const tokenSources = [
-                { key: 'accessToken', storage: localStorage },
-                { key: 'moodchat_token', storage: localStorage },
-                { key: 'token', storage: localStorage },
-                { key: 'authUser', storage: localStorage },
-                { key: 'user', storage: localStorage }
-            ];
-            
-            let validToken = null;
-            let userData = null;
-            
-            // First pass: find any valid token
-            for (const source of tokenSources) {
+            // Get authentication token securely
+            async getAuthToken() {
                 try {
-                    const token = source.storage.getItem(source.key);
-                    if (token) {
-                        console.log(`Found token in ${source.key}`);
-                        
-                        // Try to parse if it's JSON (user data)
-                        if (source.key.includes('user') || source.key.includes('auth')) {
-                            try {
-                                userData = JSON.parse(token);
-                                console.log('Parsed user data:', userData);
-                                break;
-                            } catch (e) {
-                                // Not JSON, continue
-                            }
-                        } else {
-                            validToken = token;
+                    // First try to get from parent window
+                    if (window.parent && window.parent.getAuthToken) {
+                        const parentToken = await window.parent.getAuthToken();
+                        if (parentToken && this.validateToken(parentToken)) {
+                            this.syncTokenToStorage(parentToken);
+                            return parentToken;
                         }
                     }
+                    
+                    // Try localStorage
+                    const tokens = [
+                        localStorage.getItem('accessToken'),
+                        localStorage.getItem('moodchat_token'),
+                        localStorage.getItem('token')
+                    ].filter(token => token && this.validateToken(token));
+                    
+                    if (tokens.length > 0) {
+                        return tokens[0];
+                    }
+                    
+                    // Check sessionStorage
+                    const sessionTokens = [
+                        sessionStorage.getItem('accessToken'),
+                        sessionStorage.getItem('moodchat_token'),
+                        sessionStorage.getItem('token')
+                    ].filter(token => token && this.validateToken(token));
+                    
+                    if (sessionTokens.length > 0) {
+                        return sessionTokens[0];
+                    }
+                    
+                    console.warn('[Calls iframe] No valid tokens found');
+                    return null;
                 } catch (error) {
-                    console.warn(`Error reading ${source.key}:`, error);
+                    console.error('[Calls iframe] Error getting auth token:', error);
+                    return null;
                 }
             }
             
-            // If we found user data, update UI immediately
-            if (userData) {
-                AppState.user = userData;
-                AppState.currentUser = userData;
-                AppState.isAuthenticated = true;
-                updateUIWithUserData(userData);
+            // Validate token format
+            validateToken(token) {
+                if (!token || typeof token !== 'string') return false;
+                if (token.length < 10) return false; // Basic validation
                 return true;
             }
             
-            // If we found a token but no user data, try to fetch user info
-            if (validToken && !userData) {
+            // Sync token to storage for API access
+            syncTokenToStorage(token) {
                 try {
-                    // Try to fetch user info from API
-                    if (AppState.isOnline) {
-                        const response = await fetch('/api/user/info', {
-                            headers: {
-                                'Authorization': `Bearer ${validToken}`,
-                                'Content-Type': 'application/json'
-                            }
-                        });
-                        
-                        if (response.ok) {
-                            userData = await response.json();
-                            AppState.user = userData;
-                            AppState.currentUser = userData;
-                            AppState.isAuthenticated = true;
-                            
-                            // Cache user data
-                            localStorage.setItem('authUser', JSON.stringify(userData));
-                            
-                            updateUIWithUserData(userData);
-                            return true;
-                        }
+                    if (token !== localStorage.getItem('accessToken')) {
+                        localStorage.setItem('accessToken', token);
                     }
                 } catch (error) {
-                    console.warn('Failed to fetch user info:', error);
+                    console.warn('[Calls iframe] Failed to sync token to storage:', error);
                 }
             }
             
-            // Fallback: check session storage
-            try {
-                const sessionUser = sessionStorage.getItem('currentUser');
-                if (sessionUser) {
-                    userData = JSON.parse(sessionUser);
-                    AppState.user = userData;
-                    AppState.currentUser = userData;
-                    AppState.isAuthenticated = true;
-                    updateUIWithUserData(userData);
-                    return true;
-                }
-            } catch (error) {
-                console.warn('Error reading session storage:', error);
-            }
-            
-            // No valid user found
-            return false;
-        }
-        
-        // NEW: Update UI with user data
-        function updateUIWithUserData(userData) {
-            console.log('Updating UI with user data:', userData);
-            
-            // Update API status indicator
-            elements.apiStatusIndicator.className = 'api-status-indicator connected';
-            elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
-            
-            // Update any user-specific UI elements
-            if (userData.name) {
-                document.title = `Calls - ${userData.name}`;
-            }
-            
-            // Enable UI components
-            enableUI();
-            
-            // Start background data loading
-            setTimeout(() => {
-                loadInitialData();
-            }, 100);
-            
-            // Hide API status after delay
-            setTimeout(() => {
-                elements.apiStatusIndicator.style.display = 'none';
-            }, 3000);
-        }
-        
-        async function checkAuthToken() {
-            // Check for token with retry logic
-            let attempts = 0;
-            const maxAttempts = 10;
-            
-            while (attempts < maxAttempts) {
-                const token = localStorage.getItem('accessToken') || 
-                              localStorage.getItem('moodchat_token') || 
-                              localStorage.getItem('token');
-                
-                if (token) {
-                    console.log('Token found on attempt', attempts + 1);
-                    return token;
-                }
-                
-                console.log('Token not found, waiting... attempt', attempts + 1);
-                await new Promise(resolve => setTimeout(resolve, 500));
-                attempts++;
-            }
-            
-            throw new Error('No authentication token found after multiple attempts');
-        }
-        
-        function redirectToLogin() {
-            console.log('Redirecting to login...');
-            const currentPath = window.location.pathname;
-            window.location.href = `/index.html?redirect=${encodeURIComponent(currentPath)}`;
-        }
-        
-        function handleAuthError() {
-            console.error('Authentication error detected');
-            
-            // Clear all auth-related storage
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
-            localStorage.removeItem('moodchat_token');
-            localStorage.removeItem('token');
-            localStorage.removeItem('authUser');
-            sessionStorage.removeItem('currentUser');
-            
-            // Show error status
-            elements.apiStatusIndicator.className = 'api-status-indicator disconnected';
-            elements.apiStatusText.textContent = 'Authentication failed';
-            
-            // Redirect after delay
-            setTimeout(() => {
-                redirectToLogin();
-            }, 2000);
-        }
-        
-        function showApiError(message) {
-            elements.apiStatusIndicator.className = 'api-status-indicator disconnected';
-            elements.apiStatusText.textContent = message;
-            
-            // Show error in UI
-            showNotification(message, 'error');
-        }
-        
-        // ==================== ENHANCED API WRAPPER WITH TOKEN HANDLING ====================
-        const ApiClient = {
-            async request(endpoint, options = {}) {
-                // Get token from multiple sources
-                const token = localStorage.getItem('accessToken') || 
-                              localStorage.getItem('moodchat_token') || 
-                              localStorage.getItem('token');
-                
-                if (!token) {
-                    console.warn('No authentication token available');
-                    
-                    // Try to get user from storage
-                    const userData = await validateUserFromStorage();
-                    if (!userData) {
-                        handleAuthError();
-                        throw new Error('Authentication required');
-                    }
-                }
-                
-                // Prepare headers
-                const headers = {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                };
-                
-                // Make request with timeout
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
-                
+            // Fetch with retry logic
+            async fetchWithRetry(url, options = {}, retryCount = 0) {
                 try {
-                    const response = await fetch(`/api${endpoint}`, {
+                    const token = await this.getAuthToken();
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    };
+                    
+                    if (token) {
+                        headers['Authorization'] = `Bearer ${token}`;
+                    }
+                    
+                    const response = await fetch(url, {
                         ...options,
-                        headers,
-                        signal: controller.signal
+                        headers
                     });
                     
-                    clearTimeout(timeoutId);
-                    
-                    // Handle auth errors
-                    if (response.status === 401 || response.status === 403) {
-                        console.log('Auth error detected in API call, trying to revalidate...');
-                        
-                        // Try to revalidate user
-                        const revalidated = await validateUserFromStorage();
-                        if (!revalidated) {
-                            handleAuthError();
-                            throw new Error('Authentication required');
+                    if (!response.ok) {
+                        if (response.status === 401 || response.status === 403) {
+                            // Authentication error - don't retry
+                            this.handleAuthError();
+                            throw new Error(`Authentication failed: ${response.status}`);
                         }
                         
-                        // Retry with potentially new token
-                        return this.request(endpoint, options);
-                    }
-                    
-                    if (!response.ok) {
+                        if (response.status >= 500 && retryCount < this.maxRetries) {
+                            // Server error - retry with exponential backoff
+                            const delay = this.exponentialBackoff ? 
+                                this.retryDelay * Math.pow(2, retryCount) : this.retryDelay;
+                            
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            return this.fetchWithRetry(url, options, retryCount + 1);
+                        }
+                        
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
                     return response;
                 } catch (error) {
-                    clearTimeout(timeoutId);
-                    
-                    if (error.name === 'AbortError') {
-                        console.warn('Request timeout for', endpoint);
-                        throw new Error('Request timeout');
+                    if (retryCount < this.maxRetries && 
+                        (error.message.includes('Network') || error.message.includes('Failed to fetch'))) {
+                        // Network error - retry
+                        const delay = this.exponentialBackoff ? 
+                            this.retryDelay * Math.pow(2, retryCount) : this.retryDelay;
+                        
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        return this.fetchWithRetry(url, options, retryCount + 1);
                     }
                     
                     throw error;
                 }
-            },
+            }
             
-            async get(endpoint) {
-                return this.request(endpoint, { method: 'GET' });
-            },
-            
-            async post(endpoint, data) {
-                return this.request(endpoint, {
-                    method: 'POST',
-                    body: JSON.stringify(data)
+            // Handle authentication error
+            handleAuthError() {
+                console.warn('[Calls iframe] Authentication error detected');
+                AppState.isAuthenticated = false;
+                AppState.user = null;
+                
+                // Clear invalid tokens
+                ['accessToken', 'moodchat_token', 'token', 'authUser', 'currentUser'].forEach(key => {
+                    localStorage.removeItem(key);
+                    sessionStorage.removeItem(key);
                 });
-            },
+                
+                // Show user-friendly message
+                showNotification('Authentication expired. Please login again.', 'warning');
+                
+                // Notify parent if available
+                if (window.parent) {
+                    window.parent.postMessage({
+                        type: 'AUTH_ERROR',
+                        source: 'calls-iframe'
+                    }, '*');
+                }
+            }
             
-            async put(endpoint, data) {
-                return this.request(endpoint, {
-                    method: 'PUT',
-                    body: JSON.stringify(data)
-                });
-            },
-            
-            async delete(endpoint) {
-                return this.request(endpoint, { method: 'DELETE' });
-            },
-            
-            // Specific API methods with enhanced error handling
-            async getUserInfo() {
+            // Fetch user data
+            async fetchUserData() {
                 try {
-                    const response = await this.get('/user/info');
-                    const userData = await response.json();
+                    const token = await this.getAuthToken();
+                    if (!token) {
+                        throw new Error('No authentication token available');
+                    }
                     
-                    // Cache user data
-                    localStorage.setItem('authUser', JSON.stringify(userData));
-                    sessionStorage.setItem('currentUser', JSON.stringify(userData));
-                    
-                    // Update UI immediately
-                    updateUIWithUserData(userData);
-                    
-                    return userData;
-                } catch (error) {
-                    console.warn('Failed to fetch user info, using cached data:', error);
-                    
-                    // Try to get from cache
-                    const cachedUser = localStorage.getItem('authUser');
-                    if (cachedUser) {
-                        try {
-                            const userData = JSON.parse(cachedUser);
-                            updateUIWithUserData(userData);
+                    // Try to use api.js module if available
+                    if (window.ApiModule && window.ApiModule.getCurrentUser) {
+                        const userData = await window.ApiModule.getCurrentUser();
+                        if (userData) {
+                            this.updateUserState(userData);
                             return userData;
-                        } catch (e) {
-                            // Invalid cached data
                         }
                     }
                     
-                    throw error;
+                    // Fallback to direct fetch
+                    const response = await this.fetchWithRetry('/api/user/me');
+                    const userData = await response.json();
+                    this.updateUserState(userData);
+                    return userData;
+                } catch (error) {
+                    console.warn('[Calls iframe] Failed to fetch user data:', error.message);
+                    
+                    // Try to get from storage as fallback
+                    const cachedUser = localStorage.getItem('authUser') || 
+                                      localStorage.getItem('currentUser');
+                    
+                    if (cachedUser) {
+                        try {
+                            const userData = JSON.parse(cachedUser);
+                            this.updateUserState(userData);
+                            return userData;
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached user data');
+                        }
+                    }
+                    
+                    return null;
                 }
-            },
-            
-            async getCallPermissions() {
-                const response = await this.get('/calls/permissions');
-                return response.json();
-            },
-            
-            async getContacts() {
-                const response = await this.get('/contacts');
-                return response.json();
-            },
-            
-            async getCallHistory() {
-                const response = await this.get('/calls/history');
-                return response.json();
-            },
-            
-            async getPremiumStatus() {
-                const response = await this.get('/user/premium');
-                return response.json();
-            },
-            
-            async startCall(callData) {
-                const response = await this.post('/calls/start', callData);
-                return response.json();
-            },
-            
-            async endCall(callData) {
-                const response = await this.post('/calls/end', callData);
-                return response.json();
-            },
-            
-            async sendPeerId(peerData) {
-                const response = await this.post('/calls/peer', peerData);
-                return response.json();
             }
-        };
+            
+            // Update user state
+            updateUserState(userData) {
+                if (!userData) return;
+                
+                AppState.user = userData;
+                AppState.currentUser = userData;
+                AppState.isAuthenticated = true;
+                
+                // Cache user data
+                try {
+                    localStorage.setItem('currentUser', JSON.stringify(userData));
+                } catch (error) {
+                    console.warn('[Calls iframe] Failed to cache user data:', error);
+                }
+                
+                // Update UI
+                if (elements.apiStatusIndicator) {
+                    elements.apiStatusIndicator.className = 'api-status-indicator connected';
+                    elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
+                    
+                    setTimeout(() => {
+                        elements.apiStatusIndicator.style.display = 'none';
+                    }, 2000);
+                }
+            }
+            
+            // Fetch contacts with caching
+            async fetchContacts(forceRefresh = false) {
+                try {
+                    // Check cache first
+                    if (!forceRefresh && AppState.contacts.length > 0) {
+                        return AppState.contacts;
+                    }
+                    
+                    const cachedContacts = localStorage.getItem('cachedContacts');
+                    if (!forceRefresh && cachedContacts) {
+                        try {
+                            const contacts = JSON.parse(cachedContacts);
+                            AppState.contacts = contacts;
+                            this.renderContacts(contacts);
+                            return contacts;
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached contacts');
+                        }
+                    }
+                    
+                    // Fetch from API
+                    const response = await this.fetchWithRetry('/api/contacts');
+                    const contacts = await response.json();
+                    
+                    // Update state
+                    AppState.contacts = contacts;
+                    
+                    // Cache results
+                    try {
+                        localStorage.setItem('cachedContacts', JSON.stringify(contacts));
+                        localStorage.setItem('cachedContactsTimestamp', Date.now().toString());
+                    } catch (error) {
+                        console.warn('[Calls iframe] Failed to cache contacts:', error);
+                    }
+                    
+                    // Render if needed
+                    if (elements.newCallModal && elements.newCallModal.classList.contains('active')) {
+                        this.renderContacts(contacts);
+                    }
+                    
+                    return contacts;
+                } catch (error) {
+                    console.warn('[Calls iframe] Failed to fetch contacts:', error.message);
+                    
+                    // Use cached data if available
+                    const cachedContacts = localStorage.getItem('cachedContacts');
+                    if (cachedContacts) {
+                        try {
+                            const contacts = JSON.parse(cachedContacts);
+                            AppState.contacts = contacts;
+                            this.renderContacts(contacts);
+                            return contacts;
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached contacts on error');
+                        }
+                    }
+                    
+                    // Return empty array as fallback
+                    return [];
+                }
+            }
+            
+            // Fetch call history
+            async fetchCallHistory(forceRefresh = false) {
+                try {
+                    // Check cache first
+                    if (!forceRefresh && AppState.callHistory.length > 0) {
+                        return AppState.callHistory;
+                    }
+                    
+                    const cachedHistory = localStorage.getItem('cachedCallHistory');
+                    if (!forceRefresh && cachedHistory) {
+                        try {
+                            const history = JSON.parse(cachedHistory);
+                            AppState.callHistory = history;
+                            renderCallHistory();
+                            return history;
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached call history');
+                        }
+                    }
+                    
+                    // Fetch from API
+                    const response = await this.fetchWithRetry('/api/calls/history');
+                    const history = await response.json();
+                    
+                    // Update state
+                    AppState.callHistory = history;
+                    
+                    // Cache results
+                    try {
+                        localStorage.setItem('cachedCallHistory', JSON.stringify(history));
+                        localStorage.setItem('cachedCallHistoryTimestamp', Date.now().toString());
+                    } catch (error) {
+                        console.warn('[Calls iframe] Failed to cache call history:', error);
+                    }
+                    
+                    // Render
+                    renderCallHistory();
+                    
+                    return history;
+                } catch (error) {
+                    console.warn('[Calls iframe] Failed to fetch call history:', error.message);
+                    
+                    // Use cached data if available
+                    const cachedHistory = localStorage.getItem('cachedCallHistory');
+                    if (cachedHistory) {
+                        try {
+                            const history = JSON.parse(cachedHistory);
+                            AppState.callHistory = history;
+                            renderCallHistory();
+                            return history;
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached call history on error');
+                        }
+                    }
+                    
+                    return [];
+                }
+            }
+            
+            // Fetch settings
+            async fetchSettings() {
+                try {
+                    // Try to get from parent first
+                    if (window.parent && window.parent.AppState && window.parent.AppState.settings) {
+                        AppState.settings = { ...AppState.settings, ...window.parent.AppState.settings };
+                        applySettingsToUI();
+                        return AppState.settings;
+                    }
+                    
+                    // Try API
+                    const response = await this.fetchWithRetry('/api/user/settings');
+                    const settings = await response.json();
+                    
+                    if (settings) {
+                        AppState.settings = { ...AppState.settings, ...settings };
+                        applySettingsToUI();
+                        
+                        // Cache settings
+                        try {
+                            localStorage.setItem('callSettings', JSON.stringify(settings));
+                        } catch (error) {
+                            console.warn('[Calls iframe] Failed to cache settings:', error);
+                        }
+                    }
+                    
+                    return AppState.settings;
+                } catch (error) {
+                    console.warn('[Calls iframe] Failed to fetch settings:', error.message);
+                    
+                    // Use cached settings
+                    const cachedSettings = localStorage.getItem('callSettings');
+                    if (cachedSettings) {
+                        try {
+                            const settings = JSON.parse(cachedSettings);
+                            AppState.settings = { ...AppState.settings, ...settings };
+                            applySettingsToUI();
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached settings');
+                        }
+                    }
+                    
+                    return AppState.settings;
+                }
+            }
+            
+            // Check premium status
+            async checkPremiumStatus() {
+                try {
+                    // Try to get from parent first
+                    if (window.parent && window.parent.AppState) {
+                        AppState.isPremium = window.parent.AppState.isPremium || false;
+                        AppState.trialDaysLeft = window.parent.AppState.trialDaysLeft || 30;
+                        updatePremiumUI();
+                        return AppState.isPremium;
+                    }
+                    
+                    // Try API
+                    const response = await this.fetchWithRetry('/api/user/premium');
+                    const premiumData = await response.json();
+                    
+                    AppState.isPremium = premiumData.isPremium || false;
+                    AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
+                    AppState.premiumFeatures = premiumData.features || AppState.premiumFeatures;
+                    
+                    // Cache premium status
+                    try {
+                        localStorage.setItem('premiumStatus', JSON.stringify({
+                            isPremium: AppState.isPremium,
+                            trialDaysLeft: AppState.trialDaysLeft,
+                            features: AppState.premiumFeatures
+                        }));
+                    } catch (error) {
+                        console.warn('[Calls iframe] Failed to cache premium status:', error);
+                    }
+                    
+                    updatePremiumUI();
+                    return AppState.isPremium;
+                } catch (error) {
+                    console.warn('[Calls iframe] Failed to check premium status:', error.message);
+                    
+                    // Use cached premium status
+                    const cachedPremium = localStorage.getItem('premiumStatus');
+                    if (cachedPremium) {
+                        try {
+                            const premiumData = JSON.parse(cachedPremium);
+                            AppState.isPremium = premiumData.isPremium || false;
+                            AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
+                            AppState.premiumFeatures = premiumData.features || AppState.premiumFeatures;
+                        } catch (e) {
+                            console.warn('[Calls iframe] Failed to parse cached premium status');
+                        }
+                    }
+                    
+                    updatePremiumUI();
+                    return AppState.isPremium;
+                }
+            }
+            
+            // Render contacts
+            renderContacts(contacts) {
+                if (!contacts || contacts.length === 0) {
+                    elements.contactsList.innerHTML = '<div class="offline-state"><i class="fas fa-users-slash"></i><p>No contacts available</p></div>';
+                    return;
+                }
+                
+                let html = '';
+                
+                contacts.forEach(contact => {
+                    const isOnline = Math.random() > 0.3;
+                    const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+                    
+                    html += `
+                        <div class="contact-item" data-id="${contact.id}">
+                            <input type="checkbox" class="contact-checkbox" id="contact-${contact.id}">
+                            <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
+                                ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
+                                <div class="call-status-icon ${isOnline ? 'incoming' : 'offline'}">
+                                    <i class="fas fa-circle"></i>
+                                </div>
+                            </div>
+                            <div class="call-info">
+                                <div class="call-name">
+                                    ${contact.name}
+                                    ${contact.isPremium ? '<span class="premium-badge">PRO</span>' : ''}
+                                </div>
+                                <div class="call-details">
+                                    <span>${isOnline ? 'Online' : 'Offline'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                elements.contactsList.innerHTML = html;
+                elements.contactsLoading.style.display = 'none';
+                
+                document.querySelectorAll('.contact-item').forEach(item => {
+                    item.addEventListener('click', function(e) {
+                        if (e.target.type === 'checkbox') return;
+                        
+                        const checkbox = this.querySelector('.contact-checkbox');
+                        checkbox.checked = !checkbox.checked;
+                        this.classList.toggle('selected', checkbox.checked);
+                        
+                        updateGroupCallButton();
+                    });
+                });
+                
+                this.renderGroupContacts(contacts);
+            }
+            
+            // Render group contacts
+            renderGroupContacts(contacts) {
+                let html = '';
+                
+                contacts.forEach(contact => {
+                    const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+                    
+                    html += `
+                        <div class="contact-item" data-id="${contact.id}">
+                            <input type="checkbox" class="contact-checkbox group-contact" id="group-contact-${contact.id}">
+                            <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
+                                ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
+                            </div>
+                            <div class="call-info">
+                                <div class="call-name">
+                                    ${contact.name}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                elements.groupContactsList.innerHTML = html;
+                
+                document.querySelectorAll('.group-contact').forEach(checkbox => {
+                    checkbox.addEventListener('change', function() {
+                        const item = this.closest('.contact-item');
+                        item.classList.toggle('selected', this.checked);
+                        
+                        updateGroupCallButton();
+                    });
+                });
+            }
+            
+            // Initialize background sync
+            initializeBackgroundSync() {
+                // Set up periodic sync if online
+                if (AppState.isOnline) {
+                    this.backgroundSyncInterval = setInterval(() => {
+                        this.performBackgroundSync();
+                    }, 30000); // Sync every 30 seconds
+                }
+                
+                // Listen for visibility changes
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && AppState.isOnline) {
+                        this.performBackgroundSync();
+                    }
+                });
+            }
+            
+            // Perform background sync
+            async performBackgroundSync() {
+                if (!AppState.isOnline || AppState.isInCall) return;
+                
+                try {
+                    await Promise.allSettled([
+                        this.fetchContacts(true),
+                        this.fetchCallHistory(true),
+                        this.checkPremiumStatus()
+                    ]);
+                    
+                    if (elements.syncIndicator) {
+                        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+                        elements.syncIndicator.classList.remove('syncing');
+                    }
+                    
+                    AppState.syncPending = false;
+                } catch (error) {
+                    console.warn('[Calls iframe] Background sync failed:', error.message);
+                    AppState.syncPending = true;
+                }
+            }
+            
+            // Clean up resources
+            cleanup() {
+                if (this.backgroundSyncInterval) {
+                    clearInterval(this.backgroundSyncInterval);
+                }
+            }
+        }
         
-        // Initialize function - wrapped in bootstrap
-        function initializeApp() {
-            console.log('Initializing call app...');
+        // ==================== ENHANCED BOOTSTRAP WITH IMMEDIATE UI RENDERING ====================
+        async function bootstrapIframe() {
+            console.log('[Calls iframe] Bootstrapping with enhanced API integration...');
+            
+            // Initialize API integration
+            window.callAPI = new CallAPIIntegration();
+            
+            // Show UI immediately from cached data
+            initializeUIFromCache();
+            
+            // Start background authentication and data loading
+            setTimeout(() => {
+                initializeBackgroundDataLoading();
+            }, 100);
+            
+            // Log once for initialization
+            console.log('[Calls iframe] UI loaded. Background auth pending.');
+            
+            // Initialize app functionality
+            initializeApp();
+            
+            // Initialize background sync
+            window.callAPI.initializeBackgroundSync();
+            
+            // Set up cleanup on page unload
+            window.addEventListener('beforeunload', () => {
+                if (window.callAPI) {
+                    window.callAPI.cleanup();
+                }
+            });
+        }
+        
+        // Initialize UI immediately from cache
+        function initializeUIFromCache() {
+            console.log('[Calls iframe] Initializing UI from cache...');
             
             // Cache all DOM elements
             cacheElements();
@@ -1655,13 +1876,61 @@
             // Initialize offline detection
             initializeOfflineDetection();
             
-            // Initialize UI state
+            // Initialize UI state from cache
             initializeUI();
+            
+            // Load cached data immediately
+            loadCachedDataToUI();
+            
+            // Enable UI immediately
+            enableUI();
             
             // Check URL parameters for call links
             checkUrlParameters();
-            
-            console.log('Call app initialization complete');
+        }
+        
+        // Background data loading
+        async function initializeBackgroundDataLoading() {
+            try {
+                // First authenticate
+                await window.callAPI.fetchUserData();
+                
+                if (AppState.isAuthenticated) {
+                    // Load data in parallel
+                    await Promise.allSettled([
+                        window.callAPI.fetchContacts(),
+                        window.callAPI.fetchCallHistory(),
+                        window.callAPI.fetchSettings(),
+                        window.callAPI.checkPremiumStatus()
+                    ]);
+                    
+                    console.log('[Calls iframe] Background data loading complete');
+                    
+                    // Update sync indicator
+                    if (elements.syncIndicator) {
+                        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+                        elements.syncIndicator.classList.remove('syncing');
+                    }
+                    
+                    // Schedule incoming call simulation only if we have contacts
+                    setTimeout(() => {
+                        if (AppState.contacts.length > 0) {
+                            simulateIncomingCall();
+                        }
+                    }, 10000);
+                } else {
+                    console.log('[Calls iframe] Not authenticated, loading cached data only');
+                    showNotification('Not authenticated. Some features may be limited.', 'warning');
+                }
+            } catch (error) {
+                console.error('[Calls iframe] Background data loading error:', error);
+                // Silent fail - UI already functional
+            }
+        }
+        
+        // Initialize function
+        function initializeApp() {
+            console.log('[Calls iframe] Initializing call app...');
         }
         
         function cacheElements() {
@@ -1884,6 +2153,9 @@
             window.addEventListener('offline', handleOffline);
             window.addEventListener('storage', handleStorageEvent);
             
+            // Message event for parent communication
+            window.addEventListener('message', handleParentMessage);
+            
             // Incoming call events
             elements.declineCallBtn.addEventListener('click', declineIncomingCall);
             elements.acceptCallBtn.addEventListener('click', acceptIncomingCall);
@@ -2012,232 +2284,123 @@
             makeDraggable(elements.pipContainer);
         }
         
-        // NEW: Enhanced data loading with parallel execution
-        function loadInitialData() {
-            console.log('Starting to load initial data with parallel execution...');
-            
-            // Check if we can safely make API calls
-            if (!AppState.isOnline) {
-                console.log('Offline, loading from cache');
-                loadCachedData();
+        // Handle messages from parent window
+        function handleParentMessage(event) {
+            // Validate origin for security
+            const allowedOrigins = [window.location.origin, 'http://localhost:*', 'https://yourdomain.com'];
+            if (!allowedOrigins.some(origin => event.origin.match(new RegExp(origin.replace('*', '.*'))))) {
+                console.warn('[Calls iframe] Message from unauthorized origin:', event.origin);
                 return;
             }
             
-            // Set authentication state
-            AppState.isAuthenticated = true;
-            AppState.apiReady = true;
+            const data = event.data;
             
-            // Update API status
-            elements.apiStatusIndicator.className = 'api-status-indicator connected';
-            
-            // Hide API status after successful auth
-            setTimeout(() => {
-                elements.apiStatusIndicator.style.display = 'none';
-            }, 2000);
-            
-            // Load data in parallel with proper error handling
-            const loadPromises = [
-                loadContacts(),
-                loadCallHistory(),
-                loadSettings(),
-                checkPremiumStatus()
-            ];
-            
-            // Use Promise.allSettled to continue even if some fail
-            Promise.allSettled(loadPromises)
-                .then(() => {
-                    enableUI();
-                    
-                    // Schedule incoming call simulation only if we have contacts
-                    setTimeout(() => {
-                        if (AppState.contacts.length > 0) {
-                            simulateIncomingCall();
-                        }
-                    }, 10000);
-                })
-                .catch(error => {
-                    console.error('Error in initial data loading:', error);
-                    loadCachedData();
-                    enableUI();
-                });
-        }
-        
-        function loadContacts() {
-            if (!AppState.isOnline) {
-                console.log('Offline, loading contacts from cache');
-                const cachedContacts = getCachedData('contacts');
-                if (cachedContacts) {
-                    AppState.contacts = cachedContacts;
-                    renderContacts();
-                }
-                return Promise.resolve();
+            switch (data.type) {
+                case 'AUTH_UPDATE':
+                    handleAuthUpdate(data.payload);
+                    break;
+                case 'DATA_REFRESH':
+                    handleDataRefresh(data.payload);
+                    break;
+                case 'START_CALL':
+                    handleStartCallRequest(data.payload);
+                    break;
+                case 'SYNC_REQUEST':
+                    handleSyncRequest();
+                    break;
             }
-            
-            console.log('Loading contacts via API...');
-            return ApiClient.getContacts()
-                .then(contacts => {
-                    AppState.contacts = contacts;
-                    console.log('Contacts loaded:', contacts.length);
-                    
-                    // Cache contacts
-                    cacheData('contacts', contacts);
-                    
-                    // Update UI if new call modal is open
-                    if (elements.newCallModal.classList.contains('active')) {
-                        renderContacts();
-                    }
-                    
-                    return contacts;
-                })
-                .catch(error => {
-                    console.error('Error loading contacts:', error);
-                    
-                    // Load from cache as fallback
-                    const cachedContacts = getCachedData('contacts');
-                    if (cachedContacts) {
-                        AppState.contacts = cachedContacts;
-                        renderContacts();
-                    }
-                    
-                    // Don't throw error to prevent breaking the entire app
-                    return [];
-                });
         }
         
-        function loadCallHistory() {
-            if (!AppState.isOnline) {
-                console.log('Offline, loading call history from cache');
-                const cachedCalls = getCachedData('calls');
-                if (cachedCalls) {
-                    AppState.callHistory = cachedCalls;
-                    renderCallHistory();
+        // Handle authentication update from parent
+        function handleAuthUpdate(payload) {
+            if (payload.user) {
+                AppState.user = payload.user;
+                AppState.currentUser = payload.user;
+                AppState.isAuthenticated = true;
+                
+                // Update UI
+                elements.apiStatusIndicator.className = 'api-status-indicator connected';
+                elements.apiStatusText.textContent = `Authenticated as ${payload.user.name || payload.user.username || 'User'}`;
+                
+                setTimeout(() => {
+                    elements.apiStatusIndicator.style.display = 'none';
+                }, 2000);
+                
+                // Refresh data
+                if (window.callAPI) {
+                    window.callAPI.performBackgroundSync();
                 }
-                return Promise.resolve();
             }
-            
-            console.log('Loading call history via API...');
-            return ApiClient.getCallHistory()
-                .then(history => {
-                    AppState.callHistory = history;
-                    console.log('Call history loaded:', history.length);
-                    
-                    cacheData('calls', history);
-                    
-                    renderCallHistory();
-                    
-                    return history;
-                })
-                .catch(error => {
-                    console.error('Error loading call history:', error);
-                    
-                    // Load from cache as fallback
-                    const cachedCalls = getCachedData('calls');
-                    if (cachedCalls) {
-                        AppState.callHistory = cachedCalls;
-                        renderCallHistory();
-                    }
-                    
-                    return [];
-                });
         }
         
-        function loadCachedData() {
-            try {
-                const savedSettings = localStorage.getItem('callSettings');
-                if (savedSettings) {
-                    AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
+        // Handle data refresh request
+        function handleDataRefresh(payload) {
+            if (window.callAPI) {
+                window.callAPI.performBackgroundSync();
+                showNotification('Refreshing data...', 'info');
+            }
+        }
+        
+        // Handle start call request from parent
+        function handleStartCallRequest(payload) {
+            if (payload.contactId && AppState.contacts.length > 0) {
+                const contact = AppState.contacts.find(c => c.id === payload.contactId);
+                if (contact) {
+                    const callType = payload.callType || 'voice';
+                    startCall(callType, [contact]);
                 }
-                
-                const cachedData = localStorage.getItem('cachedCallData');
-                if (cachedData) {
-                    AppState.cachedData = JSON.parse(cachedData);
-                }
-                
-                const savedMood = localStorage.getItem('currentMood');
-                if (savedMood) AppState.currentMood = savedMood;
-                
-                const savedIntention = localStorage.getItem('currentIntention');
-                if (savedIntention) AppState.currentIntention = savedIntention;
-                
-                const savedChat = localStorage.getItem('chatMessages');
-                if (savedChat) AppState.chatMessages = JSON.parse(savedChat);
-                
-                const savedPolls = localStorage.getItem('polls');
-                if (savedPolls) AppState.userVotes = JSON.parse(savedPolls);
-                
-                const savedInsights = localStorage.getItem('relationshipInsights');
-                if (savedInsights) AppState.relationshipInsights = JSON.parse(savedInsights);
-                
-                // Load contacts and calls from cache
-                if (AppState.cachedData.contacts && AppState.cachedData.contacts.length > 0) {
-                    AppState.contacts = AppState.cachedData.contacts;
-                    renderContacts();
-                }
-                
-                if (AppState.cachedData.calls && AppState.cachedData.calls.length > 0) {
-                    AppState.callHistory = AppState.cachedData.calls;
-                    renderCallHistory();
-                }
-                
-                return Promise.resolve();
-            } catch (error) {
-                console.error('Error loading cached data:', error);
-                return Promise.resolve();
+            }
+        }
+        
+        // Handle sync request
+        function handleSyncRequest() {
+            if (window.callAPI) {
+                window.callAPI.performBackgroundSync();
             }
         }
         
         function loadCachedDataToUI() {
-            if (AppState.contacts.length === 0 && AppState.cachedData.contacts.length > 0) {
-                AppState.contacts = AppState.cachedData.contacts;
-                if (elements.newCallModal.classList.contains('active')) {
-                    renderContacts();
+            // Load settings first
+            loadSettings();
+            
+            // Load contacts from cache
+            const cachedContacts = localStorage.getItem('cachedContacts');
+            if (cachedContacts) {
+                try {
+                    const contacts = JSON.parse(cachedContacts);
+                    AppState.contacts = contacts;
+                    if (window.callAPI) {
+                        window.callAPI.renderContacts(contacts);
+                    }
+                } catch (e) {
+                    console.warn('[Calls iframe] Failed to parse cached contacts');
                 }
             }
             
-            if (AppState.callHistory.length === 0 && AppState.cachedData.calls.length > 0) {
-                AppState.callHistory = AppState.cachedData.calls;
-                renderCallHistory();
-            }
-        }
-        
-        function cacheData(key, data) {
-            AppState.cachedData[key] = data;
-            
-            try {
-                localStorage.setItem('cachedCallData', JSON.stringify(AppState.cachedData));
-            } catch (error) {
-                console.error('Error caching data:', error);
-            }
-        }
-        
-        function getCachedData(key) {
-            return AppState.cachedData[key] || null;
-        }
-        
-        function syncData() {
-            if (!AppState.isOnline) {
-                console.log('Cannot sync data - offline');
-                return Promise.resolve();
+            // Load calls from cache
+            const cachedCalls = localStorage.getItem('cachedCallHistory');
+            if (cachedCalls) {
+                try {
+                    const calls = JSON.parse(cachedCalls);
+                    AppState.callHistory = calls;
+                    renderCallHistory();
+                } catch (e) {
+                    console.warn('[Calls iframe] Failed to parse cached call history');
+                }
             }
             
-            console.log('Syncing data...');
-            
-            return Promise.allSettled([
-                loadContacts(),
-                loadCallHistory()
-            ])
-            .then(() => {
-                elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
-                elements.syncIndicator.classList.remove('syncing');
-                
-                AppState.syncPending = false;
-                console.log('Data sync complete');
-            })
-            .catch(error => {
-                console.error('Error syncing data:', error);
-                elements.syncIndicator.innerHTML = '<i class="fas fa-exclamation-triangle"></i><span>Sync Failed</span>';
-                AppState.syncPending = true;
-            });
+            // Load premium status from cache
+            const cachedPremium = localStorage.getItem('premiumStatus');
+            if (cachedPremium) {
+                try {
+                    const premiumData = JSON.parse(cachedPremium);
+                    AppState.isPremium = premiumData.isPremium || false;
+                    AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
+                    updatePremiumUI();
+                } catch (e) {
+                    console.warn('[Calls iframe] Failed to parse premium status');
+                }
+            }
         }
         
         function loadSettings() {
@@ -2248,7 +2411,7 @@
                         AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
                         applySettingsToUI();
                     } catch (error) {
-                        console.error('Error loading settings:', error);
+                        console.error('[Calls iframe] Error loading settings:', error);
                     }
                 }
                 resolve();
@@ -2259,19 +2422,19 @@
             try {
                 localStorage.setItem('callSettings', JSON.stringify(AppState.settings));
             } catch (error) {
-                console.error('Error saving settings:', error);
+                console.error('[Calls iframe] Error saving settings:', error);
             }
         }
         
         function applySettingsToUI() {
-            elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
-            elements.callIntentionToggle.checked = AppState.settings.callIntention;
-            elements.inCallChatToggle.checked = AppState.settings.inCallChat;
-            elements.whiteboardToggle.checked = AppState.settings.whiteboard;
-            elements.pollsToggle.checked = AppState.settings.polls;
-            elements.notesToggle.checked = AppState.settings.notes;
-            elements.focusModeToggle.checked = AppState.settings.focusMode;
-            elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
+            if (elements.emotionalContextToggle) elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
+            if (elements.callIntentionToggle) elements.callIntentionToggle.checked = AppState.settings.callIntention;
+            if (elements.inCallChatToggle) elements.inCallChatToggle.checked = AppState.settings.inCallChat;
+            if (elements.whiteboardToggle) elements.whiteboardToggle.checked = AppState.settings.whiteboard;
+            if (elements.pollsToggle) elements.pollsToggle.checked = AppState.settings.polls;
+            if (elements.notesToggle) elements.notesToggle.checked = AppState.settings.notes;
+            if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
+            if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
         }
         
         function updateSetting(event) {
@@ -2335,57 +2498,6 @@
             }
         }
         
-        function checkPremiumStatus() {
-            if (!AppState.isOnline) {
-                console.log('Offline, using default premium status');
-                AppState.isPremium = false;
-                AppState.trialDaysLeft = 30;
-                updatePremiumUI();
-                return Promise.resolve();
-            }
-            
-            console.log('Checking premium status via API...');
-            return ApiClient.getPremiumStatus()
-                .then(premiumData => {
-                    AppState.isPremium = premiumData.isPremium;
-                    AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
-                    AppState.premiumFeatures = premiumData.features || AppState.premiumFeatures;
-                    
-                    console.log('Premium status:', AppState.isPremium, 'Days left:', AppState.trialDaysLeft);
-                    
-                    updatePremiumUI();
-                    
-                    return premiumData;
-                })
-                .catch(error => {
-                    console.error('Error checking premium status:', error);
-                    
-                    AppState.isPremium = false;
-                    AppState.trialDaysLeft = 30;
-                    updatePremiumUI();
-                    
-                    return { isPremium: false, trialDaysLeft: 30 };
-                });
-        }
-        
-        function updatePremiumUI() {
-            if (AppState.isPremium) {
-                document.querySelectorAll('.premium-badge-small').forEach(badge => {
-                    badge.style.display = 'none';
-                });
-                
-                elements.quickGroupBtn.disabled = false;
-                elements.screenShareBtn.disabled = false;
-            } else {
-                document.querySelectorAll('.premium-badge-small').forEach(badge => {
-                    badge.style.display = 'block';
-                });
-                
-                elements.quickGroupBtn.disabled = true;
-                elements.screenShareBtn.disabled = true;
-            }
-        }
-        
         function checkPremiumFeature(feature) {
             if (AppState.isPremium || AppState.premiumFeatures[feature]) {
                 return true;
@@ -2418,6 +2530,26 @@
             return false;
         }
         
+        function updatePremiumUI() {
+            if (!elements.quickGroupBtn || !elements.screenShareBtn) return;
+            
+            if (AppState.isPremium) {
+                document.querySelectorAll('.premium-badge-small').forEach(badge => {
+                    badge.style.display = 'none';
+                });
+                
+                elements.quickGroupBtn.disabled = false;
+                elements.screenShareBtn.disabled = false;
+            } else {
+                document.querySelectorAll('.premium-badge-small').forEach(badge => {
+                    badge.style.display = 'block';
+                });
+                
+                elements.quickGroupBtn.disabled = true;
+                elements.screenShareBtn.disabled = true;
+            }
+        }
+        
         function openNewCallModal() {
             if (!AppState.isOnline) {
                 showNotification('Cannot load contacts while offline', 'warning');
@@ -2426,10 +2558,10 @@
             
             elements.newCallModal.classList.add('active');
             
-            if (AppState.contacts.length === 0) {
-                loadContacts();
-            } else {
-                renderContacts();
+            if (AppState.contacts.length === 0 && window.callAPI) {
+                window.callAPI.fetchContacts();
+            } else if (window.callAPI) {
+                window.callAPI.renderContacts(AppState.contacts);
             }
             
             switchNewCallTab('contacts');
@@ -2448,91 +2580,6 @@
             elements.instantGroupOption.classList.remove('selected');
             elements.scheduledGroupOption.classList.remove('selected');
             elements.startGroupCallBtn.disabled = true;
-        }
-        
-        function renderContacts() {
-            if (AppState.contacts.length === 0) {
-                elements.contactsList.innerHTML = '<div class="offline-state"><i class="fas fa-users-slash"></i><p>No contacts available</p></div>';
-                return;
-            }
-            
-            let html = '';
-            
-            AppState.contacts.forEach(contact => {
-                const isOnline = Math.random() > 0.3;
-                const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
-                
-                html += `
-                    <div class="contact-item" data-id="${contact.id}">
-                        <input type="checkbox" class="contact-checkbox" id="contact-${contact.id}">
-                        <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
-                            ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
-                            <div class="call-status-icon ${isOnline ? 'incoming' : 'offline'}">
-                                <i class="fas fa-circle"></i>
-                            </div>
-                        </div>
-                        <div class="call-info">
-                            <div class="call-name">
-                                ${contact.name}
-                                ${contact.isPremium ? '<span class="premium-badge">PRO</span>' : ''}
-                            </div>
-                            <div class="call-details">
-                                <span>${isOnline ? 'Online' : 'Offline'}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            elements.contactsList.innerHTML = html;
-            elements.contactsLoading.style.display = 'none';
-            
-            document.querySelectorAll('.contact-item').forEach(item => {
-                item.addEventListener('click', function(e) {
-                    if (e.target.type === 'checkbox') return;
-                    
-                    const checkbox = this.querySelector('.contact-checkbox');
-                    checkbox.checked = !checkbox.checked;
-                    this.classList.toggle('selected', checkbox.checked);
-                    
-                    updateGroupCallButton();
-                });
-            });
-            
-            renderGroupContacts();
-        }
-        
-        function renderGroupContacts() {
-            let html = '';
-            
-            AppState.contacts.forEach(contact => {
-                const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
-                
-                html += `
-                    <div class="contact-item" data-id="${contact.id}">
-                        <input type="checkbox" class="contact-checkbox group-contact" id="group-contact-${contact.id}">
-                        <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
-                            ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
-                        </div>
-                        <div class="call-info">
-                            <div class="call-name">
-                                ${contact.name}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            elements.groupContactsList.innerHTML = html;
-            
-            document.querySelectorAll('.group-contact').forEach(checkbox => {
-                checkbox.addEventListener('change', function() {
-                    const item = this.closest('.contact-item');
-                    item.classList.toggle('selected', this.checked);
-                    
-                    updateGroupCallButton();
-                });
-            });
         }
         
         function searchContacts() {
@@ -2670,7 +2717,7 @@
                 return;
             }
             
-            console.log(`Starting ${type} call with ${participants.length} participants`);
+            console.log(`[Calls iframe] Starting ${type} call with ${participants.length} participants`);
             
             requestMediaPermissions(type)
                 .then(stream => {
@@ -2679,7 +2726,7 @@
                     AppState.callParticipants = participants;
                     
                     // Simulate API call
-                    console.log('Starting call simulation...');
+                    console.log('[Calls iframe] Starting call simulation...');
                     
                     AppState.activeCallId = 'call-' + Date.now();
                     AppState.currentCall = {
@@ -2699,7 +2746,7 @@
                     showNotification(`Starting ${type} call with ${participants.length} participant(s)`, 'success');
                 })
                 .catch(error => {
-                    console.error('Error starting call:', error);
+                    console.error('[Calls iframe] Error starting call:', error);
                     
                     if (AppState.localStream) {
                         AppState.localStream.getTracks().forEach(track => track.stop());
@@ -2718,7 +2765,7 @@
             
             return navigator.mediaDevices.getUserMedia(constraints)
                 .catch(error => {
-                    console.error('Error getting media permissions:', error);
+                    console.error('[Calls iframe] Error getting media permissions:', error);
                     
                     let errorMessage = 'Could not access ';
                     if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
@@ -2748,7 +2795,7 @@
             });
             
             AppState.peer.on('open', (id) => {
-                console.log('Peer connected with ID:', id);
+                console.log('[Calls iframe] Peer connected with ID:', id);
             });
             
             AppState.peer.on('call', (call) => {
@@ -2766,7 +2813,7 @@
             });
             
             AppState.peer.on('error', (error) => {
-                console.error('PeerJS error:', error);
+                console.error('[Calls iframe] PeerJS error:', error);
                 showNotification('Connection error: ' + error.type, 'error');
             });
             
@@ -2957,7 +3004,7 @@
             elements.videoGrid.appendChild(videoContainer);
             
             if (stream) {
-                video.play().catch(e => console.error('Error playing video:', e));
+                video.play().catch(e => console.error('[Calls iframe] Error playing video:', e));
             }
         }
         
@@ -3055,7 +3102,7 @@
         function toggleFullscreen(videoElement) {
             if (!document.fullscreenElement) {
                 videoElement.requestFullscreen().catch(err => {
-                    console.error('Error attempting to enable fullscreen:', err);
+                    console.error('[Calls iframe] Error attempting to enable fullscreen:', err);
                 });
             } else {
                 document.exitFullscreen();
@@ -3177,7 +3224,7 @@
                     showNotification('Screen sharing started', 'success');
                 })
                 .catch(error => {
-                    console.error('Error starting screen share:', error);
+                    console.error('[Calls iframe] Error starting screen share:', error);
                     
                     if (error.name === 'NotAllowedError') {
                         showNotification('Screen sharing permission denied', 'error');
@@ -3327,7 +3374,7 @@
                 };
                 localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
             } catch (error) {
-                console.error('Error saving private notes:', error);
+                console.error('[Calls iframe] Error saving private notes:', error);
             }
         }
         
@@ -3336,7 +3383,7 @@
                 const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
                 return allNotes[contactId] ? allNotes[contactId].notes : null;
             } catch (error) {
-                console.error('Error loading private notes:', error);
+                console.error('[Calls iframe] Error loading private notes:', error);
                 return null;
             }
         }
@@ -3523,7 +3570,7 @@
         }
         
         function broadcastData(data) {
-            console.log('Broadcasting data:', data);
+            console.log('[Calls iframe] Broadcasting data:', data);
             
             if (data.type === 'reaction' && Math.random() > 0.5) {
                 setTimeout(() => {
@@ -3568,7 +3615,7 @@
                     showNotification('Call link copied to clipboard', 'success');
                 })
                 .catch(err => {
-                    console.error('Failed to copy: ', err);
+                    console.error('[Calls iframe] Failed to copy: ', err);
                     showNotification('Failed to copy link', 'error');
                 });
         }
@@ -3591,7 +3638,7 @@
                     showNotification('Call link shared', 'success');
                 })
                 .catch(err => {
-                    console.error('Error sharing:', err);
+                    console.error('[Calls iframe] Error sharing:', err);
                     showNotification('Failed to share link', 'error');
                 });
             } else {
@@ -3910,7 +3957,7 @@
         }
         
         function handleOnline() {
-            console.log('App is online');
+            console.log('[Calls iframe] App is online');
             AppState.isOnline = true;
             
             elements.offlineBanner.classList.remove('active');
@@ -3920,13 +3967,15 @@
             elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
             elements.syncIndicator.classList.add('syncing');
             
-            syncData();
+            if (window.callAPI) {
+                window.callAPI.performBackgroundSync();
+            }
             
             enableUI();
         }
         
         function handleOffline() {
-            console.log('App is offline');
+            console.log('[Calls iframe] App is offline');
             AppState.isOnline = false;
             
             elements.offlineBanner.classList.add('active');
@@ -3940,21 +3989,28 @@
         }
         
         function showOfflineUI() {
-            if (elements.callContainer.classList.contains('active')) {
+            if (elements.callContainer && elements.callContainer.classList.contains('active')) {
                 elements.offlineCallPlaceholder.style.display = 'flex';
                 elements.videoGrid.style.display = 'none';
             }
             
-            elements.offlineContactsMessage.style.display = 'block';
+            if (elements.offlineContactsMessage) {
+                elements.offlineContactsMessage.style.display = 'block';
+            }
             
-            elements.offlineCallsState.style.display = 'flex';
-            elements.callsLoading.style.display = 'none';
+            if (elements.offlineCallsState) {
+                elements.offlineCallsState.style.display = 'flex';
+            }
+            
+            if (elements.callsLoading) {
+                elements.callsLoading.style.display = 'none';
+            }
             
             loadCachedDataToUI();
         }
         
         function enableUI() {
-            console.log('Enabling UI elements...');
+            console.log('[Calls iframe] Enabling UI elements...');
             
             elements.newCallBtn.disabled = false;
             
@@ -3971,8 +4027,8 @@
                 elements.offlineCallsState.style.display = 'none';
                 elements.offlineContactsMessage.style.display = 'none';
                 
-                if (AppState.syncPending) {
-                    syncData();
+                if (AppState.syncPending && window.callAPI) {
+                    window.callAPI.performBackgroundSync();
                 }
             } else {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
@@ -3983,8 +4039,8 @@
         }
         
         function initializeUI() {
-            elements.callsLoading.style.display = 'none';
-            elements.contactsLoading.style.display = 'none';
+            if (elements.callsLoading) elements.callsLoading.style.display = 'none';
+            if (elements.contactsLoading) elements.contactsLoading.style.display = 'none';
             
             updateMoodIndicator('neutral');
             updateIntentionIndicator('quick');
@@ -4109,21 +4165,38 @@
                     AppState.settings = { ...AppState.settings, ...newSettings };
                     applySettingsToUI();
                 } catch (error) {
-                    console.error('Error parsing updated settings:', error);
+                    console.error('[Calls iframe] Error parsing updated settings:', error);
                 }
             }
             
-            // NEW: Handle user data updates from other tabs
+            // Handle user data updates from other tabs
             if (event.key === 'authUser' || event.key === 'currentUser') {
                 try {
                     const userData = JSON.parse(event.newValue);
                     if (userData) {
                         AppState.user = userData;
                         AppState.currentUser = userData;
-                        updateUIWithUserData(userData);
+                        
+                        // Update UI
+                        elements.apiStatusIndicator.className = 'api-status-indicator connected';
+                        elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
+                        
+                        setTimeout(() => {
+                            elements.apiStatusIndicator.style.display = 'none';
+                        }, 2000);
                     }
                 } catch (error) {
-                    console.warn('Error parsing user data update:', error);
+                    console.warn('[Calls iframe] Error parsing user data update:', error);
+                }
+            }
+            
+            // Handle token updates
+            if (event.key === 'accessToken' || event.key === 'moodchat_token' || event.key === 'token') {
+                // Token was updated, we might need to refresh data
+                if (AppState.isOnline && window.callAPI) {
+                    setTimeout(() => {
+                        window.callAPI.performBackgroundSync();
+                    }, 1000);
                 }
             }
         }
@@ -4177,17 +4250,12 @@
             return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
         
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
         // Start the bootstrap process when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
             bootstrapIframe().catch(error => {
-                console.error('Failed to bootstrap iframe:', error);
-                showApiError('Failed to initialize app');
+                console.error('[Calls iframe] Failed to bootstrap:', error);
+                // Initialize UI anyway even if bootstrap fails
+                initializeUIFromCache();
             });
         });
         
@@ -4197,7 +4265,7 @@
                 if (AppState.contacts.length > 0) {
                     startCall('video', [AppState.contacts[0]]);
                 } else {
-                    console.log('Cannot start test call - no contacts available');
+                    console.log('[Calls iframe] Cannot start test call - no contacts available');
                 }
             },
             getState: () => AppState,
@@ -4216,7 +4284,24 @@
                 };
             },
             // Expose bootstrap for testing
-            bootstrapIframe
+            bootstrapIframe,
+            // Expose API integration for parent window
+            refreshData: () => {
+                if (window.callAPI) {
+                    return window.callAPI.performBackgroundSync();
+                }
+                return Promise.resolve();
+            },
+            // Notify parent of state changes
+            notifyParent: (type, data) => {
+                if (window.parent) {
+                    window.parent.postMessage({
+                        type: type,
+                        source: 'calls-iframe',
+                        data: data
+                    }, '*');
+                }
+            }
         };
     </script>
 </body>

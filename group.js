@@ -203,7 +203,6 @@ const LOCAL_STORAGE_KEYS = {
     GROUP_EVENTS: 'knecta_group_events_',
     GROUP_TRANSPARENCY: 'knecta_group_transparency_',
     USER_PARTICIPATION_MODES: 'knecta_user_participation_modes',
-    // Token storage keys
     ACCESS_TOKEN: 'knecta_access_token',
     REFRESH_TOKEN: 'knecta_refresh_token'
 };
@@ -221,337 +220,235 @@ let authReady = false;
 let authCheckInterval = null;
 
 // =============================================
-// AUTHENTICATION WAIT SYSTEM - IFRAME FIX
+// AUTHENTICATION & TOKEN MANAGEMENT
 // =============================================
 
+/**
+ * Get valid authentication token from multiple sources
+ * Priority: 1. Parent AppState, 2. Parent localStorage, 3. Iframe localStorage, 4. Current AppState
+ * @returns {string|null} Valid token or null if not found
+ */
+function getValidToken() {
+    try {
+        // 1. Try parent window AppState first
+        if (window.parent && window.parent.AppState && window.parent.AppState.accessToken) {
+            console.log('[Groups iframe] Using token from parent AppState');
+            return window.parent.AppState.accessToken;
+        }
+
+        // 2. Try parent window localStorage
+        if (window.parent && window.parent.localStorage) {
+            try {
+                const parentToken = window.parent.localStorage.getItem('knecta_access_token') || 
+                                  window.parent.localStorage.getItem('moodchat_token');
+                if (parentToken) {
+                    console.log('[Groups iframe] Using token from parent localStorage');
+                    localStorage.setItem('knecta_access_token', parentToken);
+                    return parentToken;
+                }
+            } catch (e) {
+                console.log('[Groups iframe] Cannot access parent localStorage:', e.message);
+            }
+        }
+
+        // 3. Try iframe localStorage
+        const localToken = localStorage.getItem('knecta_access_token') || 
+                          localStorage.getItem('moodchat_token');
+        if (localToken) {
+            console.log('[Groups iframe] Using token from iframe localStorage');
+            return localToken;
+        }
+
+        // 4. Try shared AppState in current window
+        if (window.AppState && window.AppState.accessToken) {
+            return window.AppState.accessToken;
+        }
+
+        console.log('[Groups iframe] No valid token found');
+        return null;
+    } catch (error) {
+        console.error('[Groups iframe] Error getting valid token:', error);
+        return null;
+    }
+}
+
+/**
+ * Get current user from multiple sources
+ * @returns {Object|null} User object or null if not found
+ */
+function getCurrentUser() {
+    try {
+        // 1. Try parent window AppState
+        if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
+            console.log('[Groups iframe] Using user from parent AppState');
+            return window.parent.AppState.currentUser;
+        }
+
+        // 2. Try parent window localStorage
+        if (window.parent && window.parent.localStorage) {
+            try {
+                const parentUser = window.parent.localStorage.getItem('knecta_current_user');
+                if (parentUser) {
+                    console.log('[Groups iframe] Using user from parent localStorage');
+                    return JSON.parse(parentUser);
+                }
+            } catch (e) {
+                console.log('[Groups iframe] Cannot access parent localStorage:', e.message);
+            }
+        }
+
+        // 3. Try iframe localStorage
+        const localUser = localStorage.getItem('knecta_current_user');
+        if (localUser) {
+            console.log('[Groups iframe] Using user from iframe localStorage');
+            return JSON.parse(localUser);
+        }
+
+        // 4. Try shared AppState in current window
+        if (window.AppState && window.AppState.currentUser) {
+            return window.AppState.currentUser;
+        }
+
+        console.log('[Groups iframe] No user found');
+        return null;
+    } catch (error) {
+        console.error('[Groups iframe] Error getting current user:', error);
+        return null;
+    }
+}
+
+/**
+ * Wait for authentication to be ready (non-blocking)
+ * @returns {Promise<boolean>} True if auth is ready, false otherwise
+ */
 function waitForAuth() {
-    return new Promise((resolve, reject) => {
-        console.log('⏳ Groups iframe: Waiting for authentication...');
+    return new Promise((resolve) => {
+        console.log('[Groups iframe] Waiting for authentication...');
         
-        // Check if auth is already ready via api.js
-        if (window.api && window.api.isAuthReady && window.api.isAuthReady()) {
-            console.log('✅ Groups iframe: Auth already ready via api.js');
-            authReady = true;
-            resolve(true);
-            return;
-        }
-        
-        // Method 1: Check for existing token
-        const token = localStorage.getItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN) || localStorage.getItem('moodchat_token');
+        // Check immediately if we already have a token
+        const token = getValidToken();
         if (token) {
-            console.log('✅ Groups iframe: Token found in localStorage');
+            console.log('[Groups iframe] Token found immediately');
             authReady = true;
             resolve(true);
             return;
         }
         
-        // Method 2: Wait for api.js auth signal
-        let attempts = 0;
-        const maxAttempts = 30; // 30 * 200ms = 6 seconds max wait
+        // Check if user data exists
+        const user = getCurrentUser();
+        if (user) {
+            console.log('[Groups iframe] User data found immediately');
+            authReady = true;
+            resolve(true);
+            return;
+        }
         
-        const checkAuth = () => {
-            attempts++;
-            
-            // Check if window.api is available
-            if (window.api && window.api.isAuthReady && window.api.isAuthReady()) {
-                console.log(`✅ Groups iframe: Auth ready via api.js after ${attempts} attempts`);
-                clearInterval(authCheckInterval);
-                authReady = true;
-                resolve(true);
-                return;
-            }
-            
-            // Check for token directly
-            const currentToken = localStorage.getItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN) || localStorage.getItem('moodchat_token');
-            if (currentToken) {
-                console.log(`✅ Groups iframe: Token found after ${attempts} attempts`);
-                clearInterval(authCheckInterval);
-                authReady = true;
-                resolve(true);
-                return;
-            }
-            
-            // Check if user data exists
-            const userData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-            if (userData) {
-                console.log(`✅ Groups iframe: User data found after ${attempts} attempts`);
-                clearInterval(authCheckInterval);
-                authReady = true;
-                resolve(true);
-                return;
-            }
-            
-            if (attempts >= maxAttempts) {
-                console.log('❌ Groups iframe: Auth timeout after maximum attempts');
-                clearInterval(authCheckInterval);
-                authReady = false;
-                reject(new Error('Authentication timeout'));
-            }
-        };
-        
-        // Start checking
-        authCheckInterval = setInterval(checkAuth, 200);
-        
-        // Initial check
-        setTimeout(checkAuth, 100);
+        // If we don't have auth, we'll proceed with cached data anyway
+        console.log('[Groups iframe] No auth found, will use cached data');
+        authReady = false;
+        resolve(false);
     });
 }
 
-// =============================================
-// BOOTSTRAP FUNCTION - SINGLE SOURCE OF TRUTH
-// =============================================
-
-async function bootstrapIframe() {
-    console.log('=== BOOTSTRAP IFRAME START ===');
-    
+/**
+ * Validate token with server in background
+ * @returns {Promise<boolean>} True if token is valid, false otherwise
+ */
+async function validateAuthInBackground() {
     try {
-        // 1. Wait for authentication to be ready
-        await waitForAuth();
-        
-        if (!authReady) {
-            console.log('❌ Groups iframe: Authentication not ready');
-            setTimeout(() => {
-                if (window.location.pathname.includes('groups.html') || window.location.pathname.includes('group.html')) {
-                    console.log('Redirecting to login from groups iframe...');
-                    redirectToLogin();
-                }
-            }, 1000);
+        const token = getValidToken();
+        if (!token) {
+            console.log('[Groups iframe] No token for background validation');
             return false;
         }
         
-        // 2. Load tokens from localStorage using fallback
-        const hasToken = loadTokensFromStorage();
-        if (!hasToken) {
-            console.log('No authentication token found');
-            redirectToLogin();
-            return false;
-        }
-        
-        // 3. Validate token with /api/auth/me using api.js
-        console.log('Validating token with /api/auth/me...');
-        const meResponse = await callApi('GET', '/api/auth/me');
-        
-        if (!meResponse || !meResponse.success) {
-            console.log('Token validation failed:', meResponse?.error);
-            
-            // Try to use cached user data as fallback
-            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-            if (cachedUser) {
-                console.log('Using cached user data as fallback');
-                try {
-                    currentUser = JSON.parse(cachedUser);
-                    userData = {
-                        displayName: currentUser.displayName || currentUser.name || 'User',
-                        username: currentUser.username || null,
-                        email: currentUser.email || null,
-                        photoURL: currentUser.photoURL || currentUser.avatar || null
-                    };
-                    console.log('Fallback user loaded:', currentUser.uid || currentUser.id);
-                    return true;
-                } catch (e) {
-                    console.error('Failed to parse cached user:', e);
-                }
-            }
-            
-            redirectToLogin();
-            return false;
-        }
-        
-        // 4. Set current user from API response
-        currentUser = meResponse.data;
-        userData = {
-            displayName: currentUser.displayName || currentUser.name || 'User',
-            username: currentUser.username || null,
-            email: currentUser.email || null,
-            photoURL: currentUser.photoURL || currentUser.avatar || null
-        };
-        
-        console.log('User authenticated:', currentUser.id || currentUser._id || currentUser.uid);
-        
-        // 5. Save user to localStorage
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
-            uid: currentUser.id || currentUser._id || currentUser.uid,
-            displayName: currentUser.displayName || currentUser.name,
-            email: currentUser.email,
-            photoURL: currentUser.photoURL || currentUser.avatar
-        }));
-        
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-        
-        console.log('=== BOOTSTRAP IFRAME COMPLETE ===');
-        return true;
-        
-    } catch (error) {
-        console.error('Bootstrap error:', error);
-        
-        // Try to use cached data as last resort
-        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-        if (cachedUser) {
-            try {
-                currentUser = JSON.parse(cachedUser);
-                userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
-                console.log('Using cached user due to bootstrap error');
+        // Use api.js if available
+        if (window.api && typeof window.api.callApi === 'function') {
+            const response = await window.api.callApi('GET', '/api/auth/me', null, { token });
+            if (response && response.success) {
+                console.log('[Groups iframe] Background auth validation successful');
+                
+                // Update user data
+                currentUser = response.data;
+                userData = {
+                    displayName: currentUser.displayName || currentUser.name || 'User',
+                    username: currentUser.username || null,
+                    email: currentUser.email || null,
+                    photoURL: currentUser.photoURL || currentUser.avatar || null
+                };
+                
+                // Save to localStorage
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                    uid: currentUser.id || currentUser._id || currentUser.uid,
+                    displayName: currentUser.displayName || currentUser.name,
+                    email: currentUser.email,
+                    photoURL: currentUser.photoURL || currentUser.avatar
+                }));
+                
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
                 return true;
-            } catch (e) {
-                console.error('Failed to use cached user:', e);
             }
         }
         
-        // Only redirect if we're on a group page
-        if (window.location.pathname.includes('groups.html') || window.location.pathname.includes('group.html')) {
-            setTimeout(() => {
-                redirectToLogin();
-            }, 1500);
-        }
-        return false;
-    }
-}
-
-// =============================================
-// TOKEN MANAGEMENT FUNCTIONS
-// =============================================
-
-// Load tokens from localStorage
-function loadTokensFromStorage() {
-    try {
-        // Try main token first
-        accessToken = localStorage.getItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN);
-        
-        // Fallback to moodchat_token if main token not found
-        if (!accessToken) {
-            accessToken = localStorage.getItem('moodchat_token');
-            if (accessToken) {
-                console.log('Using moodchat_token fallback');
-                localStorage.setItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+        // Fallback direct fetch
+        const response = await fetch('/api/auth/me', {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
             }
-        }
-        
-        // Load refresh token
-        refreshToken = localStorage.getItem(LOCAL_STORAGE_KEYS.REFRESH_TOKEN);
-        
-        if (accessToken) {
-            console.log('Access token loaded from localStorage');
-            isTokenValid = true;
-            return true;
-        } else {
-            console.log('No access token found in localStorage');
-            isTokenValid = false;
-            return false;
-        }
-    } catch (error) {
-        console.error('Error loading tokens from storage:', error);
-        isTokenValid = false;
-        return false;
-    }
-}
-
-// Check if token is expired
-function isTokenExpired(token) {
-    if (!token) return true;
-    
-    try {
-        // Simple JWT token expiration check
-        const parts = token.split('.');
-        if (parts.length !== 3) return true;
-        
-        const payload = JSON.parse(atob(parts[1]));
-        const expirationTime = payload.exp * 1000; // Convert to milliseconds
-        const currentTime = Date.now();
-        
-        return currentTime >= expirationTime;
-    } catch (error) {
-        console.error('Error checking token expiration:', error);
-        return true;
-    }
-}
-
-// Refresh token function
-async function refreshAccessToken() {
-    if (!refreshToken) {
-        console.log('No refresh token available');
-        redirectToLogin();
-        return null;
-    }
-    
-    try {
-        console.log('Attempting to refresh access token...');
-        
-        const response = await callApi('POST', '/api/auth/refresh', {
-            refreshToken: refreshToken
         });
         
-        if (response && response.success && response.data) {
-            const data = response.data;
+        if (response.ok) {
+            const data = await response.json();
+            console.log('[Groups iframe] Background auth validation successful');
             
-            if (data.accessToken) {
-                accessToken = data.accessToken;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN, accessToken);
-                
-                if (data.refreshToken) {
-                    refreshToken = data.refreshToken;
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
-                }
-                
-                console.log('Access token refreshed successfully');
-                isTokenValid = true;
-                return accessToken;
-            }
+            currentUser = data.data || data;
+            userData = {
+                displayName: currentUser.displayName || currentUser.name || 'User',
+                username: currentUser.username || null,
+                email: currentUser.email || null,
+                photoURL: currentUser.photoURL || currentUser.avatar || null
+            };
+            
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                uid: currentUser.id || currentUser._id || currentUser.uid,
+                displayName: currentUser.displayName || currentUser.name,
+                email: currentUser.email,
+                photoURL: currentUser.photoURL || currentUser.avatar
+            }));
+            
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
+            return true;
         }
         
-        console.log('Failed to refresh access token');
-        redirectToLogin();
-        return null;
+        console.log('[Groups iframe] Background auth validation failed');
+        return false;
         
     } catch (error) {
-        console.error('Error refreshing access token:', error);
-        redirectToLogin();
-        return null;
+        console.log('[Groups iframe] Background auth validation error:', error.message);
+        return false;
     }
-}
-
-// Redirect to login page
-function redirectToLogin() {
-    console.log('Redirecting to login page...');
-    // Clear all tokens
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.ACCESS_TOKEN);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.REFRESH_TOKEN);
-    localStorage.removeItem('moodchat_token');
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-    
-    // Redirect to the main app login page
-    window.location.href = '/index.html?redirect=' + encodeURIComponent(window.location.pathname);
-}
-
-// Get current token with auto-refresh
-async function getCurrentToken() {
-    if (!accessToken) {
-        const hasToken = loadTokensFromStorage();
-        if (!hasToken) {
-            redirectToLogin();
-            return null;
-        }
-    }
-    
-    if (isTokenExpired(accessToken)) {
-        console.log('Access token expired, attempting to refresh...');
-        const newToken = await refreshAccessToken();
-        return newToken;
-    }
-    
-    return accessToken;
 }
 
 // =============================================
-// API CALL FUNCTION - SINGLE ENTRY POINT
+// API CALL FUNCTION - OPTIMIZED FOR IFRAME
 // =============================================
 
+/**
+ * Make API call with token handling and error management
+ * @param {string} method - HTTP method (GET, POST, PUT, DELETE)
+ * @param {string} endpoint - API endpoint
+ * @param {Object|null} data - Request body data
+ * @param {Object} options - Additional options
+ * @returns {Promise<Object>} API response object
+ */
 async function callApi(method, endpoint, data = null, options = {}) {
-    // Get current token
-    const token = await getCurrentToken();
-    if (!token) {
-        console.error('No valid token available for API call');
-        return { success: false, error: 'Authentication required', requiresAuth: true };
+    // Get token from multiple sources
+    const token = getValidToken();
+    
+    if (!token && endpoint !== '/api/auth/me') {
+        console.log('[Groups iframe] No token for API call, using cached data');
+        return { success: false, error: 'No authentication token', isOffline: true };
     }
     
     // Use api.js if available
@@ -562,21 +459,28 @@ async function callApi(method, endpoint, data = null, options = {}) {
                 token: token
             });
         } catch (error) {
-            console.error('API call via api.js failed:', error);
-            return { success: false, error: error.message || 'API call failed' };
+            console.log('[Groups iframe] API call via api.js failed:', error.message);
+            return { 
+                success: false, 
+                error: error.message || 'API call failed',
+                isOffline: true 
+            };
         }
     }
     
-    // Fallback to direct fetch if api.js not available
+    // Fallback to direct fetch
     try {
         const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Content-Type': 'application/json'
         };
         
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
         const fetchOptions = {
-            method: method,
+            method: method.toUpperCase(),
             headers: headers,
             credentials: 'include'
         };
@@ -585,328 +489,239 @@ async function callApi(method, endpoint, data = null, options = {}) {
             fetchOptions.body = JSON.stringify(data);
         }
         
-        console.log(`API call: ${method} ${url}`);
-        
         const response = await fetch(url, fetchOptions);
         
         // Handle 401 Unauthorized
         if (response.status === 401) {
-            console.log('Token expired or invalid, attempting refresh...');
-            const newToken = await refreshAccessToken();
-            if (newToken) {
-                // Retry with new token
-                headers.Authorization = `Bearer ${newToken}`;
-                const retryResponse = await fetch(url, fetchOptions);
-                return await handleApiResponse(retryResponse);
-            } else {
-                redirectToLogin();
-                return { success: false, error: 'Authentication failed', requiresAuth: true };
-            }
+            console.log('[Groups iframe] Token expired or invalid');
+            return { 
+                success: false, 
+                error: 'Authentication failed',
+                requiresAuth: true 
+            };
         }
         
-        return await handleApiResponse(response);
-        
-    } catch (error) {
-        console.error(`API ${method} error:`, error);
-        return { 
-            success: false, 
-            error: error.message || 'Network error',
-            isOffline: error.message?.includes('Network') || error.message?.includes('Failed to fetch')
-        };
-    }
-}
-
-// Handle API response
-async function handleApiResponse(response) {
-    try {
-        const text = await response.text();
-        let data;
-        
-        try {
-            data = text ? JSON.parse(text) : {};
-        } catch (e) {
-            data = { message: text };
-        }
+        const responseData = await response.json();
         
         if (response.ok) {
             return { 
                 success: true, 
-                data: data,
+                data: responseData,
                 status: response.status 
             };
         } else {
             return { 
                 success: false, 
-                error: data.message || data.error || `HTTP ${response.status}`,
+                error: responseData.message || responseData.error || `HTTP ${response.status}`,
                 status: response.status,
-                data: data 
+                data: responseData 
             };
         }
+        
     } catch (error) {
+        console.log(`[Groups iframe] API ${method} error:`, error.message);
         return { 
             success: false, 
-            error: 'Failed to parse response',
-            isOffline: false 
+            error: error.message || 'Network error',
+            isOffline: true 
         };
     }
 }
 
-// Safe API call wrapper for background sync
+/**
+ * Safe API call wrapper with error handling
+ * @param {string} method - HTTP method
+ * @param {string} endpoint - API endpoint
+ * @param {Object|null} data - Request body
+ * @returns {Promise<Object>} API response
+ */
 async function safeApiCall(method, endpoint, data = null) {
     try {
-        return await callApi(method.toUpperCase(), `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, data);
+        const apiEndpoint = endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`;
+        return await callApi(method, apiEndpoint, data);
     } catch (error) {
-        console.error('Safe API call error:', error);
-        return { success: false, error: error.message };
+        console.log('[Groups iframe] Safe API call error:', error.message);
+        return { success: false, error: error.message, isOffline: true };
     }
 }
 
 // =============================================
-// MAIN INITIALIZATION - UPDATED FOR IFRAME
+// MAIN INITIALIZATION - OPTIMIZED FOR IFRAME
 // =============================================
 
+/**
+ * Initialize the group page with immediate UI rendering
+ */
 async function initGroupPage() {
     if (isPageInitialized) {
-        console.log('Group page already initialized');
+        console.log('[Groups iframe] Page already initialized');
         return;
     }
     
     isPageInitialized = true;
-    console.log('=== GROUP PAGE INITIALIZATION START ===');
+    console.log('[Groups iframe] Initialization started');
     
-    // 1. Load cached data INSTANTLY for immediate UI display
-    console.log('Loading cached data instantly...');
+    // IMMEDIATE UI RENDERING FROM CACHE
+    console.log('[Groups iframe] Loading cached data instantly for UI...');
     loadCachedDataInstantly();
     
-    // 2. Set up event listeners immediately
-    console.log('Setting up event listeners...');
-    if (typeof setupEventListeners === 'function') {
-        setupEventListeners();
-    }
+    // Set up event listeners immediately
+    console.log('[Groups iframe] Setting up event listeners...');
+    setupEventListeners();
     if (typeof setupGroupInvitesListener === 'function') {
         setupGroupInvitesListener();
     }
     
-    // 3. Check mobile
-    if (typeof checkMobile === 'function') {
-        checkMobile();
-        window.addEventListener('resize', checkMobile);
-    }
+    // Check mobile
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
     
-    // 4. Start authentication in background (non-blocking)
-    console.log('Starting background authentication...');
+    // BACKGROUND AUTHENTICATION (non-blocking)
     setTimeout(async () => {
         try {
-            const isAuthenticated = await bootstrapIframe();
-            if (!isAuthenticated) {
-                console.log('Background authentication failed, using cached data only');
-                return;
-            }
+            await waitForAuth();
             
-            console.log('Background authentication successful, starting full app initialization...');
-            
-            // 5. Initialize app with real data
-            if (typeof initializeApp === 'function') {
-                await initializeApp();
-            }
-            
-            // 6. Start background sync after a delay
-            setTimeout(() => {
-                if (typeof backgroundSyncWithServer === 'function') {
-                    backgroundSyncWithServer();
+            if (authReady) {
+                console.log('[Groups iframe] Authentication ready, validating in background...');
+                
+                // Validate auth in background
+                const isValid = await validateAuthInBackground();
+                
+                if (isValid) {
+                    console.log('[Groups iframe] Background authentication successful');
+                    
+                    // Start full app initialization in background
+                    setTimeout(async () => {
+                        if (typeof initializeApp === 'function') {
+                            await initializeApp();
+                        }
+                        
+                        // Start background sync
+                        setTimeout(() => {
+                            backgroundSyncWithServer();
+                        }, 2000);
+                        
+                        // Set up periodic sync
+                        setInterval(() => {
+                            backgroundSyncWithServer();
+                        }, 30000);
+                        
+                        if (typeof processPendingOfflineActions === 'function') {
+                            processPendingOfflineActions();
+                        }
+                    }, 500);
                 }
-            }, 2000);
-            
-            // 7. Set up periodic sync
-            setInterval(() => {
-                if (typeof backgroundSyncWithServer === 'function') {
-                    backgroundSyncWithServer();
-                }
-            }, 30000); // Sync every 30 seconds
-            
-            if (typeof processPendingOfflineActions === 'function') {
-                processPendingOfflineActions();
             }
-            
-            console.log('=== GROUP PAGE INITIALIZATION COMPLETE ===');
             
         } catch (error) {
-            console.error('Error in background initialization:', error);
+            console.log('[Groups iframe] Background auth error:', error.message);
             // Continue with cached data
-            showNotification('Using cached data. Some features may be limited.', 'info');
         }
-    }, 500); // Delay to ensure UI is rendered first
+    }, 100);
     
-    console.log('=== GROUP PAGE UI READY (CACHED DATA) ===');
+    console.log('[Groups iframe] UI ready with cached data');
 }
 
-// Load cached data INSTANTLY on page load
+/**
+ * Load cached data instantly on page load for immediate UI rendering
+ */
 function loadCachedDataInstantly() {
-    console.log('=== INSTANT CACHE LOAD START (GROUPS) ===');
+    console.log('[Groups iframe] Loading instant cache...');
     
     try {
         // Load groups
         const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
         if (groupsData) {
-            try {
-                groups = JSON.parse(groupsData);
-                console.log(`✓ Instant: ${groups.length} groups loaded from cache`);
-                isLoadedFromLocalStorage = true;
-                
-                if (typeof updateGroupCounts === 'function') {
-                    updateGroupCounts();
-                }
-                if (typeof renderGroupsListInstantly === 'function') {
-                    renderGroupsListInstantly();
-                }
-            } catch (e) {
-                console.error('Error parsing groups cache:', e);
-                groups = [];
-            }
-        } else {
-            console.log('No groups found in cache');
-            groups = [];
+            groups = JSON.parse(groupsData);
+            console.log(`[Groups iframe] Instant: ${groups.length} groups loaded from cache`);
+            isLoadedFromLocalStorage = true;
+            
+            updateGroupCounts();
+            renderGroupsListInstantly();
         }
         
         // Load other group data
         const myGroupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_GROUPS);
-        if (myGroupsData) {
-            try {
-                myGroups = JSON.parse(myGroupsData);
-            } catch (e) {
-                console.error('Error parsing myGroups cache:', e);
-                myGroups = [];
-            }
-        }
+        if (myGroupsData) myGroups = JSON.parse(myGroupsData);
         
         const joinedData = localStorage.getItem(LOCAL_STORAGE_KEYS.JOINED_GROUPS);
-        if (joinedData) {
-            try {
-                joinedGroups = JSON.parse(joinedData);
-            } catch (e) {
-                console.error('Error parsing joinedGroups cache:', e);
-                joinedGroups = [];
-            }
-        }
+        if (joinedData) joinedGroups = JSON.parse(joinedData);
         
         const invitesData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_INVITES);
-        if (invitesData) {
-            try {
-                groupInvites = JSON.parse(invitesData);
-            } catch (e) {
-                console.error('Error parsing groupInvites cache:', e);
-                groupInvites = [];
-            }
-        }
+        if (invitesData) groupInvites = JSON.parse(invitesData);
         
         const adminData = localStorage.getItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS);
-        if (adminData) {
-            try {
-                adminGroups = JSON.parse(adminData);
-            } catch (e) {
-                console.error('Error parsing adminGroups cache:', e);
-                adminGroups = [];
-            }
-        }
+        if (adminData) adminGroups = JSON.parse(adminData);
         
         // Load friends
         const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
-        if (cachedFriends) {
-            try {
-                friends = JSON.parse(cachedFriends);
-                console.log(`✓ Instant: ${friends.length} friends loaded from cache`);
-            } catch (e) {
-                console.error('Error parsing friends cache:', e);
-                friends = [];
-            }
-        }
+        if (cachedFriends) friends = JSON.parse(cachedFriends);
         
-        // Load user data from cache for immediate display
+        // Load user data from cache
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
-            try {
-                currentUser = JSON.parse(cachedUser);
-                userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
-                console.log('✓ Instant: User data loaded from cache');
-            } catch (e) {
-                console.error('Error parsing user cache:', e);
-            }
+            currentUser = JSON.parse(cachedUser);
+            userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
         }
         
         // Load unique features data
-        if (typeof loadUniqueFeaturesData === 'function') {
-            loadUniqueFeaturesData();
-        }
+        loadUniqueFeaturesData();
         
-        console.log('=== INSTANT CACHE LOAD COMPLETE (GROUPS) ===');
+        console.log('[Groups iframe] Instant cache load complete');
         
     } catch (error) {
-        console.error('Error in instant cache load:', error);
+        console.error('[Groups iframe] Error in instant cache load:', error);
     }
 }
 
-// Load unique features data from cache
+/**
+ * Load unique features data from cache
+ */
 function loadUniqueFeaturesData() {
     try {
         const cachedPurposes = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_PURPOSES);
         if (cachedPurposes) {
-            try {
-                const purposes = JSON.parse(cachedPurposes);
-                groups.forEach(group => {
-                    if (purposes[group.id]) {
-                        group.purpose = purposes[group.id];
-                    }
-                });
-            } catch (e) {
-                console.error('Error parsing purposes cache:', e);
-            }
+            const purposes = JSON.parse(cachedPurposes);
+            groups.forEach(group => {
+                if (purposes[group.id]) {
+                    group.purpose = purposes[group.id];
+                }
+            });
         }
         
         const cachedMoods = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_MOODS);
         if (cachedMoods) {
-            try {
-                const moods = JSON.parse(cachedMoods);
-                groups.forEach(group => {
-                    if (moods[group.id]) {
-                        group.mood = moods[group.id];
-                    }
-                });
-            } catch (e) {
-                console.error('Error parsing moods cache:', e);
-            }
+            const moods = JSON.parse(cachedMoods);
+            groups.forEach(group => {
+                if (moods[group.id]) {
+                    group.mood = moods[group.id];
+                }
+            });
         }
         
         const cachedRules = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_POSTING_RULES);
         if (cachedRules) {
-            try {
-                const rules = JSON.parse(cachedRules);
-                groups.forEach(group => {
-                    if (rules[group.id]) {
-                        group.postingRule = rules[group.id];
-                    }
-                });
-            } catch (e) {
-                console.error('Error parsing rules cache:', e);
-            }
+            const rules = JSON.parse(cachedRules);
+            groups.forEach(group => {
+                if (rules[group.id]) {
+                    group.postingRule = rules[group.id];
+                }
+            });
         }
         
         const cachedModes = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES);
         if (cachedModes) {
-            try {
-                currentParticipationMode = JSON.parse(cachedModes);
-            } catch (e) {
-                console.error('Error parsing modes cache:', e);
-            }
+            currentParticipationMode = JSON.parse(cachedModes);
         }
         
-        console.log('✓ Instant: Unique features data loaded from cache');
-        
     } catch (error) {
-        console.error('Error loading unique features data:', error);
+        console.error('[Groups iframe] Error loading unique features data:', error);
     }
 }
 
-// Render groups list instantly from cache
+/**
+ * Render groups list instantly from cache
+ */
 function renderGroupsListInstantly() {
     const allGroupsList = document.getElementById('allGroupsList');
     if (!allGroupsList) return;
@@ -945,7 +760,9 @@ function renderGroupsListInstantly() {
     allGroupsList.classList.add('instant-load');
 }
 
-// Add group item instantly
+/**
+ * Add group item instantly from cache
+ */
 function addGroupItemInstant(groupData, container, type) {
     const groupItem = document.createElement('div');
     groupItem.className = 'group-item';
@@ -1008,9 +825,7 @@ function addGroupItemInstant(groupData, container, type) {
     
     groupItem.addEventListener('click', (e) => {
         if (!e.target.closest('.group-actions')) {
-            if (typeof showGroupDetails === 'function') {
-                showGroupDetails(groupData, type);
-            }
+            showGroupDetails(groupData, type);
         }
     });
     
@@ -1019,42 +834,37 @@ function addGroupItemInstant(groupData, container, type) {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const action = btn.dataset.action;
-            if (typeof handleGroupAction === 'function') {
-                handleGroupAction(action, groupData, type, btn);
-            }
+            handleGroupAction(action, groupData, type, btn);
         });
     });
     
     container.appendChild(groupItem);
 }
 
+/**
+ * Initialize full app after authentication is ready
+ */
 async function initializeApp() {
-    console.log('=== FULL GROUP APP INITIALIZATION START ===');
-    
-    showNotification('Groups system ready with unique features', 'success');
+    console.log('[Groups iframe] Full app initialization started');
     
     // Load friends from API
-    if (typeof loadFriends === 'function') {
-        await loadFriends();
-    }
+    await loadFriends();
     
     // Load groups from API
-    if (typeof syncGroupsFromServer === 'function') {
-        await syncGroupsFromServer();
-    }
+    await syncGroupsFromServer();
     
     // Load group invites from API
-    if (typeof syncGroupInvitesFromServer === 'function') {
-        await syncGroupInvitesFromServer();
-    }
+    await syncGroupInvitesFromServer();
     
-    console.log('=== FULL GROUP APP INITIALIZATION COMPLETE ===');
+    console.log('[Groups iframe] Full app initialization complete');
 }
 
-// Load friends from API
+/**
+ * Load friends from API with fallback to cache
+ */
 async function loadFriends() {
     if (!currentUser) {
-        console.log('loadFriends: No current user, skipping');
+        console.log('[Groups iframe] loadFriends: No current user, skipping');
         return;
     }
     
@@ -1063,59 +873,52 @@ async function loadFriends() {
         if (response && response.success && response.data) {
             friends = response.data;
             localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
-            console.log(`Loaded ${friends.length} friends from API`);
+            console.log(`[Groups iframe] Loaded ${friends.length} friends from API`);
         } else {
-            console.log('Failed to load friends from API:', response?.error);
+            console.log('[Groups iframe] Failed to load friends from API:', response?.error);
         }
     } catch (error) {
-        console.error('Error loading friends:', error);
+        console.error('[Groups iframe] Error loading friends:', error);
         // Load from cache as fallback
         const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cachedFriends) {
             try {
                 friends = JSON.parse(cachedFriends);
-                console.log(`Loaded ${friends.length} friends from cache`);
+                console.log(`[Groups iframe] Loaded ${friends.length} friends from cache`);
             } catch (e) {
-                console.error('Error parsing cached friends:', e);
+                console.error('[Groups iframe] Error parsing cached friends:', e);
             }
         }
     }
 }
 
-// Background sync with server
+/**
+ * Background sync with server for groups data
+ */
 async function backgroundSyncWithServer() {
     if (!currentUser) {
-        console.log('Background sync: Skipping - no user');
+        console.log('[Groups iframe] Background sync: Skipping - no user');
         return;
     }
     
-    console.log('Background sync: Starting server fetch...');
+    console.log('[Groups iframe] Background sync: Starting...');
     
     try {
-        const syncPromises = [];
+        await syncGroupsFromServer();
+        await syncGroupInvitesFromServer();
+        await syncUniqueFeaturesData();
         
-        if (typeof syncGroupsFromServer === 'function') {
-            syncPromises.push(syncGroupsFromServer());
-        }
-        
-        if (typeof syncGroupInvitesFromServer === 'function') {
-            syncPromises.push(syncGroupInvitesFromServer());
-        }
-        
-        if (typeof syncUniqueFeaturesData === 'function') {
-            syncPromises.push(syncUniqueFeaturesData());
-        }
-        
-        await Promise.allSettled(syncPromises);
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-        console.log('Background sync: Completed successfully');
+        console.log('[Groups iframe] Background sync: Completed successfully');
         
     } catch (error) {
-        console.log('Background sync: Server appears to be unreachable:', error.message);
+        console.log('[Groups iframe] Background sync: Server appears to be unreachable:', error.message);
     }
 }
 
-// Sync unique features data
+/**
+ * Sync unique features data from server
+ */
 async function syncUniqueFeaturesData() {
     if (!currentUser) return;
     
@@ -1144,20 +947,14 @@ async function syncUniqueFeaturesData() {
             });
         }
         
-        const notesResponse = await safeApiCall('get', 'groups/notes');
-        if (notesResponse && notesResponse.success && notesResponse.data) {
-            notesResponse.data.forEach(note => {
-                const key = LOCAL_STORAGE_KEYS.GROUP_NOTES + note.groupId;
-                localStorage.setItem(key, JSON.stringify(note.notes));
-            });
-        }
-        
     } catch (error) {
-        console.log('Unique features sync error:', error.message);
+        console.log('[Groups iframe] Unique features sync error:', error.message);
     }
 }
 
-// Sync groups from server
+/**
+ * Sync groups from server with cache fallback
+ */
 async function syncGroupsFromServer() {
     if (!currentUser) return;
     
@@ -1165,7 +962,7 @@ async function syncGroupsFromServer() {
         const response = await safeApiCall('get', 'groups/user');
         
         if (!response || !response.success || !response.data) {
-            console.log('No groups found on server or API not available');
+            console.log('[Groups iframe] No groups found on server or API not available');
             return;
         }
         
@@ -1202,7 +999,7 @@ async function syncGroupsFromServer() {
         });
         
         if (JSON.stringify(serverGroups) !== JSON.stringify(groups)) {
-            console.log('Group data updated from server');
+            console.log('[Groups iframe] Group data updated from server');
             groups = serverGroups;
             myGroups = serverMyGroups;
             joinedGroups = serverJoinedGroups;
@@ -1216,23 +1013,21 @@ async function syncGroupsFromServer() {
             
             const allGroupsSection = document.getElementById('allGroupsSection');
             if (allGroupsSection && allGroupsSection.classList.contains('active')) {
-                if (typeof updateCurrentSection === 'function') {
-                    updateCurrentSection();
-                }
-                if (typeof updateGroupCounts === 'function') {
-                    updateGroupCounts();
-                }
+                updateCurrentSection();
+                updateGroupCounts();
             }
             
             showNotification('Groups list updated', 'success');
         }
         
     } catch (error) {
-        console.log('Group sync error:', error.message);
+        console.log('[Groups iframe] Group sync error:', error.message);
     }
 }
 
-// Sync group invites
+/**
+ * Sync group invites from server
+ */
 async function syncGroupInvitesFromServer() {
     if (!currentUser) return;
     
@@ -1253,7 +1048,7 @@ async function syncGroupInvitesFromServer() {
         }
         
         if (JSON.stringify(serverInvites) !== JSON.stringify(groupInvites)) {
-            console.log('Group invites updated from server');
+            console.log('[Groups iframe] Group invites updated from server');
             groupInvites = serverInvites;
             localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_INVITES, JSON.stringify(groupInvites));
             
@@ -1264,15 +1059,19 @@ async function syncGroupInvitesFromServer() {
         }
         
     } catch (error) {
-        console.log('Group invites sync error:', error.message);
+        console.log('[Groups iframe] Group invites sync error:', error.message);
     }
 }
 
 // =============================================
-// REMAINING FUNCTIONS (PRESERVED)
+// CORE GROUP FUNCTIONS
 // =============================================
 
-// Calculate group pulse
+/**
+ * Calculate group activity pulse based on last activity time
+ * @param {Object} groupData - Group object
+ * @returns {Object|null} Pulse object with text and class, or null if no activity
+ */
 function calculateGroupPulse(groupData) {
     if (!groupData.lastActivity) return null;
     
@@ -1293,7 +1092,9 @@ function calculateGroupPulse(groupData) {
     }
 }
 
-// Update group counts
+/**
+ * Update group counts in the UI
+ */
 function updateGroupCounts() {
     const totalGroupsEl = document.getElementById('totalGroups');
     const activeGroupsEl = document.getElementById('activeGroups');
@@ -1317,7 +1118,9 @@ function updateGroupCounts() {
     if (adminCountEl) adminCountEl.textContent = adminGroups.length;
 }
 
-// Update current section
+/**
+ * Update current active section based on UI state
+ */
 function updateCurrentSection() {
     const activeSection = document.querySelector('.groups-section.active');
     if (activeSection) {
@@ -1325,25 +1128,27 @@ function updateCurrentSection() {
         
         switch(sectionId) {
             case 'allGroupsSection':
-                if (typeof renderAllGroups === 'function') renderAllGroups();
+                renderAllGroups();
                 break;
             case 'myGroupsSection':
-                if (typeof renderMyGroups === 'function') renderMyGroups();
+                renderMyGroups();
                 break;
             case 'joinedSection':
-                if (typeof renderJoinedGroups === 'function') renderJoinedGroups();
+                renderJoinedGroups();
                 break;
             case 'invitesSection':
-                if (typeof renderGroupInvites === 'function') renderGroupInvites();
+                renderGroupInvites();
                 break;
             case 'adminSection':
-                if (typeof renderAdminGroups === 'function') renderAdminGroups();
+                renderAdminGroups();
                 break;
         }
     }
 }
 
-// Render all groups
+/**
+ * Render all groups with filters applied
+ */
 function renderAllGroups() {
     const allGroupsList = document.getElementById('allGroupsList');
     if (!allGroupsList) return;
@@ -1378,7 +1183,12 @@ function renderAllGroups() {
     }
 }
 
-// Add group item
+/**
+ * Add group item to container
+ * @param {Object} groupData - Group data
+ * @param {HTMLElement} container - Container element
+ * @param {string} type - Group type (group, my_group, joined, admin, group_invite)
+ */
 function addGroupItem(groupData, container, type) {
     const existingItem = container.querySelector(`[data-group-id="${groupData.id}"]`);
     if (existingItem) {
@@ -1471,9 +1281,7 @@ function addGroupItem(groupData, container, type) {
     
     groupItem.addEventListener('click', (e) => {
         if (!e.target.closest('.group-actions')) {
-            if (typeof showGroupDetails === 'function') {
-                showGroupDetails(groupData, type);
-            }
+            showGroupDetails(groupData, type);
         }
     });
     
@@ -1489,35 +1297,44 @@ function addGroupItem(groupData, container, type) {
     container.appendChild(groupItem);
 }
 
-// Handle group actions
+/**
+ * Handle group action button clicks
+ * @param {string} action - Action type
+ * @param {Object} groupData - Group data
+ * @param {string} type - Group type
+ * @param {HTMLElement} button - Button element
+ */
 function handleGroupAction(action, groupData, type, button) {
     switch(action) {
         case 'open-chat':
-            if (typeof openGroupChat === 'function') openGroupChat(groupData);
+            openGroupChat(groupData);
             break;
         case 'info':
-            if (typeof showGroupDetails === 'function') showGroupDetails(groupData, type);
+            showGroupDetails(groupData, type);
             break;
         case 'manage':
-            if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+            openAdminManagement(groupData);
             break;
         case 'leave':
-            if (typeof leaveGroupConfirm === 'function') leaveGroupConfirm(groupData);
+            leaveGroupConfirm(groupData);
             break;
         case 'accept-invite':
-            if (typeof acceptGroupInvite === 'function') acceptGroupInvite(groupData);
+            acceptGroupInvite(groupData);
             break;
         case 'decline-invite':
-            if (typeof declineGroupInvite === 'function') declineGroupInvite(groupData);
+            declineGroupInvite(groupData);
             break;
         default:
             console.log('Unknown group action:', action);
     }
 }
 
-// Open group chat
+/**
+ * Open group chat panel
+ * @param {Object} groupData - Group data
+ */
 function openGroupChat(groupData) {
-    console.log('Opening inline group chat for:', groupData.name);
+    console.log('[Groups iframe] Opening inline group chat for:', groupData.name);
     
     currentChatGroup = groupData;
     
@@ -1546,9 +1363,7 @@ function openGroupChat(groupData) {
         }
     }
     
-    if (typeof updateChatHeaderUniqueFeatures === 'function') {
-        updateChatHeaderUniqueFeatures(groupData);
-    }
+    updateChatHeaderUniqueFeatures(groupData);
     
     const sidebar = document.getElementById('sidebar');
     const groupChatPanel = document.getElementById('groupChatPanel');
@@ -1570,7 +1385,7 @@ function openGroupChat(groupData) {
             chatHeaderInfo.insertBefore(backBtn, chatHeaderInfo.firstChild);
         }
     } else {
-        if (typeof hideAllPanels === 'function') hideAllPanels();
+        hideAllPanels();
         if (groupChatPanel) groupChatPanel.classList.add('active');
     }
     
@@ -1580,16 +1395,19 @@ function openGroupChat(groupData) {
     if (chatMessages) chatMessages.innerHTML = '';
     if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     
-    if (typeof loadGroupChatMessages === 'function') loadGroupChatMessages(groupData.id);
-    if (typeof setupTypingListener === 'function') setupTypingListener(groupData.id);
+    loadGroupChatMessages(groupData.id);
+    setupTypingListener(groupData.id);
     
-    if (typeof loadUniqueFeaturesPanels === 'function') loadUniqueFeaturesPanels(groupData.id);
-    if (typeof checkPostingRules === 'function') checkPostingRules(groupData);
+    loadUniqueFeaturesPanels(groupData.id);
+    checkPostingRules(groupData);
     
     showNotification(`Opened chat: ${groupData.name}`, 'success');
 }
 
-// Update chat header with unique features
+/**
+ * Update chat header with unique features
+ * @param {Object} groupData - Group data
+ */
 function updateChatHeaderUniqueFeatures(groupData) {
     const purpose = groupData.purpose || '';
     const chatPurposeTag = document.getElementById('chatPurposeTag');
@@ -1650,7 +1468,10 @@ function updateChatHeaderUniqueFeatures(groupData) {
     }
 }
 
-// Check posting rules
+/**
+ * Check posting rules and update UI accordingly
+ * @param {Object} groupData - Group data
+ */
 function checkPostingRules(groupData) {
     const postingRule = groupData.postingRule || 'everyone';
     const quietHours = groupData.quietHours || {};
@@ -1730,12 +1551,12 @@ function checkPostingRules(groupData) {
         anonymousModeBtn.style.display = participationModes.anonymous ? 'block' : 'none';
     }
     
-    if (typeof updateParticipationModeButtons === 'function') {
-        updateParticipationModeButtons();
-    }
+    updateParticipationModeButtons();
 }
 
-// Update participation mode buttons
+/**
+ * Update participation mode buttons UI
+ */
 function updateParticipationModeButtons() {
     const silentModeBtn = document.getElementById('silentModeBtn');
     const chatInput = document.getElementById('chatInput');
@@ -1767,15 +1588,21 @@ function updateParticipationModeButtons() {
     }
 }
 
-// Load unique features panels
+/**
+ * Load all unique features panels for a group
+ * @param {string} groupId - Group ID
+ */
 function loadUniqueFeaturesPanels(groupId) {
-    if (typeof loadGroupNotes === 'function') loadGroupNotes(groupId);
-    if (typeof loadGroupEvents === 'function') loadGroupEvents(groupId);
-    if (typeof loadTransparencyLog === 'function') loadTransparencyLog(groupId);
-    if (typeof analyzeGroupEnergy === 'function') analyzeGroupEnergy(groupId);
+    loadGroupNotes(groupId);
+    loadGroupEvents(groupId);
+    loadTransparencyLog(groupId);
+    analyzeGroupEnergy(groupId);
 }
 
-// Load group notes
+/**
+ * Load group notes from cache or API
+ * @param {string} groupId - Group ID
+ */
 async function loadGroupNotes(groupId) {
     try {
         const cacheKey = LOCAL_STORAGE_KEYS.GROUP_NOTES + groupId;
@@ -1803,13 +1630,16 @@ async function loadGroupNotes(groupId) {
         }
         
     } catch (error) {
-        console.error('Error loading group notes:', error);
+        console.error('[Groups iframe] Error loading group notes:', error);
         const groupNotesPanel = document.getElementById('groupNotesPanel');
         if (groupNotesPanel) groupNotesPanel.style.display = 'none';
     }
 }
 
-// Load group events
+/**
+ * Load group events from cache or API
+ * @param {string} groupId - Group ID
+ */
 async function loadGroupEvents(groupId) {
     try {
         const cacheKey = LOCAL_STORAGE_KEYS.GROUP_EVENTS + groupId;
@@ -1820,22 +1650,18 @@ async function loadGroupEvents(groupId) {
             try {
                 events = JSON.parse(cachedEvents);
             } catch (e) {
-                console.error('Error parsing cached events:', e);
+                console.error('[Groups iframe] Error parsing cached events:', e);
             }
         }
         
-        // Try to get events from API
         const response = await safeApiCall('get', `groups/${groupId}/events`);
         if (response && response.success && response.data) {
             events = response.data;
             localStorage.setItem(cacheKey, JSON.stringify(events));
         } else {
-            // Generate unique events for this user if none exist
             if (events.length === 0 && currentUser) {
-                if (typeof generateUniqueEventsForUser === 'function') {
-                    events = generateUniqueEventsForUser(groupId, currentUser.uid || currentUser.id);
-                    localStorage.setItem(cacheKey, JSON.stringify(events));
-                }
+                events = generateUniqueEventsForUser(groupId, currentUser.uid || currentUser.id);
+                localStorage.setItem(cacheKey, JSON.stringify(events));
             }
         }
         
@@ -1870,18 +1696,22 @@ async function loadGroupEvents(groupId) {
         }
         
     } catch (error) {
-        console.error('Error loading group events:', error);
+        console.error('[Groups iframe] Error loading group events:', error);
         const eventCountdownPanel = document.getElementById('eventCountdownPanel');
         if (eventCountdownPanel) eventCountdownPanel.style.display = 'none';
     }
 }
 
-// Generate unique events for a user based on their ID
+/**
+ * Generate unique events for a user based on their ID
+ * @param {string} groupId - Group ID
+ * @param {string} userId - User ID
+ * @returns {Array} Array of event objects
+ */
 function generateUniqueEventsForUser(groupId, userId) {
     const events = [];
     const now = new Date();
     
-    // Generate events based on user ID hash for uniqueness
     const userHash = hashCode(userId);
     const eventTemplates = [
         { title: 'Group Study Session', type: 'study', duration: 2 },
@@ -1895,18 +1725,15 @@ function generateUniqueEventsForUser(groupId, userId) {
         { title: 'Celebration Party', type: 'event', duration: 5 }
     ];
     
-    // Create 3 unique events for this user
     for (let i = 0; i < 3; i++) {
         const templateIndex = (userHash + i) % eventTemplates.length;
         const template = eventTemplates[templateIndex];
         
-        // Create date 1-14 days from now, based on user hash
         const daysFromNow = 1 + ((userHash + i * 7) % 14);
         const eventDate = new Date(now);
         eventDate.setDate(eventDate.getDate() + daysFromNow);
         
-        // Set time based on user hash
-        const hour = 9 + ((userHash + i * 3) % 8); // 9 AM to 5 PM
+        const hour = 9 + ((userHash + i * 3) % 8);
         eventDate.setHours(hour, 0, 0, 0);
         
         events.push({
@@ -1927,7 +1754,11 @@ function generateUniqueEventsForUser(groupId, userId) {
     return events;
 }
 
-// Simple hash function for user IDs
+/**
+ * Simple hash function for user IDs
+ * @param {string} str - String to hash
+ * @returns {number} Hash code
+ */
 function hashCode(str) {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -1938,7 +1769,10 @@ function hashCode(str) {
     return Math.abs(hash);
 }
 
-// Load transparency log
+/**
+ * Load transparency log from cache or API
+ * @param {string} groupId - Group ID
+ */
 async function loadTransparencyLog(groupId) {
     try {
         const cacheKey = LOCAL_STORAGE_KEYS.GROUP_TRANSPARENCY + groupId;
@@ -1949,14 +1783,11 @@ async function loadTransparencyLog(groupId) {
             try {
                 log = JSON.parse(cachedLog);
             } catch (e) {
-                console.error('Error parsing transparency log:', e);
+                console.error('[Groups iframe] Error parsing transparency log:', e);
             }
         } else {
-            // Generate initial transparency log
-            if (typeof generateInitialTransparencyLog === 'function') {
-                log = generateInitialTransparencyLog(groupId);
-                localStorage.setItem(cacheKey, JSON.stringify(log));
-            }
+            log = generateInitialTransparencyLog(groupId);
+            localStorage.setItem(cacheKey, JSON.stringify(log));
         }
         
         const response = await safeApiCall('get', `groups/${groupId}/transparency`);
@@ -1990,13 +1821,17 @@ async function loadTransparencyLog(groupId) {
         }
         
     } catch (error) {
-        console.error('Error loading transparency log:', error);
+        console.error('[Groups iframe] Error loading transparency log:', error);
         const adminTransparencyPanel = document.getElementById('adminTransparencyPanel');
         if (adminTransparencyPanel) adminTransparencyPanel.style.display = 'none';
     }
 }
 
-// Generate initial transparency log
+/**
+ * Generate initial transparency log
+ * @param {string} groupId - Group ID
+ * @returns {Array} Initial transparency log entries
+ */
 function generateInitialTransparencyLog(groupId) {
     const now = new Date();
     return [
@@ -2006,7 +1841,7 @@ function generateInitialTransparencyLog(groupId) {
             action: 'Group created',
             by: currentUser?.uid || currentUser?.id || 'system',
             byName: userData?.displayName || 'System',
-            timestamp: new Date(now.getTime() - 86400000 * 2).toISOString(), // 2 days ago
+            timestamp: new Date(now.getTime() - 86400000 * 2).toISOString(),
             details: 'Group was created with initial settings'
         },
         {
@@ -2015,7 +1850,7 @@ function generateInitialTransparencyLog(groupId) {
             action: 'Welcome message set',
             by: currentUser?.uid || currentUser?.id || 'system',
             byName: userData?.displayName || 'System',
-            timestamp: new Date(now.getTime() - 86400000 * 1).toISOString(), // 1 day ago
+            timestamp: new Date(now.getTime() - 86400000 * 1).toISOString(),
             details: 'Welcome message was configured'
         },
         {
@@ -2024,13 +1859,16 @@ function generateInitialTransparencyLog(groupId) {
             action: 'First members joined',
             by: 'system',
             byName: 'System',
-            timestamp: new Date(now.getTime() - 43200000).toISOString(), // 12 hours ago
+            timestamp: new Date(now.getTime() - 43200000).toISOString(),
             details: 'Initial members joined the group'
         }
     ];
 }
 
-// Analyze group energy
+/**
+ * Analyze group energy and activity level
+ * @param {string} groupId - Group ID
+ */
 async function analyzeGroupEnergy(groupId) {
     try {
         let messages = [];
@@ -2039,10 +1877,7 @@ async function analyzeGroupEnergy(groupId) {
         if (response && response.success && response.data) {
             messages = response.data;
         } else {
-            // Generate simulated message data for demo
-            if (typeof generateSimulatedMessages === 'function') {
-                messages = generateSimulatedMessages(groupId);
-            }
+            messages = generateSimulatedMessages(groupId);
         }
         
         const now = new Date();
@@ -2092,20 +1927,23 @@ async function analyzeGroupEnergy(groupId) {
         });
         
     } catch (error) {
-        console.error('Error analyzing group energy:', error);
+        console.error('[Groups iframe] Error analyzing group energy:', error);
         const energySuggestionPanel = document.getElementById('energySuggestionPanel');
         if (energySuggestionPanel) energySuggestionPanel.style.display = 'none';
     }
 }
 
-// Generate simulated messages for energy analysis
+/**
+ * Generate simulated messages for energy analysis
+ * @param {string} groupId - Group ID
+ * @returns {Array} Simulated messages
+ */
 function generateSimulatedMessages(groupId) {
     const messages = [];
     const now = new Date();
     const members = ['user1', 'user2', 'user3', currentUser?.uid || currentUser?.id || 'user4'];
     const messageTypes = ['text', 'announcement', 'question'];
     
-    // Generate messages for the last 24 hours
     for (let i = 0; i < 50; i++) {
         const hoursAgo = Math.random() * 24;
         const timestamp = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
@@ -2126,7 +1964,9 @@ function generateSimulatedMessages(groupId) {
     return messages;
 }
 
-// Close group chat mobile
+/**
+ * Close group chat on mobile
+ */
 function closeGroupChatMobile() {
     const sidebar = document.getElementById('sidebar');
     const groupChatPanel = document.getElementById('groupChatPanel');
@@ -2145,7 +1985,9 @@ function closeGroupChatMobile() {
     }
 }
 
-// Hide all panels
+/**
+ * Hide all panels
+ */
 function hideAllPanels() {
     const groupDetailsPanel = document.getElementById('groupDetailsPanel');
     const groupChatPanel = document.getElementById('groupChatPanel');
@@ -2163,7 +2005,10 @@ function hideAllPanels() {
     }
 }
 
-// Load group chat messages
+/**
+ * Load group chat messages from cache or API
+ * @param {string} groupId - Group ID
+ */
 async function loadGroupChatMessages(groupId) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
@@ -2175,19 +2020,15 @@ async function loadGroupChatMessages(groupId) {
         try {
             const messages = JSON.parse(cachedMessages);
             messages.forEach(message => {
-                if (typeof addMessageToChat === 'function') {
-                    addMessageToChat(message, false);
-                }
+                addMessageToChat(message, false);
             });
         } catch (error) {
-            console.error('Error loading cached messages:', error);
+            console.error('[Groups iframe] Error loading cached messages:', error);
         }
     }
     
     if (chatMessages.children.length === 0) {
-        if (typeof addSystemMessage === 'function') {
-            addSystemMessage(`Welcome to the group chat! Start the conversation.`);
-        }
+        addSystemMessage(`Welcome to the group chat! Start the conversation.`);
     }
     
     const chatMessagesContainer = document.getElementById('chatMessagesContainer');
@@ -2201,20 +2042,20 @@ async function loadGroupChatMessages(groupId) {
         const response = await safeApiCall('get', `groups/${groupId}/messages`);
         if (response && response.success && response.data) {
             response.data.forEach(message => {
-                if (typeof addMessageToChat === 'function') {
-                    addMessageToChat(message, true);
-                }
-                if (typeof saveMessageToCache === 'function') {
-                    saveMessageToCache(groupId, message);
-                }
+                addMessageToChat(message, true);
+                saveMessageToCache(groupId, message);
             });
         }
     } catch (error) {
-        console.error('Error loading messages from API:', error);
+        console.error('[Groups iframe] Error loading messages from API:', error);
     }
 }
 
-// Add message to chat
+/**
+ * Add message to chat UI
+ * @param {Object} messageData - Message data
+ * @param {boolean} isNew - Whether this is a new message
+ */
 function addMessageToChat(messageData, isNew = true) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
@@ -2267,7 +2108,10 @@ function addMessageToChat(messageData, isNew = true) {
     }
 }
 
-// Add system message
+/**
+ * Add system message to chat
+ * @param {string} content - Message content
+ */
 function addSystemMessage(content) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
@@ -2281,7 +2125,11 @@ function addSystemMessage(content) {
     chatMessages.appendChild(messageElement);
 }
 
-// Save message to cache
+/**
+ * Save message to cache
+ * @param {string} groupId - Group ID
+ * @param {Object} message - Message object
+ */
 function saveMessageToCache(groupId, message) {
     try {
         const cacheKey = LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId;
@@ -2297,11 +2145,13 @@ function saveMessageToCache(groupId, message) {
             localStorage.setItem(cacheKey, JSON.stringify(cachedMessages));
         }
     } catch (error) {
-        console.error('Error saving message to cache:', error);
+        console.error('[Groups iframe] Error saving message to cache:', error);
     }
 }
 
-// Send group message
+/**
+ * Send group message
+ */
 async function sendGroupMessage() {
     const chatInput = document.getElementById('chatInput');
     const messageTopic = document.getElementById('messageTopic');
@@ -2312,7 +2162,7 @@ async function sendGroupMessage() {
     const selectedTopic = messageTopic ? messageTopic.value : '';
     
     chatInput.value = '';
-    if (typeof adjustTextareaHeight === 'function') adjustTextareaHeight();
+    adjustTextareaHeight();
     
     const message = {
         groupId: currentChatGroup.id,
@@ -2331,7 +2181,7 @@ async function sendGroupMessage() {
         id: 'temp_' + Date.now()
     };
     
-    if (typeof addMessageToChat === 'function') addMessageToChat(tempMessage, true);
+    addMessageToChat(tempMessage, true);
     
     try {
         const response = await safeApiCall('post', `groups/${currentChatGroup.id}/messages`, {
@@ -2341,28 +2191,28 @@ async function sendGroupMessage() {
         });
         
         if (response && response.success) {
-            if (typeof saveMessageToCache === 'function') {
-                saveMessageToCache(currentChatGroup.id, {
-                    ...tempMessage,
-                    id: response.data?.id || tempMessage.id
-                });
-            }
+            saveMessageToCache(currentChatGroup.id, {
+                ...tempMessage,
+                id: response.data?.id || tempMessage.id
+            });
             
             if (isAnonymousMode) {
-                if (typeof toggleAnonymousMode === 'function') toggleAnonymousMode();
+                toggleAnonymousMode();
             }
         } else {
             showNotification('Failed to send message', 'error');
         }
     } catch (error) {
-        console.error('Error sending message:', error);
+        console.error('[Groups iframe] Error sending message:', error);
         showNotification('Failed to send message', 'error');
     }
     
-    if (typeof stopTypingIndicator === 'function') stopTypingIndicator();
+    stopTypingIndicator();
 }
 
-// Toggle silent mode
+/**
+ * Toggle silent mode
+ */
 function toggleSilentMode() {
     if (currentParticipationMode === 'read_only') {
         currentParticipationMode = 'normal';
@@ -2383,12 +2233,12 @@ function toggleSilentMode() {
     }
     
     localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES, JSON.stringify(currentParticipationMode));
-    if (typeof updateParticipationModeButtons === 'function') {
-        updateParticipationModeButtons();
-    }
+    updateParticipationModeButtons();
 }
 
-// Toggle anonymous mode
+/**
+ * Toggle anonymous mode
+ */
 function toggleAnonymousMode() {
     isAnonymousMode = !isAnonymousMode;
     
@@ -2398,24 +2248,29 @@ function toggleAnonymousMode() {
         showNotification('Anonymous mode disabled', 'success');
     }
     
-    if (typeof updateParticipationModeButtons === 'function') {
-        updateParticipationModeButtons();
-    }
+    updateParticipationModeButtons();
 }
 
-// Message reaction handler
+/**
+ * Message reaction handler (exposed to window)
+ * @param {string} messageId - Message ID
+ * @param {HTMLElement} button - Button element
+ */
 window.reactToMessage = function(messageId, button) {
     const reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
     const reaction = reactions[Math.floor(Math.random() * reactions.length)];
     
     showNotification(`Reacted with ${reaction}`, 'success');
     
-    // Update button to show reaction
     button.innerHTML = `<i class="fas fa-${reaction === '👍' ? 'thumbs-up' : reaction === '❤️' ? 'heart' : 'smile'}"></i>`;
     button.style.color = '#FF9800';
 };
 
-// Message reply handler
+/**
+ * Message reply handler (exposed to window)
+ * @param {string} messageId - Message ID
+ * @param {string} senderName - Sender name
+ */
 window.replyToMessage = function(messageId, senderName) {
     const chatInput = document.getElementById('chatInput');
     if (chatInput) {
@@ -2425,10 +2280,12 @@ window.replyToMessage = function(messageId, senderName) {
     }
 };
 
-// Message delete handler
+/**
+ * Message delete handler (exposed to window)
+ * @param {string} messageId - Message ID
+ */
 window.deleteMessage = function(messageId) {
     if (confirm('Are you sure you want to delete this message?')) {
-        // Find and remove the message element
         const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
         if (messageElement) {
             messageElement.remove();
@@ -2437,7 +2294,10 @@ window.deleteMessage = function(messageId) {
     }
 };
 
-// Setup typing listener
+/**
+ * Setup typing indicator listener
+ * @param {string} groupId - Group ID
+ */
 let typingTimeout;
 function setupTypingListener(groupId) {
     const chatInput = document.getElementById('chatInput');
@@ -2459,13 +2319,17 @@ function setupTypingListener(groupId) {
     });
 }
 
-// Stop typing indicator
+/**
+ * Stop typing indicator
+ */
 function stopTypingIndicator() {
     isTyping = false;
     if (typingTimeout) clearTimeout(typingTimeout);
 }
 
-// Adjust textarea height
+/**
+ * Adjust textarea height based on content
+ */
 function adjustTextareaHeight() {
     const chatInput = document.getElementById('chatInput');
     if (!chatInput) return;
@@ -2474,13 +2338,20 @@ function adjustTextareaHeight() {
     chatInput.style.height = Math.min(chatInput.scrollHeight, 100) + 'px';
 }
 
-// Format message time
+/**
+ * Format message time
+ * @param {Date|string} date - Date object or string
+ * @returns {string} Formatted time
+ */
 function formatMessageTime(date) {
     const dateObj = date instanceof Date ? date : new Date(date);
     return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// Open admin management
+/**
+ * Open admin management modal
+ * @param {Object} groupData - Group data
+ */
 function openAdminManagement(groupData) {
     if (!groupData.isAdmin && !groupData.isCreator) {
         showNotification('You need admin permissions to manage this group', 'error');
@@ -2497,12 +2368,15 @@ function openAdminManagement(groupData) {
         adminManagementModal.classList.add('active');
     }
     
-    if (typeof loadGroupMembersForManagement === 'function') loadGroupMembersForManagement(groupData);
-    if (typeof loadGroupSettingsForManagement === 'function') loadGroupSettingsForManagement(groupData);
-    if (typeof loadUniqueFeaturesForManagement === 'function') loadUniqueFeaturesForManagement(groupData);
+    loadGroupMembersForManagement(groupData);
+    loadGroupSettingsForManagement(groupData);
+    loadUniqueFeaturesForManagement(groupData);
 }
 
-// Load group members for management
+/**
+ * Load group members for management
+ * @param {Object} groupData - Group data
+ */
 async function loadGroupMembersForManagement(groupData) {
     const memberList = document.getElementById('memberManagementList');
     if (!memberList) return;
@@ -2517,18 +2391,13 @@ async function loadGroupMembersForManagement(groupData) {
         if (response && response.success && response.data) {
             memberDetails = response.data;
         } else {
-            // Generate simulated members for demo
-            if (typeof generateSimulatedMembers === 'function') {
-                memberDetails = generateSimulatedMembers(groupData.id);
-            }
+            memberDetails = generateSimulatedMembers(groupData.id);
         }
         
-        if (typeof renderMembersList === 'function') {
-            renderMembersList(memberDetails);
-        }
+        renderMembersList(memberDetails);
         
     } catch (error) {
-        console.error('Error loading members:', error);
+        console.error('[Groups iframe] Error loading members:', error);
         memberList.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
@@ -2539,7 +2408,11 @@ async function loadGroupMembersForManagement(groupData) {
     }
 }
 
-// Generate simulated members for demo
+/**
+ * Generate simulated members for demo
+ * @param {string} groupId - Group ID
+ * @returns {Array} Simulated members
+ */
 function generateSimulatedMembers(groupId) {
     const members = [];
     const memberNames = ['Alex Johnson', 'Sam Wilson', 'Taylor Smith', 'Jordan Lee', 'Casey Brown'];
@@ -2551,13 +2424,12 @@ function generateSimulatedMembers(groupId) {
             displayName: memberNames[i],
             username: memberNames[i].toLowerCase().replace(' ', ''),
             photoURL: '',
-            online: i < 2, // First two are online
+            online: i < 2,
             isCreator: i === 0,
             isAdmin: roles[i] === 'admin' || roles[i] === 'moderator'
         });
     }
     
-    // Add current user if not already in list
     if (currentUser) {
         members.unshift({
             id: currentUser.uid || currentUser.id,
@@ -2573,7 +2445,10 @@ function generateSimulatedMembers(groupId) {
     return members;
 }
 
-// Render members list
+/**
+ * Render members list in management modal
+ * @param {Array} memberDetails - Array of member objects
+ */
 function renderMembersList(memberDetails) {
     const memberList = document.getElementById('memberManagementList');
     if (!memberList) return;
@@ -2632,53 +2507,53 @@ function renderMembersList(memberDetails) {
             const action = btn.classList.contains('promote') ? 'promote' : 
                           btn.classList.contains('demote') ? 'demote' : 'remove';
             
-            if (typeof handleMemberAction === 'function') {
-                handleMemberAction(action, memberId, groupData);
-            }
+            handleMemberAction(action, memberId, selectedGroup);
         });
     });
 }
 
-// Handle member action
+/**
+ * Handle member action in management
+ * @param {string} action - Action type (promote, demote, remove)
+ * @param {string} memberId - Member ID
+ * @param {Object} groupData - Group data
+ */
 async function handleMemberAction(action, memberId, groupData) {
     try {
         switch(action) {
             case 'promote':
                 await safeApiCall('post', `groups/${groupData.id}/members/${memberId}/promote`);
                 showNotification('Member promoted to admin', 'success');
-                if (typeof logTransparencyAction === 'function') {
-                    logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
-                }
+                logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
                 break;
             case 'demote':
                 await safeApiCall('post', `groups/${groupData.id}/members/${memberId}/demote`);
                 showNotification('Admin demoted to member', 'success');
-                if (typeof logTransparencyAction === 'function') {
-                    logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
-                }
+                logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
                 break;
             case 'remove':
                 if (confirm('Are you sure you want to remove this member from the group?')) {
                     await safeApiCall('delete', `groups/${groupData.id}/members/${memberId}`);
                     showNotification('Member removed from group', 'success');
-                    if (typeof logTransparencyAction === 'function') {
-                        logTransparencyAction(groupData.id, 'Removed member from group', memberId);
-                    }
+                    logTransparencyAction(groupData.id, 'Removed member from group', memberId);
                 }
                 break;
         }
         
-        if (typeof loadGroupMembersForManagement === 'function') {
-            loadGroupMembersForManagement(groupData);
-        }
+        loadGroupMembersForManagement(groupData);
         
     } catch (error) {
-        console.error('Error performing member action:', error);
+        console.error('[Groups iframe] Error performing member action:', error);
         showNotification('Failed to perform action', 'error');
     }
 }
 
-// Log transparency action
+/**
+ * Log transparency action
+ * @param {string} groupId - Group ID
+ * @param {string} action - Action description
+ * @param {string|null} targetId - Target user ID (optional)
+ */
 async function logTransparencyAction(groupId, action, targetId = null) {
     try {
         const logEntry = {
@@ -2699,11 +2574,14 @@ async function logTransparencyAction(groupId, action, targetId = null) {
         await safeApiCall('post', `groups/${groupId}/transparency`, logEntry);
         
     } catch (error) {
-        console.error('Error logging transparency action:', error);
+        console.error('[Groups iframe] Error logging transparency action:', error);
     }
 }
 
-// Load group settings for management
+/**
+ * Load group settings for management
+ * @param {Object} groupData - Group data
+ */
 function loadGroupSettingsForManagement(groupData) {
     const adminPublicGroup = document.getElementById('adminPublicGroup');
     const adminApproveMembers = document.getElementById('adminApproveMembers');
@@ -2724,7 +2602,10 @@ function loadGroupSettingsForManagement(groupData) {
     if (adminAnnouncementNotifications) adminAnnouncementNotifications.checked = groupData.notificationSettings?.announcementNotifications || true;
 }
 
-// Load unique features for management
+/**
+ * Load unique features for management
+ * @param {Object} groupData - Group data
+ */
 function loadUniqueFeaturesForManagement(groupData) {
     const adminGroupPurpose = document.getElementById('adminGroupPurpose');
     if (adminGroupPurpose) adminGroupPurpose.value = groupData.purpose || '';
@@ -2739,7 +2620,7 @@ function loadUniqueFeaturesForManagement(groupData) {
     
     const adminPostingMode = document.getElementById('adminPostingMode');
     if (adminPostingMode) adminPostingMode.value = groupData.postingRule || 'everyone';
-    if (typeof updatePostingRulesUI === 'function') updatePostingRulesUI();
+    updatePostingRulesUI();
     
     if (groupData.quietHours) {
         const adminQuietStart = document.getElementById('adminQuietStart');
@@ -2765,7 +2646,9 @@ function loadUniqueFeaturesForManagement(groupData) {
     if (adminEnableAnonymous) adminEnableAnonymous.checked = participationModes.anonymous || false;
 }
 
-// Update posting rules UI
+/**
+ * Update posting rules UI in admin management
+ */
 function updatePostingRulesUI() {
     const adminPostingMode = document.getElementById('adminPostingMode');
     const adminQuietHoursSection = document.getElementById('adminQuietHoursSection');
@@ -2782,7 +2665,10 @@ function updatePostingRulesUI() {
     }
 }
 
-// Save group settings
+/**
+ * Save group settings
+ * @param {Object} groupData - Group data
+ */
 async function saveGroupSettings(groupData) {
     try {
         const adminPublicGroup = document.getElementById('adminPublicGroup');
@@ -2839,17 +2725,11 @@ async function saveGroupSettings(groupData) {
         if (response && response.success) {
             Object.assign(groupData, settings);
             
-            if (typeof logTransparencyAction === 'function') {
-                logTransparencyAction(groupData.id, 'Updated group settings');
-            }
+            logTransparencyAction(groupData.id, 'Updated group settings');
             
             if (currentChatGroup && currentChatGroup.id === groupData.id) {
-                if (typeof updateChatHeaderUniqueFeatures === 'function') {
-                    updateChatHeaderUniqueFeatures(groupData);
-                }
-                if (typeof checkPostingRules === 'function') {
-                    checkPostingRules(groupData);
-                }
+                updateChatHeaderUniqueFeatures(groupData);
+                checkPostingRules(groupData);
             }
             
             showNotification('Group settings saved successfully', 'success');
@@ -2861,12 +2741,14 @@ async function saveGroupSettings(groupData) {
         }
         
     } catch (error) {
-        console.error('Error saving group settings:', error);
+        console.error('[Groups iframe] Error saving group settings:', error);
         showNotification('Failed to save settings: ' + error.message, 'error');
     }
 }
 
-// Show friend selection
+/**
+ * Show friend selection modal
+ */
 function showFriendSelection() {
     const friendSelectionModal = document.getElementById('friendSelectionModal');
     if (friendSelectionModal) {
@@ -2880,13 +2762,13 @@ function showFriendSelection() {
     }
     
     setTimeout(() => {
-        if (typeof renderFriendSelection === 'function') {
-            renderFriendSelection();
-        }
+        renderFriendSelection();
     }, 100);
 }
 
-// Render friend selection
+/**
+ * Render friend selection list
+ */
 function renderFriendSelection() {
     const friendSelectionContent = document.getElementById('friendSelectionContent');
     if (!friendSelectionContent) return;
@@ -2943,16 +2825,16 @@ function renderFriendSelection() {
                 selectedFriends.push(friend.id);
             }
             
-            if (typeof updateSelectedFriendsList === 'function') {
-                updateSelectedFriendsList();
-            }
+            updateSelectedFriendsList();
         });
         
         friendSelectionContent.appendChild(friendItem);
     });
 }
 
-// Update selected friends list
+/**
+ * Update selected friends list
+ */
 function updateSelectedFriendsList() {
     const selectedMembersList = document.getElementById('selectedMembersList');
     if (!selectedMembersList) return;
@@ -3000,12 +2882,13 @@ function updateSelectedFriendsList() {
     });
 }
 
-// Remove selected friend
+/**
+ * Remove selected friend (exposed to window)
+ * @param {string} friendId - Friend ID
+ */
 window.removeSelectedFriend = function(friendId) {
     selectedFriends = selectedFriends.filter(id => id !== friendId);
-    if (typeof updateSelectedFriendsList === 'function') {
-        updateSelectedFriendsList();
-    }
+    updateSelectedFriendsList();
     
     const friendItem = document.querySelector(`.friend-item[data-friend-id="${friendId}"]`);
     if (friendItem) {
@@ -3015,7 +2898,10 @@ window.removeSelectedFriend = function(friendId) {
     }
 };
 
-// Create group online
+/**
+ * Create group online via API
+ * @param {Object} groupData - Group data
+ */
 async function createGroupOnline(groupData) {
     try {
         const members = [currentUser.uid || currentUser.id, ...selectedFriends];
@@ -3053,9 +2939,9 @@ async function createGroupOnline(groupData) {
         myGroups.push(newGroup);
         adminGroups.push(newGroup);
         
-        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
-        if (typeof updateGroupCounts === 'function') updateGroupCounts();
-        if (typeof updateCurrentSection === 'function') updateCurrentSection();
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
         
         const inviteLinkInput = document.getElementById('inviteLinkInput');
         const copyInviteLinkBtn = document.getElementById('copyInviteLinkBtn');
@@ -3074,17 +2960,18 @@ async function createGroupOnline(groupData) {
         if (friendSelectionModal) friendSelectionModal.classList.remove('active');
         
         selectedFriends = [];
-        if (typeof showGroupDetails === 'function') {
-            showGroupDetails(newGroup, 'my_group');
-        }
+        showGroupDetails(newGroup, 'my_group');
         
     } catch (error) {
-        console.error('Error creating group:', error);
+        console.error('[Groups iframe] Error creating group:', error);
         showNotification('Failed to create group: ' + error.message, 'error');
     }
 }
 
-// Join group online
+/**
+ * Join group online via API
+ * @param {string} groupId - Group ID
+ */
 async function joinGroupOnline(groupId) {
     try {
         const response = await safeApiCall('post', `groups/${groupId}/join`);
@@ -3106,9 +2993,9 @@ async function joinGroupOnline(groupId) {
         joinedGroups.push(updatedGroup);
         groupInvites = groupInvites.filter(invite => invite.groupId !== groupId);
         
-        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
-        if (typeof updateGroupCounts === 'function') updateGroupCounts();
-        if (typeof updateCurrentSection === 'function') updateCurrentSection();
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
         
         showNotification('Successfully joined the group!', 'success');
         
@@ -3116,12 +3003,15 @@ async function joinGroupOnline(groupId) {
         if (groupInviteModal) groupInviteModal.classList.remove('active');
         
     } catch (error) {
-        console.error('Error joining group:', error);
+        console.error('[Groups iframe] Error joining group:', error);
         showNotification('Failed to join group: ' + error.message, 'error');
     }
 }
 
-// Leave group online
+/**
+ * Leave group online via API
+ * @param {string} groupId - Group ID
+ */
 async function leaveGroupOnline(groupId) {
     try {
         const response = await safeApiCall('post', `groups/${groupId}/leave`);
@@ -3135,9 +3025,9 @@ async function leaveGroupOnline(groupId) {
         joinedGroups = joinedGroups.filter(g => g.id !== groupId);
         adminGroups = adminGroups.filter(g => g.id !== groupId);
         
-        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
-        if (typeof updateGroupCounts === 'function') updateGroupCounts();
-        if (typeof updateCurrentSection === 'function') updateCurrentSection();
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
         
         showNotification('Successfully left the group', 'success');
         
@@ -3148,12 +3038,15 @@ async function leaveGroupOnline(groupId) {
         }
         
     } catch (error) {
-        console.error('Error leaving group:', error);
+        console.error('[Groups iframe] Error leaving group:', error);
         showNotification('Failed to leave group: ' + error.message, 'error');
     }
 }
 
-// Accept group invite
+/**
+ * Accept group invite via API
+ * @param {Object} inviteData - Invite data
+ */
 async function acceptGroupInvite(inviteData) {
     try {
         const inviteId = inviteData.id || inviteData.inviteId;
@@ -3169,12 +3062,15 @@ async function acceptGroupInvite(inviteData) {
         await joinGroupOnline(groupId);
         
     } catch (error) {
-        console.error('Error accepting group invite:', error);
+        console.error('[Groups iframe] Error accepting group invite:', error);
         showNotification('Failed to accept invitation: ' + error.message, 'error');
     }
 }
 
-// Decline group invite
+/**
+ * Decline group invite via API
+ * @param {Object} inviteData - Invite data
+ */
 async function declineGroupInvite(inviteData) {
     try {
         const inviteId = inviteData.id || inviteData.inviteId;
@@ -3188,9 +3084,9 @@ async function declineGroupInvite(inviteData) {
         
         groupInvites = groupInvites.filter(invite => invite.id !== inviteId);
         
-        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
-        if (typeof updateGroupCounts === 'function') updateGroupCounts();
-        if (typeof updateCurrentSection === 'function') updateCurrentSection();
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
         
         showNotification('Invitation declined', 'success');
         
@@ -3198,19 +3094,26 @@ async function declineGroupInvite(inviteData) {
         if (groupInviteModal) groupInviteModal.classList.remove('active');
         
     } catch (error) {
-        console.error('Error declining group invite:', error);
+        console.error('[Groups iframe] Error declining group invite:', error);
         showNotification('Failed to decline invitation: ' + error.message, 'error');
     }
 }
 
-// Leave group confirmation
+/**
+ * Show confirmation dialog for leaving group
+ * @param {Object} groupData - Group data
+ */
 function leaveGroupConfirm(groupData) {
     if (confirm(`Are you sure you want to leave "${groupData.name}"? You will need to be invited again to rejoin.`)) {
         leaveGroupOnline(groupData.id);
     }
 }
 
-// Show group details
+/**
+ * Show group details panel
+ * @param {Object} groupData - Group data
+ * @param {string} type - Group type
+ */
 function showGroupDetails(groupData, type) {
     selectedGroup = groupData;
     
@@ -3230,10 +3133,14 @@ function showGroupDetails(groupData, type) {
         if (groupDetailsPanel) groupDetailsPanel.classList.add('active');
     }
     
-    if (typeof loadGroupDetails === 'function') loadGroupDetails(groupData, type);
+    loadGroupDetails(groupData, type);
 }
 
-// Load group details
+/**
+ * Load group details into the panel
+ * @param {Object} groupData - Group data
+ * @param {string} type - Group type
+ */
 async function loadGroupDetails(groupData, type) {
     const detailsContent = document.getElementById('groupDetailsContent');
     if (!detailsContent) return;
@@ -3270,15 +3177,11 @@ async function loadGroupDetails(groupData, type) {
             if (response && response.success && response.data) {
                 realMembers = response.data.slice(0, 5);
             } else {
-                if (typeof generateSimulatedMembers === 'function') {
-                    realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
-                }
-            }
-        } catch (error) {
-            console.log('Error loading members:', error);
-            if (typeof generateSimulatedMembers === 'function') {
                 realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
             }
+        } catch (error) {
+            console.log('[Groups iframe] Error loading members:', error);
+            realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
         }
         
         detailsContent.innerHTML = `
@@ -3494,25 +3397,25 @@ async function loadGroupDetails(groupData, type) {
         
         if (openGroupChatBtn) {
             openGroupChatBtn.addEventListener('click', () => {
-                if (typeof openGroupChat === 'function') openGroupChat(groupData);
+                openGroupChat(groupData);
             });
         }
         
         if (manageGroupBtn) {
             manageGroupBtn.addEventListener('click', () => {
-                if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+                openAdminManagement(groupData);
             });
         }
         
         if (leaveGroupBtn) {
             leaveGroupBtn.addEventListener('click', () => {
-                if (typeof leaveGroupConfirm === 'function') leaveGroupConfirm(groupData);
+                leaveGroupConfirm(groupData);
             });
         }
         
         if (groupOptionsBtn) {
             groupOptionsBtn.addEventListener('click', () => {
-                if (typeof showGroupOptions === 'function') showGroupOptions(groupData);
+                showGroupOptions(groupData);
             });
         }
         
@@ -3523,7 +3426,7 @@ async function loadGroupDetails(groupData, type) {
         }
         
     } catch (error) {
-        console.error('Error loading group details:', error);
+        console.error('[Groups iframe] Error loading group details:', error);
         detailsContent.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
@@ -3534,7 +3437,10 @@ async function loadGroupDetails(groupData, type) {
     }
 }
 
-// Show group options
+/**
+ * Show group options menu
+ * @param {Object} groupData - Group data
+ */
 function showGroupOptions(groupData) {
     const options = [
         { icon: 'fas fa-share-alt', text: 'Share Group', action: () => shareGroup(groupData) },
@@ -3562,12 +3468,13 @@ function showGroupOptions(groupData) {
         );
     }
     
-    if (typeof showOptionsModal === 'function') {
-        showOptionsModal('Group Options', options, groupData.name);
-    }
+    showOptionsModal('Group Options', options, groupData.name);
 }
 
-// View group notes
+/**
+ * View group notes
+ * @param {Object} groupData - Group data
+ */
 function viewGroupNotes(groupData) {
     const groupNotesPanel = document.getElementById('groupNotesPanel');
     if (currentChatGroup && currentChatGroup.id === groupData.id) {
@@ -3575,14 +3482,17 @@ function viewGroupNotes(groupData) {
             groupNotesPanel.style.display = groupNotesPanel.style.display === 'none' ? 'block' : 'none';
         }
     } else {
-        if (typeof openGroupChat === 'function') openGroupChat(groupData);
+        openGroupChat(groupData);
         setTimeout(() => {
             if (groupNotesPanel) groupNotesPanel.style.display = 'block';
         }, 100);
     }
 }
 
-// View group events
+/**
+ * View group events
+ * @param {Object} groupData - Group data
+ */
 function viewGroupEvents(groupData) {
     const eventCountdownPanel = document.getElementById('eventCountdownPanel');
     if (currentChatGroup && currentChatGroup.id === groupData.id) {
@@ -3590,24 +3500,30 @@ function viewGroupEvents(groupData) {
             eventCountdownPanel.style.display = eventCountdownPanel.style.display === 'none' ? 'block' : 'none';
         }
     } else {
-        if (typeof openGroupChat === 'function') openGroupChat(groupData);
+        openGroupChat(groupData);
         setTimeout(() => {
             if (eventCountdownPanel) eventCountdownPanel.style.display = 'block';
         }, 100);
     }
 }
 
-// View group analytics
+/**
+ * View group analytics
+ * @param {Object} groupData - Group data
+ */
 function viewGroupAnalytics(groupData) {
-    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+    openAdminManagement(groupData);
     const analyticsTab = document.querySelector('.admin-management-tab[data-tab="analytics"]');
     if (analyticsTab) {
         analyticsTab.click();
-        if (typeof loadGroupAnalytics === 'function') loadGroupAnalytics(groupData);
+        loadGroupAnalytics(groupData);
     }
 }
 
-// Load group analytics
+/**
+ * Load group analytics
+ * @param {Object} groupData - Group data
+ */
 async function loadGroupAnalytics(groupData) {
     try {
         const analyticsDailyMessages = document.getElementById('analyticsDailyMessages');
@@ -3616,9 +3532,8 @@ async function loadGroupAnalytics(groupData) {
         const groupPulseInsight = document.getElementById('groupPulseInsight');
         
         if (analyticsDailyMessages) {
-            // Generate random but consistent data based on group ID
             const groupHash = hashCode(groupData.id);
-            const dailyMessages = 20 + (groupHash % 30); // 20-50 messages
+            const dailyMessages = 20 + (groupHash % 30);
             analyticsDailyMessages.textContent = dailyMessages;
         }
         
@@ -3628,7 +3543,7 @@ async function loadGroupAnalytics(groupData) {
         }
         
         if (analyticsEngagementRate) {
-            const engagementRate = 30 + (hashCode(groupData.id) % 50); // 30-80%
+            const engagementRate = 30 + (hashCode(groupData.id) % 50);
             analyticsEngagementRate.textContent = engagementRate + '%';
         }
         
@@ -3647,25 +3562,25 @@ async function loadGroupAnalytics(groupData) {
             groupPulseInsight.innerHTML = `<p style="margin: 0;">${insight}</p>`;
         }
         
-        // Load chart if available
         const analyticsChart = document.getElementById('analyticsChart');
         if (analyticsChart && window.Chart) {
-            if (typeof renderAnalyticsChart === 'function') {
-                renderAnalyticsChart(analyticsChart, groupData);
-            }
+            renderAnalyticsChart(analyticsChart, groupData);
         }
         
     } catch (error) {
-        console.error('Error loading analytics:', error);
+        console.error('[Groups iframe] Error loading analytics:', error);
     }
 }
 
-// Render analytics chart
+/**
+ * Render analytics chart
+ * @param {HTMLCanvasElement} canvas - Canvas element
+ * @param {Object} groupData - Group data
+ */
 function renderAnalyticsChart(canvas, groupData) {
     const ctx = canvas.getContext('2d');
     const groupHash = hashCode(groupData.id);
     
-    // Generate data based on group hash for consistency
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const data = days.map((_, i) => 10 + (groupHash + i * 7) % 40);
     
@@ -3706,34 +3621,48 @@ function renderAnalyticsChart(canvas, groupData) {
     });
 }
 
-// Change purpose/mood
+/**
+ * Change purpose/mood
+ * @param {Object} groupData - Group data
+ */
 function changePurposeMood(groupData) {
-    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+    openAdminManagement(groupData);
     const purposeTab = document.querySelector('.admin-management-tab[data-tab="purpose"]');
     if (purposeTab) {
         purposeTab.click();
     }
 }
 
-// Update posting rules
+/**
+ * Update posting rules
+ * @param {Object} groupData - Group data
+ */
 function updatePostingRules(groupData) {
-    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+    openAdminManagement(groupData);
     const purposeTab = document.querySelector('.admin-management-tab[data-tab="purpose"]');
     if (purposeTab) {
         purposeTab.click();
     }
 }
 
-// View change history
+/**
+ * View change history
+ * @param {Object} groupData - Group data
+ */
 function viewChangeHistory(groupData) {
-    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+    openAdminManagement(groupData);
     const transparencyTab = document.querySelector('.admin-management-tab[data-tab="transparency"]');
     if (transparencyTab) {
         transparencyTab.click();
     }
 }
 
-// Show options modal
+/**
+ * Show options modal
+ * @param {string} title - Modal title
+ * @param {Array} options - Array of option objects
+ * @param {string} subtitle - Modal subtitle
+ */
 function showOptionsModal(title, options, subtitle = '') {
     const modal = document.createElement('div');
     modal.className = 'options-modal';
@@ -3771,7 +3700,10 @@ function showOptionsModal(title, options, subtitle = '') {
     document.body.appendChild(modal);
 }
 
-// Share group
+/**
+ * Share group
+ * @param {Object} groupData - Group data
+ */
 function shareGroup(groupData) {
     const shareUrl = `${window.location.origin}/group.html?id=${groupData.id}`;
     
@@ -3787,7 +3719,10 @@ function shareGroup(groupData) {
     }
 }
 
-// Mute group
+/**
+ * Mute group notifications
+ * @param {Object} groupData - Group data
+ */
 function muteGroup(groupData) {
     const mutedGroups = JSON.parse(localStorage.getItem('knecta_muted_groups') || '[]');
     
@@ -3800,7 +3735,10 @@ function muteGroup(groupData) {
     }
 }
 
-// Favorite group
+/**
+ * Add group to favorites
+ * @param {Object} groupData - Group data
+ */
 function favoriteGroup(groupData) {
     const favoriteGroups = JSON.parse(localStorage.getItem('knecta_favorite_groups') || '[]');
     
@@ -3813,7 +3751,10 @@ function favoriteGroup(groupData) {
     }
 }
 
-// Report group
+/**
+ * Report group
+ * @param {Object} groupData - Group data
+ */
 function reportGroup(groupData) {
     const reason = prompt(`Why are you reporting "${groupData.name}"?\n1. Spam\n2. Harassment\n3. Inappropriate content\n4. Fake group\n5. Other\n\nEnter reason number:`, '1');
     
@@ -3830,7 +3771,10 @@ function reportGroup(groupData) {
     }
 }
 
-// Block group
+/**
+ * Block group
+ * @param {Object} groupData - Group data
+ */
 function blockGroup(groupData) {
     if (confirm(`Are you sure you want to block "${groupData.name}"? You will no longer see this group or receive notifications from it.`)) {
         const blockedGroups = JSON.parse(localStorage.getItem('knecta_blocked_groups') || '[]');
@@ -3846,9 +3790,9 @@ function blockGroup(groupData) {
         joinedGroups = joinedGroups.filter(g => g.id !== groupData.id);
         adminGroups = adminGroups.filter(g => g.id !== groupData.id);
         
-        if (typeof saveGroupsToLocalStorage === 'function') saveGroupsToLocalStorage();
-        if (typeof updateGroupCounts === 'function') updateGroupCounts();
-        if (typeof updateCurrentSection === 'function') updateCurrentSection();
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
         
         showNotification('Group blocked successfully', 'success');
         
@@ -3860,7 +3804,10 @@ function blockGroup(groupData) {
     }
 }
 
-// Show group QR code
+/**
+ * Show group QR code
+ * @param {Object} groupData - Group data
+ */
 function showGroupQRCode(groupData) {
     const modal = document.createElement('div');
     modal.className = 'qr-modal';
@@ -3888,7 +3835,6 @@ function showGroupQRCode(groupData) {
     
     document.body.appendChild(modal);
     
-    // Generate QR code
     setTimeout(() => {
         const qrContainer = document.getElementById('qrCodeContainer');
         if (qrContainer && window.QRCode) {
@@ -3904,7 +3850,9 @@ function showGroupQRCode(groupData) {
     }, 100);
 }
 
-// Download QR code
+/**
+ * Download QR code (exposed to window)
+ */
 window.downloadQRCode = function() {
     const qrCanvas = document.querySelector('#qrCodeContainer canvas');
     if (qrCanvas) {
@@ -3916,29 +3864,44 @@ window.downloadQRCode = function() {
     }
 };
 
-// Copy invite link
+/**
+ * Copy invite link to clipboard
+ * @param {Object} groupData - Group data
+ */
 function copyInviteLink(groupData) {
     const inviteLink = `${window.location.origin}/group.html?join=${groupData.id}`;
     navigator.clipboard.writeText(inviteLink);
     showNotification('Invite link copied to clipboard', 'success');
 }
 
-// Invite members
+/**
+ * Invite members to group
+ * @param {Object} groupData - Group data
+ */
 function inviteMembers(groupData) {
-    if (typeof showFriendSelection === 'function') showFriendSelection();
+    showFriendSelection();
 }
 
-// Edit group info
+/**
+ * Edit group info
+ * @param {Object} groupData - Group data
+ */
 function editGroupInfo(groupData) {
-    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+    openAdminManagement(groupData);
 }
 
-// Manage roles
+/**
+ * Manage roles
+ * @param {Object} groupData - Group data
+ */
 function manageRoles(groupData) {
-    if (typeof openAdminManagement === 'function') openAdminManagement(groupData);
+    openAdminManagement(groupData);
 }
 
-// Create event
+/**
+ * Create event
+ * @param {Object} groupData - Group data
+ */
 function createEvent(groupData) {
     const modal = document.createElement('div');
     modal.className = 'event-modal';
@@ -3992,7 +3955,6 @@ function createEvent(groupData) {
         </div>
     `;
     
-    // Set default date to tomorrow
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const formattedDate = tomorrow.toISOString().split('T')[0];
@@ -4005,7 +3967,6 @@ function createEvent(groupData) {
     
     document.body.appendChild(modal);
     
-    // Set default values after DOM is ready
     setTimeout(() => {
         const eventDateInput = document.getElementById('eventDate');
         const eventTimeInput = document.getElementById('eventTime');
@@ -4014,7 +3975,9 @@ function createEvent(groupData) {
     }, 100);
 }
 
-// Save new event
+/**
+ * Save new event (exposed to window)
+ */
 window.saveNewEvent = function() {
     const eventTitle = document.getElementById('eventTitle');
     const eventDate = document.getElementById('eventDate');
@@ -4040,7 +4003,6 @@ window.saveNewEvent = function() {
     const eventDuration = document.getElementById('eventDuration')?.value || '1';
     const eventType = document.getElementById('eventType')?.value || 'meeting';
     
-    // Save event to local storage
     const event = {
         id: `event_${currentChatGroup?.id || 'global'}_${Date.now()}`,
         groupId: currentChatGroup?.id || 'global',
@@ -4060,19 +4022,20 @@ window.saveNewEvent = function() {
     cachedEvents.push(event);
     localStorage.setItem(cacheKey, JSON.stringify(cachedEvents));
     
-    // Close modal
     const modal = document.querySelector('.event-modal');
     if (modal) modal.remove();
     
     showNotification('Event created successfully!', 'success');
     
-    // Reload events if in group chat
-    if (currentChatGroup && typeof loadGroupEvents === 'function') {
+    if (currentChatGroup) {
         loadGroupEvents(currentChatGroup.id);
     }
 };
 
-// Create poll
+/**
+ * Create poll
+ * @param {Object} groupData - Group data
+ */
 function createPoll(groupData) {
     const modal = document.createElement('div');
     modal.className = 'poll-modal';
@@ -4140,7 +4103,9 @@ function createPoll(groupData) {
     document.body.appendChild(modal);
 }
 
-// Add poll option
+/**
+ * Add poll option (exposed to window)
+ */
 window.addPollOption = function() {
     const pollOptions = document.getElementById('pollOptions');
     if (!pollOptions) return;
@@ -4161,7 +4126,10 @@ window.addPollOption = function() {
     pollOptions.appendChild(newOption);
 };
 
-// Remove poll option
+/**
+ * Remove poll option (exposed to window)
+ * @param {HTMLElement} button - Remove button
+ */
 window.removePollOption = function(button) {
     const optionDiv = button.parentElement;
     if (optionDiv && optionDiv.parentElement) {
@@ -4174,7 +4142,9 @@ window.removePollOption = function(button) {
     }
 };
 
-// Save new poll
+/**
+ * Save new poll (exposed to window)
+ */
 window.saveNewPoll = function() {
     const pollQuestion = document.getElementById('pollQuestion');
     const pollOptions = document.querySelectorAll('.poll-option');
@@ -4197,7 +4167,6 @@ window.saveNewPoll = function() {
     const allowMultipleVotes = document.getElementById('allowMultipleVotes')?.checked || false;
     const anonymousPoll = document.getElementById('anonymousPoll')?.checked || true;
     
-    // Create poll message
     const pollMessage = {
         groupId: currentChatGroup?.id || 'global',
         senderId: currentUser?.uid || currentUser?.id || 'user',
@@ -4215,7 +4184,6 @@ window.saveNewPoll = function() {
         }
     };
     
-    // Send poll as message
     if (currentChatGroup) {
         const chatMessages = document.getElementById('chatMessages');
         if (chatMessages) {
@@ -4242,7 +4210,6 @@ window.saveNewPoll = function() {
             `;
             chatMessages.appendChild(pollElement);
             
-            // Scroll to bottom
             const chatMessagesContainer = document.getElementById('chatMessagesContainer');
             if (chatMessagesContainer) {
                 chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
@@ -4250,14 +4217,17 @@ window.saveNewPoll = function() {
         }
     }
     
-    // Close modal
     const modal = document.querySelector('.poll-modal');
     if (modal) modal.remove();
     
     showNotification('Poll created successfully!', 'success');
 };
 
-// Vote on poll
+/**
+ * Vote on poll (exposed to window)
+ * @param {number} optionId - Option ID
+ * @param {HTMLElement} button - Vote button
+ */
 window.voteOnPoll = function(optionId, button) {
     const optionDiv = button.parentElement;
     const votesSpan = button.querySelector('span');
@@ -4273,7 +4243,10 @@ window.voteOnPoll = function(optionId, button) {
     }
 };
 
-// Show group invite details
+/**
+ * Show group invite details
+ * @param {Object} inviteData - Invite data
+ */
 function showGroupInviteDetails(inviteData) {
     const groupData = inviteData.groupData || inviteData;
     
@@ -4334,7 +4307,11 @@ function showGroupInviteDetails(inviteData) {
     }
 }
 
-// Check filters
+/**
+ * Check if group matches current filters
+ * @param {Object} groupData - Group data
+ * @returns {boolean} True if group matches filters
+ */
 function matchesFilters(groupData) {
     if (currentTypeFilter !== 'all' && groupData.type !== currentTypeFilter) {
         return false;
@@ -4347,7 +4324,12 @@ function matchesFilters(groupData) {
     return true;
 }
 
-// Check search
+/**
+ * Check if group matches search term
+ * @param {Object} groupData - Group data
+ * @param {string} searchTerm - Search term
+ * @returns {boolean} True if group matches search
+ */
 function matchesSearch(groupData, searchTerm) {
     if (!searchTerm) return true;
     
@@ -4361,10 +4343,13 @@ function matchesSearch(groupData, searchTerm) {
     return searchIn.includes(searchTerm.toLowerCase());
 }
 
-// Filter groups by type
+/**
+ * Filter groups by type
+ * @param {string} type - Group type to filter by
+ */
 function filterGroupsByType(type) {
     currentTypeFilter = type;
-    if (typeof updateCurrentSection === 'function') updateCurrentSection();
+    updateCurrentSection();
     
     document.querySelectorAll('.type-filter-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -4376,13 +4361,18 @@ function filterGroupsByType(type) {
     }
 }
 
-// Search groups
+/**
+ * Search groups by term
+ * @param {string} searchTerm - Search term
+ */
 function searchGroups(searchTerm) {
     currentSearchTerm = searchTerm.toLowerCase().trim();
-    if (typeof updateCurrentSection === 'function') updateCurrentSection();
+    updateCurrentSection();
 }
 
-// Save groups to local storage
+/**
+ * Save groups to local storage
+ */
 function saveGroupsToLocalStorage() {
     try {
         localStorage.setItem(LOCAL_STORAGE_KEYS.GROUPS, JSON.stringify(groups));
@@ -4392,13 +4382,17 @@ function saveGroupsToLocalStorage() {
         localStorage.setItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS, JSON.stringify(adminGroups));
         localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS, JSON.stringify(pendingGroupActions));
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
-        console.log('Groups saved to local storage');
+        console.log('[Groups iframe] Groups saved to local storage');
     } catch (error) {
-        console.error('Error saving groups to local storage:', error);
+        console.error('[Groups iframe] Error saving groups to local storage:', error);
     }
 }
 
-// Format time ago
+/**
+ * Format time ago string
+ * @param {Date|string} date - Date object or string
+ * @returns {string} Formatted time ago
+ */
 function formatTimeAgo(date) {
     const dateObj = date instanceof Date ? date : new Date(date);
     const now = new Date();
@@ -4414,7 +4408,11 @@ function formatTimeAgo(date) {
     return `${Math.floor(diffDays / 7)}w ago`;
 }
 
-// Format date
+/**
+ * Format date string
+ * @param {Date|string} date - Date object or string
+ * @returns {string} Formatted date
+ */
 function formatDate(date) {
     const dateObj = date instanceof Date ? date : new Date(date);
     return dateObj.toLocaleDateString('en-US', {
@@ -4424,7 +4422,11 @@ function formatDate(date) {
     });
 }
 
-// Show notification
+/**
+ * Show notification
+ * @param {string} message - Notification message
+ * @param {string} type - Notification type (success, error, info, warning)
+ */
 function showNotification(message, type = 'success') {
     const notificationText = document.getElementById('notificationText');
     const notification = document.getElementById('notification');
@@ -4442,19 +4444,23 @@ function showNotification(message, type = 'success') {
     }, 3000);
 }
 
-// Process pending offline actions
+/**
+ * Process pending offline actions
+ */
 function processPendingOfflineActions() {
     try {
         const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
         if (pendingActions.length > 0) {
-            console.log('Processing pending group actions...');
+            console.log('[Groups iframe] Processing pending group actions...');
         }
     } catch (error) {
-        console.error('Error processing pending offline actions:', error);
+        console.error('[Groups iframe] Error processing pending offline actions:', error);
     }
 }
 
-// Update create group posting rules UI
+/**
+ * Update create group posting rules UI
+ */
 function updateCreateGroupPostingRulesUI() {
     const postingRulesSelect = document.getElementById('postingRulesSelect');
     const quietHoursSection = document.getElementById('quietHoursSection');
@@ -4471,7 +4477,13 @@ function updateCreateGroupPostingRulesUI() {
     }
 }
 
-// Setup event listeners
+// =============================================
+// EVENT LISTENERS
+// =============================================
+
+/**
+ * Setup event listeners for the groups page
+ */
 function setupEventListeners() {
     // Category tabs
     const allTab = document.getElementById('allTab');
@@ -4493,7 +4505,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (allGroupsSection) allGroupsSection.classList.add('active');
-            if (typeof updateCurrentSection === 'function') updateCurrentSection();
+            updateCurrentSection();
         });
     }
     
@@ -4504,7 +4516,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (myGroupsSection) myGroupsSection.classList.add('active');
-            if (typeof updateCurrentSection === 'function') updateCurrentSection();
+            updateCurrentSection();
         });
     }
     
@@ -4515,7 +4527,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (joinedSection) joinedSection.classList.add('active');
-            if (typeof updateCurrentSection === 'function') updateCurrentSection();
+            updateCurrentSection();
         });
     }
     
@@ -4526,7 +4538,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (invitesSection) invitesSection.classList.add('active');
-            if (typeof updateCurrentSection === 'function') updateCurrentSection();
+            updateCurrentSection();
         });
     }
     
@@ -4537,7 +4549,7 @@ function setupEventListeners() {
             
             document.querySelectorAll('.groups-section').forEach(section => section.classList.remove('active'));
             if (adminSection) adminSection.classList.add('active');
-            if (typeof updateCurrentSection === 'function') updateCurrentSection();
+            updateCurrentSection();
         });
     }
     
@@ -4545,7 +4557,7 @@ function setupEventListeners() {
     document.querySelectorAll('.type-filter-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const type = this.dataset.type;
-            if (typeof filterGroupsByType === 'function') filterGroupsByType(type);
+            filterGroupsByType(type);
         });
     });
     
@@ -4553,7 +4565,7 @@ function setupEventListeners() {
     const groupSearch = document.getElementById('groupSearch');
     if (groupSearch) {
         groupSearch.addEventListener('input', function() {
-            if (typeof searchGroups === 'function') searchGroups(this.value);
+            searchGroups(this.value);
         });
     }
     
@@ -4601,7 +4613,6 @@ function setupEventListeners() {
                 if (enableReactOnlyMode) enableReactOnlyMode.checked = false;
                 if (enableAnonymousMode) enableAnonymousMode.checked = false;
                 
-                // Reset theme selection
                 document.querySelectorAll('.theme-option').forEach(option => {
                     const icon = option.querySelector('i');
                     if (icon) icon.style.display = 'none';
@@ -4612,7 +4623,6 @@ function setupEventListeners() {
                     if (icon) icon.style.display = 'inline';
                 }
                 
-                // Reset mood selection
                 document.querySelectorAll('.mood-option').forEach(option => {
                     const icon = option.querySelector('i');
                     if (icon) icon.style.display = 'none';
@@ -4623,12 +4633,10 @@ function setupEventListeners() {
                     if (icon) icon.style.display = 'inline';
                 }
                 
-                // Reset reactions
                 document.querySelectorAll('.reaction-option').forEach(option => {
                     option.style.borderColor = 'var(--border-color)';
                 });
                 
-                // Reset badges
                 document.querySelectorAll('.badge-option').forEach(option => {
                     option.style.borderColor = 'var(--border-color)';
                 });
@@ -4638,7 +4646,7 @@ function setupEventListeners() {
                 if (fireBadge) fireBadge.style.borderColor = 'var(--primary-color)';
                 
                 selectedFriends = [];
-                if (typeof updateSelectedFriendsList === 'function') updateSelectedFriendsList();
+                updateSelectedFriendsList();
             }
         });
     }
@@ -4654,7 +4662,7 @@ function setupEventListeners() {
     const groupInvitesBtn = document.getElementById('groupInvitesBtn');
     if (groupInvitesBtn) {
         groupInvitesBtn.addEventListener('click', () => {
-            if (typeof showMobileSection === 'function') showMobileSection('invites');
+            showMobileSection('invites');
         });
     }
     
@@ -4679,9 +4687,7 @@ function setupEventListeners() {
             if (tabContent) tabContent.classList.add('active');
             
             if (tabName === 'purpose') {
-                if (typeof updateCreateGroupPostingRulesUI === 'function') {
-                    updateCreateGroupPostingRulesUI();
-                }
+                updateCreateGroupPostingRulesUI();
             }
         });
     });
@@ -4802,9 +4808,7 @@ function setupEventListeners() {
                 scheduledPosting: scheduledPosting
             };
             
-            if (typeof createGroupOnline === 'function') {
-                await createGroupOnline(groupData);
-            }
+            await createGroupOnline(groupData);
         });
     }
     
@@ -4895,7 +4899,7 @@ function setupEventListeners() {
     const addEventBtn = document.getElementById('addEventBtn');
     if (addEventBtn) {
         addEventBtn.addEventListener('click', () => {
-            if (typeof createEvent === 'function') createEvent(currentChatGroup);
+            createEvent(currentChatGroup);
         });
     }
     
@@ -4948,7 +4952,7 @@ function setupEventListeners() {
     const saveAdminSettingsBtn = document.getElementById('saveAdminSettingsBtn');
     if (saveAdminSettingsBtn) {
         saveAdminSettingsBtn.addEventListener('click', () => {
-            if (selectedGroup && typeof saveGroupSettings === 'function') {
+            if (selectedGroup) {
                 saveGroupSettings(selectedGroup);
             }
         });
@@ -4995,7 +4999,7 @@ function setupEventListeners() {
     const acceptInviteBtn = document.getElementById('acceptInviteBtn');
     if (acceptInviteBtn) {
         acceptInviteBtn.addEventListener('click', () => {
-            if (window.currentInvite && typeof acceptGroupInvite === 'function') {
+            if (window.currentInvite) {
                 acceptGroupInvite(window.currentInvite);
             }
         });
@@ -5005,21 +5009,25 @@ function setupEventListeners() {
     const declineInviteBtn = document.getElementById('declineInviteBtn');
     if (declineInviteBtn) {
         declineInviteBtn.addEventListener('click', () => {
-            if (window.currentInvite && typeof declineGroupInvite === 'function') {
+            if (window.currentInvite) {
                 declineGroupInvite(window.currentInvite);
             }
         });
     }
 }
 
-// Setup group invites listener
+/**
+ * Setup group invites listener (for real-time updates)
+ */
 function setupGroupInvitesListener() {
     if (!currentUser) return;
     
     // Already handled by background sync interval
 }
 
-// Check mobile
+/**
+ * Check if device is mobile and update UI
+ */
 function checkMobile() {
     const wasMobile = isMobile;
     isMobile = window.innerWidth <= 768;
@@ -5051,7 +5059,10 @@ function checkMobile() {
     }
 }
 
-// Show mobile section
+/**
+ * Show mobile section (for mobile navigation)
+ * @param {string} section - Section to show
+ */
 function showMobileSection(section) {
     document.querySelectorAll('.groups-section').forEach(s => {
         s.classList.remove('active');
@@ -5094,10 +5105,12 @@ function showMobileSection(section) {
             break;
     }
     
-    if (typeof updateCurrentSection === 'function') updateCurrentSection();
+    updateCurrentSection();
 }
 
-// Render my groups
+/**
+ * Render my groups
+ */
 function renderMyGroups() {
     const myGroupsList = document.getElementById('myGroupsList');
     if (!myGroupsList) return;
@@ -5122,7 +5135,9 @@ function renderMyGroups() {
     });
 }
 
-// Render joined groups
+/**
+ * Render joined groups
+ */
 function renderJoinedGroups() {
     const joinedList = document.getElementById('joinedList');
     if (!joinedList) return;
@@ -5147,7 +5162,9 @@ function renderJoinedGroups() {
     });
 }
 
-// Render group invites
+/**
+ * Render group invites
+ */
 function renderGroupInvites() {
     const invitesList = document.getElementById('invitesList');
     if (!invitesList) return;
@@ -5170,7 +5187,11 @@ function renderGroupInvites() {
     });
 }
 
-// Add group invite item
+/**
+ * Add group invite item to list
+ * @param {Object} inviteData - Invite data
+ * @param {HTMLElement} container - Container element
+ */
 function addGroupInviteItem(inviteData, container) {
     const inviteItem = document.createElement('div');
     inviteItem.className = 'group-item';
@@ -5222,7 +5243,7 @@ function addGroupInviteItem(inviteData, container) {
     
     inviteItem.addEventListener('click', (e) => {
         if (!e.target.closest('.group-actions')) {
-            if (typeof showGroupInviteDetails === 'function') showGroupInviteDetails(inviteData);
+            showGroupInviteDetails(inviteData);
         }
     });
     
@@ -5232,9 +5253,9 @@ function addGroupInviteItem(inviteData, container) {
             e.stopPropagation();
             const action = btn.dataset.action;
             if (action === 'accept-invite') {
-                if (typeof acceptGroupInvite === 'function') acceptGroupInvite(inviteData);
+                acceptGroupInvite(inviteData);
             } else if (action === 'decline-invite') {
-                if (typeof declineGroupInvite === 'function') declineGroupInvite(inviteData);
+                declineGroupInvite(inviteData);
             }
         });
     });
@@ -5242,7 +5263,9 @@ function addGroupInviteItem(inviteData, container) {
     container.appendChild(inviteItem);
 }
 
-// Render admin groups
+/**
+ * Render admin groups
+ */
 function renderAdminGroups() {
     const adminList = document.getElementById('adminList');
     if (!adminList) return;
@@ -5267,19 +5290,25 @@ function renderAdminGroups() {
     });
 }
 
-// Start group call (simulated for now)
+/**
+ * Start group call (simulated for now)
+ */
 function startGroupCall() {
     showNotification('Group call feature would start here', 'info');
 }
 
+// =============================================
+// INITIALIZATION
+// =============================================
+
 // Initialize the page when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, initializing group page...');
+    console.log('[Groups iframe] DOM loaded, initializing group page...');
     initGroupPage();
 });
 
 // Also try to initialize if DOM is already loaded
 if (document.readyState === 'interactive' || document.readyState === 'complete') {
-    console.log('DOM already ready, initializing group page immediately...');
+    console.log('[Groups iframe] DOM already ready, initializing group page immediately...');
     setTimeout(initGroupPage, 100);
 }
