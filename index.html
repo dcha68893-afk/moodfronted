@@ -1554,7 +1554,6 @@
         .fade-in {
             animation: fadeIn 0.3s ease-in;
         }
-
     </style>
 </head>
 <body>
@@ -2170,7 +2169,7 @@
     <!-- ============================================= -->
     <!-- JAVASCRIPT LOADING - UPDATED ORDER -->
     <!-- ============================================= -->
-    <!-- Ensure auth, API, and core scripts load in this order for token handling and app startup -->
+    <!-- Ensure UI scripts load first, then auth logic -->
     
     <!-- 1. jQuery FIRST - Required for plugins -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -2179,16 +2178,16 @@
         window.jQuery || document.write('<script src="js/vendor/jquery.min.js"><\/script>');
     </script>
     
-    <!-- 2. Auth UI script SECOND - Authentication logic for login UI -->
+    <!-- 2. UI scripts SECOND - UI logic and form handling -->
     <script src="/js/app.ui.auth.js"></script>
     
-    <!-- 3. API script THIRD - API requests that require tokens -->
-    <script src="/js/api.js"></script>
-    
-    <!-- 4. Core app script FOURTH - App initialization and token validation -->
+    <!-- 3. Core app script THIRD - App initialization without auth checks -->
     <script src="/js/app.core.js"></script>
     
-    <!-- 5. Inline auth JavaScript - IMMEDIATE INITIALIZATION -->
+    <!-- 4. API script FOURTH - API requests (loaded after core) -->
+    <script src="/js/api.js"></script>
+    
+    <!-- 5. Main entry script - Entry point logic -->
     <script>
         // =============================================
         // CONFIGURATION
@@ -2454,7 +2453,7 @@
         }
         
         // =============================================
-        // FORM TOGGLING FUNCTIONS - IMMEDIATELY AVAILABLE
+        // FORM TOGGLING FUNCTIONS
         // =============================================
         function showForm(formName) {
             console.log('Showing form:', formName);
@@ -2561,7 +2560,7 @@
         }
         
         // =============================================
-        // SETUP FORM EVENT LISTENERS - IMMEDIATELY
+        // SETUP FORM EVENT LISTENERS
         // =============================================
         function setupFormEventListeners() {
             console.log('Setting up form event listeners...');
@@ -3011,7 +3010,7 @@
         }
         
         // =============================================
-        // INITIALIZATION - RUN IMMEDIATELY
+        // INITIALIZATION
         // =============================================
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DOM loaded, initializing auth UI...');
@@ -3092,7 +3091,7 @@
         });
     </script>
     
-    <!-- 6. Service Worker Registration - UPDATED WITH ENVIRONMENT CHECK -->
+    <!-- 6. Service Worker Registration -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             if ('serviceWorker' in navigator) {
@@ -3128,6 +3127,5 @@
             }
         });
     </script>
-
 </body>
 </html>

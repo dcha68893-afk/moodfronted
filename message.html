@@ -1026,15 +1026,12 @@
             try {
                 // Priority: api.js auth, then parent AppState
                 let userData = null;
-                let token = null;
                 
                 if (apiAuth && apiAuth.user) {
                     userData = apiAuth.user;
-                    token = apiAuth.token;
                     console.log('[Auth] Using auth from api.js');
                 } else if (parentAuth) {
                     userData = parentAuth.currentUser;
-                    token = parentAuth.accessToken;
                     console.log('[Auth] Using auth from parent AppState');
                 }
                 

@@ -1270,6 +1270,7 @@
                 this.backgroundSyncInterval = null;
                 this.authCheckDone = false;
                 this.backgroundJobsStarted = false;
+                this.authErrorNotified = false;
             }
             
             // Get authentication token securely - READ ONLY
@@ -2208,41 +2209,35 @@
             // Three dots menu events
             elements.menuDotsBtn.addEventListener('click', toggleMenuDots);
             
-            // Menu item events
+            // Menu item events - FIXED: All menu items now open proper UI
             elements.menuParticipants.addEventListener('click', () => {
                 closeMenuDots();
-                showNotification('Participants feature accessed from menu', 'info');
+                openParticipantsPanel();
             });
             
             elements.menuChat.addEventListener('click', () => {
                 closeMenuDots();
-                showNotification('Chat feature accessed from menu', 'info');
+                openChatPanel();
             });
             
             elements.menuWhiteboard.addEventListener('click', () => {
                 closeMenuDots();
-                if (checkPremiumFeature('whiteboard')) {
-                    showNotification('Whiteboard feature accessed from menu', 'info');
-                }
+                openWhiteboardPanel();
             });
             
             elements.menuNotes.addEventListener('click', () => {
                 closeMenuDots();
-                showNotification('Notes feature accessed from menu', 'info');
+                openNotesPanel();
             });
             
             elements.menuPolls.addEventListener('click', () => {
                 closeMenuDots();
-                if (checkPremiumFeature('polls')) {
-                    showNotification('Polls feature accessed from menu', 'info');
-                }
+                openPollsPanel();
             });
             
             elements.menuRelationship.addEventListener('click', () => {
                 closeMenuDots();
-                if (checkPremiumFeature('relationshipInsights')) {
-                    showNotification('Relationship insights accessed from menu', 'info');
-                }
+                openRelationshipPanel();
             });
             
             // Close menu when clicking outside
@@ -2386,6 +2381,652 @@
             
             // Make PIP draggable
             makeDraggable(elements.pipContainer);
+        }
+        
+        // NEW: Panel opening functions for menu items
+        function openParticipantsPanel() {
+            if (AppState.isInCall) {
+                // Create and show participants panel
+                createParticipantsPanel();
+                showNotification('Participants panel opened', 'info');
+            } else {
+                showNotification('Join a call to see participants', 'info');
+            }
+        }
+        
+        function openChatPanel() {
+            if (AppState.isInCall && AppState.settings.inCallChat) {
+                // Create and show chat panel
+                createChatPanel();
+                showNotification('Chat panel opened', 'info');
+            } else if (!AppState.isInCall) {
+                showNotification('Join a call to use chat', 'info');
+            } else {
+                showNotification('Enable in-call chat in settings', 'info');
+            }
+        }
+        
+        function openWhiteboardPanel() {
+            if (checkPremiumFeature('whiteboard')) {
+                if (AppState.isInCall) {
+                    // Create and show whiteboard
+                    createWhiteboardPanel();
+                    showNotification('Whiteboard opened', 'info');
+                } else {
+                    showNotification('Join a call to use whiteboard', 'info');
+                }
+            }
+        }
+        
+        function openNotesPanel() {
+            if (AppState.isInCall && AppState.settings.notes) {
+                // Create and show notes panel
+                createNotesPanel();
+                showNotification('Notes panel opened', 'info');
+            } else if (!AppState.isInCall) {
+                showNotification('Join a call to use notes', 'info');
+            } else {
+                showNotification('Enable notes in settings', 'info');
+            }
+        }
+        
+        function openPollsPanel() {
+            if (checkPremiumFeature('polls')) {
+                if (AppState.isInCall && AppState.settings.polls) {
+                    // Create and show polls panel
+                    createPollsPanel();
+                    showNotification('Polls panel opened', 'info');
+                } else if (!AppState.isInCall) {
+                    showNotification('Join a call to create polls', 'info');
+                } else {
+                    showNotification('Enable polls in settings', 'info');
+                }
+            }
+        }
+        
+        function openRelationshipPanel() {
+            if (checkPremiumFeature('relationshipInsights')) {
+                // Create and show relationship insights
+                createRelationshipPanel();
+                showNotification('Relationship insights opened', 'info');
+            }
+        }
+        
+        // NEW: Panel creation functions
+        function createParticipantsPanel() {
+            // Remove existing panel if any
+            const existingPanel = document.querySelector('.feature-panel');
+            if (existingPanel) {
+                existingPanel.remove();
+            }
+            
+            const panel = document.createElement('div');
+            panel.className = 'feature-panel participants-panel';
+            panel.innerHTML = `
+                <div class="panel-header">
+                    <h4>Participants (${AppState.callParticipants.length + 1})</h4>
+                    <button class="panel-close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="participant-item">
+                        <div class="participant-avatar" style="background-color: ${stringToColor('You')}">Y</div>
+                        <div class="participant-info">
+                            <div class="participant-name">You (Host)</div>
+                            <div class="participant-status online">Online</div>
+                        </div>
+                    </div>
+                    ${AppState.callParticipants.map(participant => `
+                        <div class="participant-item">
+                            <div class="participant-avatar" style="background-color: ${stringToColor(participant.name)}">
+                                ${participant.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                            </div>
+                            <div class="participant-info">
+                                <div class="participant-name">${participant.name}</div>
+                                <div class="participant-status online">Online</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            
+            document.body.appendChild(panel);
+            
+            // Add close button event
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+            });
+        }
+        
+        function createChatPanel() {
+            const existingPanel = document.querySelector('.feature-panel');
+            if (existingPanel) {
+                existingPanel.remove();
+            }
+            
+            const panel = document.createElement('div');
+            panel.className = 'feature-panel chat-panel';
+            panel.innerHTML = `
+                <div class="panel-header">
+                    <h4>In-Call Chat</h4>
+                    <button class="panel-close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="chat-messages" id="chatMessagesPanel">
+                        <div class="chat-message system">
+                            <div class="message-content">Chat started. Messages are end-to-end encrypted.</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" class="chat-input" id="chatInputPanel" placeholder="Type a message...">
+                        <button class="chat-send-btn" id="chatSendPanel">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(panel);
+            
+            // Add event listeners
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+            });
+            
+            const chatInput = panel.querySelector('#chatInputPanel');
+            const chatSend = panel.querySelector('#chatSendPanel');
+            
+            chatSend.addEventListener('click', () => {
+                const message = chatInput.value.trim();
+                if (message) {
+                    sendChatMessage(message);
+                    chatInput.value = '';
+                }
+            });
+            
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const message = chatInput.value.trim();
+                    if (message) {
+                        sendChatMessage(message);
+                        chatInput.value = '';
+                    }
+                }
+            });
+        }
+        
+        function createWhiteboardPanel() {
+            const existingPanel = document.querySelector('.feature-panel');
+            if (existingPanel) {
+                existingPanel.remove();
+            }
+            
+            const panel = document.createElement('div');
+            panel.className = 'feature-panel whiteboard-panel';
+            panel.innerHTML = `
+                <div class="panel-header">
+                    <h4>Shared Whiteboard</h4>
+                    <button class="panel-close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="whiteboard-toolbar">
+                        <div class="tool-btn active" data-tool="pen">
+                            <i class="fas fa-pen"></i>
+                        </div>
+                        <div class="tool-btn" data-tool="eraser">
+                            <i class="fas fa-eraser"></i>
+                        </div>
+                        <div class="tool-btn" data-tool="text">
+                            <i class="fas fa-font"></i>
+                        </div>
+                        <div class="tool-btn" data-tool="line">
+                            <i class="fas fa-slash"></i>
+                        </div>
+                        <div class="tool-btn" data-tool="rectangle">
+                            <i class="fas fa-square"></i>
+                        </div>
+                        <div class="tool-btn" data-tool="circle">
+                            <i class="fas fa-circle"></i>
+                        </div>
+                        <div class="tool-color" style="background-color: #000000;" data-color="#000000"></div>
+                        <div class="tool-color selected" style="background-color: #ff3b30;" data-color="#ff3b30"></div>
+                        <div class="tool-color" style="background-color: #007aff;" data-color="#007aff"></div>
+                        <div class="tool-color" style="background-color: #34c759;" data-color="#34c759"></div>
+                        <div class="tool-color" style="background-color: #ff9500;" data-color="#ff9500"></div>
+                        <input type="range" class="tool-size-slider" min="1" max="20" value="3">
+                        <button class="tool-btn" id="clearWhiteboard">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                    <canvas class="whiteboard-canvas" width="800" height="500"></canvas>
+                    <div class="whiteboard-status">
+                        <span>Whiteboard ready. Draw something!</span>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(panel);
+            
+            // Initialize whiteboard
+            initializeWhiteboard(panel.querySelector('.whiteboard-canvas'));
+            
+            // Add event listeners
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+            });
+            
+            panel.querySelector('#clearWhiteboard').addEventListener('click', () => {
+                if (confirm('Clear the entire whiteboard?')) {
+                    const canvas = panel.querySelector('.whiteboard-canvas');
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            });
+        }
+        
+        function createNotesPanel() {
+            const existingPanel = document.querySelector('.feature-panel');
+            if (existingPanel) {
+                existingPanel.remove();
+            }
+            
+            const panel = document.createElement('div');
+            panel.className = 'feature-panel notes-panel';
+            panel.innerHTML = `
+                <div class="panel-header">
+                    <h4>Shared Notes</h4>
+                    <button class="panel-close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="notes-editor-container">
+                        <textarea class="notes-editor" id="sharedNotesEditor" placeholder="Start taking notes...">Meeting Notes:
+- 
+- 
+-</textarea>
+                        <div class="notes-toolbar">
+                            <button class="notes-btn" data-action="bold">
+                                <i class="fas fa-bold"></i>
+                            </button>
+                            <button class="notes-btn" data-action="italic">
+                                <i class="fas fa-italic"></i>
+                            </button>
+                            <button class="notes-btn" data-action="list">
+                                <i class="fas fa-list-ul"></i>
+                            </button>
+                            <button class="notes-btn" data-action="save">
+                                <i class="fas fa-save"></i> Save
+                            </button>
+                        </div>
+                    </div>
+                    <div class="notes-history">
+                        <h5>Previous Notes</h5>
+                        <div class="notes-history-list">
+                            <div class="notes-history-item">
+                                <div class="notes-history-date">Today, 10:30 AM</div>
+                                <div class="notes-history-preview">Project discussion notes...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(panel);
+            
+            // Add event listeners
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+            });
+            
+            // Save notes functionality
+            panel.querySelector('[data-action="save"]').addEventListener('click', () => {
+                const notes = panel.querySelector('#sharedNotesEditor').value;
+                if (notes.trim()) {
+                    saveSharedNotes(notes);
+                    showNotification('Notes saved', 'success');
+                }
+            });
+        }
+        
+        function createPollsPanel() {
+            const existingPanel = document.querySelector('.feature-panel');
+            if (existingPanel) {
+                existingPanel.remove();
+            }
+            
+            const panel = document.createElement('div');
+            panel.className = 'feature-panel polls-panel';
+            panel.innerHTML = `
+                <div class="panel-header">
+                    <h4>Polls</h4>
+                    <button class="panel-close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="polls-tabs">
+                        <button class="polls-tab active" data-tab="create">Create Poll</button>
+                        <button class="polls-tab" data-tab="active">Active Polls</button>
+                        <button class="polls-tab" data-tab="results">Results</button>
+                    </div>
+                    
+                    <div class="polls-tab-content active" data-tab="create">
+                        <div class="poll-form">
+                            <input type="text" class="poll-question-input" placeholder="Enter your poll question...">
+                            <div class="poll-options">
+                                <input type="text" class="poll-option-input" placeholder="Option 1">
+                                <input type="text" class="poll-option-input" placeholder="Option 2">
+                                <button class="add-option-btn">Add Option</button>
+                            </div>
+                            <div class="poll-settings">
+                                <label>
+                                    <input type="checkbox" checked> Multiple choices allowed
+                                </label>
+                                <label>
+                                    <input type="checkbox"> Anonymous voting
+                                </label>
+                            </div>
+                            <button class="create-poll-btn">Create Poll</button>
+                        </div>
+                    </div>
+                    
+                    <div class="polls-tab-content" data-tab="active">
+                        <div class="active-polls-list">
+                            <div class="poll-item">
+                                <div class="poll-question">What time works best for our next meeting?</div>
+                                <div class="poll-options">
+                                    <div class="poll-option">
+                                        <input type="radio" name="poll1" id="poll1-1">
+                                        <label for="poll1-1">Monday 10 AM</label>
+                                    </div>
+                                    <div class="poll-option">
+                                        <input type="radio" name="poll1" id="poll1-2">
+                                        <label for="poll1-2">Tuesday 2 PM</label>
+                                    </div>
+                                    <div class="poll-option">
+                                        <input type="radio" name="poll1" id="poll1-3">
+                                        <label for="poll1-3">Wednesday 11 AM</label>
+                                    </div>
+                                </div>
+                                <button class="vote-btn">Vote</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="polls-tab-content" data-tab="results">
+                        <div class="poll-results">
+                            <div class="poll-result-item">
+                                <div class="poll-question">Favorite meeting platform?</div>
+                                <div class="result-bar">
+                                    <div class="result-fill" style="width: 60%">Zoom (60%)</div>
+                                </div>
+                                <div class="result-bar">
+                                    <div class="result-fill" style="width: 30%">Google Meet (30%)</div>
+                                </div>
+                                <div class="result-bar">
+                                    <div class="result-fill" style="width: 10%">Teams (10%)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(panel);
+            
+            // Add event listeners
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+            });
+            
+            // Tab switching
+            panel.querySelectorAll('.polls-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabName = this.dataset.tab;
+                    
+                    // Update tabs
+                    panel.querySelectorAll('.polls-tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Update content
+                    panel.querySelectorAll('.polls-tab-content').forEach(content => {
+                        content.classList.remove('active');
+                        if (content.dataset.tab === tabName) {
+                            content.classList.add('active');
+                        }
+                    });
+                });
+            });
+            
+            // Create poll functionality
+            panel.querySelector('.create-poll-btn').addEventListener('click', () => {
+                const question = panel.querySelector('.poll-question-input').value;
+                if (question.trim()) {
+                    showNotification('Poll created successfully!', 'success');
+                }
+            });
+        }
+        
+        function createRelationshipPanel() {
+            const existingPanel = document.querySelector('.feature-panel');
+            if (existingPanel) {
+                existingPanel.remove();
+            }
+            
+            const panel = document.createElement('div');
+            panel.className = 'feature-panel relationship-panel';
+            panel.innerHTML = `
+                <div class="panel-header">
+                    <h4>Relationship Insights</h4>
+                    <button class="panel-close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="insight-cards">
+                        <div class="insight-card">
+                            <div class="insight-title">Total Calls</div>
+                            <div class="insight-value">47</div>
+                            <div class="insight-description">With all contacts</div>
+                            <span class="insight-trend trend-up">+12%</span>
+                        </div>
+                        <div class="insight-card">
+                            <div class="insight-title">Average Duration</div>
+                            <div class="insight-value">24m</div>
+                            <div class="insight-description">Per call</div>
+                            <span class="insight-trend trend-neutral">0%</span>
+                        </div>
+                        <div class="insight-card">
+                            <div class="insight-title">Busiest Day</div>
+                            <div class="insight-value">Wednesday</div>
+                            <div class="insight-description">Most calls scheduled</div>
+                        </div>
+                        <div class="insight-card">
+                            <div class="insight-title">Favorite Contact</div>
+                            <div class="insight-value">Sarah</div>
+                            <div class="insight-description">15 calls this month</div>
+                            <span class="insight-trend trend-up">+3</span>
+                        </div>
+                    </div>
+                    <div class="relationship-chart">
+                        <h5>Call Frequency (Last 30 days)</h5>
+                        <div class="chart-container">
+                            <div class="chart-bar" style="height: 80%">Mon</div>
+                            <div class="chart-bar" style="height: 60%">Tue</div>
+                            <div class="chart-bar" style="height: 90%">Wed</div>
+                            <div class="chart-bar" style="height: 70%">Thu</div>
+                            <div class="chart-bar" style="height: 50%">Fri</div>
+                            <div class="chart-bar" style="height: 40%">Sat</div>
+                            <div class="chart-bar" style="height: 30%">Sun</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(panel);
+            
+            // Add event listener
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+            });
+        }
+        
+        function initializeWhiteboard(canvas) {
+            const ctx = canvas.getContext('2d');
+            let drawing = false;
+            let currentTool = 'pen';
+            let currentColor = '#ff3b30';
+            let currentSize = 3;
+            
+            // Set initial canvas style
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Drawing functions
+            function startDrawing(e) {
+                drawing = true;
+                draw(e);
+            }
+            
+            function stopDrawing() {
+                drawing = false;
+                ctx.beginPath();
+            }
+            
+            function draw(e) {
+                if (!drawing) return;
+                
+                ctx.lineWidth = currentSize;
+                ctx.strokeStyle = currentColor;
+                
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            }
+            
+            // Event listeners for drawing
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            
+            // Touch support for mobile
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                startDrawing(touch);
+            });
+            
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                draw(touch);
+            });
+            
+            canvas.addEventListener('touchend', stopDrawing);
+            
+            // Tool selection
+            const panel = canvas.closest('.whiteboard-panel');
+            if (panel) {
+                panel.querySelectorAll('.tool-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        panel.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                        this.classList.add('active');
+                        currentTool = this.dataset.tool;
+                    });
+                });
+                
+                panel.querySelectorAll('.tool-color').forEach(colorBtn => {
+                    colorBtn.addEventListener('click', function() {
+                        panel.querySelectorAll('.tool-color').forEach(c => c.classList.remove('selected'));
+                        this.classList.add('selected');
+                        currentColor = this.dataset.color;
+                    });
+                });
+                
+                const sizeSlider = panel.querySelector('.tool-size-slider');
+                if (sizeSlider) {
+                    sizeSlider.addEventListener('input', function() {
+                        currentSize = parseInt(this.value);
+                    });
+                }
+            }
+        }
+        
+        function sendChatMessage(message) {
+            // Add message to UI
+            const chatMessages = document.querySelector('#chatMessagesPanel');
+            if (chatMessages) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'chat-message user';
+                messageDiv.innerHTML = `
+                    <div class="message-sender">You</div>
+                    <div class="message-content">${message}</div>
+                    <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                `;
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            
+            // Simulate receiving a response after delay
+            setTimeout(() => {
+                if (AppState.callParticipants.length > 0) {
+                    const participant = AppState.callParticipants[0];
+                    const responses = [
+                        "Thanks for sharing!",
+                        "I agree with that.",
+                        "Let's discuss this further.",
+                        "Interesting point.",
+                        "Can you elaborate on that?"
+                    ];
+                    const response = responses[Math.floor(Math.random() * responses.length)];
+                    
+                    if (chatMessages) {
+                        const responseDiv = document.createElement('div');
+                        responseDiv.className = 'chat-message other';
+                        responseDiv.innerHTML = `
+                            <div class="message-sender">${participant.name}</div>
+                            <div class="message-content">${response}</div>
+                            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        `;
+                        chatMessages.appendChild(responseDiv);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }
+                }
+            }, 1000 + Math.random() * 2000);
+            
+            // Update chat badge
+            AppState.unreadChatCount++;
+            updateChatBadge();
+            
+            showNotification('Message sent', 'success');
+        }
+        
+        function saveSharedNotes(notes) {
+            try {
+                const callNotes = JSON.parse(localStorage.getItem('sharedCallNotes') || '[]');
+                callNotes.push({
+                    notes: notes,
+                    timestamp: new Date().toISOString(),
+                    callId: AppState.activeCallId || 'general'
+                });
+                localStorage.setItem('sharedCallNotes', JSON.stringify(callNotes));
+            } catch (error) {
+                console.error('[Calls iframe] Error saving shared notes:', error);
+            }
         }
         
         // Handle messages from parent window

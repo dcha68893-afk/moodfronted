@@ -14,8 +14,40 @@
 // CRITICAL FIX: Refresh-safe bootstrap - wait for /auth/me validation before loading UI
 // CRITICAL FIX: Bootstrapping order - UI renders immediately, auth happens in background
 // CRITICAL FIX: COMPLETELY REMOVED all admin route calls and backend route mounting logic
+// FIXED: Authentication gating - public pages skip session validation, no redirect loops
 
 (function () {
+  // ============================================================================
+  // PUBLIC PAGES CONFIGURATION
+  // ============================================================================
+  
+  // Define public pages that don't require authentication
+  const PUBLIC_PAGES = [
+    '/index.html',
+    '/index.html',
+    '/signup.html',
+    '/forgot-password.html',
+    '/', // Root path
+    'index.html',
+    'index.html',
+    'signup.html',
+    'forgot-password.html'
+  ];
+  
+  // Check if current page is public
+  function isPublicPage() {
+    const currentPath = window.location.pathname;
+    const currentFile = currentPath.split('/').pop() || '';
+    
+    // Check if current path ends with any public page
+    return PUBLIC_PAGES.some(page => 
+      currentPath === page || 
+      currentPath.endsWith(page) ||
+      currentFile === page ||
+      (page === '/' && (currentPath === '/' || currentPath === '/index.html'))
+    );
+  }
+  
   // ============================================================================
   // GLOBAL AUTH READY FLAG - ADDED FOR REFRESH-SAFE BOOTSTRAP
   // ============================================================================
@@ -57,6 +89,12 @@
   // Validate stored token on app start to ensure user is authenticated
   function validateTokenOnStartup() {
     console.log('🔐 Validating stored token on app startup...');
+    
+    // CRITICAL FIX: Check if we're on a public page first
+    if (isPublicPage()) {
+      console.log('On public page, skipping token validation');
+      return;
+    }
     
     // Check if we're already on login page - if so, skip validation
     if (window.location.pathname.endsWith('index.html') || 
@@ -1235,6 +1273,18 @@
   async function validateAuthDeterministic() {
     console.log('🔄 REFRESH-SAFE: Starting deterministic auth validation...');
     
+    // CRITICAL FIX: Skip validation on public pages
+    if (isPublicPage()) {
+      console.log('Public page detected, skipping auth validation');
+      window.AUTH_READY = true;
+      window.MoodChatConfig.authValidationInProgress = false;
+      authValidationInProgress = false;
+      authValidationComplete = true;
+      executePendingAuthOperations();
+      broadcastAuthReady();
+      return { valid: false, reason: 'Public page - no auth required' };
+    }
+    
     // Set validation in progress flag
     window.MoodChatConfig.authValidationInProgress = true;
     authValidationInProgress = true;
@@ -1433,6 +1483,15 @@
   // NEW: Enhanced auth validation function that validates tokens before marking user as authenticated
   async function validateAuthOnStartup() {
     console.log('🔄 Starting authentication validation on startup...');
+    
+    // CRITICAL FIX: Skip validation on public pages
+    if (isPublicPage()) {
+      console.log('Public page detected, skipping auth validation');
+      authValidationComplete = true;
+      window.MoodChatConfig.authValidationInProgress = false;
+      authValidationInProgress = false;
+      return true;
+    }
     
     // Set validation in progress flag
     window.MoodChatConfig.authValidationInProgress = true;
@@ -1837,56 +1896,70 @@
     
     appStartupPerformed = true;
     
-    // STEP 1: Set initial network status to "checking" - FIXED: Not "offline"
+    // STEP 1: Check if we're on a public page
+    if (isPublicPage()) {
+      console.log('📄 Public page detected, skipping auth validation and proceeding with UI');
+      window.AUTH_READY = true;
+      executePendingAuthOperations();
+      broadcastAuthReady();
+    }
+    
+    // STEP 2: Set initial network status to "checking" - FIXED: Not "offline"
     window.MoodChatConfig.networkStatus = 'checking';
     console.log('Initial network status: checking...');
     
     // Notify UI about initial checking state
     API_COORDINATION.notifyNetworkStatus('checking', 'Checking connection...');
     
-    // STEP 2: Wait for api.js using enhanced detection
+    // STEP 3: Wait for api.js using enhanced detection
     console.log('Waiting for api.js using multiple detection methods...');
     const apiAvailable = await API_COORDINATION.waitForApi();
     
-    // STEP 3: CRITICAL - Run deterministic auth validation BEFORE ANY UI LOADS
-    console.log('🔐 CRITICAL: Running deterministic auth validation before any UI loads...');
-    
-    // This is the key fix: validate auth via /auth/me BEFORE allowing UI to load
-    try {
-      await validateAuthDeterministic();
-      console.log('✅ Auth validation completed before proceeding with startup');
-    } catch (error) {
-      console.log('⚠️ Auth validation error during startup:', error);
-      // Continue but auth will not be ready
-    }
-    
-    // STEP 4: Check if auth is ready - if not, DO NOT load UI
-    if (!window.AUTH_READY) {
-      console.log('⚠️ Auth NOT ready, waiting for validation or redirecting...');
+    // STEP 4: CRITICAL - Run deterministic auth validation BEFORE ANY UI LOADS
+    // Skip on public pages
+    if (!isPublicPage()) {
+      console.log('🔐 CRITICAL: Running deterministic auth validation before any UI loads...');
       
-      // If we're not on login page and have no valid auth, redirect
-      if (!window.location.pathname.endsWith('index.html') && 
-          !window.location.pathname.endsWith('/')) {
+      // This is the key fix: validate auth via /auth/me BEFORE allowing UI to load
+      try {
+        await validateAuthDeterministic();
+        console.log('✅ Auth validation completed before proceeding with startup');
+      } catch (error) {
+        console.log('⚠️ Auth validation error during startup:', error);
+        // Continue but auth will not be ready
+      }
+      
+      // STEP 5: Check if auth is ready - if not, DO NOT load UI
+      if (!window.AUTH_READY) {
+        console.log('⚠️ Auth NOT ready, waiting for validation or redirecting...');
         
-        // Check if we have any token at all
-        const hasToken = JWT_VALIDATION.hasToken() || localStorage.getItem('accessToken');
-        
-        if (!hasToken) {
-          console.log('No token found, redirecting to login...');
-          setTimeout(() => {
-            window.location.href = '/index.html';
-          }, 100);
-          return;
-        } else {
-          console.log('Token exists but validation failed, showing loading screen...');
-          // Keep showing loading screen until redirect or validation completes
+        // If we're not on login page and have no valid auth, redirect
+        if (!window.location.pathname.endsWith('index.html') && 
+            !window.location.pathname.endsWith('/')) {
+          
+          // Check if we have any token at all
+          const hasToken = JWT_VALIDATION.hasToken() || localStorage.getItem('accessToken');
+          
+          if (!hasToken) {
+            console.log('No token found, redirecting to login...');
+            setTimeout(() => {
+              window.location.href = '/index.html';
+            }, 100);
+            return;
+          } else {
+            console.log('Token exists but validation failed, showing loading screen...');
+            // Keep showing loading screen until redirect or validation completes
+          }
         }
+      } else {
+        console.log('✅ Auth is READY, proceeding with UI initialization');
       }
     } else {
-      console.log('✅ Auth is READY, proceeding with UI initialization');
+      console.log('✅ Public page - auth not required, proceeding with UI initialization');
+      window.AUTH_READY = true;
     }
     
-    // STEP 5: Check backend reachability in background - NON-BLOCKING
+    // STEP 6: Check backend reachability in background - NON-BLOCKING
     console.log('Starting backend health check in background...');
     
     if (!apiAvailable) {
@@ -1898,11 +1971,11 @@
       console.log('api.js available, health check running in background');
     }
     
-    // STEP 6: Hide loading screen ONLY if auth is ready
+    // STEP 7: Hide loading screen ONLY if auth is ready or public page
     const loadingScreen = document.getElementById('loadingScreen');
     if (loadingScreen) {
-      // Only hide if auth is ready, otherwise keep showing
-      if (window.AUTH_READY) {
+      // Hide if auth is ready OR we're on a public page
+      if (window.AUTH_READY || isPublicPage()) {
         loadingScreen.classList.add('hidden');
         setTimeout(() => {
           if (loadingScreen.parentNode) {
@@ -1914,77 +1987,37 @@
       }
     }
     
-    // STEP 7: Initialize core services (non-blocking) - but only if auth is ready
-    if (window.AUTH_READY) {
-      setTimeout(() => {
-        // Initialize settings
-        SETTINGS_SERVICE.initialize();
-        
-        // Setup global auth access
-        setupGlobalAuthAccess();
-        
-        // Initialize network detection - UPDATED: Won't set offline prematurely
-        initializeNetworkDetection();
-        
-        // Expose global state to iframes
-        exposeGlobalStateToIframes();
-        
-        // Setup event listeners
-        setupEventListeners();
-        
-        // Setup cross-page communication
-        setupCrossPageCommunication();
-        
-        console.log('✓ Core services initialized');
-      }, 50);
-    }
-    
-    // STEP 8: Initialize UI ONLY if auth is ready
-    if (window.AUTH_READY) {
-      setTimeout(() => {
-        initializeAppUI();
-      }, 100);
-    } else {
-      console.log('⚠️ Delaying UI initialization until auth is ready...');
+    // STEP 8: Initialize core services (non-blocking)
+    setTimeout(() => {
+      // Initialize settings
+      SETTINGS_SERVICE.initialize();
       
-      // Wait for auth ready event
-      window.addEventListener('moodchat-auth-ready', () => {
-        console.log('✅ Auth ready event received, initializing UI...');
-        setTimeout(() => {
-          initializeAppUI();
-        }, 100);
-      }, { once: true });
+      // Setup global auth access
+      setupGlobalAuthAccess();
       
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!window.AUTH_READY) {
-          console.log('⚠️ Auth ready timeout, checking if we should redirect...');
-          
-          // If we have a token but validation is taking too long, show offline UI
-          if (JWT_VALIDATION.hasToken() || localStorage.getItem('accessToken')) {
-            console.log('Token exists but validation timeout, creating offline user...');
-            createOfflineUserForUI();
-            window.AUTH_READY = true;
-            executePendingAuthOperations();
-            broadcastAuthReady();
-            setTimeout(() => {
-              initializeAppUI();
-            }, 100);
-          } else {
-            // No token, redirect to login
-            if (!window.location.pathname.endsWith('index.html') && 
-                !window.location.pathname.endsWith('/')) {
-              console.log('No token and auth timeout, redirecting to login...');
-              window.location.href = '/index.html';
-            }
-          }
-        }
-      }, 10000);
-    }
+      // Initialize network detection - UPDATED: Won't set offline prematurely
+      initializeNetworkDetection();
+      
+      // Expose global state to iframes
+      exposeGlobalStateToIframes();
+      
+      // Setup event listeners
+      setupEventListeners();
+      
+      // Setup cross-page communication
+      setupCrossPageCommunication();
+      
+      console.log('✓ Core services initialized');
+    }, 50);
     
-    // STEP 9: Schedule background validation ONLY if backend becomes reachable AND auth is ready
+    // STEP 9: Initialize UI
+    setTimeout(() => {
+      initializeAppUI();
+    }, 100);
+    
+    // STEP 10: Schedule background validation ONLY if backend becomes reachable AND auth is ready
     window.addEventListener('moodchat-backend-ready', (event) => {
-      if (event.detail.reachable && JWT_VALIDATION.hasToken() && window.AUTH_READY) {
+      if (event.detail.reachable && JWT_VALIDATION.hasToken() && window.AUTH_READY && !isPublicPage()) {
         console.log('Backend ready, scheduling background token validation...');
         scheduleBackgroundValidation();
       }
@@ -2025,9 +2058,15 @@
       document.body.appendChild(contentArea);
     }
     
-    // Load default page (non-blocking) - ONLY if authenticated AND validated
+    // Load default page (non-blocking) - ONLY if authenticated AND validated, or public page
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
+      if (isPublicPage()) {
+        // Public page - load appropriate content
+        if (window.location.pathname.includes('index.html') || window.location.pathname.endsWith('/')) {
+          // Already on login page, nothing to load
+          console.log('Public page loaded');
+        }
+      } else if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
         loadPage(APP_CONFIG.defaultPage);
       } else {
         // Show offline or login page
@@ -2037,7 +2076,7 @@
     
     // Set default tab (non-blocking) - ONLY if authenticated AND validated
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
+      if (!isPublicPage() && window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
         try {
           const groupsTab = document.querySelector(TAB_CONFIG.groups.container);
           if (groupsTab) {
@@ -2062,7 +2101,7 @@
     
     // Load cached data instantly - ONLY if authenticated AND validated
     setTimeout(() => {
-      if (window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
+      if (!isPublicPage() && window.currentUser && !window.currentUser.isOfflineMode && window.currentUser.validated) {
         loadCachedDataInstantly();
       }
     }, 300);
@@ -2071,6 +2110,7 @@
     // This will be triggered when network status becomes "online"
     window.addEventListener('moodchat-network-status', (event) => {
       if (event.detail.status === 'online' && 
+          !isPublicPage() &&
           window.currentUser && 
           !window.currentUser.isOfflineMode &&
           window.currentUser.validated) {
@@ -6189,87 +6229,20 @@
       .large-text {
         font-size: 1.25em;
       }
-      
-      .wallpaper-gradient1 {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      }
-      
-      .wallpaper-gradient2 {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-      }
-      
-      .wallpaper-pattern1 {
-        background: url('data:image/svg+xml,<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="%23f3f4f6"/><path d="M0 0h20v20H0z" fill="none"/><circle cx="10" cy="10" r="1" fill="%23d1d5db" opacity="0.5"/></svg>');
-      }
     `;
+    
     document.head.appendChild(style);
   }
 
   // ============================================================================
-  // STARTUP EXECUTION
+  // INITIALIZE APP
   // ============================================================================
 
-  // Start the app after DOM is ready
+  // Start the app initialization when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
     initializeApp();
   }
 
-  // CRITICAL FIX: COMPLETELY DISABLED all admin route calls
-  // These are NO-OP stubs that prevent any attempts to call backend admin routes
-  window.ensureAuthRoutes = async function() {
-    console.log('🔄 Auth routes assumed to be mounted by backend - NO OP');
-    return { success: true, message: 'Routes are mounted by backend - NO OP' };
-  };
-  
-  window.verifyAuthRoutes = async function() {
-    console.log('🔄 Auth routes assumed to be mounted by backend - NO OP');
-    return { success: true, message: 'Routes are mounted by backend - NO OP' };
-  };
-  
-  window.mountAuthRoutes = async function() {
-    console.log('🔄 Backend routes are mounted by backend - frontend cannot mount routes - NO OP');
-    return { success: true, message: 'Routes are mounted by backend - NO OP' };
-  };
-  
-  window.mountAuthRoutesAlternative = async function() {
-    console.log('🔄 Backend routes are mounted by backend - no alternative mounting needed - NO OP');
-    return { success: true, message: 'Routes are mounted by backend - NO OP' };
-  };
-  
-  // CRITICAL FIX: Block any direct calls to /api/admin/*
-  const originalFetch = window.fetch;
-  window.fetch = function(url, options) {
-    if (typeof url === 'string' && url.includes('/api/admin/')) {
-      console.log('🚫 BLOCKED: Admin route call prevented:', url);
-      return Promise.reject(new Error('Admin routes cannot be called from frontend'));
-    }
-    return originalFetch.call(this, url, options);
-  };
-
-  // Expose key functions globally
-  window.MoodChatCore = {
-    initializeApp: initializeApp,
-    switchTab: switchTab,
-    loadPage: window.loadPage,
-    toggleSidebar: window.toggleSidebar,
-    getCurrentUser: () => window.currentUser,
-    isAuthenticated: () => !!window.currentUser,
-    isAuthReady: () => authStateRestored,
-    getNetworkStatus: () => API_COORDINATION.getNetworkStatus(),
-    isBackendReachable: () => window.MoodChatConfig.backendReachable,
-    // CRITICAL FIX: Expose NO-OP admin route functions
-    ensureAuthRoutes: () => Promise.resolve({ success: true, message: 'NO OP - Backend routes are mounted by backend' }),
-    verifyAuthRoutes: () => Promise.resolve({ success: true, message: 'NO OP - Backend routes are mounted by backend' }),
-    mountAuthRoutes: () => Promise.resolve({ success: true, message: 'NO OP - Backend routes are mounted by backend' })
-  };
-
-  // Add close modal function
-  window.closeModal = function(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-      modal.classList.add('hidden');
-    }
-  };
 })();
