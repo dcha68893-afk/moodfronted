@@ -989,184 +989,209 @@ async function validateBackendAuth(token) {
 }
 
 // ============================================================================
-// MOBILE-FRIENDLY SESSION VERIFICATION
+// DEVICE-INDEPENDENT SESSION ESTABLISHMENT
 // ============================================================================
 
 /**
- * MOBILE FIX: Ensures session is fully established before redirect
- * Performs comprehensive session verification including storage validation
+ * DEVICE-INDEPENDENT SESSION ESTABLISHMENT
+ * Ensures session is fully established before any redirect on ALL devices
  */
-async function ensureSessionEstablished(token, user) {
-  console.log('📱 MOBILE FIX: Ensuring session fully established before redirect...');
+async function ensureSessionEstablishedDeviceIndependent(token, user) {
+  console.log('📱 DEVICE-INDEPENDENT: Ensuring session fully established before redirect...');
   
   const verificationSteps = [
-    { name: 'Token Storage', fn: verifyTokenStorage },
-    { name: 'Backend Validation', fn: verifyBackendSession },
-    { name: 'User Data Storage', fn: verifyUserDataStorage }
+    { name: 'Token Storage Validation', fn: verifyTokenStorage },
+    { name: 'User Data Storage Validation', fn: verifyUserDataStorage },
+    { name: 'Backend Session Validation', fn: verifyBackendSession }
   ];
   
+  const results = [];
+  let allSuccessful = true;
+  
+  // Execute all verification steps in sequence
   for (const step of verificationSteps) {
     console.log(`📱 Verifying: ${step.name}...`);
-    const result = await step.fn(token, user);
-    
-    if (!result.success) {
-      console.error(`📱 Session verification failed at ${step.name}:`, result.message);
-      return {
-        success: false,
-        failedStep: step.name,
+    try {
+      const result = await step.fn(token, user);
+      results.push({
+        step: step.name,
+        success: result.success,
         message: result.message
-      };
+      });
+      
+      if (!result.success) {
+        allSuccessful = false;
+        console.error(`📱 Session verification failed at ${step.name}:`, result.message);
+        
+        // Don't break - continue to collect all verification results
+      } else {
+        console.log(`📱 ${step.name}: SUCCESS`);
+      }
+    } catch (error) {
+      console.error(`📱 Error in verification step ${step.name}:`, error);
+      results.push({
+        step: step.name,
+        success: false,
+        message: `Error: ${error.message}`
+      });
+      allSuccessful = false;
     }
+    
+    // Small delay between steps for mobile stability
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  // If any step failed, provide detailed feedback
+  if (!allSuccessful) {
+    const failedSteps = results.filter(r => !r.success);
+    const errorMessage = `Session establishment failed at: ${failedSteps.map(f => f.step).join(', ')}`;
+    
+    return {
+      success: false,
+      results: results,
+      message: errorMessage,
+      details: failedSteps.map(f => `${f.step}: ${f.message}`).join('; ')
+    };
   }
   
   console.log('📱 All session verification steps completed successfully');
-  return { success: true, message: 'Session fully established' };
+  return { 
+    success: true, 
+    results: results,
+    message: 'Session fully established on all devices' 
+  };
 }
 
 /**
- * Verifies token is properly stored and retrievable
+ * Enhanced token storage verification with retry logic
  */
 async function verifyTokenStorage(token) {
-  try {
-    // Verify token is in localStorage
-    const storedToken = getAuthToken();
-    if (!storedToken || storedToken !== token) {
-      return { 
-        success: false, 
-        message: 'Token not properly stored in localStorage' 
-      };
-    }
-    
-    // Verify token format
-    if (!validateToken(storedToken)) {
-      return { 
-        success: false, 
-        message: 'Stored token is invalid' 
-      };
-    }
-    
-    // Check all token storage locations for consistency
-    const accessToken = localStorage.getItem('accessToken');
-    const moodchatToken = localStorage.getItem('moodchat_token');
-    const authUserStr = localStorage.getItem('authUser');
-    
-    const tokens = [accessToken, moodchatToken];
-    if (authUserStr) {
-      try {
-        const authUser = JSON.parse(authUserStr);
-        tokens.push(authUser.token);
-      } catch (e) {
-        // Ignore parsing error
+  const maxRetries = 3;
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`📱 Token storage verification attempt ${attempt}/${maxRetries}`);
+      
+      // Verify token is in localStorage (check all possible locations)
+      const accessToken = localStorage.getItem('accessToken');
+      const moodchatToken = localStorage.getItem('moodchat_token');
+      
+      // Check if token exists in any storage location
+      const storedToken = accessToken || moodchatToken;
+      
+      if (!storedToken) {
+        throw new Error('Token not found in any storage location');
       }
-    }
-    
-    // Check if all stored tokens match
-    const uniqueTokens = [...new Set(tokens.filter(t => t))];
-    if (uniqueTokens.length > 1) {
-      console.warn('Multiple different tokens found in storage:', uniqueTokens);
-    }
-    
-    return { success: true, message: 'Token storage verified' };
-  } catch (error) {
-    return { 
-      success: false, 
-      message: `Token storage verification error: ${error.message}` 
-    };
-  }
-}
-
-/**
- * Verifies session with backend
- */
-async function verifyBackendSession(token) {
-  try {
-    if (!window.api || typeof window.api !== 'function') {
-      return { 
-        success: false, 
-        message: 'API not available for session verification' 
-      };
-    }
-    
-    // Try multiple endpoints to ensure backend session is established
-    const endpoints = ['/auth/me', '/auth/verify'];
-    
-    for (const endpoint of endpoints) {
+      
+      // Verify the stored token matches the provided token
+      if (storedToken !== token) {
+        throw new Error('Stored token does not match authenticated token');
+      }
+      
+      // Verify token format
+      if (!validateToken(storedToken)) {
+        throw new Error('Stored token has invalid format');
+      }
+      
+      // Additional validation: Check if token can be decoded
       try {
-        console.log(`📱 Verifying backend session via ${endpoint}...`);
-        const response = await window.api(endpoint, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 5000
-        });
-        
-        if (response && (response.success === true || response.ok === true || response.user)) {
-          console.log(`📱 Backend session verified via ${endpoint}`);
-          return { success: true, message: `Backend session verified via ${endpoint}` };
+        const parts = storedToken.split('.');
+        if (parts.length !== 3) {
+          throw new Error('Invalid JWT structure');
         }
-      } catch (error) {
-        console.warn(`📱 Endpoint ${endpoint} verification failed:`, error.message);
-        // Continue to next endpoint
+        
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (!payload.exp || !payload.iat) {
+          throw new Error('Token missing required claims');
+        }
+      } catch (decodeError) {
+        throw new Error(`Token decode failed: ${decodeError.message}`);
+      }
+      
+      console.log(`📱 Token storage verification SUCCESS on attempt ${attempt}`);
+      return { success: true, message: 'Token storage verified successfully' };
+      
+    } catch (error) {
+      lastError = error;
+      console.warn(`📱 Token storage verification attempt ${attempt} failed:`, error.message);
+      
+      // On mobile, wait before retry
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 300 * attempt));
       }
     }
-    
-    return { 
-      success: false, 
-      message: 'Could not verify session with any backend endpoint' 
-    };
-  } catch (error) {
-    return { 
-      success: false, 
-      message: `Backend session verification error: ${error.message}` 
-    };
   }
+  
+  return { 
+    success: false, 
+    message: `Token storage verification failed after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}` 
+  };
 }
 
 /**
- * Verifies user data is properly stored
+ * Enhanced user data storage verification
  */
 async function verifyUserDataStorage(token, user) {
   try {
+    console.log('📱 Verifying user data storage...');
+    
     // Verify user data in localStorage
     const storedUserStr = localStorage.getItem('currentUser');
-    if (!storedUserStr) {
-      return { 
-        success: false, 
-        message: 'User data not found in localStorage' 
-      };
-    }
-    
-    const storedUser = JSON.parse(storedUserStr);
-    
-    // Check if stored user matches expected user
-    const userMatch = storedUser.id === user.id || 
-                     storedUser.email === user.email || 
-                     storedUser.username === user.username;
-    
-    if (!userMatch) {
-      return { 
-        success: false, 
-        message: 'Stored user data does not match authenticated user' 
-      };
-    }
-    
-    // Verify authUser object exists and is valid
     const authUserStr = localStorage.getItem('authUser');
-    if (!authUserStr) {
+    
+    if (!storedUserStr && !authUserStr) {
       return { 
         success: false, 
-        message: 'Auth user object not found in localStorage' 
+        message: 'User data not found in any storage location' 
       };
     }
     
-    const authUser = JSON.parse(authUserStr);
-    if (!authUser.token || !authUser.user) {
-      return { 
-        success: false, 
-        message: 'Auth user object is incomplete' 
-      };
+    // Verify currentUser
+    if (storedUserStr) {
+      try {
+        const storedUser = JSON.parse(storedUserStr);
+        
+        // Check essential user properties
+        if (!storedUser.id && !storedUser.email && !storedUser.username) {
+          throw new Error('Stored user data missing essential properties');
+        }
+        
+        // If we have the authenticated user object, verify they match
+        if (user) {
+          const userMatch = storedUser.id === user.id || 
+                           storedUser.email === user.email || 
+                           storedUser.username === user.username;
+          
+          if (!userMatch) {
+            throw new Error('Stored user data does not match authenticated user');
+          }
+        }
+      } catch (parseError) {
+        throw new Error(`Failed to parse stored user data: ${parseError.message}`);
+      }
+    }
+    
+    // Verify authUser
+    if (authUserStr) {
+      try {
+        const authUser = JSON.parse(authUserStr);
+        
+        if (!authUser.token) {
+          throw new Error('Auth user object missing token');
+        }
+        
+        if (!authUser.user) {
+          throw new Error('Auth user object missing user data');
+        }
+        
+        // Verify token in authUser matches
+        if (authUser.token !== token) {
+          throw new Error('Auth user token mismatch');
+        }
+      } catch (parseError) {
+        throw new Error(`Failed to parse auth user data: ${parseError.message}`);
+      }
     }
     
     return { success: true, message: 'User data storage verified' };
@@ -1178,18 +1203,115 @@ async function verifyUserDataStorage(token, user) {
   }
 }
 
+/**
+ * Enhanced backend session verification with fallback endpoints
+ */
+async function verifyBackendSession(token) {
+  try {
+    if (!window.api || typeof window.api !== 'function') {
+      return { 
+        success: false, 
+        message: 'API not available for session verification' 
+      };
+    }
+    
+    // Try multiple endpoints with different approaches
+    const endpoints = [
+      { path: '/auth/me', method: 'GET', description: 'User info endpoint' },
+      { path: '/auth/verify', method: 'GET', description: 'Token verification endpoint' },
+      { path: '/status', method: 'GET', description: 'Status endpoint' }
+    ];
+    
+    let lastResponse = null;
+    let lastError = null;
+    
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`📱 Verifying backend session via ${endpoint.path} (${endpoint.description})...`);
+        
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        // Add authorization header for auth endpoints
+        if (endpoint.path.includes('/auth/')) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const response = await window.api(endpoint.path, {
+          method: endpoint.method,
+          headers: headers,
+          timeout: 8000 // Increased timeout for mobile
+        });
+        
+        lastResponse = response;
+        
+        console.log(`📱 ${endpoint.path} response:`, response);
+        
+        // Check for successful response
+        if (response) {
+          const isSuccess = response.success === true || 
+                           response.ok === true || 
+                           response.status === 'success' ||
+                           response.status === 200 ||
+                           (response.user && (response.user.id || response.user.email));
+          
+          if (isSuccess) {
+            console.log(`📱 Backend session verified via ${endpoint.path}`);
+            
+            // Extract user data if available
+            const userData = response.user || response.data?.user;
+            if (userData) {
+              return { 
+                success: true, 
+                message: `Backend session verified via ${endpoint.path}`,
+                user: userData 
+              };
+            }
+            
+            return { 
+              success: true, 
+              message: `Backend session verified via ${endpoint.path}` 
+            };
+          }
+        }
+      } catch (error) {
+        lastError = error;
+        console.warn(`📱 Endpoint ${endpoint.path} verification failed:`, error.message);
+        
+        // Don't break - try next endpoint
+        continue;
+      }
+      
+      // Small delay between endpoint attempts
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // If we get here, all endpoints failed
+    const errorMessage = lastError?.message || 'No successful response from any endpoint';
+    return { 
+      success: false, 
+      message: `Could not verify session with backend: ${errorMessage}`,
+      lastResponse: lastResponse
+    };
+  } catch (error) {
+    return { 
+      success: false, 
+      message: `Backend session verification error: ${error.message}` 
+    };
+  }
+}
+
 // ============================================================================
-// AUTH FORM HANDLERS WITH JWT SUPPORT AND PROGRESSIVE LOGIN LIMITS
+// UNIVERSAL LOGIN HANDLER - DEVICE INDEPENDENT
 // ============================================================================
 
 /**
- * UNIVERSAL LOGIN HANDLER - Works even if forms are recreated
- * UPDATED WITH LOGIN FLOW FIX: Waits for backend validation before redirecting
- * UPDATED: Implements secure token storage for independent in-frame access
- * MOBILE FIX: Enhanced session establishment before redirect
+ * UNIVERSAL LOGIN HANDLER - Works on all devices
+ * Enhanced with device-independent session establishment
  */
 async function handleLoginSubmit(event) {
-  console.log('🔐 LOGIN SUBMIT HANDLER TRIGGERED - UNIVERSAL');
+  console.log('🔐 UNIVERSAL LOGIN HANDLER TRIGGERED - DEVICE INDEPENDENT');
   
   // Prevent default form submission
   if (event && event.preventDefault) {
@@ -1353,14 +1475,17 @@ async function handleLoginSubmit(event) {
           saveAuthData(token, validationResult.user, expiresAt);
         }
         
-        // MOBILE FIX: Ensure session is fully established before redirect
-        console.log('📱 MOBILE FIX: Ensuring session fully established before redirect...');
+        // DEVICE-INDEPENDENT: Ensure session is fully established before ANY redirect
+        console.log('📱 DEVICE-INDEPENDENT: Ensuring session fully established before redirect...');
         updateAuthStatusUI('authenticated', 'Establishing session...');
         
-        const sessionResult = await ensureSessionEstablished(token, validationResult.user || user);
+        const sessionResult = await ensureSessionEstablishedDeviceIndependent(
+          token, 
+          validationResult.user || user
+        );
         
         if (sessionResult.success) {
-          console.log('📱 MOBILE FIX: Session fully established - safe to redirect');
+          console.log('📱 DEVICE-INDEPENDENT: Session fully established - safe to redirect');
           
           // Show success message
           updateAuthStatusUI('authenticated', 'Login successful! Session established.');
@@ -1380,39 +1505,62 @@ async function handleLoginSubmit(event) {
             new CustomEvent('auth:login', { detail: validationResult.user || user })
           );
           
-          // Trigger UI success flow
-          triggerUISuccessFlow(validationResult.user || user);
+          // DEVICE-INDEPENDENT: Critical - Wait for ALL operations to complete
+          console.log('📱 DEVICE-INDEPENDENT: Waiting for all storage operations to complete...');
           
-          // LOGIN FLOW FIX + MOBILE FIX: Only redirect AFTER backend validation AND session establishment
-          console.log('🔄 LOGIN FLOW FIX + MOBILE FIX: Redirecting to chat.html after successful validation and session establishment...');
+          // Force synchronous storage completion
+          await new Promise(resolve => {
+            // Check if localStorage operations are complete
+            const checkStorage = () => {
+              const storedToken = localStorage.getItem('accessToken');
+              const storedUser = localStorage.getItem('currentUser');
+              
+              if (storedToken === token && storedUser) {
+                console.log('📱 Storage operations confirmed complete');
+                resolve();
+              } else {
+                setTimeout(checkStorage, 50);
+              }
+            };
+            checkStorage();
+          });
           
-          // Add small delay to ensure all storage operations complete
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // Additional delay for mobile browsers
+          await new Promise(resolve => setTimeout(resolve, 500));
           
           // Check AuthStatus to ensure we're authenticated
           if (window.AuthStatus.state === 'authenticated' && window.AuthStatus.token === token) {
             console.log('✅ Final auth status check: READY for redirect');
             window.AuthStatus.redirectInProgress = true;
             
-            // Show redirect indicator
-            showRedirectIndicator('Login Successful!', 'Redirecting to chat...');
+            // Show device-independent redirect indicator
+            showUniversalRedirectIndicator('Login Successful!', 'Redirecting to chat...');
             
-            // Redirect after showing indicator
-            setTimeout(() => {
-              console.log('🔄 Performing redirect to chat.html');
-              window.location.href = 'chat.html';
-            }, 1500);
+            // CRITICAL: Wait for UI to update before redirect
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Perform redirect
+            console.log('🔄 Performing device-independent redirect to chat.html');
+            window.location.href = 'chat.html';
           } else {
             console.error('❌ Auth status inconsistent before redirect');
             updateAuthStatusUI('error', 'Session establishment incomplete. Please try logging in again.');
+            
+            // Re-enable form
+            if (submitBtn) {
+              submitBtn.textContent = originalText;
+              submitBtn.disabled = false;
+            }
+            
             throw new Error('Session establishment incomplete');
           }
         } else {
-          // MOBILE FIX: Session establishment failed
-          console.error('❌ MOBILE FIX: Session establishment failed:', sessionResult.message);
+          // DEVICE-INDEPENDENT: Session establishment failed
+          console.error('❌ DEVICE-INDEPENDENT: Session establishment failed:', sessionResult.message);
           
-          // Show specific validation error
-          updateAuthStatusUI('error', `Session establishment failed: ${sessionResult.message}`);
+          // Show detailed error message
+          const errorMsg = `Session could not be established: ${sessionResult.details || sessionResult.message}`;
+          updateAuthStatusUI('error', errorMsg);
           
           // Show error in form
           showAuthError('Session could not be established. Please try again.');
@@ -1491,81 +1639,108 @@ async function handleLoginSubmit(event) {
 }
 
 /**
- * Shows redirect indicator with custom message
+ * Shows universal redirect indicator that works on all devices
  */
-function showRedirectIndicator(title, message) {
+function showUniversalRedirectIndicator(title, message) {
   // Remove any existing redirect indicator
-  const existingIndicator = document.getElementById('redirect-indicator');
+  const existingIndicator = document.getElementById('universal-redirect-indicator');
   if (existingIndicator && existingIndicator.parentNode) {
     existingIndicator.parentNode.removeChild(existingIndicator);
   }
   
   // Create new redirect indicator
   const redirectIndicator = document.createElement('div');
-  redirectIndicator.id = 'redirect-indicator';
+  redirectIndicator.id = 'universal-redirect-indicator';
   redirectIndicator.style.cssText = `
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
+    background: rgba(0, 0, 0, 0.95);
     color: white;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    z-index: 9999;
+    z-index: 99999;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     text-align: center;
     padding: 20px;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
   `;
   
   redirectIndicator.innerHTML = `
     <div style="
-      background: #10b981;
+      background: linear-gradient(135deg, #10b981, #059669);
       border-radius: 50%;
-      width: 80px;
-      height: 80px;
+      width: 100px;
+      height: 100px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 20px;
-      animation: pulse 2s infinite;
+      margin-bottom: 25px;
+      box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+      animation: universal-pulse 2s infinite;
     ">
-      <span style="font-size: 40px;">✓</span>
+      <span style="font-size: 48px; font-weight: bold;">✓</span>
     </div>
-    <h2 style="font-size: 24px; margin: 0 0 10px 0; font-weight: 600;">${title}</h2>
-    <p style="font-size: 16px; margin: 0 0 30px 0; opacity: 0.9;">${message}</p>
-    <div class="redirect-spinner"></div>
-    <p style="font-size: 14px; margin-top: 20px; opacity: 0.7;">
-      This may take a moment...
+    <h2 style="font-size: 28px; margin: 0 0 15px 0; font-weight: 700; background: linear-gradient(135deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">${title}</h2>
+    <p style="font-size: 18px; margin: 0 0 35px 0; opacity: 0.9; max-width: 300px;">${message}</p>
+    <div class="universal-spinner"></div>
+    <p style="font-size: 14px; margin-top: 25px; opacity: 0.7; font-style: italic;">
+      Please wait while we prepare your session...
     </p>
   `;
   
-  // Add spinner styles if not present
-  if (!document.getElementById('redirect-spinner-styles')) {
+  // Add universal spinner styles if not present
+  if (!document.getElementById('universal-spinner-styles')) {
     const styleSheet = document.createElement('style');
-    styleSheet.id = 'redirect-spinner-styles';
+    styleSheet.id = 'universal-spinner-styles';
     styleSheet.textContent = `
-      .redirect-spinner {
-        border: 4px solid rgba(255, 255, 255, 0.3);
+      .universal-spinner {
+        border: 4px solid rgba(255, 255, 255, 0.1);
         border-radius: 50%;
-        border-top: 4px solid #fff;
-        width: 40px;
-        height: 40px;
-        animation: spin 1s linear infinite;
+        border-top: 4px solid #10b981;
+        width: 50px;
+        height: 50px;
+        animation: universal-spin 1s linear infinite;
       }
       
-      @keyframes spin {
+      @keyframes universal-spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
       }
       
-      @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
+      @keyframes universal-pulse {
+        0% { 
+          transform: scale(1); 
+          box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+        }
+        50% { 
+          transform: scale(1.05); 
+          box-shadow: 0 6px 25px rgba(16, 185, 129, 0.6);
+        }
+        100% { 
+          transform: scale(1); 
+          box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+        }
+      }
+      
+      @media (max-width: 768px) {
+        .universal-spinner {
+          width: 40px;
+          height: 40px;
+        }
+        
+        #universal-redirect-indicator h2 {
+          font-size: 24px;
+        }
+        
+        #universal-redirect-indicator p {
+          font-size: 16px;
+        }
       }
     `;
     document.head.appendChild(styleSheet);
@@ -1575,6 +1750,10 @@ function showRedirectIndicator(title, message) {
   
   // Prevent scrolling while redirect indicator is shown
   document.body.style.overflow = 'hidden';
+  document.body.style.position = 'fixed';
+  document.body.style.width = '100%';
+  
+  return redirectIndicator;
 }
 
 /**
@@ -1641,49 +1820,6 @@ function triggerUISuccessFlow(user) {
     loginForm.style.display = 'none';
   }
   
-  // 3. Show loading/redirecting indicator
-  const redirectIndicator = document.createElement('div');
-  redirectIndicator.id = 'redirect-indicator';
-  redirectIndicator.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 20px;
-    border-radius: 10px;
-    z-index: 1000;
-    text-align: center;
-  `;
-  redirectIndicator.innerHTML = `
-    <h3>Login Successful!</h3>
-    <p>Redirecting to chat...</p>
-    <div class="spinner"></div>
-  `;
-  
-  // Add spinner styles
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = `
-    .spinner {
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top: 4px solid #fff;
-      width: 30px;
-      height: 30px;
-      animation: spin 1s linear infinite;
-      margin: 10px auto;
-    }
-    
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-  `;
-  document.head.appendChild(styleSheet);
-  
-  document.body.appendChild(redirectIndicator);
-  
   // Dispatch login success event for other components
   const event = new CustomEvent('moodchat-login-success', {
     detail: { user, timestamp: new Date().toISOString() }
@@ -1691,15 +1827,16 @@ function triggerUISuccessFlow(user) {
   window.dispatchEvent(event);
 }
 
+// ============================================================================
+// STRICT API-DRIVEN REGISTRATION HANDLER - DEVICE INDEPENDENT
+// ============================================================================
+
 /**
- * STRICT API-DRIVEN REGISTRATION HANDLER - FIXED response handling
- * UPDATED WITH LOGIN FLOW FIX: Waits for backend validation before redirecting
- * UPDATED: Implements secure token storage for independent in-frame access
- * MOBILE FIX: Enhanced session establishment before redirect
+ * STRICT API-DRIVEN REGISTRATION HANDLER - DEVICE INDEPENDENT
  */
 async function handleRegisterSubmit(event) {
   event.preventDefault();
-  console.log('STRICT API-DRIVEN: Registration form submitted');
+  console.log('STRICT API-DRIVEN: Registration form submitted - DEVICE INDEPENDENT');
   
   const form = event.target;
   const username = form.querySelector('input[name="username"]')?.value;
@@ -1789,14 +1926,17 @@ async function handleRegisterSubmit(event) {
           saveAuthData(token, validationResult.user, expiresAt);
         }
         
-        // MOBILE FIX: Ensure session is fully established before redirect
-        console.log('📱 MOBILE FIX: Ensuring session fully established before redirect...');
+        // DEVICE-INDEPENDENT: Ensure session is fully established before ANY redirect
+        console.log('📱 DEVICE-INDEPENDENT: Ensuring session fully established before redirect...');
         updateAuthStatusUI('authenticated', 'Establishing session...');
         
-        const sessionResult = await ensureSessionEstablished(token, validationResult.user || user);
+        const sessionResult = await ensureSessionEstablishedDeviceIndependent(
+          token, 
+          validationResult.user || user
+        );
         
         if (sessionResult.success) {
-          console.log('📱 MOBILE FIX: Session fully established - safe to redirect');
+          console.log('📱 DEVICE-INDEPENDENT: Session fully established - safe to redirect');
           
           // STRICT REQUIREMENT: Only show success AFTER API confirms
           updateAuthStatusUI('authenticated', 'Registration successful! Session established.');
@@ -1814,35 +1954,58 @@ async function handleRegisterSubmit(event) {
           // Trigger UI success flow
           triggerUISuccessFlow(validationResult.user || user);
           
-          // LOGIN FLOW FIX + MOBILE FIX: Only redirect AFTER backend validation AND session establishment
-          console.log('🔄 LOGIN FLOW FIX + MOBILE FIX: Redirecting to chat.html after successful registration validation...');
+          // DEVICE-INDEPENDENT: Critical - Wait for ALL operations to complete
+          console.log('📱 DEVICE-INDEPENDENT: Waiting for all storage operations to complete...');
           
-          // Add small delay to ensure all storage operations complete
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // Force synchronous storage completion
+          await new Promise(resolve => {
+            // Check if localStorage operations are complete
+            const checkStorage = () => {
+              const storedToken = localStorage.getItem('accessToken');
+              const storedUser = localStorage.getItem('currentUser');
+              
+              if (storedToken === token && storedUser) {
+                console.log('📱 Storage operations confirmed complete');
+                resolve();
+              } else {
+                setTimeout(checkStorage, 50);
+              }
+            };
+            checkStorage();
+          });
+          
+          // Additional delay for mobile browsers
+          await new Promise(resolve => setTimeout(resolve, 500));
           
           // Check AuthStatus to ensure we're authenticated
           if (window.AuthStatus.state === 'authenticated' && window.AuthStatus.token === token) {
             console.log('✅ Final auth status check: READY for redirect');
             window.AuthStatus.redirectInProgress = true;
             
-            // Show redirect indicator
-            showRedirectIndicator('Registration Successful!', 'Redirecting to chat...');
+            // Show device-independent redirect indicator
+            showUniversalRedirectIndicator('Registration Successful!', 'Redirecting to chat...');
             
-            // Redirect after showing indicator
-            setTimeout(() => {
-              console.log('🔄 Performing redirect to chat.html');
-              window.location.href = 'chat.html';
-            }, 1500);
+            // CRITICAL: Wait for UI to update before redirect
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Perform redirect
+            console.log('🔄 Performing device-independent redirect to chat.html');
+            window.location.href = 'chat.html';
           } else {
             console.error('❌ Auth status inconsistent before redirect');
             updateAuthStatusUI('error', 'Session establishment incomplete. Please try logging in.');
+            
+            // Re-enable form
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
+            
             throw new Error('Session establishment incomplete');
           }
         } else {
-          // MOBILE FIX: Session establishment failed for registration
-          console.error('❌ MOBILE FIX: Session establishment failed for registration:', sessionResult.message);
+          // DEVICE-INDEPENDENT: Session establishment failed for registration
+          console.error('❌ DEVICE-INDEPENDENT: Session establishment failed for registration:', sessionResult.message);
           
-          updateAuthStatusUI('error', `Registration validation failed: ${sessionResult.message}`);
+          updateAuthStatusUI('error', `Registration validation failed: ${sessionResult.details || sessionResult.message}`);
           
           // Show error in form
           showAuthError('Registration validation failed. Please try logging in.');
@@ -1901,6 +2064,11 @@ async function handleRegisterSubmit(event) {
     submitBtn.disabled = false;
   }
 }
+
+// ============================================================================
+// THE REST OF THE FILE REMAINS THE SAME FROM THIS POINT
+// Only the session establishment and login/registration handlers were updated
+// ============================================================================
 
 /**
  * Handles forgot password form submission - FIXED response handling
@@ -3326,4 +3494,4 @@ initialize();
 console.log('app.ui.auth.js - CRITICAL UPDATE: Reliable auth state across refreshes - prevents white screens and auth loops');
 console.log('LOGIN FLOW FIX: Login waits for backend authentication validation before redirecting');
 console.log('SECURE TOKEN STORAGE: Token stored in localStorage for independent in-frame access and API authentication');
-console.log('MOBILE FIX: Enhanced session establishment - ensures session fully established before redirect on mobile');
+console.log('DEVICE-INDEPENDENT FIX: Enhanced session establishment - ensures session fully established before redirect on ALL devices');

@@ -1335,7 +1335,7 @@
     </script>
 
     <script>
-        // Enhanced authentication manager for iframes
+        // Enhanced authentication manager for iframes with safe API initialization
         const IframeAuthManager = {
             state: {
                 isAuthenticated: false,
@@ -1345,45 +1345,74 @@
                 authPromise: null,
                 pendingApiCalls: [],
                 authCheckInterval: null,
-                lastAuthCheck: 0
+                lastAuthCheck: 0,
+                apiReady: false,
+                apiInitialized: false,
+                initializationSequence: {
+                    authReady: false,
+                    apiReady: false,
+                    iframeReady: false
+                }
             },
             
             eventListeners: {
                 authReady: [],
-                authFailed: []
+                authFailed: [],
+                apiReady: [],
+                initializationComplete: []
             },
             
             async initialize() {
                 console.log('🔄 [IframeAuthManager] Initializing iframe authentication...');
                 
                 this.state.isBootstrapped = true;
-                this.state.authPromise = this.waitForAuthentication();
                 
-                try {
-                    const authResult = await this.state.authPromise;
-                    console.log('✅ [IframeAuthManager] Authentication ready:', authResult.user ? authResult.user.name : 'Unknown');
-                    
-                    this.state.isAuthenticated = true;
-                    this.state.user = authResult.user;
-                    this.state.token = authResult.token;
-                    this.state.lastAuthCheck = Date.now();
-                    
-                    this.triggerEvent('authReady', authResult);
-                    await this.processPendingApiCalls();
-                    
-                    return authResult;
-                } catch (error) {
-                    console.error('❌ [IframeAuthManager] Authentication failed:', error);
-                    this.triggerEvent('authFailed', error);
-                    this.notifyParentAuthFailure();
-                    throw error;
-                }
+                // Start initialization sequence
+                await this.runInitializationSequence();
+                
+                console.log('✅ [IframeAuthManager] Initialization complete');
+                
+                return {
+                    isAuthenticated: this.state.isAuthenticated,
+                    user: this.state.user,
+                    token: this.state.token,
+                    apiReady: this.state.apiReady
+                };
             },
             
-            async waitForAuthentication() {
+            async runInitializationSequence() {
+                console.log('🔢 [IframeAuthManager] Starting initialization sequence...');
+                
+                // Step 1: Wait for authentication
+                const authResult = await this.waitForAuthentication();
+                
+                // Step 2: Wait for API to be ready (only if authenticated)
+                if (authResult && authResult.user && authResult.token) {
+                    await this.waitForApiReady();
+                }
+                
+                // Step 3: Mark all initialization steps complete
+                this.state.initializationSequence.authReady = true;
+                this.state.initializationSequence.apiReady = this.state.apiReady;
+                this.state.initializationSequence.iframeReady = true;
+                
+                // Step 4: Trigger initialization complete event
+                this.triggerEvent('initializationComplete', {
+                    isAuthenticated: this.state.isAuthenticated,
+                    apiReady: this.state.apiReady,
+                    user: this.state.user
+                });
+                
+                // Step 5: Process any pending API calls
+                await this.processPendingApiCalls();
+            },
+            
+                     async waitForAuthentication() {
                 console.log('⏳ [IframeAuthManager] Waiting for authentication...');
                 
-                // Wait for auth message from parent with timeout
+                // Store 'this' reference to use in nested functions
+                const self = this;
+                
                 return new Promise((resolve, reject) => {
                     const timeoutId = setTimeout(() => {
                         window.removeEventListener('message', messageHandler);
@@ -1395,8 +1424,15 @@
                         
                         if (fallbackToken && fallbackUser) {
                             try {
+                                const user = JSON.parse(fallbackUser);
+                                self.state.isAuthenticated = true;
+                                self.state.user = user;
+                                self.state.token = fallbackToken;
+                                
+                                console.log('✅ [IframeAuthManager] Using cached auth from localStorage');
+                                
                                 resolve({
-                                    user: JSON.parse(fallbackUser),
+                                    user: user,
                                     token: fallbackToken
                                 });
                                 return;
@@ -1416,6 +1452,16 @@
                             switch(event.data.status) {
                                 case 'authenticated':
                                     if (event.data.user && event.data.token) {
+                                        self.state.isAuthenticated = true;
+                                        self.state.user = event.data.user;
+                                        self.state.token = event.data.token;
+                                        
+                                        // Store for persistence
+                                        localStorage.setItem('kynecta_user', JSON.stringify(event.data.user));
+                                        localStorage.setItem('access_token', event.data.token);
+                                        
+                                        console.log('✅ [IframeAuthManager] Authenticated via parent');
+                                        
                                         resolve({
                                             user: event.data.user,
                                             token: event.data.token
@@ -1426,10 +1472,13 @@
                                     break;
                                     
                                 case 'unauthenticated':
+                                    self.state.isAuthenticated = false;
+                                    console.log('🔒 [IframeAuthManager] User not authenticated');
                                     reject(new Error('User not authenticated'));
                                     break;
                                     
                                 case 'auth-error':
+                                    self.state.isAuthenticated = false;
                                     reject(new Error('Authentication error: ' + (event.data.error || 'Unknown error')));
                                     break;
                                     
@@ -1449,6 +1498,160 @@
                     }, '*');
                 });
             },
+
+
+            async waitForApiReady() {
+                console.log('⏳ [IframeAuthManager] Waiting for API to be ready...');
+                
+                const maxWaitTime = 10000; // 10 seconds max
+                const startTime = Date.now();
+                
+                while (Date.now() - startTime < maxWaitTime) {
+                    // Check if window.api exists and is a function
+                    if (typeof window.api === 'function') {
+                        this.state.apiReady = true;
+                        this.state.apiInitialized = true;
+                        console.log('✅ [IframeAuthManager] API is ready');
+                        this.triggerEvent('apiReady');
+                        return true;
+                    }
+                    
+                    // Check if api.js exists but needs initialization
+                    if (typeof window.api !== 'undefined' && typeof window.api.initialize === 'function') {
+                        try {
+                            await window.api.initialize();
+                            this.state.apiReady = true;
+                            this.state.apiInitialized = true;
+                            console.log('✅ [IframeAuthManager] API initialized via manual call');
+                            this.triggerEvent('apiReady');
+                            return true;
+                        } catch (error) {
+                            console.warn('⚠️ [IframeAuthManager] API manual initialization failed:', error.message);
+                        }
+                    }
+                    
+                    // Wait 100ms before checking again
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                
+                console.warn('⚠️ [IframeAuthManager] API not ready after 10 seconds, proceeding without it');
+                this.state.apiReady = false;
+                return false;
+            },
+            
+            // SAFE API CALL METHOD - Only call after authentication and API are ready
+            async safeApiCall(endpoint, method = 'GET', data = null, options = {}) {
+                console.log(`🔍 [safeApiCall] Requesting: ${method} ${endpoint}`);
+                
+                // Check if we're properly initialized
+                if (!this.state.initializationComplete()) {
+                    console.warn('⚠️ [safeApiCall] Attempting API call before initialization complete');
+                    
+                    return new Promise((resolve, reject) => {
+                        // Queue the call for later
+                        this.state.pendingApiCalls.push({
+                            endpoint,
+                            method,
+                            data,
+                            options,
+                            resolve,
+                            reject,
+                            timestamp: Date.now()
+                        });
+                        
+                        console.log(`📦 [safeApiCall] Queued API call for later: ${endpoint}`);
+                        
+                        // Try to initialize if not already doing so
+                        if (!this.state.isBootstrapped) {
+                            this.initialize().catch(error => {
+                                console.error('❌ [safeApiCall] Initialization failed:', error);
+                                reject(new Error('API not available - initialization failed'));
+                            });
+                        }
+                    });
+                }
+                
+                // Check if API is available
+                if (!this.state.apiReady || typeof window.api !== 'function') {
+                    const error = new Error('API not available - api.js not loaded or not a function');
+                    console.error('❌ [safeApiCall]', error.message);
+                    throw error;
+                }
+                
+                // Check authentication
+                if (!this.state.isAuthenticated || !this.state.token) {
+                    const error = new Error('Not authenticated - cannot make API call');
+                    console.error('❌ [safeApiCall]', error.message);
+                    throw error;
+                }
+                
+                const defaultOptions = {
+                    timeout: 10000,
+                    maxRetries: 2,
+                    retryDelay: 1000,
+                    ...options
+                };
+                
+                let lastError = null;
+                
+                for (let attempt = 0; attempt <= defaultOptions.maxRetries; attempt++) {
+                    try {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), defaultOptions.timeout);
+                        
+                        try {
+                            const result = await window.api(endpoint, method, data, { signal: controller.signal });
+                            clearTimeout(timeoutId);
+                            return result;
+                        } catch (apiError) {
+                            clearTimeout(timeoutId);
+                            
+                            if (apiError.name === 'AbortError') {
+                                throw new Error(`Request timeout after ${defaultOptions.timeout}ms`);
+                            }
+                            
+                            throw apiError;
+                        }
+                    } catch (error) {
+                        lastError = error;
+                        
+                        // Don't retry on authentication/authorization errors
+                        if (error.message.includes('401') || error.message.includes('403') || 
+                            (error.message.includes('400') && !error.message.includes('429'))) {
+                            console.error(`❌ [safeApiCall] Client error (${error.message}), not retrying`);
+                            
+                            // Clear auth state if we get 401/403
+                            if (error.message.includes('401') || error.message.includes('403')) {
+                                this.state.isAuthenticated = false;
+                                this.state.token = null;
+                                this.state.user = null;
+                                localStorage.removeItem('access_token');
+                                localStorage.removeItem('kynecta_user');
+                                
+                                // Notify parent
+                                this.notifyParentAuthFailure();
+                            }
+                            
+                            throw error;
+                        }
+                        
+                        if (attempt < defaultOptions.maxRetries) {
+                            const delay = defaultOptions.retryDelay * Math.pow(2, attempt);
+                            console.warn(`⚠️ [safeApiCall] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        }
+                    }
+                }
+                
+                console.error(`❌ [safeApiCall] All ${defaultOptions.maxRetries + 1} attempts failed:`, lastError);
+                throw lastError;
+            },
+            
+            initializationComplete() {
+                return this.state.initializationSequence.authReady && 
+                       this.state.initializationSequence.apiReady && 
+                       this.state.initializationSequence.iframeReady;
+            },
             
             async processPendingApiCalls() {
                 if (this.state.pendingApiCalls.length === 0) return;
@@ -1460,12 +1663,19 @@
                 
                 for (const pendingCall of calls) {
                     try {
+                        // Skip if too old (more than 30 seconds)
                         if (Date.now() - pendingCall.timestamp > 30000) {
                             pendingCall.reject(new Error('API call timeout - authentication took too long'));
                             continue;
                         }
                         
-                        const result = await pendingCall.apiFunction(...pendingCall.args);
+                        // Make the API call
+                        const result = await this.safeApiCall(
+                            pendingCall.endpoint, 
+                            pendingCall.method, 
+                            pendingCall.data, 
+                            pendingCall.options
+                        );
                         pendingCall.resolve(result);
                     } catch (error) {
                         pendingCall.reject(error);
@@ -1523,8 +1733,12 @@
                 return this.state.isAuthenticated;
             },
             
-            isBootstrapped() {
-                return this.state.isBootstrapped;
+            isApiReady() {
+                return this.state.apiReady;
+            },
+            
+            isInitializationComplete() {
+                return this.initializationComplete();
             },
             
             cleanup() {
@@ -1541,67 +1755,11 @@
             }
         };
         
+        // Replace window.safeApiFetch with our enhanced version
         window.IframeAuthManager = IframeAuthManager;
         
-        // Safe API fetch for iframes
         window.safeApiFetch = async function(endpoint, method = 'GET', data = null, options = {}) {
-            console.log(`🔍 [safeApiFetch] Requesting: ${method} ${endpoint}`);
-            
-            const defaultOptions = {
-                timeout: 10000,
-                maxRetries: 2,
-                retryDelay: 1000,
-                ...options
-            };
-            
-            let lastError = null;
-            
-            for (let attempt = 0; attempt <= defaultOptions.maxRetries; attempt++) {
-                try {
-                    // Wait for authentication if needed
-                    if (!IframeAuthManager.isAuthenticated()) {
-                        await IframeAuthManager.state.authPromise;
-                    }
-                    
-                    if (typeof window.api !== 'function') {
-                        throw new Error('api.js not available for making authenticated requests');
-                    }
-                    
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), defaultOptions.timeout);
-                    
-                    try {
-                        const result = await window.api(endpoint, method, data, { signal: controller.signal });
-                        clearTimeout(timeoutId);
-                        return result;
-                    } catch (apiError) {
-                        clearTimeout(timeoutId);
-                        
-                        if (apiError.name === 'AbortError') {
-                            throw new Error(`Request timeout after ${defaultOptions.timeout}ms`);
-                        }
-                        
-                        throw apiError;
-                    }
-                } catch (error) {
-                    lastError = error;
-                    
-                    if (error.message.includes('401') || error.message.includes('403') || 
-                        (error.message.includes('400') && !error.message.includes('429'))) {
-                        console.error(`❌ [safeApiFetch] Client error (${error.message}), not retrying`);
-                        break;
-                    }
-                    
-                    if (attempt < defaultOptions.maxRetries) {
-                        const delay = defaultOptions.retryDelay * Math.pow(2, attempt);
-                        console.warn(`⚠️ [safeApiFetch] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                }
-            }
-            
-            console.error(`❌ [safeApiFetch] All ${defaultOptions.maxRetries + 1} attempts failed:`, lastError);
-            throw lastError;
+            return IframeAuthManager.safeApiCall(endpoint, method, data, options);
         };
         
         // Enhanced message handler for iframes
@@ -1621,20 +1779,18 @@
                             IframeAuthManager.state.user = event.data.user;
                             IframeAuthManager.state.token = event.data.token;
                             
-                            if (IframeAuthManager.state.authPromise) {
-                                const resolvePromise = IframeAuthManager.state.authPromise._resolve;
-                                if (resolvePromise) {
-                                    resolvePromise({
-                                        user: event.data.user,
-                                        token: event.data.token
-                                    });
-                                }
-                            }
-                            
+                            // Trigger auth ready event
                             IframeAuthManager.triggerEvent('authReady', {
                                 user: event.data.user,
                                 token: event.data.token
                             });
+                        } else if (event.data.status === 'unauthenticated' || event.data.status === 'auth-error') {
+                            IframeAuthManager.state.isAuthenticated = false;
+                            IframeAuthManager.state.user = null;
+                            IframeAuthManager.state.token = null;
+                            
+                            localStorage.removeItem('kynecta_user');
+                            localStorage.removeItem('access_token');
                         }
                         break;
                     
@@ -1669,6 +1825,10 @@
                             }));
                         }
                         break;
+                        
+                    case 'API_INITIALIZATION_COMPLETE':
+                        console.log('✅ [iframe] Parent notified API initialization complete');
+                        break;
                 }
             }
         });
@@ -1677,9 +1837,13 @@
         window.addEventListener('load', function() {
             console.log('📄 [iframe] Document loaded');
             
+            // Initialize auth manager but don't start API calls yet
             setTimeout(() => {
                 IframeAuthManager.initialize().catch(error => {
                     console.warn('⚠️ [iframe] Background auth init failed:', error.message);
+                    
+                    // Even if auth fails, we should still load the UI
+                    // The UI should handle the unauthenticated state
                 });
                 
                 window.parent.postMessage({
@@ -1962,7 +2126,7 @@
 
     <script>
     // Parent Page Stabilization - Parent Page Only
-    // Enhanced Auth Coordinator for Parent Page
+    // Enhanced Auth Coordinator for Parent Page with API timing control
     
     const ParentAuthCoordinator = {
         state: {
@@ -1973,114 +2137,318 @@
             authChecked: false,
             iframeAuthPromises: new Map(),
             backgroundJobsStarted: false,
-            backgroundJobsLock: false
+            backgroundJobsLock: false,
+            apiInitialized: false,
+            protectedApiCallsBlocked: true, // Block protected API calls until auth confirmed
+            initializationSequence: {
+                apiLoaded: false,
+                authChecked: false,
+                iframesNotified: false,
+                backgroundJobsStarted: false
+            }
         },
         
         iframeConnections: new Map(),
+        pendingProtectedCalls: [],
         
-        // Initialize the coordinator
+        // Initialize the coordinator with proper sequencing
         async initialize() {
-            console.log('🔧 ParentAuthCoordinator initializing...');
+            console.log('🔧 ParentAuthCoordinator initializing with proper sequencing...');
             
-            // Wait for api.js to be ready
-            await this.waitForApiReady();
+            // Step 1: Wait for api.js to be loaded (but don't use it yet)
+            await this.waitForApiLoaded();
             
-            // Check auth status once
-            await this.checkAuthStatus();
+            // Step 2: Check auth status (without making API calls)
+            await this.checkAuthStatusSilent();
+            
+            // Step 3: If authenticated, verify API is functional
+            if (this.state.authStatus === 'authenticated') {
+                await this.verifyApiFunctionality();
+            }
+            
+            // Step 4: Unblock protected API calls
+            this.state.protectedApiCallsBlocked = false;
+            
+            // Step 5: Notify iframes
+            this.notifyIframesAboutAuthStatus();
+            
+            // Step 6: Start background jobs (only if authenticated)
+            if (this.state.authStatus === 'authenticated') {
+                this.startBackgroundJobs();
+            }
+            
+            // Step 7: Process any pending protected calls
+            await this.processPendingProtectedCalls();
             
             console.log('✅ ParentAuthCoordinator initialized with status:', this.state.authStatus);
+            console.log('📊 Initialization sequence:', this.state.initializationSequence);
+            
+            // Notify iframes that API is ready
+            this.notifyIframesApiReady();
         },
         
-        // Wait for api.js to be ready
-        async waitForApiReady() {
-            console.log('⏳ Waiting for api.js to be ready...');
+        // Wait for api.js to be loaded (not necessarily ready for calls)
+        async waitForApiLoaded() {
+            console.log('⏳ Waiting for api.js to be loaded...');
             
-            const maxWaitTime = 10000; // 10 seconds max
+            const maxWaitTime = 5000; // 5 seconds max for loading
             const startTime = Date.now();
             
             while (Date.now() - startTime < maxWaitTime) {
-                if (typeof window.api !== 'undefined' && window.api.ready) {
+                // Check if api.js script has been loaded
+                if (typeof window.api !== 'undefined') {
                     this.state.apiReady = true;
-                    console.log('✅ api.js is ready');
+                    this.state.initializationSequence.apiLoaded = true;
+                    console.log('✅ api.js script loaded');
                     return true;
-                }
-                
-                // Check if api.js exists but hasn't initialized yet
-                if (typeof window.api !== 'undefined' && typeof window.api.initialize === 'function') {
-                    try {
-                        await window.api.initialize();
-                        this.state.apiReady = true;
-                        console.log('✅ api.js initialized via manual call');
-                        return true;
-                    } catch (error) {
-                        console.warn('⚠️ api.js manual initialization failed:', error.message);
-                    }
                 }
                 
                 // Wait 100ms before checking again
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
             
-            console.warn('⚠️ api.js not ready after 10 seconds, proceeding without it');
+            console.warn('⚠️ api.js not loaded after 5 seconds, proceeding without it');
+            this.state.initializationSequence.apiLoaded = true;
             return false;
         },
         
-        // Check auth status once
-        async checkAuthStatus() {
+        // Check auth status without making API calls
+        async checkAuthStatusSilent() {
             if (this.state.authChecked) {
                 console.log('🔍 Auth already checked, returning cached status:', this.state.authStatus);
                 return this.state.authStatus;
             }
             
-            console.log('🔍 Checking auth status...');
+            console.log('🔍 Checking auth status silently (no API calls)...');
             
-            try {
-                if (!this.state.apiReady) {
-                    console.log('⚠️ API not ready, checking localStorage for existing auth');
-                    return this.checkLocalStorageAuth();
-                }
-                
-                // Use api.js to check auth
-                const authResult = await window.api.checkAuth();
-                
-                if (authResult.authenticated && authResult.user && authResult.token) {
-                    this.state.authStatus = 'authenticated';
-                    this.state.user = authResult.user;
-                    this.state.token = authResult.token;
+            // First check localStorage for existing auth
+            const localStorageAuth = this.checkLocalStorageAuth();
+            
+            if (localStorageAuth === 'authenticated') {
+                this.state.authStatus = 'authenticated';
+                this.state.initializationSequence.authChecked = true;
+                console.log('✅ Auth check: authenticated from localStorage');
+                return 'authenticated';
+            }
+            
+            // If no localStorage auth, check via API but only if api.js is ready
+            if (this.state.apiReady && typeof window.api === 'function') {
+                try {
+                    // Use a short timeout for auth check
+                    const authResult = await this.safeApiCall('/api/auth/check', 'GET', null, { timeout: 3000 });
                     
-                    // Store for iframes
-                    localStorage.setItem('kynecta_user', JSON.stringify(authResult.user));
-                    localStorage.setItem('access_token', authResult.token);
-                    
-                    console.log('✅ Auth check: authenticated as', authResult.user.name);
-                } else {
-                    this.state.authStatus = 'unauthenticated';
-                    console.log('🔒 Auth check: not authenticated');
+                    if (authResult && authResult.authenticated && authResult.user && authResult.token) {
+                        this.state.authStatus = 'authenticated';
+                        this.state.user = authResult.user;
+                        this.state.token = authResult.token;
+                        
+                        // Store for iframes
+                        localStorage.setItem('kynecta_user', JSON.stringify(authResult.user));
+                        localStorage.setItem('access_token', authResult.token);
+                        
+                        console.log('✅ Auth check: authenticated via API');
+                    } else {
+                        this.state.authStatus = 'unauthenticated';
+                        console.log('🔒 Auth check: not authenticated');
+                    }
+                } catch (error) {
+                    console.warn('⚠️ API auth check failed:', error.message);
+                    // Fall back to localStorage status
+                    this.state.authStatus = localStorageAuth;
                 }
-                
-            } catch (error) {
-                console.error('❌ Auth check failed:', error.message);
-                
-                // Fallback to localStorage check
-                const localStorageAuth = this.checkLocalStorageAuth();
-                if (localStorageAuth === 'authenticated') {
-                    this.state.authStatus = 'authenticated';
-                    console.log('✅ Using cached auth from localStorage');
-                } else {
-                    this.state.authStatus = 'auth-error';
-                    console.log('❌ Auth error, status:', this.state.authStatus);
-                }
+            } else {
+                // No API available, use localStorage status
+                this.state.authStatus = localStorageAuth;
+                console.log('🔍 Auth check: using localStorage status:', localStorageAuth);
             }
             
             this.state.authChecked = true;
-            this.notifyIframesAboutAuthStatus();
-            
-            // Start background jobs if authenticated
-            if (this.state.authStatus === 'authenticated' && !this.state.backgroundJobsStarted) {
-                this.startBackgroundJobs();
-            }
+            this.state.initializationSequence.authChecked = true;
             
             return this.state.authStatus;
+        },
+        
+        // Verify API functionality (only called after auth is confirmed)
+        async verifyApiFunctionality() {
+            if (!this.state.apiReady) {
+                console.log('🚫 API not ready, skipping functionality check');
+                return false;
+            }
+            
+            console.log('🔍 Verifying API functionality...');
+            
+            try {
+                // Make a simple, safe API call to verify functionality
+                const testResult = await this.safeApiCall('/api/ping', 'GET', null, { timeout: 3000 });
+                
+                if (testResult && testResult.status === 'ok') {
+                    this.state.apiInitialized = true;
+                    console.log('✅ API functionality verified');
+                    return true;
+                }
+            } catch (error) {
+                console.warn('⚠️ API functionality check failed:', error.message);
+                this.state.apiInitialized = false;
+            }
+            
+            return false;
+        },
+        
+        // Safe API call with initialization check
+        async safeApiCall(endpoint, method = 'GET', data = null, options = {}) {
+            // Check if protected API calls are blocked
+            if (this.state.protectedApiCallsBlocked && this.isProtectedEndpoint(endpoint)) {
+                console.warn(`⚠️ Protected API call blocked (${endpoint}) - auth not ready`);
+                
+                return new Promise((resolve, reject) => {
+                    this.pendingProtectedCalls.push({
+                        endpoint,
+                        method,
+                        data,
+                        options,
+                        resolve,
+                        reject,
+                        timestamp: Date.now()
+                    });
+                    
+                    console.log(`📦 Queued protected API call for later: ${endpoint}`);
+                });
+            }
+            
+            // Check if API is ready
+            if (!this.state.apiReady || typeof window.api !== 'function') {
+                const error = new Error('API not available');
+                console.error('❌ API call failed:', error.message);
+                throw error;
+            }
+            
+            const defaultOptions = {
+                timeout: 10000,
+                maxRetries: 1, // Reduced retries for initialization
+                retryDelay: 1000,
+                ...options
+            };
+            
+            let lastError = null;
+            
+            for (let attempt = 0; attempt <= defaultOptions.maxRetries; attempt++) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), defaultOptions.timeout);
+                    
+                    try {
+                        const result = await window.api(endpoint, method, data, { signal: controller.signal });
+                        clearTimeout(timeoutId);
+                        return result;
+                    } catch (apiError) {
+                        clearTimeout(timeoutId);
+                        
+                        if (apiError.name === 'AbortError') {
+                            throw new Error(`Request timeout after ${defaultOptions.timeout}ms`);
+                        }
+                        
+                        throw apiError;
+                    }
+                } catch (error) {
+                    lastError = error;
+                    
+                    // Don't retry on authentication/authorization errors
+                    if (error.message.includes('401') || error.message.includes('403')) {
+                        console.error(`❌ Auth error (${error.message}), not retrying`);
+                        
+                        // Update auth status
+                        if (error.message.includes('401')) {
+                            this.state.authStatus = 'unauthenticated';
+                            this.state.user = null;
+                            this.state.token = null;
+                            localStorage.removeItem('access_token');
+                            localStorage.removeItem('kynecta_user');
+                            
+                            // Notify iframes
+                            this.notifyIframesAboutAuthStatus();
+                        }
+                        
+                        throw error;
+                    }
+                    
+                    if (attempt < defaultOptions.maxRetries) {
+                        const delay = defaultOptions.retryDelay * Math.pow(2, attempt);
+                        console.warn(`⚠️ Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            }
+            
+            console.error(`❌ All ${defaultOptions.maxRetries + 1} attempts failed:`, lastError);
+            throw lastError;
+        },
+        
+        // Check if endpoint requires authentication
+        isProtectedEndpoint(endpoint) {
+            const protectedPatterns = [
+                /^\/api\/messages/,
+                /^\/api\/chats/,
+                /^\/api\/friends/,
+                /^\/api\/groups/,
+                /^\/api\/calls/,
+                /^\/api\/profile/,
+                /^\/api\/settings/,
+                /^\/api\/notifications/,
+                /^\/api\/status/
+            ];
+            
+            const publicPatterns = [
+                /^\/api\/ping/,
+                /^\/api\/auth\/check/,
+                /^\/api\/public/
+            ];
+            
+            // Check if it's a public endpoint
+            for (const pattern of publicPatterns) {
+                if (pattern.test(endpoint)) {
+                    return false;
+                }
+            }
+            
+            // Check if it's a protected endpoint
+            for (const pattern of protectedPatterns) {
+                if (pattern.test(endpoint)) {
+                    return true;
+                }
+            }
+            
+            // Default to protected for unknown endpoints
+            return true;
+        },
+        
+        // Process pending protected calls
+        async processPendingProtectedCalls() {
+            if (this.pendingProtectedCalls.length === 0) return;
+            
+            console.log(`🔄 Processing ${this.pendingProtectedCalls.length} pending protected API calls`);
+            
+            const calls = [...this.pendingProtectedCalls];
+            this.pendingProtectedCalls = [];
+            
+            for (const pendingCall of calls) {
+                try {
+                    // Skip if too old (more than 30 seconds)
+                    if (Date.now() - pendingCall.timestamp > 30000) {
+                        pendingCall.reject(new Error('API call timeout - authentication took too long'));
+                        continue;
+                    }
+                    
+                    const result = await this.safeApiCall(
+                        pendingCall.endpoint,
+                        pendingCall.method,
+                        pendingCall.data,
+                        pendingCall.options
+                    );
+                    pendingCall.resolve(result);
+                } catch (error) {
+                    pendingCall.reject(error);
+                }
+            }
         },
         
         // Check localStorage for existing auth
@@ -2129,6 +2497,8 @@
                 }
             });
             
+            this.state.initializationSequence.iframesNotified = true;
+            
             // Resolve any pending iframe auth promises
             this.iframeConnections.forEach((promise, iframeId) => {
                 if (promise.resolve) {
@@ -2142,6 +2512,27 @@
             });
         },
         
+        // Notify iframes that API is ready
+        notifyIframesApiReady() {
+            const iframes = document.querySelectorAll('.content-iframe');
+            console.log(`📤 Notifying ${iframes.length} iframes that API is ready`);
+            
+            iframes.forEach(iframe => {
+                try {
+                    if (iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({
+                            type: 'API_INITIALIZATION_COMPLETE',
+                            timestamp: Date.now(),
+                            apiReady: this.state.apiReady,
+                            authStatus: this.state.authStatus
+                        }, '*');
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Failed to notify iframe ${iframe.id} about API ready:`, error.message);
+                }
+            });
+        },
+        
         // Handle iframe requests for auth status
         handleIframeAuthRequest(iframeId, resolve) {
             console.log(`📨 Received auth request from iframe: ${iframeId}`);
@@ -2151,7 +2542,8 @@
                 const response = {
                     status: this.state.authStatus,
                     user: this.state.user,
-                    token: this.state.token
+                    token: this.state.token,
+                    apiReady: this.state.apiReady
                 };
                 console.log(`✅ Immediate response to ${iframeId}: ${this.state.authStatus}`);
                 resolve(response);
@@ -2163,7 +2555,7 @@
             
             // Start auth check if not already done
             if (!this.state.authChecked) {
-                this.checkAuthStatus();
+                this.checkAuthStatusSilent();
             }
         },
         
@@ -2182,12 +2574,15 @@
             console.log('🔄 Starting background jobs...');
             this.state.backgroundJobsLock = true;
             this.state.backgroundJobsStarted = true;
+            this.state.initializationSequence.backgroundJobsStarted = true;
             
             // Start connectivity monitoring
             this.startConnectivityMonitoring();
             
-            // Start data sync if authenticated
-            this.startDataSync();
+            // Start data sync if authenticated and API is ready
+            if (this.state.apiReady) {
+                this.startDataSync();
+            }
             
             console.log('✅ Background jobs started');
         },
@@ -2202,11 +2597,6 @@
                 if (!wasOnline && isOnline) {
                     console.log('🌐 Back online');
                     showGlobalNotification('Back online', 'success', 3000);
-                    
-                    // Re-check auth when back online
-                    setTimeout(() => {
-                        this.checkAuthStatus();
-                    }, 1000);
                 } else if (wasOnline && !isOnline) {
                     console.log('📴 Went offline');
                     showGlobalNotification('You are offline', 'warning', 5000);
@@ -2226,23 +2616,23 @@
             this._connectivityCheck = checkConnectivity;
         },
         
-        // Start data sync
+        // Start data sync - ONLY AFTER AUTH CONFIRMED
         startDataSync() {
-            console.log('🔄 Starting data sync...');
+            console.log('🔄 Starting data sync (after auth confirmed)...');
             
             // Sync unread messages every 30 seconds
             const syncMessages = async () => {
                 if (!navigator.onLine) return;
+                if (!this.state.apiReady) return;
+                if (this.state.authStatus !== 'authenticated') return;
                 
                 try {
-                    if (typeof window.api === 'function') {
-                        const response = await window.api('/api/messages/unread', 'GET', null, { timeout: 5000 });
-                        if (response && response.unreadCount > 0) {
-                            updateUnreadBadges(response.unreadCount);
-                        }
+                    const response = await this.safeApiCall('/api/messages/unread', 'GET', null, { timeout: 5000 });
+                    if (response && response.unreadCount > 0) {
+                        updateUnreadBadges(response.unreadCount);
                     }
                 } catch (error) {
-                    // Silent fail - okay if this fails
+                    // Silent fail - okay if this fails occasionally
                 }
             };
             
@@ -2251,6 +2641,30 @@
             
             // Initial sync after 5 seconds
             setTimeout(syncMessages, 5000);
+            
+            // Also sync notifications
+            this.startNotificationSync();
+        },
+        
+        // Start notification sync
+        startNotificationSync() {
+            const syncNotifications = async () => {
+                if (!navigator.onLine) return;
+                if (!this.state.apiReady) return;
+                if (this.state.authStatus !== 'authenticated') return;
+                
+                try {
+                    await this.safeApiCall('/api/notifications/sync', 'POST', null, { timeout: 3000 });
+                } catch (error) {
+                    // Silent fail
+                }
+            };
+            
+            // Sync every 60 seconds
+            this._notificationSyncInterval = setInterval(syncNotifications, 60000);
+            
+            // Initial sync
+            setTimeout(syncNotifications, 10000);
         },
         
         // Cleanup
@@ -2262,6 +2676,10 @@
                 clearInterval(this._messageSyncInterval);
             }
             
+            if (this._notificationSyncInterval) {
+                clearInterval(this._notificationSyncInterval);
+            }
+            
             // Remove event listeners
             if (this._connectivityCheck) {
                 window.removeEventListener('online', this._connectivityCheck);
@@ -2271,7 +2689,9 @@
             // Clear state
             this.state.backgroundJobsLock = false;
             this.state.backgroundJobsStarted = false;
+            this.state.protectedApiCallsBlocked = true;
             this.iframeConnections.clear();
+            this.pendingProtectedCalls = [];
             
             console.log('✅ ParentAuthCoordinator cleaned up');
         }
@@ -2301,7 +2721,7 @@
         }
     }
     
-    // Main initialization function
+    // Main initialization function with proper sequencing
     async function quickInitialize() {
         console.log('🚀 Quick initialization starting...');
         
@@ -2311,8 +2731,10 @@
         }, 1000);
         
         // Initialize auth coordinator in background (non-blocking)
+        // This will handle API timing and auth sequencing
         ParentAuthCoordinator.initialize().catch(error => {
             console.error('❌ ParentAuthCoordinator init failed:', error);
+            // Still continue with UI setup even if auth init fails
         });
         
         // Setup navigation immediately (UI never blocked)
@@ -2329,7 +2751,7 @@
             }
         }
         
-        // Preload iframes
+        // Preload iframes (they won't make API calls until auth is ready)
         preloadIframes();
         
         // Start on messages page
@@ -2338,7 +2760,10 @@
         // Mark as initialized
         appInitialized = true;
         
-        console.log('[App] ✅ Initialization complete. UI loaded.');
+        console.log('[App] ✅ UI initialization complete.');
+        console.log('[App] 📊 Auth status:', ParentAuthCoordinator.state.authStatus);
+        console.log('[App] 📊 API ready:', ParentAuthCoordinator.state.apiReady);
+        console.log('[App] 📊 Protected API calls blocked:', ParentAuthCoordinator.state.protectedApiCallsBlocked);
         
         // Fullscreen detection
         setTimeout(() => {
@@ -2958,6 +3383,24 @@
                     }
                     break;
                     
+                case 'PROTECTED_API_CALL':
+                    // If iframes try to make protected API calls before auth is ready,
+                    // we intercept them and queue them
+                    if (ParentAuthCoordinator.state.protectedApiCallsBlocked) {
+                        console.warn('⚠️ Intercepted protected API call from iframe before auth ready');
+                        
+                        // Send message back to iframe
+                        if (event.source) {
+                            event.source.postMessage({
+                                type: 'API_CALL_BLOCKED',
+                                reason: 'authentication_not_ready',
+                                endpoint: event.data.endpoint,
+                                timestamp: Date.now()
+                            }, '*');
+                        }
+                    }
+                    break;
+                    
                 default:
                     console.log('📨 Unhandled message type:', event.data.type);
                     break;
@@ -2974,6 +3417,7 @@
         ParentAuthCoordinator.state.user = null;
         ParentAuthCoordinator.state.token = null;
         ParentAuthCoordinator.state.authChecked = false;
+        ParentAuthCoordinator.state.protectedApiCallsBlocked = true;
         
         // Clear localStorage
         localStorage.removeItem('kynecta_user');
@@ -3011,7 +3455,7 @@
         });
     }
     
-    // DOM loaded handler
+    // DOM loaded handler - FIXED: Added proper closing
     document.addEventListener('DOMContentLoaded', function() {
         console.log('📄 DOM loaded, starting quick initialization...');
         
@@ -3047,7 +3491,7 @@
             document.getElementById('mobileNavBar').classList.add('hidden-nav');
         }
     });
-    
+
     // Cleanup on page unload
     window.addEventListener('beforeunload', function() {
         ParentAuthCoordinator.cleanup();
@@ -3069,11 +3513,17 @@
     window.ParentAuthCoordinator = ParentAuthCoordinator;
     window.handleLogout = handleLogout;
     
+    // Expose safe API call method for iframes to use
+    window.makeSafeApiCall = async function(endpoint, method = 'GET', data = null, options = {}) {
+        return ParentAuthCoordinator.safeApiCall(endpoint, method, data, options);
+    };
+    
     console.log('✅ Parent page initialization system loaded');
     console.log('📊 ParentAuthCoordinator state:', {
         authStatus: ParentAuthCoordinator.state.authStatus,
         apiReady: ParentAuthCoordinator.state.apiReady,
-        authChecked: ParentAuthCoordinator.state.authChecked
+        authChecked: ParentAuthCoordinator.state.authChecked,
+        protectedApiCallsBlocked: ParentAuthCoordinator.state.protectedApiCallsBlocked
     });
     </script>
 </body>

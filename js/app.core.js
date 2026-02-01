@@ -18,20 +18,22 @@
 
 (function () {
   // ============================================================================
-  // PUBLIC PAGES CONFIGURATION
+  // PUBLIC PAGES CONFIGURATION - UPDATED WITH CORRECT PATHS
   // ============================================================================
   
   // Define public pages that don't require authentication
   const PUBLIC_PAGES = [
     '/index.html',
-    '/index.html',
+    '/',
+    '/login.html',
     '/signup.html',
     '/forgot-password.html',
-    '/', // Root path
+    '/reset-password.html',
     'index.html',
-    'index.html',
+    'login.html',
     'signup.html',
-    'forgot-password.html'
+    'forgot-password.html',
+    'reset-password.html'
   ];
   
   // Check if current page is public
@@ -93,6 +95,9 @@
     // CRITICAL FIX: Check if we're on a public page first
     if (isPublicPage()) {
       console.log('On public page, skipping token validation');
+      window.AUTH_READY = true;
+      executePendingAuthOperations();
+      broadcastAuthReady();
       return;
     }
     
@@ -101,6 +106,9 @@
         window.location.pathname.endsWith('/') ||
         window.location.pathname.includes('/login')) {
       console.log('On login page, skipping token validation');
+      window.AUTH_READY = true;
+      executePendingAuthOperations();
+      broadcastAuthReady();
       return;
     }
     
@@ -1305,9 +1313,12 @@
       // Clear any cached auth state
       localStorage.removeItem('moodchat-auth-state');
       
-      // If we're not on login page, redirect
+      // If we're not on login page, redirect to login
       if (!window.location.pathname.endsWith('index.html') && 
-          !window.location.pathname.endsWith('/')) {
+          !window.location.pathname.endsWith('/') &&
+          !window.location.pathname.includes('login.html') &&
+          !window.location.pathname.includes('signup.html') &&
+          !window.location.pathname.includes('forgot-password.html')) {
         console.log('Redirecting to login (no token)...');
         setTimeout(() => {
           window.location.href = '/index.html';
@@ -1425,9 +1436,12 @@
         window.currentUser = null;
         authStateRestored = false;
         
-        // Redirect to login
+        // Redirect to login only if we're not on a public page
         if (!window.location.pathname.endsWith('index.html') && 
-            !window.location.pathname.endsWith('/')) {
+            !window.location.pathname.endsWith('/') &&
+            !window.location.pathname.includes('login.html') &&
+            !window.location.pathname.includes('signup.html') &&
+            !window.location.pathname.includes('forgot-password.html')) {
           console.log('Redirecting to login (invalid token)...');
           setTimeout(() => {
             window.location.href = '/index.html';
@@ -1466,9 +1480,12 @@
         authValidationInProgress = false;
         authValidationComplete = true;
         
-        // Redirect to login
+        // Redirect to login only if we're not on a public page
         if (!window.location.pathname.endsWith('index.html') && 
-            !window.location.pathname.endsWith('/')) {
+            !window.location.pathname.endsWith('/') &&
+            !window.location.pathname.includes('login.html') &&
+            !window.location.pathname.includes('signup.html') &&
+            !window.location.pathname.includes('forgot-password.html')) {
           console.log('Redirecting to login (validation error)...');
           setTimeout(() => {
             window.location.href = '/index.html';
@@ -1933,9 +1950,12 @@
       if (!window.AUTH_READY) {
         console.log('⚠️ Auth NOT ready, waiting for validation or redirecting...');
         
-        // If we're not on login page and have no valid auth, redirect
+        // If we're not on a public page and have no valid auth, redirect
         if (!window.location.pathname.endsWith('index.html') && 
-            !window.location.pathname.endsWith('/')) {
+            !window.location.pathname.endsWith('/') &&
+            !window.location.pathname.includes('login.html') &&
+            !window.location.pathname.includes('signup.html') &&
+            !window.location.pathname.includes('forgot-password.html')) {
           
           // Check if we have any token at all
           const hasToken = JWT_VALIDATION.hasToken() || localStorage.getItem('accessToken');
@@ -6192,6 +6212,12 @@
         to { transform: translateY(20px); opacity: 0; }
       }
       
+      .offline-placeholder {
+        max-width: 400px;
+        margin: 0 auto;
+        padding-top: 80px;
+      }
+      
       .theme-dark {
         color-scheme: dark;
       }
@@ -6200,24 +6226,8 @@
         color-scheme: light;
       }
       
-      .font-small {
-        font-size: 0.875rem;
-      }
-      
-      .font-medium {
-        font-size: 1rem;
-      }
-      
-      .font-large {
-        font-size: 1.125rem;
-      }
-      
-      .font-xlarge {
-        font-size: 1.25rem;
-      }
-      
       .high-contrast {
-        filter: contrast(1.5);
+        --contrast-multiplier: 1.5;
       }
       
       .reduce-motion * {
@@ -6227,22 +6237,53 @@
       }
       
       .large-text {
-        font-size: 1.25em;
+        font-size: calc(1rem * 1.2);
+      }
+      
+      .font-small {
+        --font-size-multiplier: 0.875;
+      }
+      
+      .font-medium {
+        --font-size-multiplier: 1;
+      }
+      
+      .font-large {
+        --font-size-multiplier: 1.125;
+      }
+      
+      .font-xlarge {
+        --font-size-multiplier: 1.25;
+      }
+      
+      body {
+        font-size: calc(1rem * var(--font-size-multiplier, 1));
+      }
+      
+      .wallpaper-gradient1 {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+      
+      .wallpaper-gradient2 {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      }
+      
+      .wallpaper-pattern1 {
+        background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.1) 1px, transparent 0);
+        background-size: 20px 20px;
       }
     `;
-    
     document.head.appendChild(style);
   }
 
   // ============================================================================
-  // INITIALIZE APP
+  // START THE APPLICATION
   // ============================================================================
 
-  // Start the app initialization when DOM is ready
+  // Initialize app when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
   } else {
     initializeApp();
   }
-
 })();
