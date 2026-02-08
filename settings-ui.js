@@ -1,1690 +1,87 @@
 // =============================================
-// SETTINGS SYSTEM - STABILIZED IMPLEMENTATION (ES MODULES)
+// SETTINGS UI - STABILIZED IMPLEMENTATION (ES MODULES)
 // =============================================
 
-import { 
-  secureFetch, 
-  getCurrentUser, 
-  getUserToken, 
-  setUserToken, 
-  getSession, 
-  initSession,
-  logout,
-  requestSession,
-  validateSession,
-  isAuthenticated,
-  isSessionValid
-} from './api.core.js';
+import {
+    currentUser,
+    userSettings,
+    currentSection,
+    unsavedChanges,
+    blockedUsers,
+    activeSessions,
+    userContacts,
+    userGroups,
+    authReady,
+    apiInitialized,
+    MAX_API_RETRIES,
+    backgroundTasksStarted,
+    AUTH_CHECK_INTERVAL,
+    tokenReady,
+    tokenAvailable,
+    tokenInitialized,
+    TOKEN_CHECK_INTERVAL,
+    parentCommunicationReady,
+    parentSessionReceived,
+    MAX_HANDSHAKE_ATTEMPTS,
+    HANDSHAKE_RETRY_INTERVAL,
+    parentOrigin,
+    parentSessionData,
+    sessionValidated,
+    DEFAULT_SETTINGS,
+    SETTINGS_MENU,
+    verifyParentPresence,
+    setupSecureMessagingChannel,
+    startParentHandshake,
+    sendMessageToParent,
+    resetUIForLogout,
+    showReconnectionState,
+    checkAuthenticationState,
+    bootstrapIframe,
+    waitForSession,
+    initializeBasicUI,
+    setupBasicEventListeners,
+    startTokenMonitoring,
+    checkTokenAvailability,
+    notifyTokenReady,
+    notifyTokenLost,
+    getSecureToken,
+    secureFetchWrapper,
+    waitForToken,
+    startPassiveAuthMonitoring,
+    startBackgroundTasks,
+    safeLoadUserData,
+    safeLoadSettings,
+    safeLoadBlockedUsers,
+    safeLoadActiveSessions,
+    safeLoadUserContacts,
+    safeLoadUserGroups,
+    makeSafeRequest,
+    saveSettings,
+    notifyParentAuthState,
+    notifyParentAuthError,
+    loadFromLocalStorage,
+    updateUserUI,
+    initializeUI,
+    calculateStorageUsage,
+    formatStorageSize,
+    getMoodText,
+    getMoodColor,
+    terminateSession,
+    terminateAllSessions,
+    unblockUser,
+    clearChatCache,
+    clearMediaCache
+} from './settings-core.js';
 
-// Global variables - NO TOKEN DECLARATIONS
-let currentUser = null;
-let userSettings = {};
-let currentSection = 'profile';
-let unsavedChanges = false;
+// UI-specific variables
 let colorPicker = null;
-let blockedUsers = [];
-let activeSessions = [];
-let userContacts = [];
-let userGroups = [];
-
-// AUTH STATE FLAGS (read-only observers)
-let authReady = false;
-let apiInitialized = true; // ES modules are always initialized
-let apiInitRetries = 0;
-const MAX_API_RETRIES = 5;
-let backgroundTasksStarted = false;
-let authCheckInterval = null;
-const AUTH_CHECK_INTERVAL = 30000; // 30 seconds
-
-// Token system flags
-let tokenReady = false;
-let tokenAvailable = false;
-let tokenInitialized = false;
-const TOKEN_CHECK_INTERVAL = 1000; // Check token every 1 second
-let tokenCheckInterval = null;
-
-// Parent communication state
-let parentCommunicationReady = false;
-let parentSessionReceived = false;
-let handshakeAttempts = 0;
-const MAX_HANDSHAKE_ATTEMPTS = 10;
-let handshakeInterval = null;
-const HANDSHAKE_RETRY_INTERVAL = 1000;
-let parentOrigin = null;
-
-// Session state from parent
-let parentSessionData = null;
-let sessionValidated = false;
-
-// Default settings structure (222 features organized by section)
-const DEFAULT_SETTINGS = {
-    // PROFILE SECTION (22 features)
-    profile: {
-        photoUrl: '',
-        displayName: '',
-        username: '',
-        bio: '',
-        phoneNumber: '',
-        email: '',
-        currentMood: 'neutral',
-        currentMoodText: '',
-        profileVisibility: 'everyone',
-        lastSeen: true,
-        onlineStatus: true,
-        profilePhotoVisibility: 'everyone'
-    },
-    
-    // SECURITY SECTION (11 features)
-    security: {
-        twoFactorAuth: false,
-        loginNotifications: true,
-        sessionTimeout: '30min',
-        appLock: false,
-        screenCaptureProtection: true,
-        encryption: true,
-        biometricBypass: true,
-        timeoutWarnings: true,
-        enhancedTimeout: false,
-        lockScreenAfter: '5min',
-        logoutAfter: '8hr'
-    },
-    
-    // PRIVACY SECTION (25 features)
-    privacy: {
-        whoCanAddMe: 'everyone',
-        readReceipts: true,
-        typingIndicators: true,
-        messageForwarding: true,
-        contactDiscovery: true,
-        canMessageMe: 'everyone',
-        canCallMe: 'everyone',
-        canSeeMyStatus: 'friendsOnly',
-        canSeeProfilePhoto: 'everyone',
-        canSeeLastSeen: 'friendsOnly',
-        canForwardMessages: 'friendsOnly',
-        canTakeScreenshots: false,
-        blockedUsers: []
-    },
-    
-    // CHAT SECTION (12 features)
-    chat: {
-        chatWallpaper: 'default',
-        enterKeySends: true,
-        mediaAutoDownload: 'wifiOnly',
-        saveToCameraRoll: true,
-        messageHistory: 'forever',
-        disappearingMessages: 'off',
-        smartReplies: true,
-        messageTranslation: false,
-        chatSummarization: false,
-        spamDetection: true,
-        messageApprovalMode: false,
-        keywordFiltering: false
-    },
-    
-    // FRIENDS SECTION (10 features)
-    friends: {
-        discoverByPhone: true,
-        discoverByEmail: true,
-        nearbyDiscovery: false,
-        qrCodeScanner: true,
-        friendSuggestions: true,
-        temporaryFriends: true,
-        friendshipNotes: true,
-        friendCategories: true,
-        trustScore: true,
-        friendAnalytics: true
-    },
-    
-    // GROUPS SECTION (15 features)
-    groups: {
-        autoJoinGroups: false,
-        groupInvitations: 'everyone',
-        groupPrivacy: 'everyone',
-        groupAnnouncements: true,
-        autoDownloadGroupMedia: 'wifiOnly',
-        messageApprovalModeGroup: false,
-        keywordFilteringGroup: false,
-        groupSpamDetection: true,
-        memberWarnings: true,
-        activityTracking: true,
-        topContributors: true,
-        messageVolumeAnalytics: true,
-        groupDataCache: 'activeGroupsOnly'
-    },
-    
-    // CALLS SECTION (18 features)
-    calls: {
-        whoCanCallMe: 'everyone',
-        callVerification: true,
-        ringtone: 'default',
-        callVibration: true,
-        autoAnswer: false,
-        videoQuality: 'auto',
-        cameraDefault: 'front',
-        noiseCancellation: true,
-        echoCancellation: true,
-        liveReactions: true,
-        inCallChat: true,
-        sharedWhiteboard: true,
-        sharedNotes: true,
-        polls: true,
-        callHistoryCache: '90days'
-    },
-    
-    // STATUS SECTION (12 features)
-    status: {
-        whoCanViewMyStatus: 'friendsOnly',
-        autoExpireStatus: '24h',
-        replyPermissions: 'friendsOnly',
-        downloadPermissions: false,
-        hideFromSpecificUsers: [],
-        viewCount: true,
-        viewerList: true,
-        engagementReactions: true,
-        autoCaptions: false,
-        aiEnhancement: false,
-        statusScheduling: false,
-        statusCache: '24hours'
-    },
-    
-    // NOTIFICATIONS SECTION (13 features)
-    notifications: {
-        messageNotifications: true,
-        groupNotifications: true,
-        friendRequestNotifications: true,
-        callNotifications: true,
-        statusNotifications: true,
-        notificationSound: true,
-        vibration: true,
-        popupNotifications: true,
-        notificationLight: true,
-        doNotDisturb: false,
-        schedule: 'custom',
-        allowCalls: true,
-        allowMessagesFrom: 'everyone'
-    },
-    
-    // APPEARANCE SECTION (13 features)
-    appearance: {
-        theme: 'auto',
-        accentColor: '#0084ff',
-        fontSize: 16,
-        reduceMotion: false,
-        language: 'en',
-        timeFormat: '12-hour',
-        dateFormat: 'MM/DD/YYYY',
-        layoutMode: 'auto',
-        moodBasedLayouts: true,
-        customIcons: false,
-        chatIcon: 'default',
-        callIcon: 'default',
-        statusIcon: 'default',
-        buttonStyles: 'rounded'
-    },
-    
-    // STORAGE SECTION (7 features)
-    storage: {
-        autoClearCache: 'never',
-        chatCacheSize: 0,
-        mediaCacheSize: 0,
-        otherCacheSize: 0,
-        totalStorageUsed: 0,
-        storageTotal: 1024 * 1024 * 1024,
-        storageBreakdown: {
-            chats: 0,
-            media: 0,
-            other: 0
-        }
-    },
-    
-    // MOOD SETTINGS SECTION (24 features)
-    mood: {
-        moodLinkedTheme: true,
-        moodColors: {
-            happy: '#FFD700',
-            calm: '#4A90E2',
-            energetic: '#FF6B6B',
-            focused: '#7B68EE',
-            relaxed: '#4ECDC4',
-            stressed: '#FF8C00',
-            tired: '#A9A9A9',
-            excited: '#FF1493'
-        },
-        currentMood: 'neutral',
-        manualMoodOverride: 'autoDetect',
-        smartNotifications: true,
-        stressedModeRules: true,
-        focusedModeRules: true,
-        happyModeRules: true,
-        autoMoodDetection: true,
-        updateAfterCalls: true,
-        updateAfterStatusPosts: true,
-        updateAfterActivity: true,
-        moodPrivacyRules: true,
-        tiredMoodRule: true,
-        stressedMoodRule: true,
-        happyMoodRule: true,
-        ruleDuration: '6hr'
-    },
-    
-    // SMART ACTIVITY SECTION (18 features)
-    activity: {
-        focusMode: false,
-        focusDuration: '1hr',
-        focusModeEssentialContacts: true,
-        focusModeUrgentCalls: true,
-        focusModeWorkMessages: true,
-        focusModeFamilyMessages: true,
-        autoEnableFocusMode: false,
-        autoArchiveChats: false,
-        inactivityPeriod: '90',
-        excludeImportantChats: true,
-        archiveNotifications: true,
-        offlineDataControl: 'balanced',
-        chatPageCache: '30days',
-        callHistoryCacheActivity: '90days',
-        groupDataCacheActivity: 'activeGroupsOnly',
-        statusCacheActivity: '7days'
-    },
-    
-    // INTERACTION INTELLIGENCE SECTION (23 features)
-    intelligence: {
-        smartVisibility: true,
-        visibleToGroups: [],
-        visibleToContacts: [],
-        timeBasedVisibility: false,
-        activityBasedVisibility: true,
-        interactionAnalytics: true,
-        mostContacted: 0,
-        responseTime: 0,
-        activeHours: '',
-        engagementScore: 0,
-        weeklyReports: true,
-        interactionTrends: true,
-        moodAutoReplies: true,
-        busyMoodTemplate: 'I\'m busy right now, I\'ll get back to you soon.',
-        focusedMoodTemplate: 'In focus mode, will respond when available.',
-        relaxedMoodTemplate: 'Taking it easy, feel free to chat!',
-        smartTemplateSelection: true
-    },
-    
-    // PERSONALIZATION SECTION (17 features)
-    personalization: {
-        layoutMode: 'auto',
-        moodBasedLayouts: true,
-        customIcons: false,
-        chatIcon: 'default',
-        callIcon: 'default',
-        statusIcon: 'default',
-        buttonStyles: 'rounded',
-        quickAccess: true,
-        shortcut1: 'tools',
-        shortcut2: 'marketplace',
-        shortcut3: 'groups',
-        shortcutPosition: 'topBar'
-    },
-    
-    // SAFETY & PRIVACY+ SECTION (19 features)
-    safety: {
-        invisibleMode: false,
-        invisibleDuration: '30min',
-        hideFromContacts: [],
-        alwaysVisibleTo: [],
-        invisibleTimer: 0,
-        moodPrivacyRules: true,
-        tiredMoodRule: true,
-        stressedMoodRule: true,
-        happyMoodRule: true,
-        ruleDuration: '6hr',
-        enhancedTimeout: false,
-        lockScreenAfter: '5min',
-        logoutAfter: '8hr',
-        biometricBypass: true,
-        timeoutWarnings: true
-    },
-    
-    // ADVANCED SECTION (10 features)
-    advanced: {
-        offlineMode: false,
-        intranetSupport: false,
-        lowBandwidthMode: false,
-        debugMode: false,
-        proxySettings: {},
-        dataSaver: false
-    },
-    
-    // BACKUP & RESTORE SECTION (11 features)
-    backup: {
-        autoBackup: true,
-        backupFrequency: 'weekly',
-        backupLocation: 'cloud',
-        lastBackup: null,
-        backupSize: 0
-    },
-    
-    // DANGER ZONE SECTION (7 features)
-    danger: {
-        accountDeletionRequested: false,
-        deletionScheduled: null,
-        dataExportRequested: false,
-        lastExport: null,
-        exportFormat: 'json'
-    }
-};
-
-// Settings menu structure
-const SETTINGS_MENU = [
-    {
-        id: 'profile',
-        title: 'Profile',
-        icon: 'fas fa-user',
-        badge: null
-    },
-    {
-        id: 'security',
-        title: 'Security',
-        icon: 'fas fa-shield-alt',
-        badge: null
-    },
-    {
-        id: 'privacy',
-        title: 'Privacy',
-        icon: 'fas fa-lock',
-        badge: null
-    },
-    {
-        id: 'chat',
-        title: 'Chat',
-        icon: 'fas fa-comments',
-        badge: null
-    },
-    {
-        id: 'friends',
-        title: 'Friends',
-        icon: 'fas fa-user-friends',
-        badge: null
-    },
-    {
-        id: 'groups',
-        title: 'Groups',
-        icon: 'fas fa-users',
-        badge: null
-    },
-    {
-        id: 'calls',
-        title: 'Calls',
-        icon: 'fas fa-phone',
-        badge: null
-    },
-    {
-        id: 'status',
-        title: 'Status',
-        icon: 'fas fa-circle',
-        badge: null
-    },
-    {
-        id: 'notifications',
-        title: 'Notifications',
-        icon: 'fas fa-bell',
-        badge: null
-    },
-    {
-        id: 'appearance',
-        title: 'Appearance',
-        icon: 'fas fa-palette',
-        badge: null
-    },
-    {
-        id: 'storage',
-        title: 'Storage',
-        icon: 'fas fa-database',
-        badge: null
-    },
-    {
-        id: 'mood',
-        title: 'Mood Settings',
-        icon: 'fas fa-smile',
-        badge: 'NEW'
-    },
-    {
-        id: 'activity',
-        title: 'Smart Activity',
-        icon: 'fas fa-brain',
-        badge: null
-    },
-    {
-        id: 'intelligence',
-        title: 'Interaction Intelligence',
-        icon: 'fas fa-robot',
-        badge: null
-    },
-    {
-        id: 'personalization',
-        title: 'Personalization',
-        icon: 'fas fa-sliders-h',
-        badge: null
-    },
-    {
-        id: 'safety',
-        title: 'Safety & Privacy+',
-        icon: 'fas fa-user-secret',
-        badge: 'PRO'
-    },
-    {
-        id: 'advanced',
-        title: 'Advanced',
-        icon: 'fas fa-cogs',
-        badge: null
-    },
-    {
-        id: 'backup',
-        title: 'Backup & Restore',
-        icon: 'fas fa-cloud-upload-alt',
-        badge: null
-    },
-    {
-        id: 'danger',
-        title: 'Danger Zone',
-        icon: 'fas fa-exclamation-triangle',
-        badge: '!',
-        danger: true
-    }
-];
-
-// =============================================
-// PARENT COMMUNICATION & SESSION AUTHORITY SYSTEM
-// =============================================
-
-// Parent Detection and Verification
-function verifyParentPresence() {
-    try {
-        if (!window.parent || window.parent === window) {
-            console.warn('[Settings] No parent window detected');
-            return false;
-        }
-        
-        // Try to get parent origin (with same-origin check)
-        try {
-            // For same-origin, we can access parent location
-            parentOrigin = window.location.origin;
-            console.log('[Settings] Parent detected (same-origin):', parentOrigin);
-            return true;
-        } catch (e) {
-            // Cross-origin case - we'll use '*' for postMessage
-            parentOrigin = '*';
-            console.log('[Settings] Parent detected (cross-origin)');
-            return true;
-        }
-    } catch (error) {
-        console.warn('[Settings] Parent verification error:', error.message);
-        return false;
-    }
-}
-
-// Secure messaging channel setup
-function setupSecureMessagingChannel() {
-    console.log('[Settings] Setting up secure messaging channel with parent');
-    
-    // Clear any existing listeners
-    window.removeEventListener('message', handleParentMessage);
-    
-    // Add secure message listener
-    window.addEventListener('message', handleParentMessage, false);
-    
-    parentCommunicationReady = true;
-    console.log('[Settings] Secure messaging channel established');
-}
-
-// Handshake Protocol with exponential backoff
-function startParentHandshake() {
-    console.log('[Settings] Starting parent handshake protocol');
-    
-    // Clear any existing handshake interval
-    if (handshakeInterval) {
-        clearInterval(handshakeInterval);
-        handshakeInterval = null;
-    }
-    
-    handshakeAttempts = 0;
-    
-    // Send initial CHILD_READY message
-    sendMessageToParent({
-        type: 'CHILD_READY',
-        childId: 'settings',
-        timestamp: Date.now(),
-        version: '1.0'
-    });
-    
-    // Start handshake retry with exponential backoff
-    handshakeInterval = setInterval(() => {
-        if (handshakeAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
-            console.error('[Settings] Max handshake attempts reached');
-            clearInterval(handshakeInterval);
-            handshakeInterval = null;
-            
-            // Show reconnection state
-            showReconnectionState();
-            return;
-        }
-        
-        handshakeAttempts++;
-        
-        if (!parentSessionReceived) {
-            // Send REQUEST_SESSION with exponential backoff
-            const retryDelay = Math.min(1000 * Math.pow(2, handshakeAttempts - 1), 10000);
-            
-            setTimeout(() => {
-                sendMessageToParent({
-                    type: 'REQUEST_SESSION',
-                    childId: 'settings',
-                    attempt: handshakeAttempts,
-                    timestamp: Date.now()
-                });
-                console.log(`[Settings] Session request sent (attempt ${handshakeAttempts}/${MAX_HANDSHAKE_ATTEMPTS})`);
-            }, retryDelay);
-        } else {
-            // Session received, stop handshake
-            clearInterval(handshakeInterval);
-            handshakeInterval = null;
-            console.log('[Settings] Handshake completed successfully');
-        }
-    }, HANDSHAKE_RETRY_INTERVAL);
-}
-
-// Send message to parent
-function sendMessageToParent(message) {
-    try {
-        if (window.parent && window.parent !== window) {
-            window.parent.postMessage(message, parentOrigin || '*');
-            console.log('[Settings] Sent to parent:', message.type);
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.warn('[Settings] Failed to send message to parent:', error.message);
-        return false;
-    }
-}
-
-// Handle messages from parent
-function handleParentMessage(event) {
-    // Validate message source
-    if (!event.data || !event.data.type) return;
-    
-    console.log('[Settings] Received from parent:', event.data.type);
-    
-    switch (event.data.type) {
-        case 'SESSION_DATA':
-            handleSessionData(event.data);
-            break;
-            
-        case 'SESSION_UPDATE':
-            handleSessionUpdate(event.data);
-            break;
-            
-        case 'LOGOUT':
-            handleLogout();
-            break;
-            
-        case 'HANDSHAKE_ACK':
-            handleHandshakeAck();
-            break;
-            
-        case 'PARENT_READY':
-            handleParentReady();
-            break;
-            
-        case 'AUTH_READY':
-            handleAuthReady();
-            break;
-            
-        case 'AUTH_LOST':
-            handleAuthLost();
-            break;
-            
-        case 'TOKEN_READY':
-            handleTokenReady();
-            break;
-            
-        case 'USER_UPDATED':
-            handleUserUpdated(event.data);
-            break;
-    }
-}
-
-// Handle SESSION_DATA message
-function handleSessionData(data) {
-    console.log('[Settings] Processing SESSION_DATA from parent');
-    
-    // Validate session data schema
-    if (!validateSessionData(data)) {
-        console.error('[Settings] Invalid session data schema');
-        sendMessageToParent({
-            type: 'SESSION_ERROR',
-            childId: 'settings',
-            error: 'Invalid session data schema',
-            timestamp: Date.now()
-        });
-        return;
-    }
-    
-    // Store session data
-    parentSessionData = data.session;
-    parentSessionReceived = true;
-    sessionValidated = true;
-    
-    // Update local state
-    if (data.session.user) {
-        currentUser = data.session.user;
-        console.log('[Settings] User data received from parent:', currentUser.displayName || currentUser.username);
-    }
-    
-    // Update auth flags
-    if (data.session.token) {
-        tokenAvailable = true;
-        tokenReady = true;
-        authReady = true;
-    }
-    
-    // Notify parent of successful receipt
-    sendMessageToParent({
-        type: 'SESSION_CONFIRMED',
-        childId: 'settings',
-        timestamp: Date.now()
-    });
-    
-    // Initialize UI with session data
-    initializeUIWithSession();
-    
-    // Start background tasks
-    if (!backgroundTasksStarted && tokenReady) {
-        startBackgroundTasks();
-    }
-    
-    console.log('[Settings] Session data processed successfully');
-}
-
-// Validate session data schema
-function validateSessionData(data) {
-    try {
-        if (!data || !data.session) return false;
-        
-        const session = data.session;
-        
-        // Basic required fields
-        if (!session.id && !session.token) return false;
-        
-        // Validate user object if present
-        if (session.user) {
-            if (typeof session.user !== 'object') return false;
-            if (!session.user.id && !session.user.email && !session.user.username) return false;
-        }
-        
-        return true;
-    } catch (error) {
-        console.warn('[Settings] Session validation error:', error.message);
-        return false;
-    }
-}
-
-// Handle SESSION_UPDATE message
-function handleSessionUpdate(data) {
-    console.log('[Settings] Processing SESSION_UPDATE from parent');
-    
-    if (data.session && data.session.user) {
-        currentUser = data.session.user;
-        
-        // Update UI immediately
-        updateUserUI();
-        
-        // Save to localStorage as cache
-        localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-        
-        showNotification('Profile updated', 'success');
-    }
-}
-
-// Handle LOGOUT message
-function handleLogout() {
-    console.log('[Settings] Processing LOGOUT from parent');
-    
-    // Clear all session-related data
-    parentSessionData = null;
-    parentSessionReceived = false;
-    sessionValidated = false;
-    currentUser = null;
-    tokenReady = false;
-    tokenAvailable = false;
-    authReady = false;
-    backgroundTasksStarted = false;
-    
-    // Clear UI state
-    resetUIForLogout();
-    
-    // Notify parent
-    sendMessageToParent({
-        type: 'LOGOUT_CONFIRMED',
-        childId: 'settings',
-        timestamp: Date.now()
-    });
-    
-    console.log('[Settings] Logout processed, awaiting new session');
-}
-
-// Handle HANDSHAKE_ACK
-function handleHandshakeAck() {
-    console.log('[Settings] Parent acknowledged handshake');
-    // Parent is ready, continue with normal operations
-}
-
-// Handle PARENT_READY
-function handleParentReady() {
-    console.log('[Settings] Parent reported ready');
-    // Parent is ready, we can proceed
-}
-
-// Handle AUTH_READY
-function handleAuthReady() {
-    console.log('[Settings] Parent reported auth ready');
-    checkTokenAvailability();
-}
-
-// Handle AUTH_LOST
-function handleAuthLost() {
-    console.log('[Settings] Parent reported auth lost');
-    tokenReady = false;
-    tokenAvailable = false;
-    backgroundTasksStarted = false;
-}
-
-// Handle TOKEN_READY
-function handleTokenReady() {
-    console.log('[Settings] Parent reported token ready');
-    checkTokenAvailability();
-}
-
-// Handle USER_UPDATED
-function handleUserUpdated(data) {
-    if (data.user) {
-        currentUser = data.user;
-        updateUserUI();
-        localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-    }
-}
-
-// Initialize UI with session data
-function initializeUIWithSession() {
-    console.log('[Settings] Initializing UI with session data');
-    
-    // Step 1: Initialize UI immediately
-    initializeUI();
-    
-    // Step 2: Load from localStorage for immediate display
-    loadFromLocalStorage();
-    
-    // Step 3: Load default section
-    loadSection(currentSection);
-    
-    // Step 4: Start token monitoring
-    startTokenMonitoring();
-    
-    // Step 5: Try to get token in background
-    setTimeout(async () => {
-        try {
-            await waitForToken(5000);
-            if (tokenReady) {
-                console.log('[Settings] Token ready during initialization');
-                startBackgroundTasks();
-            } else {
-                console.log('[Settings] Token not ready yet, will retry in background');
-            }
-        } catch (error) {
-            console.warn('[Settings] Token wait error:', error.message);
-        }
-    }, 1000);
-    
-    console.log('[Settings] UI initialized with session data');
-}
-
-// Reset UI for logout
-function resetUIForLogout() {
-    // Show waiting state
-    const contentContainer = document.getElementById('settingsContent');
-    if (contentContainer) {
-        contentContainer.innerHTML = `
-            <div class="settings-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-sign-out-alt section-icon"></i> Session Ended</h3>
-                    <div class="section-description">
-                        Your session has ended. Waiting for re-authentication...
-                    </div>
-                </div>
-                <div class="section-body">
-                    <div style="text-align: center; padding: 40px;">
-                        <i class="fas fa-user-clock" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 20px;"></i>
-                        <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                            Please return to the main app to sign in again.
-                        </p>
-                        <button class="setting-button" onclick="window.location.href = '/'">
-                            <i class="fas fa-home"></i> Return to App
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    // Disable menu
-    const menuContainer = document.getElementById('settingsMenu');
-    if (menuContainer) {
-        menuContainer.innerHTML = '';
-    }
-    
-    // Disable buttons
-    const resetBtn = document.getElementById('resetSectionBtn');
-    const saveBtn = document.getElementById('saveSectionBtn');
-    if (resetBtn) resetBtn.disabled = true;
-    if (saveBtn) saveBtn.disabled = true;
-}
-
-// Show reconnection state
-function showReconnectionState() {
-    const contentContainer = document.getElementById('settingsContent');
-    if (contentContainer) {
-        contentContainer.innerHTML = `
-            <div class="settings-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-unlink section-icon"></i> Connection Lost</h3>
-                    <div class="section-description">
-                        Unable to establish connection with parent app
-                    </div>
-                </div>
-                <div class="section-body">
-                    <div style="text-align: center; padding: 40px;">
-                        <i class="fas fa-sync-alt" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 20px;"></i>
-                        <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                            Attempting to reconnect...
-                        </p>
-                        <div class="loading-spinner" style="margin: 0 auto;"></div>
-                        <p style="color: var(--text-secondary); margin-top: 20px; font-size: 14px;">
-                            If this persists, try refreshing the page or returning to the main app.
-                        </p>
-                        <button class="setting-button" onclick="location.reload()" style="margin-top: 20px;">
-                            <i class="fas fa-redo"></i> Retry Connection
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-}
-
-// Authentication Enforcement - Check if protected UI should be shown
-function checkAuthenticationState() {
-    if (!parentSessionReceived || !sessionValidated) {
-        console.log('[Settings] Waiting for parent session before showing protected UI');
-        return false;
-    }
-    
-    if (!tokenReady && !authReady) {
-        console.log('[Settings] Waiting for authentication before showing protected UI');
-        return false;
-    }
-    
-    return true;
-}
-
-// =============================================
-// STABILIZED BOOTSTRAP FUNCTION (UPDATED)
-// =============================================
-
-async function bootstrapIframe() {
-    console.log('[Settings] Bootstrap starting (iframe mode with parent coordination)...');
-    
-    try {
-        // Step 1: Parent detection
-        if (!verifyParentPresence()) {
-            console.error('[Settings] Parent window not detected');
-            showReconnectionState();
-            return false;
-        }
-        
-        // Step 2: Setup secure messaging
-        setupSecureMessagingChannel();
-        
-        // Step 3: Start handshake protocol
-        startParentHandshake();
-        
-        // Step 4: Load basic UI immediately (non-protected parts)
-        initializeBasicUI();
-        
-        // Step 5: Load cached data for immediate display
-        await loadFromLocalStorage();
-        
-        // Step 6: Wait for session data (with timeout)
-        const sessionReceived = await waitForSession(10000); // 10 second timeout
-        
-        if (sessionReceived) {
-            console.log('[Settings] Bootstrap complete with session data');
-            return true;
-        } else {
-            console.warn('[Settings] Bootstrap completed without session data, showing reconnection state');
-            showReconnectionState();
-            return false;
-        }
-        
-    } catch (error) {
-        console.warn('[Settings] Bootstrap error:', error.message);
-        
-        // Fallback: Ensure basic UI is usable
-        initializeBasicUI();
-        showReconnectionState();
-        
-        return false;
-    }
-}
-
-// Wait for session data from parent
-function waitForSession(timeout = 10000) {
-    return new Promise((resolve) => {
-        if (parentSessionReceived && sessionValidated) {
-            resolve(true);
-            return;
-        }
-        
-        const startTime = Date.now();
-        const checkInterval = setInterval(() => {
-            if (parentSessionReceived && sessionValidated) {
-                clearInterval(checkInterval);
-                resolve(true);
-            } else if (Date.now() - startTime > timeout) {
-                clearInterval(checkInterval);
-                resolve(false);
-            }
-        }, 100);
-    });
-}
-
-// Initialize basic UI (non-protected parts)
-function initializeBasicUI() {
-    console.log('[Settings] Initializing basic UI');
-    
-    // Build settings menu structure (disabled state)
-    buildSettingsMenu();
-    
-    // Setup basic event listeners
-    setupBasicEventListeners();
-    
-    // Apply basic theme from localStorage if available
-    const cachedSettings = localStorage.getItem('knecta_user_settings');
-    if (cachedSettings) {
-        try {
-            const settings = JSON.parse(cachedSettings);
-            if (settings.appearance && settings.appearance.theme) {
-                applyTheme(settings.appearance.theme);
-            }
-            if (settings.appearance && settings.appearance.accentColor) {
-                updateAccentColor(settings.appearance.accentColor);
-            }
-        } catch (e) {
-            // Ignore parse errors
-        }
-    }
-}
-
-// Setup basic event listeners
-function setupBasicEventListeners() {
-    // Back to app button
-    const backToAppBtn = document.getElementById('backToAppBtn');
-    if (backToAppBtn) {
-        backToAppBtn.addEventListener('click', () => {
-            if (unsavedChanges) {
-                showConfirmation(
-                    'Unsaved Changes',
-                    'You have unsaved changes. Are you sure you want to leave?',
-                    () => {
-                        sendMessageToParent({
-                            type: 'CHILD_CLOSING',
-                            childId: 'settings',
-                            timestamp: Date.now()
-                        });
-                        // Let parent handle navigation
-                    }
-                );
-            } else {
-                sendMessageToParent({
-                    type: 'CHILD_CLOSING',
-                    childId: 'settings',
-                    timestamp: Date.now()
-                });
-            }
-        });
-    }
-    
-    // Search input (basic functionality)
-    const settingsSearch = document.getElementById('settingsSearch');
-    if (settingsSearch) {
-        settingsSearch.addEventListener('input', function(e) {
-            if (parentSessionReceived) {
-                searchSettings(e.target.value);
-            }
-        });
-    }
-    
-    // Before unload warning
-    window.addEventListener('beforeunload', (e) => {
-        if (unsavedChanges) {
-            e.preventDefault();
-            e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
-        }
-    });
-}
-
-// =============================================
-// TOKEN MANAGEMENT SYSTEM (UPDATED FOR PARENT COORDINATION)
-// =============================================
-
-// Start token monitoring system
-function startTokenMonitoring() {
-    console.log('[Settings] Starting token monitoring with parent coordination...');
-    
-    // Clear any existing interval
-    if (tokenCheckInterval) {
-        clearInterval(tokenCheckInterval);
-        tokenCheckInterval = null;
-    }
-    
-    // Set up token monitoring
-    tokenCheckInterval = setInterval(() => {
-        checkTokenAvailability();
-    }, TOKEN_CHECK_INTERVAL);
-    
-    // Initial check
-    setTimeout(checkTokenAvailability, 500);
-}
-
-// Check token availability from parent or api.core.js
-function checkTokenAvailability() {
-    try {
-        // First check parent session
-        if (parentSessionData && parentSessionData.token) {
-            if (!tokenAvailable) {
-                tokenAvailable = true;
-                tokenReady = true;
-                authReady = true;
-                console.log('[Settings] Token available from parent session');
-                
-                // Start background tasks if not started
-                if (!backgroundTasksStarted) {
-                    startBackgroundTasks();
-                }
-                
-                // Notify parent if needed
-                notifyTokenReady();
-            }
-            return;
-        }
-        
-        // Check api.core.js for token
-        if (!tokenAvailable) {
-            const token = getUserToken();
-            if (token && token !== '') {
-                tokenAvailable = true;
-                tokenReady = true;
-                console.log('[Settings] Token detected via api.core.js');
-                
-                // Start background tasks if not started
-                if (!backgroundTasksStarted) {
-                    startBackgroundTasks();
-                }
-                
-                // Notify token is ready
-                notifyTokenReady();
-            } else if (tokenAvailable) {
-                // Token was lost
-                tokenAvailable = false;
-                tokenReady = false;
-                console.log('[Settings] Token lost via api.core.js');
-                
-                // Notify token lost
-                notifyTokenLost();
-            }
-        } else {
-            // Check if token is still valid via api.core.js
-            const token = getUserToken();
-            if (!token || token === '') {
-                tokenAvailable = false;
-                tokenReady = false;
-                console.log('[Settings] Token lost via api.core.js check');
-                notifyTokenLost();
-            }
-        }
-    } catch (error) {
-        console.warn('[Settings] Token check error:', error.message);
-        // Don't throw - passive monitoring
-    }
-}
-
-// Notify that token is ready (triggers background data loading)
-function notifyTokenReady() {
-    console.log('[Settings] Token ready, starting background data sync');
-    
-    // Update auth state
-    authReady = true;
-    
-    // Start background tasks if not started
-    if (!backgroundTasksStarted) {
-        startBackgroundTasks();
-    }
-    
-    // Notify parent iframe
-    notifyParentAuthState(true);
-}
-
-// Notify that token is lost
-function notifyTokenLost() {
-    console.log('[Settings] Token lost, pausing background tasks');
-    
-    // Update auth state
-    authReady = false;
-    backgroundTasksStarted = false;
-    
-    // Notify parent iframe
-    notifyParentAuthState(false);
-}
-
-// Get secure token from parent or api.core.js (with fallback to legacy tokens)
-function getSecureToken() {
-    try {
-        // First try to get from parent session
-        if (parentSessionData && parentSessionData.token) {
-            return parentSessionData.token;
-        }
-        
-        // Then try to get from api.core.js
-        const token = getUserToken();
-        if (token && token !== '') {
-            return token;
-        }
-        
-        // Fallback to legacy tokens (for backward compatibility)
-        const legacyTokens = [
-            localStorage.getItem('USER_TOKEN'),
-            localStorage.getItem('accessToken'),
-            localStorage.getItem('moodchat_token'),
-            localStorage.getItem('authToken')
-        ];
-        
-        for (const legacyToken of legacyTokens) {
-            if (legacyToken && legacyToken !== 'null' && legacyToken !== 'undefined') {
-                console.log('[Settings] Using legacy token for backward compatibility');
-                
-                // Migrate to centralized token system if possible
-                setUserToken(legacyToken);
-                
-                return legacyToken;
-            }
-        }
-        
-        return null;
-    } catch (error) {
-        console.warn('[Settings] Error getting secure token:', error.message);
-        return null;
-    }
-}
-
-// Secure API request using parent session or centralized token system
-async function secureFetchWrapper(method, endpoint, data = null) {
-    // Check if we have authentication
-    if (!tokenAvailable && !parentSessionReceived) {
-        console.warn('[Settings] No authentication available for secure request:', endpoint);
-        throw new Error('Authentication not available');
-    }
-    
-    try {
-        // Use api.core.js secureFetch
-        return await secureFetch(method, endpoint, data);
-        
-    } catch (error) {
-        console.warn('[Settings] Secure fetch error:', error.message, endpoint);
-        
-        // Check for auth errors
-        if (error.message && (
-            error.message.includes('401') || 
-            error.message.includes('403') || 
-            error.message.includes('unauthorized') || 
-            error.message.includes('Unauthorized') ||
-            error.message.includes('Session expired')
-        )) {
-            console.warn('[Settings] Auth error detected');
-            tokenAvailable = false;
-            tokenReady = false;
-            
-            // Notify parent once
-            notifyParentAuthError();
-        }
-        
-        throw error;
-    }
-}
-
-// Wait for token to be ready (non-blocking)
-function waitForToken(timeout = 10000) {
-    return new Promise((resolve, reject) => {
-        if (tokenReady) {
-            resolve(true);
-            return;
-        }
-        
-        const startTime = Date.now();
-        const checkInterval = setInterval(() => {
-            if (tokenReady) {
-                clearInterval(checkInterval);
-                resolve(true);
-            } else if (Date.now() - startTime > timeout) {
-                clearInterval(checkInterval);
-                resolve(false); // Resolve with false instead of rejecting to avoid blocking
-            }
-        }, 100);
-    });
-}
-
-// =============================================
-// STABILIZED AUTH HANDLING (UPDATED)
-// =============================================
-
-// Start passive auth monitoring (no active requests, only listens)
-function startPassiveAuthMonitoring() {
-    // Clear any existing interval
-    if (authCheckInterval) {
-        clearInterval(authCheckInterval);
-        authCheckInterval = null;
-    }
-    
-    // Set up auth state monitoring (passive, no requests)
-    authCheckInterval = setInterval(() => {
-        checkAuthStatePassively();
-    }, AUTH_CHECK_INTERVAL);
-    
-    // Initial check
-    setTimeout(checkAuthStatePassively, 1000);
-}
-
-// Check auth state passively (read-only, no mutations)
-function checkAuthStatePassively() {
-    try {
-        // Check if token is available
-        checkTokenAvailability();
-    } catch (error) {
-        console.warn('[Settings] Passive auth check error:', error.message);
-        // Don't throw - passive monitoring
-    }
-}
-
-// Start background tasks (only when token is ready)
-function startBackgroundTasks() {
-    if (backgroundTasksStarted) {
-        console.log('[Settings] Background tasks already started');
-        return;
-    }
-    
-    if (!tokenReady && !parentSessionReceived) {
-        console.log('[Settings] Token not ready and no parent session, skipping background tasks');
-        return;
-    }
-    
-    backgroundTasksStarted = true;
-    console.log('[Settings] Starting background tasks');
-    
-    // Load data in background (non-blocking)
-    Promise.allSettled([
-        safeLoadUserData(),
-        safeLoadSettings(),
-        safeLoadBlockedUsers(),
-        safeLoadActiveSessions(),
-        safeLoadUserContacts(),
-        safeLoadUserGroups()
-    ]).then(results => {
-        console.log('[Settings] Background data loading completed');
-        showNotification('Settings synced with server', 'success');
-    }).catch(error => {
-        console.warn('[Settings] Background tasks completed with warnings:', error.message);
-    });
-}
-
-// Safe wrapper for user data loading
-async function safeLoadUserData() {
-    if (!tokenReady && !parentSessionReceived) {
-        console.log('[Settings] No authentication, skipping user data load');
-        return;
-    }
-    
-    try {
-        // Use parent session data if available
-        if (parentSessionData && parentSessionData.user) {
-            currentUser = parentSessionData.user;
-            console.log('[Settings] User loaded from parent session');
-            
-            // Update UI
-            updateUserUI();
-            
-            // Save to localStorage as cache
-            localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-            return;
-        }
-        
-        // Fallback to API request via api.core.js
-        const response = await getCurrentUser();
-        if (response && response.user) {
-            currentUser = response.user;
-            console.log('[Settings] User loaded from API');
-            
-            // Update UI
-            updateUserUI();
-            
-            // Save to localStorage as cache
-            localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-        }
-    } catch (error) {
-        console.warn('[Settings] User data load warning:', error.message);
-        // Use cached data - don't throw
-    }
-}
-
-// Safe wrapper for settings loading
-async function safeLoadSettings() {
-    if (!tokenReady && !parentSessionReceived) {
-        console.log('[Settings] No authentication, skipping settings load');
-        return;
-    }
-    
-    try {
-        const response = await secureFetchWrapper('GET', '/api/settings');
-        if (response && response.settings) {
-            userSettings = response.settings;
-            console.log('[Settings] Settings loaded from API');
-            
-            // Ensure all sections exist
-            Object.keys(DEFAULT_SETTINGS).forEach(section => {
-                if (!userSettings[section]) {
-                    userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
-                }
-            });
-            
-            // Save to localStorage as cache
-            localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
-            
-            // Calculate storage usage
-            calculateStorageUsage();
-        }
-    } catch (error) {
-        console.warn('[Settings] Settings load warning:', error.message);
-        // Use cached settings - don't throw
-    }
-}
-
-// Safe wrapper for blocked users
-async function safeLoadBlockedUsers() {
-    if (!tokenReady && !parentSessionReceived) return;
-    
-    try {
-        const response = await secureFetchWrapper('GET', '/api/users/blocked');
-        if (response && response.blockedUsers) {
-            blockedUsers = response.blockedUsers;
-        }
-    } catch (error) {
-        // Silent fail for non-critical data
-    }
-}
-
-// Safe wrapper for active sessions
-async function safeLoadActiveSessions() {
-    if (!tokenReady && !parentSessionReceived) return;
-    
-    try {
-        const response = await secureFetchWrapper('GET', '/api/auth/sessions');
-        if (response && response.sessions) {
-            activeSessions = response.sessions;
-        }
-    } catch (error) {
-        // Silent fail for non-critical data
-    }
-}
-
-// Safe wrapper for user contacts
-async function safeLoadUserContacts() {
-    if (!tokenReady && !parentSessionReceived) return;
-    
-    try {
-        const response = await secureFetchWrapper('GET', '/api/contacts');
-        if (response && response.contacts) {
-            userContacts = response.contacts;
-        }
-    } catch (error) {
-        // Silent fail for non-critical data
-    }
-}
-
-// Safe wrapper for user groups
-async function safeLoadUserGroups() {
-    if (!tokenReady && !parentSessionReceived) return;
-    
-    try {
-        const response = await secureFetchWrapper('GET', '/api/groups');
-        if (response && response.groups) {
-            userGroups = response.groups;
-        }
-    } catch (error) {
-        // Silent fail for non-critical data
-    }
-}
-
-// =============================================
-// STABILIZED REQUEST HANDLING (UPDATED)
-// =============================================
-
-// Safe request wrapper (respects authentication state)
-async function makeSafeRequest(method, endpoint, data = null) {
-    // Check if we can make requests
-    if (!tokenReady && !parentSessionReceived) {
-        console.warn('[Settings] Skipping request: no authentication', endpoint);
-        throw new Error('Authentication not available');
-    }
-    
-    // Use secureFetch for all API requests
-    return await secureFetchWrapper(method, endpoint, data);
-}
-
-// Save settings safely
-async function saveSettings() {
-    try {
-        // Update local storage first (as backup)
-        localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
-        
-        // Save to API if authenticated
-        if (tokenReady || parentSessionReceived) {
-            await secureFetchWrapper('POST', '/api/settings', { settings: userSettings });
-            console.log('[Settings] Settings saved to API');
-        } else {
-            console.log('[Settings] Not authenticated, saved locally only');
-        }
-        
-        unsavedChanges = false;
-        updateSaveButton();
-        showNotification('Settings saved successfully', 'success');
-        
-    } catch (error) {
-        console.warn('[Settings] Settings save warning:', error.message);
-        
-        // Still update local storage
-        localStorage.setItem('knecta_user_settings', JSON.stringify(userSettings));
-        
-        showNotification('Error saving to server, saved locally', 'warning');
-    }
-}
-
-// =============================================
-// PARENT COMMUNICATION (UPDATED)
-// =============================================
-
-// Notify parent about auth state (one-way communication)
-function notifyParentAuthState(hasAuth) {
-    try {
-        sendMessageToParent({
-            type: 'IFRAME_AUTH_STATE',
-            hasAuth: hasAuth,
-            iframeId: 'settings',
-            tokenReady: tokenReady,
-            timestamp: Date.now()
-        });
-    } catch (error) {
-        console.warn('[Settings] Failed to notify parent:', error.message);
-    }
-}
-
-// Notify parent about auth error (one-time)
-let authErrorNotified = false;
-function notifyParentAuthError() {
-    if (authErrorNotified) return;
-    
-    try {
-        sendMessageToParent({
-            type: 'IFRAME_AUTH_ERROR',
-            iframeId: 'settings',
-            message: 'Authentication required',
-            tokenExpired: true,
-            timestamp: Date.now()
-        });
-        authErrorNotified = true;
-    } catch (error) {
-        console.warn('[Settings] Failed to notify parent about auth error:', error.message);
-    }
-}
-
-// =============================================
-// STABILIZED INITIALIZATION (UPDATED)
-// =============================================
-
-// Load from localStorage as fallback (always works)
-async function loadFromLocalStorage() {
-    console.log('[Settings] Loading from localStorage...');
-    
-    // Try to get from localStorage first
-    const cachedUser = localStorage.getItem('knecta_current_user');
-    if (cachedUser) {
-        try {
-            currentUser = JSON.parse(cachedUser);
-            console.log('[Settings] User loaded from cache');
-            
-            // Update UI
-            updateUserUI();
-        } catch (e) {
-            console.warn('[Settings] Error parsing cached user:', e.message);
-            currentUser = { displayName: 'User' };
-        }
-    } else {
-        currentUser = { displayName: 'User' };
-    }
-    
-    // Load settings from localStorage
-    const savedSettings = localStorage.getItem('knecta_user_settings');
-    if (savedSettings) {
-        try {
-            userSettings = JSON.parse(savedSettings);
-            console.log('[Settings] Settings loaded from localStorage');
-        } catch (e) {
-            console.warn('[Settings] Error parsing saved settings:', e.message);
-            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-        }
-    } else {
-        userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-    }
-    
-    // Ensure all sections exist
-    Object.keys(DEFAULT_SETTINGS).forEach(section => {
-        if (!userSettings[section]) {
-            userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
-        }
-    });
-    
-    // Calculate storage usage
-    calculateStorageUsage();
-}
-
-// Update user UI elements
-function updateUserUI() {
-    if (!currentUser) return;
-    
-    const userNamePreview = document.getElementById('userNamePreview');
-    const userAvatarPreview = document.getElementById('userAvatarPreview');
-    
-    if (userNamePreview) {
-        userNamePreview.textContent = currentUser.displayName || 
-                                     currentUser.username || 
-                                     currentUser.email?.split('@')[0] || 
-                                     'User';
-    }
-    
-    if (userAvatarPreview) {
-        if (currentUser.photoURL || currentUser.avatar || currentUser.profilePicture) {
-            const photoUrl = currentUser.photoURL || currentUser.avatar || currentUser.profilePicture;
-            userAvatarPreview.style.backgroundImage = `url('${photoUrl}')`;
-            userAvatarPreview.innerHTML = '';
-        } else {
-            // Create initials from display name
-            const displayName = currentUser.displayName || currentUser.username || currentUser.email || 'User';
-            const initials = displayName
-                .split(' ')
-                .map(word => word[0])
-                .join('')
-                .toUpperCase()
-                .substring(0, 2);
-            
-            userAvatarPreview.style.backgroundImage = '';
-            userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
-        }
-    }
-}
-
-// Initialize UI (always works)
-function initializeUI() {
-    // Build settings menu
-    buildSettingsMenu();
-    
-    // Setup event listeners
-    setupEventListeners();
-    
-    // Update user status
-    updateUserStatus();
-    
-    // Initialize color picker
-    initializeColorPicker();
-    
-    // Apply current theme
-    if (userSettings.appearance && userSettings.appearance.theme) {
-        applyTheme(userSettings.appearance.theme);
-    }
-    
-    // Apply accent color
-    if (userSettings.appearance && userSettings.appearance.accentColor) {
-        updateAccentColor(userSettings.appearance.accentColor);
-    }
-    
-    // Enable buttons if authenticated
-    const resetBtn = document.getElementById('resetSectionBtn');
-    const saveBtn = document.getElementById('saveSectionBtn');
-    if (resetBtn) resetBtn.disabled = !(tokenReady || parentSessionReceived);
-    if (saveBtn) saveBtn.disabled = !(tokenReady || parentSessionReceived);
-    updateSaveButton();
-}
 
 // =============================================
 // UI FUNCTIONS (UPDATED WITH PARENT COORDINATION)
 // =============================================
 
 // Build settings menu
-function buildSettingsMenu() {
+export function buildSettingsMenu() {
     const menuContainer = document.getElementById('settingsMenu');
     if (!menuContainer) return;
     
@@ -1738,7 +135,7 @@ function buildSettingsMenu() {
 }
 
 // Load a settings section
-function loadSection(sectionId) {
+export function loadSection(sectionId) {
     // Check authentication first
     if (!checkAuthenticationState()) {
         showNotification('Authentication required to load settings', 'warning');
@@ -1823,7 +220,7 @@ function loadSection(sectionId) {
 }
 
 // Update section title
-function updateSectionTitle(sectionId) {
+export function updateSectionTitle(sectionId) {
     const menuItem = SETTINGS_MENU.find(item => item.id === sectionId);
     if (menuItem) {
         const contentTitle = document.getElementById('contentTitle');
@@ -1835,7 +232,7 @@ function updateSectionTitle(sectionId) {
 }
 
 // Get section description
-function getSectionDescription(sectionId) {
+export function getSectionDescription(sectionId) {
     const descriptions = {
         profile: 'Manage your personal information and account settings',
         security: 'Secure your account with advanced security features',
@@ -1862,7 +259,7 @@ function getSectionDescription(sectionId) {
 }
 
 // Update save button state
-function updateSaveButton() {
+export function updateSaveButton() {
     const saveBtn = document.getElementById('saveSectionBtn');
     if (!saveBtn) return;
     
@@ -1889,7 +286,7 @@ function updateSaveButton() {
 }
 
 // Setup event listeners
-function setupEventListeners() {
+export function setupEventListeners() {
     // Back to app button
     const backToAppBtn = document.getElementById('backToAppBtn');
     if (backToAppBtn) {
@@ -1991,7 +388,7 @@ function setupEventListeners() {
 }
 
 // Setup modal listeners
-function setupModalListeners() {
+export function setupModalListeners() {
     // Close buttons
     const closeButtons = [
         { id: 'closePhotoModal', modal: 'changePhotoModal' },
@@ -2032,7 +429,7 @@ function setupModalListeners() {
 }
 
 // Setup photo modal listeners
-function setupPhotoModalListeners() {
+export function setupPhotoModalListeners() {
     const takePhotoBtn = document.getElementById('takePhotoBtn');
     if (takePhotoBtn) {
         takePhotoBtn.addEventListener('click', () => {
@@ -2079,7 +476,7 @@ function setupPhotoModalListeners() {
 }
 
 // Setup password modal listeners
-function setupPasswordModalListeners() {
+export function setupPasswordModalListeners() {
     const savePasswordBtn = document.getElementById('savePasswordBtn');
     if (savePasswordBtn) {
         savePasswordBtn.addEventListener('click', () => {
@@ -2093,7 +490,7 @@ function setupPasswordModalListeners() {
 }
 
 // Initialize color picker
-function initializeColorPicker() {
+export function initializeColorPicker() {
     const container = document.getElementById('colorPickerContainer');
     if (!container) return;
     
@@ -2139,7 +536,7 @@ function initializeColorPicker() {
 }
 
 // Update accent color in UI
-function updateAccentColor(color) {
+export function updateAccentColor(color) {
     document.documentElement.style.setProperty('--primary-color', color);
     
     // Calculate darker variant
@@ -2148,7 +545,7 @@ function updateAccentColor(color) {
 }
 
 // Apply theme
-function applyTheme(theme) {
+export function applyTheme(theme) {
     if (theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
         document.body.classList.add('dark-theme');
     } else {
@@ -2157,12 +554,12 @@ function applyTheme(theme) {
 }
 
 // Apply font size
-function applyFontSize(size) {
+export function applyFontSize(size) {
     document.documentElement.style.fontSize = `${size}px`;
 }
 
 // Utility function to shade color
-function shadeColor(color, percent) {
+export function shadeColor(color, percent) {
     let R = parseInt(color.substring(1,3),16);
     let G = parseInt(color.substring(3,5),16);
     let B = parseInt(color.substring(5,7),16);
@@ -2183,7 +580,7 @@ function shadeColor(color, percent) {
 }
 
 // Search settings
-function searchSettings(query) {
+export function searchSettings(query) {
     const normalizedQuery = query.toLowerCase().trim();
     
     if (!normalizedQuery) {
@@ -2260,7 +657,7 @@ function searchSettings(query) {
 }
 
 // Show notification
-function showNotification(message, type = 'success') {
+export function showNotification(message, type = 'success') {
     const notification = document.getElementById('notification');
     const notificationText = document.getElementById('notificationText');
     
@@ -2277,7 +674,7 @@ function showNotification(message, type = 'success') {
 }
 
 // Show confirmation dialog
-function showConfirmation(title, message, confirmCallback) {
+export function showConfirmation(title, message, confirmCallback) {
     const confirmationTitle = document.getElementById('confirmationTitle');
     const confirmationMessage = document.getElementById('confirmationMessage');
     const modal = document.getElementById('confirmationModal');
@@ -2306,7 +703,7 @@ function showConfirmation(title, message, confirmCallback) {
 }
 
 // Reset current section
-function resetCurrentSection() {
+export function resetCurrentSection() {
     if (currentSection && DEFAULT_SETTINGS[currentSection]) {
         userSettings[currentSection] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[currentSection]));
         unsavedChanges = true;
@@ -2317,7 +714,7 @@ function resetCurrentSection() {
 }
 
 // Update user status
-function updateUserStatus() {
+export function updateUserStatus() {
     const statusIndicator = document.getElementById('userStatusIndicator');
     const statusText = document.getElementById('userStatusText');
     
@@ -2333,73 +730,22 @@ function updateUserStatus() {
     }
 }
 
-// Calculate storage usage
-function calculateStorageUsage() {
-    // Simulate some storage usage
-    const settings = userSettings.storage;
-    settings.storageBreakdown.chats = Math.floor(Math.random() * 200) * 1024 * 1024;
-    settings.storageBreakdown.media = Math.floor(Math.random() * 500) * 1024 * 1024;
-    settings.storageBreakdown.other = Math.floor(Math.random() * 100) * 1024 * 1024;
-    settings.totalStorageUsed = settings.storageBreakdown.chats + settings.storageBreakdown.media + settings.storageBreakdown.other;
-}
-
-// Format storage size
-function formatStorageSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
 // Format time
-function formatTime(seconds) {
+export function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     return `${hours}h ${minutes}m`;
 }
 
 // Escape HTML
-function escapeHtml(text) {
+export function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// Get mood text
-function getMoodText(mood) {
-    const moodTexts = {
-        neutral: 'Neutral',
-        happy: 'Happy',
-        calm: 'Calm',
-        energetic: 'Energetic',
-        focused: 'Focused',
-        relaxed: 'Relaxed',
-        stressed: 'Stressed',
-        tired: 'Tired',
-        excited: 'Excited'
-    };
-    return moodTexts[mood] || 'Neutral';
-}
-
-// Get mood color
-function getMoodColor(mood) {
-    const colors = {
-        neutral: '#A9A9A9',
-        happy: '#FFD700',
-        calm: '#4A90E2',
-        energetic: '#FF6B6B',
-        focused: '#7B68EE',
-        relaxed: '#4ECDC4',
-        stressed: '#FF8C00',
-        tired: '#808080',
-        excited: '#FF1493'
-    };
-    return colors[mood] || '#A9A9A9';
-}
-
 // Get shortcut icon
-function getShortcutIcon(shortcut) {
+export function getShortcutIcon(shortcut) {
     const icons = {
         tools: 'tools',
         marketplace: 'store',
@@ -2412,7 +758,7 @@ function getShortcutIcon(shortcut) {
 }
 
 // Get shortcut name
-function getShortcutName(shortcut) {
+export function getShortcutName(shortcut) {
     const names = {
         tools: 'Tools',
         marketplace: 'Marketplace',
@@ -2425,7 +771,7 @@ function getShortcutName(shortcut) {
 }
 
 // Show active sessions
-function showActiveSessions() {
+export function showActiveSessions() {
     const sessionsList = document.getElementById('sessionsList');
     const sessionsModal = document.getElementById('sessionsModal');
     
@@ -2479,7 +825,7 @@ function showActiveSessions() {
 }
 
 // Show blocked users
-function showBlockedUsers() {
+export function showBlockedUsers() {
     const blockedUsersList = document.getElementById('blockedUsersList');
     const blockedUsersModal = document.getElementById('blockedUsersModal');
     
@@ -2519,60 +865,18 @@ function showBlockedUsers() {
     blockedUsersModal.classList.add('active');
 }
 
-// Terminate session (secure version using token system)
-async function terminateSession(sessionId) {
-    try {
-        await makeSafeRequest('POST', '/api/auth/terminate-session', { sessionId });
-        showNotification('Session terminated', 'success');
-        // Refresh sessions list
-        await safeLoadActiveSessions();
-        showActiveSessions();
-    } catch (error) {
-        console.warn('[Settings] Error terminating session:', error.message);
-        showNotification('Error terminating session', 'error');
-    }
-}
-
-// Terminate all sessions (secure version using token system)
-async function terminateAllSessions() {
-    try {
-        await makeSafeRequest('POST', '/api/auth/terminate-all-sessions');
-        showNotification('All other sessions terminated', 'success');
-        // Refresh sessions list
-        await safeLoadActiveSessions();
-        showActiveSessions();
-    } catch (error) {
-        console.warn('[Settings] Error terminating all sessions:', error.message);
-        showNotification('Error terminating sessions', 'error');
-    }
-}
-
-// Unblock user (secure version using token system)
-async function unblockUser(userId) {
-    try {
-        await makeSafeRequest('POST', '/api/users/unblock', { userId });
-        showNotification('User unblocked', 'success');
-        // Refresh blocked users list
-        await safeLoadBlockedUsers();
-        showBlockedUsers();
-    } catch (error) {
-        console.warn('[Settings] Error unblocking user:', error.message);
-        showNotification('Error unblocking user', 'error');
-    }
-}
-
 // Take photo
-function takePhoto() {
+export function takePhoto() {
     showNotification('Camera access would open here in a real app', 'info');
 }
 
 // Choose photo
-function choosePhoto() {
+export function choosePhoto() {
     showNotification('Photo gallery would open here in a real app', 'info');
 }
 
 // Remove photo
-function removePhoto() {
+export function removePhoto() {
     showConfirmation(
         'Remove Profile Photo',
         'Are you sure you want to remove your profile photo?',
@@ -2599,7 +903,7 @@ function removePhoto() {
 }
 
 // Save photo
-function savePhoto() {
+export function savePhoto() {
     showNotification('Profile photo saved', 'success');
     const changePhotoModal = document.getElementById('changePhotoModal');
     if (changePhotoModal) {
@@ -2608,7 +912,7 @@ function savePhoto() {
 }
 
 // Change password (secure version using token system)
-async function changePassword() {
+export async function changePassword() {
     const currentPassword = document.getElementById('currentPassword');
     const newPassword = document.getElementById('newPassword');
     const confirmPassword = document.getElementById('confirmPassword');
@@ -2663,7 +967,7 @@ async function changePassword() {
 }
 
 // Edit mood color
-function editMoodColor(mood) {
+export function editMoodColor(mood) {
     if (!colorPicker) return;
     
     const currentColor = userSettings.mood.moodColors[mood];
@@ -2687,48 +991,12 @@ function editMoodColor(mood) {
     });
 }
 
-// Clear chat cache (secure version using token system)
-async function clearChatCache() {
-    try {
-        await makeSafeRequest('POST', '/api/storage/clear-chat-cache');
-        
-        userSettings.storage.storageBreakdown.chats = 0;
-        userSettings.storage.totalStorageUsed = userSettings.storage.storageBreakdown.media + userSettings.storage.storageBreakdown.other;
-        unsavedChanges = true;
-        updateSaveButton();
-        loadSection('storage');
-        showNotification('Chat cache cleared', 'success');
-        
-    } catch (error) {
-        console.warn('[Settings] Error clearing chat cache:', error.message);
-        showNotification('Error clearing chat cache', 'error');
-    }
-}
-
-// Clear media cache (secure version using token system)
-async function clearMediaCache() {
-    try {
-        await makeSafeRequest('POST', '/api/storage/clear-media-cache');
-        
-        userSettings.storage.storageBreakdown.media = 0;
-        userSettings.storage.totalStorageUsed = userSettings.storage.storageBreakdown.chats + userSettings.storage.storageBreakdown.other;
-        unsavedChanges = true;
-        updateSaveButton();
-        loadSection('storage');
-        showNotification('Media cache cleared', 'success');
-        
-    } catch (error) {
-        console.warn('[Settings] Error clearing media cache:', error.message);
-        showNotification('Error clearing media cache', 'error');
-    }
-}
-
 // =============================================
 // SECTION LOADING FUNCTIONS (UPDATED WITH AUTH CHECK)
 // =============================================
 
 // PROFILE SECTION (22 features)
-function loadProfileSection(container) {
+export function loadProfileSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -3025,7 +1293,7 @@ function loadProfileSection(container) {
 }
 
 // SECURITY SECTION (11 features)
-function loadSecuritySection(container) {
+export function loadSecuritySection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -3335,7 +1603,7 @@ function loadSecuritySection(container) {
 }
 
 // PRIVACY SECTION (25 features) - FULLY IMPLEMENTED
-function loadPrivacySection(container) {
+export function loadPrivacySection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -3655,7 +1923,7 @@ function loadPrivacySection(container) {
 }
 
 // CHAT SECTION (12 features) - FULLY IMPLEMENTED
-function loadChatSection(container) {
+export function loadChatSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -3958,7 +2226,7 @@ function loadChatSection(container) {
 }
 
 // FRIENDS SECTION (10 features) - FULLY IMPLEMENTED
-function loadFriendsSection(container) {
+export function loadFriendsSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -4175,7 +2443,7 @@ function loadFriendsSection(container) {
 }
 
 // GROUPS SECTION (15 features) - FULLY IMPLEMENTED
-function loadGroupsSection(container) {
+export function loadGroupsSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -4463,7 +2731,7 @@ function loadGroupsSection(container) {
 }
 
 // CALLS SECTION (18 features) - FULLY IMPLEMENTED
-function loadCallsSection(container) {
+export function loadCallsSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -4790,7 +3058,7 @@ function loadCallsSection(container) {
 }
 
 // STATUS SECTION (12 features) - FULLY IMPLEMENTED
-function loadStatusSection(container) {
+export function loadStatusSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -5075,7 +3343,7 @@ function loadStatusSection(container) {
 }
 
 // NOTIFICATIONS SECTION (13 features) - FULLY IMPLEMENTED
-function loadNotificationsSection(container) {
+export function loadNotificationsSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -5366,7 +3634,7 @@ function loadNotificationsSection(container) {
 }
 
 // APPEARANCE SECTION (13 features) - FULLY IMPLEMENTED
-function loadAppearanceSection(container) {
+export function loadAppearanceSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -5743,7 +4011,7 @@ function loadAppearanceSection(container) {
 }
 
 // STORAGE SECTION (7 features) - FULLY IMPLEMENTED
-function loadStorageSection(container) {
+export function loadStorageSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -5923,7 +4191,7 @@ function loadStorageSection(container) {
 }
 
 // MOOD SETTINGS SECTION (24 features) - FULLY IMPLEMENTED
-function loadMoodSection(container) {
+export function loadMoodSection(container) {
     // Check authentication
     if (!checkAuthenticationState()) {
         container.innerHTML = `
@@ -6188,71 +4456,48 @@ function loadMoodSection(container) {
                         </label>
                     </div>
                 </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Mood Privacy Rules</div>
-                        <div class="setting-description">
-                            Adjust privacy based on mood
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="moodPrivacyRulesToggle" ${settings.moodPrivacyRules ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Rule Duration</div>
-                        <div class="setting-description">
-                            How long mood-based rules should stay active
-                        </div>
-                    </div>
-                    <div class="setting-control">
-                        <select class="setting-dropdown" id="ruleDurationSelect">
-                            <option value="1hr" ${settings.ruleDuration === '1hr' ? 'selected' : ''}>1 Hour</option>
-                            <option value="3hr" ${settings.ruleDuration === '3hr' ? 'selected' : ''}>3 Hours</option>
-                            <option value="6hr" ${settings.ruleDuration === '6hr' ? 'selected' : ''}>6 Hours</option>
-                            <option value="12hr" ${settings.ruleDuration === '12hr' ? 'selected' : ''}>12 Hours</option>
-                            <option value="24hr" ${settings.ruleDuration === '24hr' ? 'selected' : ''}>24 Hours</option>
-                        </select>
-                    </div>
-                </div>
             </div>
         </div>
     `;
     
     // Add event listeners for mood section
-    // Mood color item clicks
+    // Mood color items - set current mood
     document.querySelectorAll('.mood-color-item').forEach(item => {
         item.addEventListener('click', function() {
             const mood = this.dataset.mood;
             userSettings.mood.currentMood = mood;
+            userSettings.profile.currentMood = mood;
             unsavedChanges = true;
             updateSaveButton();
             
-            // Update active state
+            // Update UI
             document.querySelectorAll('.mood-color-item').forEach(i => {
                 i.classList.remove('active');
             });
             this.classList.add('active');
             
-            // Update current mood in profile section if loaded
-            userSettings.profile.currentMood = mood;
+            // Update current mood indicator in profile section
+            const currentMoodText = document.getElementById('currentMoodText');
+            if (currentMoodText) {
+                currentMoodText.textContent = getMoodText(mood);
+            }
             
-            showNotification(`${mood.charAt(0).toUpperCase() + mood.slice(1)} mood set`, 'success');
+            // Update mood indicator
+            const moodIndicator = document.querySelector('.mood-indicator');
+            if (moodIndicator) {
+                moodIndicator.style.backgroundColor = getMoodColor(mood);
+            }
+            
+            showNotification(`Mood set to ${getMoodText(mood)}`, 'success');
         });
         
-        // Long press for color editing
+        // Long press to edit color
         let pressTimer;
-        item.addEventListener('mousedown', function(e) {
+        item.addEventListener('mousedown', function() {
             pressTimer = setTimeout(() => {
                 const mood = this.dataset.mood;
                 editMoodColor(mood);
-            }, 800);
+            }, 1000);
         });
         
         item.addEventListener('mouseup', function() {
@@ -6262,27 +4507,26 @@ function loadMoodSection(container) {
         item.addEventListener('mouseleave', function() {
             clearTimeout(pressTimer);
         });
-    });
-    
-    // Select change listeners
-    const selects = ['manualMoodOverrideSelect', 'ruleDurationSelect'];
-    selects.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('change', () => {
-                const property = id.replace('Select', '');
-                userSettings.mood[property] = element.value;
-                unsavedChanges = true;
-                updateSaveButton();
-            });
-        }
+        
+        // Touch events for mobile
+        item.addEventListener('touchstart', function(e) {
+            pressTimer = setTimeout(() => {
+                const mood = this.dataset.mood;
+                editMoodColor(mood);
+                e.preventDefault();
+            }, 1000);
+        });
+        
+        item.addEventListener('touchend', function() {
+            clearTimeout(pressTimer);
+        });
     });
     
     // Toggle change listeners
-    const toggles = ['autoMoodDetectionToggle', 'updateAfterCallsToggle', 'updateAfterStatusPostsToggle',
-                   'updateAfterActivityToggle', 'moodLinkedThemeToggle', 'smartNotificationsToggle',
-                   'moodAutoRepliesToggle', 'stressedModeRulesToggle', 'focusedModeRulesToggle',
-                   'happyModeRulesToggle', 'moodPrivacyRulesToggle'];
+    const toggles = ['autoMoodDetectionToggle', 'smartNotificationsToggle', 'moodAutoRepliesToggle',
+                   'stressedModeRulesToggle', 'focusedModeRulesToggle', 'happyModeRulesToggle',
+                   'moodLinkedThemeToggle', 'updateAfterCallsToggle', 'updateAfterStatusPostsToggle',
+                   'updateAfterActivityToggle'];
     toggles.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -6294,29 +4538,31 @@ function loadMoodSection(container) {
             });
         }
     });
+    
+    // Select change listener
+    const manualMoodOverrideSelect = document.getElementById('manualMoodOverrideSelect');
+    if (manualMoodOverrideSelect) {
+        manualMoodOverrideSelect.addEventListener('change', function() {
+            userSettings.mood.manualMoodOverride = this.value;
+            unsavedChanges = true;
+            updateSaveButton();
+        });
+    }
 }
 
-// =============================================
-// EXPORT FUNCTIONS
-// =============================================
-
-export {
-    bootstrapIframe,
-    verifyParentPresence,
-    setupSecureMessagingChannel,
-    startParentHandshake,
-    sendMessageToParent,
-    handleParentMessage,
-    getSecureToken,
-    secureFetchWrapper,
-    makeSafeRequest,
-    saveSettings,
-    loadFromLocalStorage,
-    initializeUI,
-    loadSection,
-    showNotification,
-    showConfirmation,
-    updateUserUI,
-    applyTheme,
-    updateAccentColor
-};
+// Initialize the UI when DOM is ready
+document.addEventListener('DOMContentLoaded', async function() {
+    // Initialize core first
+    await bootstrapIframe();
+    
+    // Wait for session to be ready
+    const sessionReady = await waitForSession(10000);
+    
+    if (sessionReady) {
+        // Initialize UI with session data
+        initializeUI();
+    } else {
+        // Show reconnection state
+        showReconnectionState();
+    }
+});

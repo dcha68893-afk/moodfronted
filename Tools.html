@@ -1510,7 +1510,8 @@
     <div class="upload-progress" id="uploadProgress"></div>
 
     <!-- API.js must load BEFORE Tool.js -->
-    <script src="/js/api.js"></script>
-    <script src="Tool.js"></script>
+     <script type="module" src="Tool-core.js"></script>
+<script type="module" src="Tool-ui.js"></script>
+
 </body>
 </html>

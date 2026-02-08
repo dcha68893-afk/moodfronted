@@ -19,7 +19,6 @@
     <link rel="stylesheet" href="status.css">
     
     <!-- API.js must load BEFORE status.js -->
-    <script src="/js/api.js"></script>
     
     <style>
         /* ============================================= */
@@ -1855,6 +1854,7 @@
         </div>
     </div>
 
-    <script src="status.js"></script>
+    <script type="module" src="status-core.js"></script>
+<script type="module" src="status-ui.js"></script>
 </body>
 </html>

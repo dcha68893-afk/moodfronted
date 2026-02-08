@@ -2,6 +2,37 @@
 // ENHANCED MARKETPLACE SYSTEM WITH PREMIUM FEATURES
 // =============================================
 
+// Import ES modules for API integration
+import { 
+  secureFetch, 
+  getCurrentUser, 
+  getUserToken, 
+  login, 
+  logout, 
+  refreshToken,
+  callApi
+} from './api.core.js';
+
+import {
+  getUserGroups,
+  getUserFriends,
+  getTeamMembers,
+  updateTeamMemberRole,
+  inviteTeamMember
+} from './api-groups.js';
+
+import {
+  getMessages,
+  sendMessage,
+  openChat
+} from './api.messages.js';
+
+import {
+  getAnalyticsData,
+  exportAnalytics,
+  trackEvent
+} from './api-analytics.js';
+
 // Global variables (only marketplace-specific)
 let currentUser = null;
 let userData = null;
@@ -21,6 +52,24 @@ let analyticsData = {};
 let streakData = {};
 let premiumFeatures = {};
 let paymentMethods = [];
+
+// Parent-Child Communication State - ENHANCED
+let parentDataLoaded = false;
+let directAPILoaded = false;
+let parentDataTimeout = 2000; // 2 seconds timeout for parent data
+let parentCommunicationId = null;
+let dataFetchInProgress = false;
+
+// SESSION CONTROL STATE - NEW
+let parentSessionAuthority = null;
+let sessionData = null;
+let handshakeComplete = false;
+let handshakeRetryCount = 0;
+let maxHandshakeRetries = 10;
+let handshakeRetryDelay = 500;
+let sessionValidationInProgress = false;
+let uiBlockedForSession = true; // Block UI until session confirmed
+let secureMessagingChannel = null;
 
 // Marketplace constants
 const LISTING_TYPES = {
@@ -131,6 +180,31 @@ const LOCAL_STORAGE_KEYS = {
     MARKETPLACE_USERS: 'knecta_marketplace_users'
 };
 
+// MESSAGE TYPES for parent communication - ENHANCED
+const PARENT_MESSAGE_TYPES = {
+    // Child to Parent
+    CHILD_READY: 'CHILD_READY',
+    REQUEST_SESSION: 'REQUEST_SESSION',
+    SESSION_CONFIRMED: 'SESSION_CONFIRMED',
+    UI_READY: 'UI_READY',
+    NEED_REFRESH: 'NEED_REFRESH',
+    AUTH_ERROR: 'AUTH_ERROR',
+    
+    // Parent to Child
+    SESSION_DATA: 'SESSION_DATA',
+    SESSION_UPDATE: 'SESSION_UPDATE',
+    LOGOUT: 'LOGOUT',
+    PARENT_READY: 'PARENT_READY',
+    REFRESH_UI: 'REFRESH_UI',
+    FORCE_RELOAD: 'FORCE_RELOAD'
+};
+
+// Session Schema Validation
+const SESSION_SCHEMA = {
+    required: ['userId', 'userToken', 'expiresAt'],
+    optional: ['displayName', 'email', 'photoURL', 'isPremium', 'subscription', 'trustLevel', 'groups', 'friends']
+};
+
 // DOM Elements
 const marketplaceDetailPanel = document.getElementById('marketplaceDetailPanel');
 const createListingModal = document.getElementById('createListingModal');
@@ -154,316 +228,1401 @@ const spotlightListings = document.getElementById('spotlightListings');
 const premiumStatusBadge = document.getElementById('premiumStatusBadge');
 const listingStreak = document.getElementById('listingStreak');
 
-// Authentication state - NO TOKEN GLOBALS
+// Token system state
 let isBootstrapped = false;
 let isAuthReady = false;
 let backgroundJobsStarted = false;
+let tokenInitializationPromise = null;
+let tokenRefreshInProgress = false;
 
-// Initialize the application
+// Initialize the application with enhanced parent-child communication
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('[Tool.js] Marketplace iframe initialization started');
+    console.log('[Tool.js] Marketplace iframe initialization started with ENHANCED parent-child communication');
     
     try {
-        // Setup event listeners first (non-data dependent)
+        // Show UI immediately (no loading screens)
+        showMarketplaceUI();
+        
+        // Step 1: Initialize enhanced parent-child communication system
+        await initializeEnhancedParentCommunication();
+        
+        // Step 2: Setup event listeners first (non-data dependent)
         setupEnhancedEventListeners();
         
-        // Load cached data for instant display
+        // Step 3: Load cached data for instant display (non-sensitive)
         loadCachedDataInstantly();
         
-        // Wait for parent to signal auth readiness
-        await waitForAuthReady();
+        // Step 4: Wait for session data from parent
+        await waitForSessionData();
         
-        // Start background data fetching only once
-        if (isAuthReady && !backgroundJobsStarted) {
-            startBackgroundJobs();
-            backgroundJobsStarted = true;
+        // Step 5: After session confirmed, initialize token system
+        if (sessionData && sessionData.userToken) {
+            initializeTokenSystem();
+            
+            // Step 6: Start background data fetching after token is ready
+            tokenInitializationPromise.then(() => {
+                if (!backgroundJobsStarted) {
+                    startBackgroundJobs();
+                    backgroundJobsStarted = true;
+                }
+            }).catch(error => {
+                console.warn('[Tool.js] Token initialization failed, continuing offline:', error);
+                // Continue with cached data
+            });
+            
+            // Step 7: Initialize enhanced marketplace with session data
+            initializeEnhancedMarketplace();
         }
         
     } catch (error) {
         console.error('[Tool.js] Initialization failed:', error);
-        showNotification('Failed to load marketplace. Please try again.', 'error');
+        handleInitializationFailure(error);
     }
 });
 
-// Wait for parent to signal auth readiness
-async function waitForAuthReady() {
-    console.log('[Tool.js] Waiting for auth readiness signal...');
+// ENHANCED PARENT COMMUNICATION FUNCTIONS
+
+/**
+ * 1. Parent Detection & Secure Channel Establishment
+ */
+async function initializeEnhancedParentCommunication() {
+    console.log('[Tool.js] Initializing ENHANCED parent-child communication system');
     
-    // Check if parent has already signaled readiness
-    if (window.parent && window.parent.AppState && window.parent.AppState.authReady === true) {
-        isAuthReady = true;
-        console.log('[Tool.js] Auth ready signaled by parent');
+    // Generate unique ID for this iframe
+    parentCommunicationId = 'marketplace_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    console.log('[Tool.js] Parent communication ID:', parentCommunicationId);
+    
+    // Verify presence of window.parent
+    if (!window.parent || window.parent === window) {
+        console.warn('[Tool.js] Not running in iframe, standalone mode detected');
+        handleStandaloneMode();
         return;
     }
     
-    // Listen for auth readiness message from parent
+    // Try to detect same-origin (with error handling for cross-origin)
+    let sameOrigin = false;
+    try {
+        sameOrigin = window.location.origin === window.parent.location.origin;
+    } catch (e) {
+        console.warn('[Tool.js] Cross-origin iframe detected (cannot access parent location):', e.message);
+        // We'll still try to communicate but with caution
+    }
+    
+    console.log('[Tool.js] Same-origin check:', sameOrigin);
+    
+    // Establish secure messaging channel
+    secureMessagingChannel = {
+        id: parentCommunicationId,
+        origin: window.location.origin,
+        parentOrigin: sameOrigin ? window.parent.location.origin : '*',
+        sameOrigin: sameOrigin,
+        ready: false
+    };
+    
+    // Listen for messages from parent with enhanced security
+    setupSecureMessageListener();
+    
+    // Start handshake protocol
+    startHandshakeProtocol();
+    
     return new Promise((resolve) => {
-        const checkAuth = () => {
-            try {
-                // Check if parent has signaled auth readiness
-                if (window.parent && window.parent.AppState && window.parent.AppState.authReady === true) {
-                    isAuthReady = true;
-                    console.log('[Tool.js] Auth ready detected from parent AppState');
-                    resolve();
-                    return;
-                }
-                
-                // Check for token via api.js if available
-                if (typeof window.getAuthToken === 'function') {
-                    try {
-                        const token = window.getAuthToken();
-                        if (token) {
-                            isAuthReady = true;
-                            console.log('[Tool.js] Auth ready via api.js token');
-                            resolve();
-                            return;
-                        }
-                    } catch (e) {
-                        // api.js not ready yet
-                    }
-                }
-                
-                // Check localStorage as fallback (but don't trust it as auth)
-                const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-                if (cachedUser) {
-                    try {
-                        currentUser = JSON.parse(cachedUser);
-                        userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
-                        console.log('[Tool.js] Using cached user data for UI');
-                    } catch (e) {
-                        // Silent fail
-                    }
-                }
-                
-                // Continue waiting or timeout
-                setTimeout(checkAuth, 100);
-            } catch (error) {
-                // Parent inaccessible, continue with offline mode
-                console.warn('[Tool.js] Parent inaccessible, continuing offline');
-                isAuthReady = true; // Don't block UI
-                resolve();
-            }
-        };
-        
-        checkAuth();
-        
-        // Timeout after 3 seconds to prevent hanging
-        setTimeout(() => {
-            if (!isAuthReady) {
-                console.warn('[Tool.js] Auth readiness timeout, continuing offline');
-                isAuthReady = true; // Don't block UI
-                resolve();
-            }
-        }, 3000);
+        // Resolve after handshake initiated (UI will show immediately)
+        resolve();
     });
 }
 
-// Get token dynamically from parent/api.js - NO GLOBAL STORAGE
-function getAuthToken() {
-    // Priority 1: Use api.js if available
-    if (typeof window.getAuthToken === 'function') {
-        try {
-            const token = window.getAuthToken();
-            if (token) {
-                return token;
+/**
+ * Setup secure message listener with validation
+ */
+function setupSecureMessageListener() {
+    window.addEventListener('message', handleSecureParentMessage, false);
+    console.log('[Tool.js] Secure message listener established');
+}
+
+/**
+ * Enhanced message handler with security checks
+ */
+function handleSecureParentMessage(event) {
+    // Basic security checks
+    if (!validateMessageOrigin(event)) {
+        console.warn('[Tool.js] Message from untrusted origin ignored:', event.origin);
+        return;
+    }
+    
+    const message = event.data;
+    
+    // Debug logging
+    console.log('[Tool.js] Received secure message:', {
+        type: message?.type,
+        source: event.source === window.parent ? 'parent' : 'other',
+        origin: event.origin,
+        timestamp: new Date().toISOString()
+    });
+    
+    // Handle different message types
+    switch (message?.type) {
+        // PARENT AUTHORITY MESSAGES
+        case PARENT_MESSAGE_TYPES.PARENT_READY:
+            console.log('[Tool.js] Parent ready signal received');
+            handleParentReady(message);
+            break;
+            
+        case PARENT_MESSAGE_TYPES.SESSION_DATA:
+            console.log('[Tool.js] Session data received from parent authority');
+            handleSessionDataFromParent(message.data);
+            break;
+            
+        case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
+            console.log('[Tool.js] Session update received');
+            handleSessionUpdate(message.data);
+            break;
+            
+        case PARENT_MESSAGE_TYPES.LOGOUT:
+            console.log('[Tool.js] Logout command received');
+            handleParentLogout();
+            break;
+            
+        case PARENT_MESSAGE_TYPES.REFRESH_UI:
+            console.log('[Tool.js] Refresh UI command received');
+            handleRefreshUI();
+            break;
+            
+        case PARENT_MESSAGE_TYPES.FORCE_RELOAD:
+            console.log('[Tool.js] Force reload command received');
+            handleForceReload();
+            break;
+            
+        // LEGACY MESSAGE SUPPORT (for backward compatibility)
+        case 'user_data':
+            console.log('[Tool.js] Legacy user data received (migrating to session system)');
+            migrateLegacyUserData(message.data);
+            break;
+            
+        case 'user_profile_updated':
+            console.log('[Tool.js] User profile updated from parent');
+            if (message.data) {
+                handleSessionUpdate(message.data);
             }
-        } catch (e) {
-            console.warn('[Tool.js] Failed to get token from api.js:', e);
+            break;
+            
+        case 'user_logged_in':
+            console.log('[Tool.js] User logged in notification');
+            sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, { force: true });
+            break;
+            
+        case 'user_logged_out':
+            console.log('[Tool.js] User logged out notification');
+            handleParentLogout();
+            break;
+            
+        case 'session_expired':
+            console.log('[Tool.js] Session expired notification');
+            handleSessionExpired();
+            break;
+            
+        case 'iframe_response':
+            if (message.requestId === parentCommunicationId) {
+                console.log('[Tool.js] Response to our request');
+                if (message.data && message.data.session) {
+                    handleSessionDataFromParent(message.data.session);
+                }
+            }
+            break;
+            
+        case 'ping':
+            sendMessageToParent('pong', {
+                id: parentCommunicationId,
+                timestamp: Date.now(),
+                sessionStatus: !!sessionData
+            });
+            break;
+            
+        default:
+            console.log('[Tool.js] Unknown message type from parent:', message?.type);
+    }
+}
+
+/**
+ * Validate message origin for security
+ */
+function validateMessageOrigin(event) {
+    // In production, you should validate against a list of allowed origins
+    // const allowedOrigins = ['https://yourdomain.com', 'https://app.yourdomain.com'];
+    
+    // For development, accept all origins with warning
+    if (event.origin !== window.location.origin && !event.origin.includes('localhost')) {
+        console.warn('[Tool.js] Message from different origin:', event.origin);
+        // Still accept for now, but log warning
+    }
+    
+    // Ensure message is from parent window
+    if (event.source !== window.parent) {
+        console.warn('[Tool.js] Message not from direct parent, source mismatch');
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * 2. Handshake Protocol with Exponential Backoff
+ */
+function startHandshakeProtocol() {
+    console.log('[Tool.js] Starting handshake protocol with parent');
+    
+    // Send CHILD_READY signal
+    sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
+        id: parentCommunicationId,
+        type: 'marketplace',
+        version: '2.1',
+        features: ['session_authority', 'centralized_auth', 'ui_coordination'],
+        timestamp: Date.now()
+    });
+    
+    // Start handshake retry mechanism
+    initiateHandshakeRetry();
+}
+
+/**
+ * Initiate handshake with exponential backoff
+ */
+function initiateHandshakeRetry() {
+    if (handshakeComplete) {
+        console.log('[Tool.js] Handshake already complete');
+        return;
+    }
+    
+    if (handshakeRetryCount >= maxHandshakeRetries) {
+        console.error('[Tool.js] Max handshake retries reached, entering reconnect state');
+        handleParentUnavailable();
+        return;
+    }
+    
+    // Calculate delay with exponential backoff
+    const delay = handshakeRetryDelay * Math.pow(1.5, handshakeRetryCount);
+    handshakeRetryCount++;
+    
+    console.log(`[Tool.js] Handshake attempt ${handshakeRetryCount}/${maxHandshakeRetries}, delay: ${delay}ms`);
+    
+    setTimeout(() => {
+        if (!handshakeComplete) {
+            // Send REQUEST_SESSION
+            sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+                id: parentCommunicationId,
+                retryCount: handshakeRetryCount,
+                lastAttempt: Date.now()
+            });
+            
+            // Schedule next retry if still not complete
+            if (!handshakeComplete) {
+                initiateHandshakeRetry();
+            }
+        }
+    }, delay);
+}
+
+/**
+ * Handle parent ready signal
+ */
+function handleParentReady(message) {
+    console.log('[Tool.js] Parent ready, establishing session authority');
+    
+    parentSessionAuthority = {
+        ready: true,
+        version: message.version || '1.0',
+        capabilities: message.capabilities || [],
+        timestamp: Date.now()
+    };
+    
+    // Immediately request session data
+    sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+        id: parentCommunicationId,
+        urgent: true,
+        requireValidation: true
+    });
+    
+    // Reset retry counter since we made contact
+    handshakeRetryCount = 0;
+}
+
+/**
+ * 3. Session Consumption & Validation
+ */
+function handleSessionDataFromParent(sessionDataFromParent) {
+    if (sessionValidationInProgress) {
+        console.log('[Tool.js] Session validation already in progress, ignoring duplicate');
+        return;
+    }
+    
+    console.log('[Tool.js] Processing session data from parent authority');
+    
+    // Validate session schema
+    if (!validateSessionSchema(sessionDataFromParent)) {
+        console.error('[Tool.js] Invalid session schema received');
+        sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+            error: 'INVALID_SESSION_SCHEMA',
+            received: Object.keys(sessionDataFromParent || {})
+        });
+        return;
+    }
+    
+    // Mark validation in progress
+    sessionValidationInProgress = true;
+    
+    try {
+        // Process the session data
+        processSessionData(sessionDataFromParent);
+        
+        // Mark handshake as complete
+        handshakeComplete = true;
+        handshakeRetryCount = 0;
+        
+        // Store session data
+        sessionData = sessionDataFromParent;
+        
+        // Update local state with session data
+        updateLocalStateFromSession(sessionData);
+        
+        // Send confirmation to parent
+        sendMessageToParent(PARENT_MESSAGE_TYPES.SESSION_CONFIRMED, {
+            id: parentCommunicationId,
+            userId: sessionData.userId,
+            timestamp: Date.now()
+        });
+        
+        // Unblock UI
+        uiBlockedForSession = false;
+        
+        // Bind UI with session data
+        bindUIWithSession();
+        
+        console.log('[Tool.js] Session consumption complete, UI ready');
+        
+        // Send UI ready signal
+        sendMessageToParent(PARENT_MESSAGE_TYPES.UI_READY, {
+            id: parentCommunicationId,
+            component: 'marketplace',
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        console.error('[Tool.js] Session processing failed:', error);
+        sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+            error: 'SESSION_PROCESSING_FAILED',
+            message: error.message
+        });
+    } finally {
+        sessionValidationInProgress = false;
+    }
+}
+
+/**
+ * Validate session schema
+ */
+function validateSessionSchema(session) {
+    if (!session || typeof session !== 'object') {
+        console.error('[Tool.js] Session data is not an object');
+        return false;
+    }
+    
+    // Check required fields
+    for (const field of SESSION_SCHEMA.required) {
+        if (!session.hasOwnProperty(field) || session[field] === undefined || session[field] === null) {
+            console.error(`[Tool.js] Missing required session field: ${field}`);
+            return false;
         }
     }
     
-    // Priority 2: Check parent AppState
-    if (window.parent && window.parent.AppState) {
-        try {
-            if (window.parent.AppState.accessToken) {
-                return window.parent.AppState.accessToken;
-            }
-        } catch (e) {
-            // Cross-origin restriction
+    // Validate userToken
+    if (!session.userToken || typeof session.userToken !== 'string' || session.userToken.length < 10) {
+        console.error('[Tool.js] Invalid userToken in session');
+        return false;
+    }
+    
+    // Validate expiresAt if present
+    if (session.expiresAt) {
+        const expiresDate = new Date(session.expiresAt);
+        if (isNaN(expiresDate.getTime())) {
+            console.error('[Tool.js] Invalid expiresAt date in session');
+            return false;
         }
     }
     
-    // Priority 3: localStorage (fallback only, not authoritative)
-    const storedToken = localStorage.getItem('accessToken') || 
-                       localStorage.getItem('knecta_auth_token');
+    console.log('[Tool.js] Session schema validation passed');
+    return true;
+}
+
+/**
+ * Process session data from parent
+ */
+function processSessionData(sessionDataFromParent) {
+    console.log(`[Tool.js] Processing session for user: ${sessionDataFromParent.userId}`);
     
-    if (storedToken) {
-        console.log('[Tool.js] Using token from localStorage fallback');
-        return storedToken;
+    // Extract user data from session
+    const userDataFromSession = {
+        id: sessionDataFromParent.userId,
+        displayName: sessionDataFromParent.displayName || 'User',
+        email: sessionDataFromParent.email || '',
+        photoURL: sessionDataFromParent.photoURL || '',
+        isPremium: sessionDataFromParent.isPremium || false,
+        subscription: sessionDataFromParent.subscription || null,
+        trustLevel: sessionDataFromParent.trustLevel || 'new',
+        groups: sessionDataFromParent.groups || [],
+        friends: sessionDataFromParent.friends || []
+    };
+    
+    // Set current user
+    currentUser = userDataFromSession;
+    userData = userDataFromSession;
+    
+    // Store user token in centralized location (for API integration)
+    if (sessionDataFromParent.userToken) {
+        storeCentralizedToken(sessionDataFromParent.userToken);
     }
     
+    // Mark parent data as loaded
+    parentDataLoaded = true;
+    dataFetchInProgress = false;
+    
+    console.log(`[Tool.js] Session processed successfully for: ${currentUser.displayName}`);
+}
+
+/**
+ * Store token in centralized location
+ */
+function storeCentralizedToken(token) {
+    // Store in localStorage for backward compatibility
+    localStorage.setItem('USER_TOKEN', token);
+    
+    console.log('[Tool.js] Token stored in centralized location');
+}
+
+/**
+ * Update local state from session
+ */
+function updateLocalStateFromSession(session) {
+    // Update user groups if provided
+    if (session.groups && Array.isArray(session.groups)) {
+        userGroups = session.groups;
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
+    }
+    
+    // Update user friends if provided
+    if (session.friends && Array.isArray(session.friends)) {
+        userFriends = session.friends;
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
+    }
+    
+    // Update subscription if provided
+    if (session.subscription) {
+        userSubscription = session.subscription;
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
+    }
+    
+    console.log('[Tool.js] Local state updated from session');
+}
+
+/**
+ * Bind UI with session data
+ */
+function bindUIWithSession() {
+    console.log('[Tool.js] Binding UI with session data');
+    
+    // Update user interface
+    updateUserInterface();
+    
+    // Load service categories and other UI elements
+    loadServiceCategories();
+    loadGroupsForSelection();
+    loadFriendsForSelection();
+    
+    // Update premium status
+    updatePremiumStatusUI();
+    
+    // Update streak indicator
+    updateStreakIndicator();
+    
+    // Update my listings preview
+    updateMyListingsPreview();
+    
+    console.log('[Tool.js] UI binding complete');
+}
+
+/**
+ * 4. Authentication Enforcement & UI Blocking
+ */
+function showMarketplaceUI() {
+    console.log('[Tool.js] Showing marketplace UI immediately');
+    
+    // Ensure marketplace UI is visible
+    const marketplaceContainer = document.getElementById('marketplaceContainer');
+    if (marketplaceContainer) {
+        marketplaceContainer.style.display = 'block';
+        marketplaceContainer.style.opacity = '1';
+        marketplaceContainer.style.visibility = 'visible';
+    }
+    
+    // Hide any loading indicators
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    if (loadingIndicator) {
+        loadingIndicator.style.display = 'none';
+    }
+    
+    // Show cached content immediately
+    renderMarketplaceList();
+    
+    console.log('[Tool.js] Marketplace UI displayed');
+}
+
+/**
+ * Wait for session data with timeout
+ */
+async function waitForSessionData() {
+    console.log('[Tool.js] Waiting for session data from parent...');
+    
+    return new Promise((resolve) => {
+        // Check if we already have session data
+        if (sessionData) {
+            console.log('[Tool.js] Already have session data, proceeding');
+            resolve();
+            return;
+        }
+        
+        // Set timeout for session wait (30 seconds max)
+        const sessionWaitTimeout = setTimeout(() => {
+            console.warn('[Tool.js] Session wait timeout, proceeding with limited functionality');
+            handleSessionTimeout();
+            resolve();
+        }, 30000);
+        
+        // Check periodically if session is loaded
+        const checkInterval = setInterval(() => {
+            if (sessionData || !uiBlockedForSession) {
+                clearInterval(checkInterval);
+                clearTimeout(sessionWaitTimeout);
+                console.log('[Tool.js] Session data received, proceeding');
+                resolve();
+            }
+        }, 100);
+    });
+}
+
+/**
+ * Handle session timeout
+ */
+function handleSessionTimeout() {
+    console.log('[Tool.js] Session timeout - proceeding with limited functionality');
+    
+    // Show notification to user
+    showNotification('Waiting for authentication. Some features may be limited.', 'warning');
+    
+    // Unblock UI but with limited functionality
+    uiBlockedForSession = false;
+    
+    // Use cached data if available
+    const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+    if (cachedUser) {
+        try {
+            const parsedUser = JSON.parse(cachedUser);
+            currentUser = parsedUser;
+            userData = parsedUser;
+            updateUserInterface();
+        } catch (e) {
+            console.warn('[Tool.js] Failed to parse cached user data:', e);
+        }
+    }
+}
+
+/**
+ * Handle session updates from parent
+ */
+function handleSessionUpdate(updatedData) {
+    console.log('[Tool.js] Handling session update from parent');
+    
+    // Validate update data
+    if (!updatedData || typeof updatedData !== 'object') {
+        console.warn('[Tool.js] Invalid session update data');
+        return;
+    }
+    
+    // Merge with existing session data
+    if (sessionData) {
+        sessionData = { ...sessionData, ...updatedData };
+    } else {
+        sessionData = updatedData;
+    }
+    
+    // Update local state
+    if (updatedData.userId && currentUser) {
+        currentUser = { ...currentUser, ...updatedData };
+        userData = { ...userData, ...updatedData };
+        
+        // Save to localStorage (non-sensitive data only)
+        if (updatedData.displayName || updatedData.photoURL || updatedData.isPremium) {
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+        }
+        
+        // Update UI
+        updateUserInterface();
+        
+        // Update premium status if subscription changed
+        if (updatedData.subscription) {
+            userSubscription = updatedData.subscription;
+            updatePremiumStatusUI();
+        }
+    }
+    
+    console.log('[Tool.js] Session update processed');
+}
+
+/**
+ * Handle parent logout command
+ */
+function handleParentLogout() {
+    console.log('[Tool.js] Handling parent logout command');
+    
+    // Clear all session data
+    clearSessionData();
+    
+    // Reset UI to logged out state
+    resetUIForLogout();
+    
+    // Show notification
+    showNotification('You have been logged out.', 'warning');
+    
+    console.log('[Tool.js] Logout processing complete');
+}
+
+/**
+ * Clear all session data
+ */
+function clearSessionData() {
+    // Clear session data
+    sessionData = null;
+    currentUser = null;
+    userData = null;
+    userSubscription = null;
+    handshakeComplete = false;
+    
+    // Clear sensitive data from localStorage
+    localStorage.removeItem('USER_TOKEN');
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
+    
+    // Reset parent communication flags
+    parentDataLoaded = false;
+    directAPILoaded = false;
+    
+    console.log('[Tool.js] Session data cleared');
+}
+
+/**
+ * Reset UI for logout state
+ */
+function resetUIForLogout() {
+    // Update my listings section
+    if (myListingsAvatar) {
+        myListingsAvatar.style.backgroundImage = '';
+        myListingsAvatar.innerHTML = '<span style="color: white; font-size: 20px;">ME</span>';
+    }
+    
+    if (myListingsName) {
+        myListingsName.textContent = 'My Marketplace';
+    }
+    
+    if (myListingsText) {
+        myListingsText.textContent = 'Tap to create your first listing';
+    }
+    
+    // Hide premium features
+    updatePremiumStatusUI();
+    
+    // Hide streak indicator
+    if (listingStreak) {
+        listingStreak.style.display = 'none';
+    }
+    
+    console.log('[Tool.js] UI reset for logout');
+}
+
+/**
+ * Handle refresh UI command
+ */
+function handleRefreshUI() {
+    console.log('[Tool.js] Refreshing UI per parent command');
+    
+    // Re-bind UI with current session data
+    if (sessionData) {
+        bindUIWithSession();
+    }
+    
+    // Re-render marketplace list
+    renderMarketplaceList();
+    
+    console.log('[Tool.js] UI refresh complete');
+}
+
+/**
+ * Handle force reload command
+ */
+function handleForceReload() {
+    console.log('[Tool.js] Force reload requested by parent');
+    
+    // Save any unsaved data
+    saveAllMarketplaceData();
+    
+    // Reload the iframe
+    window.location.reload();
+}
+
+/**
+ * 5. API Integration via Centralized Channels
+ */
+
+/**
+ * Enhanced secure API call that uses parent session authority
+ */
+async function secureApiCall(method, endpoint, data = null, options = {}) {
+    console.log(`[Tool.js] Secure API call: ${method} ${endpoint}`);
+    
+    // Check if we have valid session
+    if (!sessionData || !sessionData.userToken) {
+        console.warn('[Tool.js] No valid session for API call, queuing or rejecting');
+        
+        // If this is a critical call, request session refresh
+        if (method !== 'GET' || endpoint.includes('/auth/')) {
+            sendMessageToParent(PARENT_MESSAGE_TYPES.NEED_REFRESH, {
+                reason: 'api_call_without_session',
+                endpoint: endpoint,
+                method: method
+            });
+        }
+        
+        throw new Error('No valid session available for API call');
+    }
+    
+    // Queue API calls if token is not ready yet
+    if (!isAuthReady) {
+        return queueApiCall(method, endpoint, data, options);
+    }
+    
+    // Use imported callApi function
+    try {
+        console.log('[Tool.js] Using callApi from api.core.js for secure request');
+        const response = await callApi(method, endpoint, data);
+        return response;
+    } catch (error) {
+        return handleApiError(error, method, endpoint);
+    }
+}
+
+/**
+ * Handle API errors with parent notification
+ */
+async function handleApiError(error, method, endpoint) {
+    console.error(`[Tool.js] API call failed: ${method} ${endpoint}`, error.message || error);
+    
+    // Notify parent of API error
+    sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+        error: 'API_CALL_FAILED',
+        endpoint: endpoint,
+        method: method,
+        message: error.message
+    });
+    
+    // If auth error, handle it
+    if (error.status === 401 || error.status === 403) {
+        return handleUnauthorized();
+    }
+    
+    // Re-throw other errors
+    throw error;
+}
+
+/**
+ * Handle unauthorized responses with parent coordination
+ */
+async function handleUnauthorized() {
+    console.warn('[Tool.js] Unauthorized API call detected');
+    
+    // Notify parent immediately
+    sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+        error: 'UNAUTHORIZED_API_CALL',
+        timestamp: Date.now()
+    });
+    
+    // Clear local token
+    localStorage.removeItem('USER_TOKEN');
+    
+    // Show user notification
+    showNotification('Session expired. Please log in again.', 'error');
+    
+    // Wait for parent to handle session refresh
     return null;
 }
 
-// Check if we have a valid auth token
-function hasValidAuth() {
-    const token = getAuthToken();
-    if (!token) return false;
-    
-    // Basic token validation (not expiration checking - that's parent's job)
-    return token.length > 10; // Simple sanity check
-}
-
-// SINGLE BOOTSTRAP FUNCTION - Safe, parent-independent
-async function bootstrapIframe() {
-    console.log('[Tool.js] Bootstrapping marketplace iframe');
-    
-    if (isBootstrapped) {
-        console.log('[Tool.js] Already bootstrapped');
-        return;
-    }
-    
-    // Wait for auth readiness
-    if (!isAuthReady) {
-        console.log('[Tool.js] Waiting for auth readiness before bootstrapping');
-        await waitForAuthReady();
-    }
-    
-    // Load cached data for immediate UI
-    loadCachedDataInstantly();
-    
-    // Verify auth if we have a token
-    if (hasValidAuth()) {
-        try {
-            // Try to validate token via api.js
-            if (typeof window.apiCall === 'function') {
-                try {
-                    const userResponse = await window.apiCall('GET', '/api/auth/me');
-                    if (userResponse && userResponse.user) {
-                        currentUser = userResponse.user;
-                        userData = userResponse.user;
-                        
-                        // Cache for offline use
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(currentUser));
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-                        
-                        console.log('[Tool.js] User verified via api.js:', currentUser.displayName || currentUser.email);
-                    }
-                } catch (error) {
-                    console.warn('[Tool.js] User verification failed, using cached data:', error.message);
-                    // Continue with cached user
-                }
-            }
-        } catch (error) {
-            console.warn('[Tool.js] Bootstrap auth check failed:', error.message);
-            // Continue offline
-        }
-    }
-    
-    isBootstrapped = true;
-    console.log('[Tool.js] Marketplace iframe bootstrapped successfully');
-}
-
-// Start background jobs only once
-function startBackgroundJobs() {
-    if (!isAuthReady || backgroundJobsStarted) {
-        return;
-    }
-    
-    console.log('[Tool.js] Starting background data jobs');
-    backgroundJobsStarted = true;
-    
-    // Start background data loading
-    setTimeout(() => {
-        loadEnhancedMarketplaceData().catch(error => {
-            console.warn('[Tool.js] Background data load failed:', error.message);
-        });
-    }, 1000);
-    
-    // Check premium status in background
-    setTimeout(() => {
-        checkUserPremiumStatus().catch(error => {
-            console.warn('[Tool.js] Premium status check failed:', error.message);
-        });
-    }, 1500);
-}
-
-// Unified API call function using api.js - SAFE VERSION
-async function makeApiCall(method, endpoint, data = null) {
-    // Wait for auth readiness
-    if (!isAuthReady) {
-        console.warn('[Tool.js] Auth not ready, pausing API call');
-        return null;
-    }
-    
-    // Check if we have valid auth
-    if (!hasValidAuth()) {
-        console.warn('[Tool.js] No valid auth token, skipping API call');
-        return null;
-    }
-    
-    // Use api.js for all API calls if available
-    if (typeof window.apiCall === 'function') {
-        try {
-            const response = await window.apiCall(method, endpoint, data);
-            return response;
-        } catch (error) {
-            // Log error but don't clear auth (parent's responsibility)
-            console.error(`[Tool.js] API call failed: ${method} ${endpoint}`, error.message || error);
-            
-            // If auth error, notify parent once
-            if (error.status === 401 || error.status === 403) {
-                console.warn('[Tool.js] Auth error detected, notifying parent');
-                // Parent will handle auth refresh/logout
-            }
-            
-            throw error;
-        }
-    } else {
-        // api.js not available, can't make calls
-        console.warn('[Tool.js] api.js not available, cannot make API call');
-        return null;
-    }
-}
-
-// Safe API call wrapper for backward compatibility
+/**
+ * Safe API call wrapper for backward compatibility
+ */
 async function safeApiCall(method, endpoint, data = null) {
     try {
-        return await makeApiCall(method, endpoint, data);
+        return await secureApiCall(method, endpoint, data);
     } catch (error) {
         console.warn('[Tool.js] Safe API call failed:', error.message || error);
         return null;
     }
 }
 
-// Authenticated API call wrapper for backward compatibility
-async function authenticatedApiCall(method, endpoint, data = null) {
-    return await safeApiCall(method, endpoint, data);
+/**
+ * 6. Fallback Handling & Reconnection
+ */
+function handleParentUnavailable() {
+    console.error('[Tool.js] Parent unavailable, entering reconnection state');
+    
+    // Show reconnection UI
+    showReconnectionState();
+    
+    // Disable protected features
+    disableProtectedFeatures();
+    
+    // Periodically attempt to reconnect
+    startReconnectionAttempts();
+}
+
+/**
+ * Show reconnection state UI
+ */
+function showReconnectionState() {
+    // Create or show reconnection message
+    let reconnectMsg = document.getElementById('reconnectionMessage');
+    if (!reconnectMsg) {
+        reconnectMsg = document.createElement('div');
+        reconnectMsg.id = 'reconnectionMessage';
+        reconnectMsg.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 193, 7, 0.9);
+            color: #000;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        `;
+        reconnectMsg.innerHTML = `
+            <i class="fas fa-sync-alt fa-spin"></i>
+            <span>Reconnecting to parent session...</span>
+        `;
+        document.body.appendChild(reconnectMsg);
+    }
+    
+    reconnectMsg.style.display = 'flex';
+    
+    console.log('[Tool.js] Reconnection state displayed');
+}
+
+/**
+ * Disable protected features when parent unavailable
+ */
+function disableProtectedFeatures() {
+    // Disable create listing button
+    const createListingBtn = document.getElementById('createListingBtn');
+    if (createListingBtn) {
+        createListingBtn.disabled = true;
+        createListingBtn.title = 'Waiting for authentication...';
+    }
+    
+    // Disable premium features
+    const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
+    if (premiumOptionsBtn) {
+        premiumOptionsBtn.disabled = true;
+        premiumOptionsBtn.title = 'Waiting for authentication...';
+    }
+    
+    // Disable analytics
+    const viewAnalyticsBtn = document.getElementById('viewAnalyticsBtn');
+    if (viewAnalyticsBtn) {
+        viewAnalyticsBtn.disabled = true;
+        viewAnalyticsBtn.title = 'Waiting for authentication...';
+    }
+    
+    console.log('[Tool.js] Protected features disabled');
+}
+
+/**
+ * Start reconnection attempts
+ */
+function startReconnectionAttempts() {
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 20;
+    
+    const attemptReconnection = () => {
+        if (handshakeComplete || reconnectAttempts >= maxReconnectAttempts) {
+            console.log('[Tool.js] Reconnection attempts stopped');
+            return;
+        }
+        
+        reconnectAttempts++;
+        console.log(`[Tool.js] Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+        
+        // Send handshake request
+        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
+            id: parentCommunicationId,
+            type: 'marketplace',
+            reconnection: true,
+            attempt: reconnectAttempts,
+            timestamp: Date.now()
+        });
+        
+        // Schedule next attempt with exponential backoff
+        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 30000);
+        setTimeout(attemptReconnection, delay);
+    };
+    
+    // Start first attempt after 2 seconds
+    setTimeout(attemptReconnection, 2000);
+}
+
+/**
+ * Hide reconnection state
+ */
+function hideReconnectionState() {
+    const reconnectMsg = document.getElementById('reconnectionMessage');
+    if (reconnectMsg) {
+        reconnectMsg.style.display = 'none';
+    }
+    
+    // Re-enable protected features
+    const createListingBtn = document.getElementById('createListingBtn');
+    if (createListingBtn) {
+        createListingBtn.disabled = false;
+        createListingBtn.title = '';
+    }
+    
+    const premiumOptionsBtn = document.getElementById('premiumOptionsBtn');
+    if (premiumOptionsBtn) {
+        premiumOptionsBtn.disabled = false;
+        premiumOptionsBtn.title = '';
+    }
+    
+    const viewAnalyticsBtn = document.getElementById('viewAnalyticsBtn');
+    if (viewAnalyticsBtn) {
+        viewAnalyticsBtn.disabled = false;
+        viewAnalyticsBtn.title = '';
+    }
+    
+    console.log('[Tool.js] Reconnection state hidden, features re-enabled');
+}
+
+/**
+ * 7. Re-Synchronization & Event Listening
+ */
+
+/**
+ * Setup enhanced event listeners with parent coordination
+ */
+function setupEnhancedEventListeners() {
+    console.log('[Tool.js] Setting up enhanced event listeners');
+    
+    // First setup all existing event listeners
+    setupExistingEventListeners();
+    
+    // Then add parent communication specific listeners
+    setupParentCommunicationListeners();
+    
+    // Setup online/offline detection
+    setupConnectivityListeners();
+    
+    console.log('[Tool.js] Enhanced event listeners setup complete');
+}
+
+/**
+ * Setup connectivity listeners
+ */
+function setupConnectivityListeners() {
+    window.addEventListener('online', () => {
+        console.log('[Tool.js] Browser online, checking parent connection');
+        sendMessageToParent('ping', { type: 'connectivity_check' });
+    });
+    
+    window.addEventListener('offline', () => {
+        console.warn('[Tool.js] Browser offline, caching operations');
+        showNotification('Working offline - changes will sync when back online', 'info');
+    });
+    
+    console.log('[Tool.js] Connectivity listeners established');
+}
+
+/**
+ * 8. Initialization Safety & Singleton Enforcement
+ */
+
+/**
+ * Initialize token system with session data
+ */
+function initializeTokenSystem() {
+    console.log('[Tool.js] Initializing token system with session data');
+    
+    // Singleton check
+    if (tokenInitializationPromise) {
+        console.log('[Tool.js] Token system already initializing');
+        return tokenInitializationPromise;
+    }
+    
+    tokenInitializationPromise = new Promise(async (resolve, reject) => {
+        try {
+            // Wait for session data
+            if (!sessionData || !sessionData.userToken) {
+                throw new Error('No session data available for token initialization');
+            }
+            
+            // Verify token is valid
+            if (!isValidToken(sessionData.userToken)) {
+                throw new Error('Invalid token in session data');
+            }
+            
+            // Set token in centralized location
+            storeCentralizedToken(sessionData.userToken);
+            
+            // Mark auth as ready
+            isAuthReady = true;
+            
+            console.log('[Tool.js] Token system initialized successfully with session data');
+            resolve();
+            
+        } catch (error) {
+            console.error('[Tool.js] Token system initialization failed:', error);
+            isAuthReady = true; // Allow offline mode
+            reject(error);
+        }
+    });
+    
+    return tokenInitializationPromise;
+}
+
+/**
+ * Check if token is valid
+ */
+function isValidToken(token) {
+    if (!token || typeof token !== 'string') return false;
+    if (token === 'undefined' || token === 'null' || token === '') return false;
+    if (token.length < 10) return false; // Basic length check
+    
+    return true;
+}
+
+/**
+ * Wait for api.core.js to be imported and ready
+ */
+async function waitForApiJs() {
+    return new Promise((resolve) => {
+        const checkApiJs = () => {
+            if (typeof callApi === 'function' && typeof getUserToken === 'function') {
+                console.log('[Tool.js] api.core.js detected with session integration');
+                resolve();
+            } else {
+                console.log('[Tool.js] Waiting for api.core.js...');
+                setTimeout(checkApiJs, 100);
+            }
+        };
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+            console.warn('[Tool.js] api.core.js not detected, proceeding without it');
+            resolve();
+        }, 5000);
+        
+        checkApiJs();
+    });
+}
+
+/**
+ * 9. Error Management & Parent Reporting
+ */
+
+/**
+ * Handle initialization failure
+ */
+function handleInitializationFailure(error) {
+    console.error('[Tool.js] Initialization failed:', error);
+    
+    // Report to parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+        error: 'INITIALIZATION_FAILED',
+        component: 'marketplace',
+        message: error.message,
+        stack: error.stack
+    });
+    
+    // Show user-friendly error
+    showNotification('Failed to load marketplace. Some features may be limited.', 'error');
+    
+    // Still show UI with limited functionality
+    showMarketplaceUI();
+}
+
+/**
+ * Send message to parent with enhanced error handling
+ */
+function sendMessageToParent(type, data = {}) {
+    if (!window.parent || window.parent === window) {
+        console.warn(`[Tool.js] Cannot send message ${type}: not in iframe`);
+        return false;
+    }
+    
+    try {
+        const message = {
+            type: type,
+            source: 'marketplace_iframe',
+            id: parentCommunicationId,
+            timestamp: Date.now(),
+            version: '2.1',
+            data: data
+        };
+        
+        console.log(`[Tool.js] Sending message to parent: ${type}`, Object.keys(data));
+        
+        // Send message to parent
+        // Use specific origin if we know it, otherwise use '*'
+        const targetOrigin = secureMessagingChannel?.sameOrigin ? 
+            secureMessagingChannel.parentOrigin : '*';
+        
+        window.parent.postMessage(message, targetOrigin);
+        
+        return true;
+    } catch (error) {
+        console.error(`[Tool.js] Error sending message ${type} to parent:`, error);
+        return false;
+    }
+}
+
+/**
+ * 10. Compatibility & Legacy Support
+ */
+
+/**
+ * Migrate legacy user data to session system
+ */
+function migrateLegacyUserData(legacyData) {
+    console.log('[Tool.js] Migrating legacy user data to session system');
+    
+    // Convert legacy format to session format
+    const sessionData = {
+        userId: legacyData.id || legacyData._id || 'unknown',
+        userToken: getCentralizedToken() || '',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(), // Default 1 hour
+        displayName: legacyData.displayName || '',
+        email: legacyData.email || '',
+        photoURL: legacyData.photoURL || '',
+        isPremium: legacyData.isPremium || false,
+        subscription: legacyData.subscription || null,
+        trustLevel: legacyData.trustLevel || 'new'
+    };
+    
+    // Process as session data
+    handleSessionDataFromParent(sessionData);
+}
+
+/**
+ * Get centralized token with legacy support
+ */
+function getCentralToken() {
+    // Priority 1: Use session data if available
+    if (sessionData && sessionData.userToken) {
+        console.log('[Tool.js] Token from session data');
+        return sessionData.userToken;
+    }
+    
+    // Priority 2: Use imported getUserToken() if available
+    if (typeof getUserToken === 'function') {
+        try {
+            const token = getUserToken();
+            if (token) {
+                console.log('[Tool.js] Token from getUserToken()');
+                return token;
+            }
+        } catch (e) {
+            console.warn('[Tool.js] Failed to get token from getUserToken():', e);
+        }
+    }
+    
+    // Priority 3: Check for legacy tokens
+    const legacyTokens = [
+        'accessToken',
+        'moodchat_token', 
+        'authToken',
+        'knecta_auth_token',
+        'USER_TOKEN'
+    ];
+    
+    for (const tokenKey of legacyTokens) {
+        const legacyToken = localStorage.getItem(tokenKey);
+        if (legacyToken) {
+            console.log(`[Tool.js] Found legacy token ${tokenKey}`);
+            return legacyToken;
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Handle standalone mode (not in iframe)
+ */
+function handleStandaloneMode() {
+    console.log('[Tool.js] Running in standalone mode');
+    
+    // Show notification
+    showNotification('Running in standalone mode. Parent coordination disabled.', 'warning');
+    
+    // Unblock UI
+    uiBlockedForSession = false;
+    
+    // Try to load user data from localStorage
+    const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+    if (cachedUser) {
+        try {
+            const parsedUser = JSON.parse(cachedUser);
+            currentUser = parsedUser;
+            userData = parsedUser;
+            updateUserInterface();
+        } catch (e) {
+            console.warn('[Tool.js] Failed to parse cached user data:', e);
+        }
+    }
+    
+    // Initialize without parent coordination
+    initializeEnhancedMarketplace();
+}
+
+/**
+ * Bootstrap iframe with session integration
+ */
+async function bootstrapIframe() {
+    console.log('[Tool.js] Bootstrapping marketplace iframe with session integration');
+    
+    if (isBootstrapped) {
+        console.log('[Tool.js] Already bootstrapped');
+        return;
+    }
+    
+    // Wait for session data
+    if (!sessionData) {
+        console.warn('[Tool.js] No session data available, bootstrapping with limited functionality');
+    }
+    
+    // Wait for token system initialization
+    try {
+        await tokenInitializationPromise;
+    } catch (error) {
+        console.warn('[Tool.js] Token system not ready, continuing offline');
+    }
+    
+    // Load cached data for immediate UI
+    loadCachedDataInstantly();
+    
+    // Verify auth if we have a token
+    if (sessionData && sessionData.userToken) {
+        try {
+            // Try to validate via secure API call
+            const userResponse = await secureApiCall('GET', '/api/auth/verify');
+            if (userResponse && userResponse.valid) {
+                console.log('[Tool.js] Session verified via secure API');
+            }
+        } catch (error) {
+            console.warn('[Tool.js] Session verification failed:', error.message);
+            // Continue with cached user
+        }
+    }
+    
+    isBootstrapped = true;
+    console.log('[Tool.js] Marketplace iframe bootstrapped successfully with session integration');
+}
+
+// Update user interface with current user data
+function updateUserInterface() {
+    console.log('[Tool.js] Updating UI with user data:', {
+        hasUser: !!currentUser,
+        name: currentUser?.displayName,
+        fromSession: !!sessionData
+    });
+    
+    // Update my listings section
+    if (myListingsAvatar) {
+        if (userData?.photoURL) {
+            myListingsAvatar.style.backgroundImage = `url('${escapeHtml(userData.photoURL)}')`;
+            myListingsAvatar.innerHTML = '';
+        } else {
+            const initials = userData?.displayName ? 
+                userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                'ME';
+            myListingsAvatar.innerHTML = `<span style="color: white; font-size: 20px;">${initials}</span>`;
+        }
+    }
+    
+    if (myListingsName) {
+        myListingsName.textContent = userData?.displayName || 'My Marketplace';
+    }
+    
+    // Update any other user-specific UI elements
+    updatePremiumStatusUI();
+    updateStreakIndicator();
+    updateMyListingsPreview();
+    
+    // If we have a user, show personalized greeting
+    if (currentUser && currentUser.displayName) {
+        console.log(`[Tool.js] Welcome, ${currentUser.displayName}! (Session: ${!!sessionData})`);
+    }
 }
 
 // Load cached data for instant display
 function loadCachedDataInstantly() {
-    console.log('[Tool.js] Loading cached marketplace data');
+    console.log('[Tool.js] Loading cached marketplace data (non-sensitive)');
     
     try {
-        // Load user from cache immediately
+        // Load user from cache immediately (non-sensitive data only)
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
-            currentUser = JSON.parse(cachedUser);
-            console.log('[Tool.js] Loaded user from cache');
+            try {
+                const parsedUser = JSON.parse(cachedUser);
+                // Only use non-sensitive fields
+                if (parsedUser.displayName || parsedUser.photoURL) {
+                    if (!currentUser) currentUser = {};
+                    if (!userData) userData = {};
+                    
+                    currentUser.displayName = parsedUser.displayName || currentUser.displayName;
+                    currentUser.photoURL = parsedUser.photoURL || currentUser.photoURL;
+                    userData.displayName = parsedUser.displayName || userData.displayName;
+                    userData.photoURL = parsedUser.photoURL || userData.photoURL;
+                    
+                    console.log('[Tool.js] Loaded non-sensitive user data from cache');
+                }
+            } catch (e) {
+                console.warn('[Tool.js] Failed to parse cached user data:', e);
+            }
         }
         
-        // Load user profile from cache
-        const cachedProfile = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-        if (cachedProfile) {
-            userData = JSON.parse(cachedProfile);
-            
-            // Update my listings section
-            if (myListingsAvatar) {
-                if (userData.photoURL) {
-                    myListingsAvatar.style.backgroundImage = `url('${escapeHtml(userData.photoURL)}')`;
-                    myListingsAvatar.innerHTML = '';
-                } else {
-                    const initials = userData.displayName ? 
-                        userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                        'ME';
-                    myListingsAvatar.innerHTML = `<span style="color: white; font-size: 20px;">${initials}</span>`;
-                }
+        // Update my listings section with cached data
+        if (myListingsAvatar) {
+            if (userData?.photoURL) {
+                myListingsAvatar.style.backgroundImage = `url('${escapeHtml(userData.photoURL)}')`;
+                myListingsAvatar.innerHTML = '';
+            } else {
+                const initials = userData?.displayName ? 
+                    userData.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                    'ME';
+                myListingsAvatar.innerHTML = `<span style="color: white; font-size: 20px;">${initials}</span>`;
             }
-            
-            if (myListingsName) {
-                myListingsName.textContent = userData.displayName || 'My Marketplace';
-            }
+        }
+        
+        if (myListingsName) {
+            myListingsName.textContent = userData?.displayName || 'My Marketplace';
         }
         
         // Load all marketplace users for visibility checks
@@ -568,19 +1727,19 @@ function loadCachedDataInstantly() {
             updateMoodFilterIndicator();
         }
         
-        // Load user groups
+        // Load user groups (non-sensitive)
         const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
         if (groupsData) {
             userGroups = JSON.parse(groupsData);
         }
         
-        // Load user friends
+        // Load user friends (non-sensitive)
         const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_FRIENDS);
         if (friendsData) {
             userFriends = JSON.parse(friendsData);
         }
         
-        // Load user subscription
+        // Load user subscription (non-sensitive)
         const subscriptionData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         if (subscriptionData) {
             userSubscription = JSON.parse(subscriptionData);
@@ -626,7 +1785,7 @@ function loadCachedDataInstantly() {
         
         console.log('[Tool.js] Instant marketplace cache load complete');
         
-        // Render initial listings
+        // Render initial listings immediately
         renderMarketplaceList();
         updateAvailableListingsCount();
         
@@ -728,10 +1887,10 @@ async function loadListingsFromBackend() {
 
 async function loadUserGroups() {
     try {
-        const response = await safeApiCall('GET', '/api/user/groups');
+        const groups = await getUserGroups();
         
-        if (response && response.groups) {
-            userGroups = response.groups;
+        if (groups && Array.isArray(groups)) {
+            userGroups = groups;
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(userGroups));
         }
         
@@ -742,10 +1901,10 @@ async function loadUserGroups() {
 
 async function loadUserFriends() {
     try {
-        const response = await safeApiCall('GET', '/api/user/friends');
+        const friends = await getUserFriends();
         
-        if (response && response.friends) {
-            userFriends = response.friends;
+        if (friends && Array.isArray(friends)) {
+            userFriends = friends;
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_FRIENDS, JSON.stringify(userFriends));
         }
         
@@ -757,10 +1916,10 @@ async function loadUserFriends() {
 async function loadTeamMembers() {
     try {
         if (userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team')) {
-            const response = await safeApiCall('GET', '/api/team/members');
+            const members = await getTeamMembers();
             
-            if (response && response.members) {
-                teamMembers = response.members;
+            if (members && Array.isArray(members)) {
+                teamMembers = members;
                 localStorage.setItem(LOCAL_STORAGE_KEYS.TEAM_MEMBERS, JSON.stringify(teamMembers));
             }
         }
@@ -787,10 +1946,10 @@ async function loadLeaderboard() {
 async function loadAnalyticsData() {
     try {
         if (isUserPremium()) {
-            const response = await safeApiCall('GET', '/api/marketplace/analytics');
+            const analytics = await getAnalyticsData();
             
-            if (response && response.analytics) {
-                analyticsData = response.analytics;
+            if (analytics) {
+                analyticsData = analytics;
                 localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
                 updateAnalyticsDashboard();
             }
@@ -2032,13 +3191,13 @@ function renderLeaderboard() {
 }
 
 // Export Functions
-async function exportAnalytics(format) {
+async function exportAnalyticsData(format) {
     try {
-        const response = await safeApiCall('GET', `/api/analytics/export?format=${format}`);
+        const result = await exportAnalytics(format);
         
-        if (response && response.downloadUrl) {
+        if (result && result.downloadUrl) {
             const link = document.createElement('a');
-            link.href = response.downloadUrl;
+            link.href = result.downloadUrl;
             link.download = `analytics_${new Date().toISOString().split('T')[0]}.${format}`;
             document.body.appendChild(link);
             link.click();
@@ -2666,8 +3825,16 @@ function generateSampleMarketplaceData() {
     }
 }
 
-// Enhanced Event Listeners Setup
+// Enhanced Event Listeners Setup with parent communication
 function setupEnhancedEventListeners() {
+    // First setup all existing event listeners
+    setupExistingEventListeners();
+    
+    // Then add parent communication specific listeners
+    setupParentCommunicationListeners();
+}
+
+function setupExistingEventListeners() {
     const allTab = document.getElementById('allTab');
     const servicesTab = document.getElementById('servicesTab');
     const digitalTab = document.getElementById('digitalTab');
@@ -2919,7 +4086,7 @@ function setupEnhancedEventListeners() {
             });
             this.classList.add('selected');
             const format = this.dataset.format;
-            exportAnalytics(format);
+            exportAnalyticsData(format);
         });
     });
     
@@ -3168,7 +4335,7 @@ function setupEnhancedEventListeners() {
     const exportAnalyticsBtn = document.getElementById('exportAnalyticsBtn');
     if (exportAnalyticsBtn) exportAnalyticsBtn.addEventListener('click', () => {
         const selectedFormat = document.querySelector('.export-option.selected')?.dataset.format || 'csv';
-        exportAnalytics(selectedFormat);
+        exportAnalyticsData(selectedFormat);
     });
     
     document.querySelectorAll('[data-plan-select]').forEach(button => {
@@ -3258,6 +4425,100 @@ function setupEnhancedEventListeners() {
     });
     
     setupBackupRestoreButtons();
+}
+
+function setupParentCommunicationListeners() {
+    // Add a refresh user data button if it doesn't exist
+    const userActionsContainer = document.querySelector('.my-listings-actions');
+    if (userActionsContainer && !document.getElementById('refreshUserDataBtn')) {
+        const refreshUserBtn = document.createElement('button');
+        refreshUserBtn.className = 'my-listing-action-btn secondary';
+        refreshUserBtn.id = 'refreshUserDataBtn';
+        refreshUserBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh User';
+        refreshUserBtn.title = 'Refresh user data from parent or API';
+        refreshUserBtn.addEventListener('click', () => {
+            refreshUserData();
+        });
+        userActionsContainer.appendChild(refreshUserBtn);
+    }
+    
+    // Add debug info panel if in development mode
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        addDebugInfoPanel();
+    }
+}
+
+function refreshUserData() {
+    console.log('[Tool.js] Manually refreshing user data');
+    
+    // Reset flags
+    parentDataLoaded = false;
+    directAPILoaded = false;
+    dataFetchInProgress = false;
+    
+    // Clear current user data (but keep cached listings)
+    currentUser = null;
+    userData = null;
+    
+    // Try to get from parent first
+    if (window.parent !== window) {
+        requestParentUserData();
+    } else {
+        // If not in iframe, fetch directly
+        fetchUserDataDirectly();
+    }
+    
+    showNotification('Refreshing user data...', 'info');
+}
+
+function addDebugInfoPanel() {
+    const debugPanel = document.createElement('div');
+    debugPanel.id = 'marketplaceDebugPanel';
+    debugPanel.style.cssText = `
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        background: rgba(0,0,0,0.8);
+        color: #fff;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        z-index: 10000;
+        max-width: 300px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: monospace;
+    `;
+    
+    debugPanel.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <strong>Marketplace Debug</strong>
+            <button id="closeDebugBtn" style="background: none; border: none; color: #fff; cursor: pointer;">✕</button>
+        </div>
+        <div id="debugContent">
+            <div>Parent Data: <span id="debugParentData">${parentDataLoaded ? 'Loaded' : 'Waiting'}</span></div>
+            <div>Direct API: <span id="debugDirectAPI">${directAPILoaded ? 'Loaded' : 'Waiting'}</span></div>
+            <div>User: <span id="debugUserName">${currentUser?.displayName || 'None'}</span></div>
+            <div>In Iframe: <span id="debugIframe">${window.parent !== window ? 'Yes' : 'No'}</span></div>
+            <div>Auth Ready: <span id="debugAuth">${isAuthReady ? 'Yes' : 'No'}</span></div>
+        </div>
+    `;
+    
+    document.body.appendChild(debugPanel);
+    
+    // Update debug info periodically
+    setInterval(() => {
+        document.getElementById('debugParentData').textContent = parentDataLoaded ? 'Loaded' : 'Waiting';
+        document.getElementById('debugDirectAPI').textContent = directAPILoaded ? 'Loaded' : 'Waiting';
+        document.getElementById('debugUserName').textContent = currentUser?.displayName || 'None';
+        document.getElementById('debugIframe').textContent = window.parent !== window ? 'Yes' : 'No';
+        document.getElementById('debugAuth').textContent = isAuthReady ? 'Yes' : 'No';
+    }, 1000);
+    
+    // Close button
+    document.getElementById('closeDebugBtn').addEventListener('click', () => {
+        debugPanel.style.display = 'none';
+    });
 }
 
 function getCurrentListingId() {
@@ -4041,11 +5302,8 @@ async function inviteTeamMember() {
     if (!email) return;
     
     try {
-        const response = await safeApiCall('POST', '/api/team/invite', { email });
-        
-        if (response && response.success) {
-            showNotification('Invitation sent successfully', 'success');
-        }
+        await inviteTeamMember(email);
+        showNotification('Invitation sent successfully', 'success');
         
     } catch (error) {
         console.error('[Tool.js] Invitation failed:', error);
@@ -4063,12 +5321,9 @@ async function saveTeamChanges() {
             });
         });
         
-        const response = await safeApiCall('POST', '/api/team/update', { roleChanges });
-        
-        if (response && response.success) {
-            showNotification('Team updated successfully', 'success');
-            if (teamManagementModal) teamManagementModal.classList.remove('active');
-        }
+        await updateTeamMemberRole(roleChanges);
+        showNotification('Team updated successfully', 'success');
+        if (teamManagementModal) teamManagementModal.classList.remove('active');
         
     } catch (error) {
         console.error('[Tool.js] Team update failed:', error);
@@ -4311,10 +5566,6 @@ function reserveListing(listingId) {
     showNotification('Listing reserved - you will be notified when available', 'success');
 }
 
-function openChat(userId, userName) {
-    showNotification(`Opening chat with ${userName}`, 'info');
-}
-
 function shareListing(listing) {
     if (navigator.share) {
         navigator.share({
@@ -4434,7 +5685,339 @@ function showMyNotesModal() {
     }
 }
 
-console.log('[Tool.js] Enhanced marketplace system initialized successfully');
-console.log('[Tool.js] Premium features enabled: Featured Listings, Advanced Analytics, Team Tools, AR Previews, Bulk Uploads, Backup & Restore');
-console.log('[Tool.js] Direct token access enabled: Yes');
-console.log('[Tool.js] Bootstrapped:', isBootstrapped);
+// Queue API calls when token is not ready
+const apiCallQueue = [];
+let isProcessingQueue = false;
+
+function queueApiCall(method, endpoint, data, options) {
+    return new Promise((resolve, reject) => {
+        apiCallQueue.push({
+            method,
+            endpoint,
+            data,
+            options,
+            resolve,
+            reject,
+            timestamp: Date.now()
+        });
+        
+        console.log(`[Tool.js] Queued API call: ${method} ${endpoint} (queue size: ${apiCallQueue.length})`);
+        
+        // Start processing queue if not already doing so
+        if (!isProcessingQueue) {
+            processApiCallQueue();
+        }
+    });
+}
+
+async function processApiCallQueue() {
+    if (isProcessingQueue || apiCallQueue.length === 0) {
+        return;
+    }
+    
+    isProcessingQueue = true;
+    
+    // Wait for token to be ready
+    try {
+        await tokenInitializationPromise;
+    } catch (error) {
+        console.warn('[Tool.js] Token initialization failed, clearing queue');
+        // Reject all queued calls
+        apiCallQueue.forEach(call => {
+            call.reject(new Error('Token initialization failed'));
+        });
+        apiCallQueue.length = 0;
+        isProcessingQueue = false;
+        return;
+    }
+    
+    console.log(`[Tool.js] Processing API call queue (${apiCallQueue.length} calls)`);
+    
+    // Process each call in the queue
+    while (apiCallQueue.length > 0) {
+        const call = apiCallQueue.shift();
+        
+        try {
+            const result = await secureApiCall(call.method, call.endpoint, call.data, call.options);
+            call.resolve(result);
+        } catch (error) {
+            call.reject(error);
+        }
+        
+        // Small delay between calls to avoid overwhelming
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    isProcessingQueue = false;
+    console.log('[Tool.js] API call queue processed');
+}
+
+// Authenticated API call wrapper for backward compatibility
+async function authenticatedApiCall(method, endpoint, data = null) {
+    return await safeApiCall(method, endpoint, data);
+}
+
+// Backward compatibility for existing code
+async function makeApiCall(method, endpoint, data = null) {
+    return await secureApiCall(method, endpoint, data);
+}
+
+// Start background jobs only once
+function startBackgroundJobs() {
+    if (!isAuthReady || backgroundJobsStarted) {
+        return;
+    }
+    
+    console.log('[Tool.js] Starting background data jobs');
+    backgroundJobsStarted = true;
+    
+    // Start background data loading
+    setTimeout(() => {
+        loadEnhancedMarketplaceData().catch(error => {
+            console.warn('[Tool.js] Background data load failed:', error.message);
+        });
+    }, 1000);
+    
+    // Check premium status in background
+    setTimeout(() => {
+        checkUserPremiumStatus().catch(error => {
+            console.warn('[Tool.js] Premium status check failed:', error.message);
+        });
+    }, 1500);
+}
+
+// Handle session expired
+function handleSessionExpired() {
+    console.log('[Tool.js] Handling session expired notification');
+    
+    // Clear authentication token
+    localStorage.removeItem('USER_TOKEN');
+    
+    // Show session expired message
+    showNotification('Your session has expired. Please log in again.', 'error');
+    
+    // Try to refresh token if possible
+    if (typeof refreshToken === 'function') {
+        refreshToken().catch(() => {
+            // If refresh fails, trigger logout
+            handleParentLogout();
+        });
+    } else {
+        // If no refresh function, trigger logout
+        handleParentLogout();
+    }
+}
+
+// Request user data from parent (legacy function)
+function requestParentUserData() {
+    console.log('[Tool.js] Requesting user data from parent...');
+    
+    const requestSent = sendMessageToParent('get_user_data', {
+        fields: ['id', 'displayName', 'email', 'photoURL', 'isPremium', 'subscription', 'trustLevel']
+    });
+    
+    if (requestSent) {
+        // Set timeout for parent response
+        setTimeout(() => {
+            if (!parentDataLoaded && !dataFetchInProgress) {
+                console.log('[Tool.js] Parent data request timeout, falling back to direct API');
+                fetchUserDataDirectly();
+            }
+        }, parentDataTimeout);
+    } else {
+        console.log('[Tool.js] Could not send request to parent, falling back to direct API');
+        fetchUserDataDirectly();
+    }
+}
+
+// Fetch user data directly from API (legacy function)
+async function fetchUserDataDirectly() {
+    if (dataFetchInProgress) {
+        console.log('[Tool.js] User data fetch already in progress');
+        return;
+    }
+    
+    console.log('[Tool.js] Fetching user data directly from API...');
+    dataFetchInProgress = true;
+    
+    try {
+        // Check if we have a valid token first
+        const token = getCentralToken();
+        if (!token) {
+            console.warn('[Tool.js] No authentication token available for direct API fetch');
+            
+            // Check if we have cached user data
+            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+            if (cachedUser) {
+                console.log('[Tool.js] Using cached user data');
+                const parsedUser = JSON.parse(cachedUser);
+                processUserData(parsedUser, 'cache');
+                updateUserInterface();
+                dataFetchInProgress = false;
+                return;
+            }
+            
+            throw new Error('No authentication token available');
+        }
+        
+        // Use secure API call to fetch user profile
+        const response = await secureApiCall('GET', '/api/user/profile');
+        
+        if (response && response.user) {
+            console.log('[Tool.js] Successfully fetched user data from API:', response.user);
+            
+            // Mark that direct API data is loaded
+            directAPILoaded = true;
+            parentDataLoaded = false; // Ensure we don't try to load from parent again
+            dataFetchInProgress = false;
+            
+            // Process the user data
+            processUserData(response.user, 'api');
+            
+            // Update UI
+            updateUserInterface();
+            
+            // Initialize marketplace with user data
+            initializeEnhancedMarketplace();
+            
+            // Notify parent that we have user data (in case parent wants to sync)
+            sendMessageToParent('user_data_loaded', {
+                source: 'direct_api',
+                userId: response.user.id
+            });
+        } else {
+            throw new Error('Invalid response from user profile API');
+        }
+        
+    } catch (error) {
+        console.error('[Tool.js] Failed to fetch user data directly:', error);
+        dataFetchInProgress = false;
+        
+        // If we're in an iframe and haven't received parent data yet, wait a bit longer
+        if (window.parent !== window && !parentDataLoaded) {
+            console.log('[Tool.js] Will retry parent data request');
+            // Could implement a retry mechanism here
+        } else {
+            // Try to use cached data as last resort
+            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+            if (cachedUser) {
+                console.log('[Tool.js] Falling back to cached user data');
+                const parsedUser = JSON.parse(cachedUser);
+                processUserData(parsedUser, 'cache_fallback');
+                updateUserInterface();
+            } else {
+                console.warn('[Tool.js] No user data available from any source');
+                showNotification('Unable to load user profile. Some features may be limited.', 'warning');
+            }
+        }
+    }
+}
+
+// Process user data from any source (legacy function)
+function processUserData(userDataFromSource, source) {
+    console.log(`[Tool.js] Processing user data from ${source}:`, {
+        id: userDataFromSource.id,
+        displayName: userDataFromSource.displayName,
+        email: userDataFromSource.email
+    });
+    
+    // Set current user
+    currentUser = userDataFromSource;
+    userData = userDataFromSource;
+    
+    // Save to localStorage for offline use
+    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
+    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+    
+    // Log the source for debugging
+    console.log(`[Tool.js] User data loaded from ${source}:`, {
+        id: currentUser.id,
+        name: currentUser.displayName,
+        source: source
+    });
+}
+
+// Handle user data received from parent (legacy function)
+function handleParentUserData(userDataFromParent) {
+    if (parentDataLoaded || dataFetchInProgress) {
+        console.log('[Tool.js] Already loaded user data, ignoring duplicate from parent');
+        return;
+    }
+    
+    console.log('[Tool.js] Processing user data from parent:', userDataFromParent);
+    
+    // Validate the data
+    if (!userDataFromParent || (!userDataFromParent.id && !userDataFromParent.email)) {
+        console.warn('[Tool.js] Invalid user data received from parent:', userDataFromParent);
+        
+        // If we got invalid data from parent, try direct API
+        if (!dataFetchInProgress) {
+            fetchUserDataDirectly();
+        }
+        return;
+    }
+    
+    // Mark that parent data is loaded
+    parentDataLoaded = true;
+    dataFetchInProgress = false;
+    
+    // Process the user data
+    processUserData(userDataFromParent, 'parent');
+    
+    // Update UI
+    updateUserInterface();
+    
+    // Initialize marketplace with user data
+    initializeEnhancedMarketplace();
+}
+
+// Update user data when parent sends updates (legacy function)
+function updateUserDataFromParent(updatedData) {
+    console.log('[Tool.js] Updating user data from parent update:', updatedData);
+    
+    // Merge with existing data
+    if (currentUser) {
+        currentUser = { ...currentUser, ...updatedData };
+    } else {
+        currentUser = updatedData;
+    }
+    
+    if (userData) {
+        userData = { ...userData, ...updatedData };
+    } else {
+        userData = updatedData;
+    }
+    
+    // Save to localStorage
+    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
+    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+    
+    // Update UI
+    updateUserInterface();
+    
+    // Check premium status if subscription data was updated
+    if (updatedData.subscription) {
+        userSubscription = updatedData.subscription;
+        updatePremiumStatusUI();
+    }
+}
+
+// Handle user logout (legacy function)
+function handleUserLogout() {
+    console.log('[Tool.js] Handling user logout notification');
+    
+    // Clear user data
+    currentUser = null;
+    userData = null;
+    userSubscription = null;
+    
+    // Clear localStorage (but keep some cached data for re-login)
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
+    
+    // Update UI for logout state
+    resetUIForLogout();
+    
+    showNotification('You have been logged out.', 'warning');
+}

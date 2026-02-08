@@ -11,9 +11,10 @@
     <title>Groups | Knecta Chat</title>
     
     <!-- API System - LOADED FIRST -->
-    <script src="/js/api.js"></script>
-    <script src="group.js"></script>
-    <script src="/js/settingsManager.js"></script>
+<script type="module" src="group-core.js"></script>
+<script type="module" src="group-ui.js"></script>
+
+    <script type="module" src="/js/settingsManager.js"></script>
 
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1206,6 +1207,5 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
-    <script type="module" src="group.js"></script>
 </body>
 </html>

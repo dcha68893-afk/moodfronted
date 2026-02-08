@@ -1,342 +1,122 @@
 // =============================================
-// STATUS SYSTEM - USING DIRECT TOKEN ACCESS
+// STATUS SYSTEM - UI COMPONENTS
 // =============================================
 
-// Global variables
-let currentUser = null;
-let userData = null;
-let statuses = [];
-let myStatuses = [];
-let friendsStatuses = [];
-let closeFriendsStatuses = [];
-let pinnedStatuses = [];
-let mutedStatuses = [];
-let microCirclesStatuses = [];
-let highlights = [];
-let drafts = [];
-let scheduledStatuses = [];
-let viewedStatuses = new Set();
-let mutedUsers = new Set();
-let currentViewerStatus = null;
-let currentSlideIndex = 0;
-let autoAdvanceInterval = null;
-let isAutoAdvancePaused = false;
-let progressInterval = null;
-let currentCategoryFilter = 'all';
-let currentIntentFilter = null;
-let currentMoodFilter = null;
-let isMobile = window.innerWidth <= 768;
-let isOfflineMode = false;
-let pendingReplies = [];
-let pendingReactions = [];
-let moodChartData = [];
-let streakCount = 0;
-let lastPostDate = null;
-let activeFilters = new Set();
-let selectedDraft = null;
-
-// Authentication variables
-let apiReadyReceived = false;
-let apiCheckInterval = null;
-let authValidated = false;
-let authChecked = false;
-let isBackgroundInitialized = false;
-
-// Status types
-const statusTypes = {
-    'text': {
-        name: 'Text Status',
-        icon: 'fas fa-font',
-        color: 'var(--primary-color)'
-    },
-    'media': {
-        name: 'Media Status',
-        icon: 'fas fa-image',
-        color: 'var(--success-color)'
-    },
-    'poll': {
-        name: 'Poll Status',
-        icon: 'fas fa-poll',
-        color: 'var(--warning-color)'
-    }
-};
-
-// Status intents
-const statusIntents = {
-    'feedback': {
-        name: 'Looking for feedback',
-        icon: 'fas fa-comments',
-        color: 'var(--intent-feedback)'
-    },
-    'achievement': {
-        name: 'Sharing achievement',
-        icon: 'fas fa-trophy',
-        color: 'var(--intent-achievement)'
-    },
-    'advice': {
-        name: 'Need advice',
-        icon: 'fas fa-hands-helping',
-        color: 'var(--intent-advice)'
-    },
-    'chat': {
-        name: 'Available to chat',
-        icon: 'fas fa-comment-dots',
-        color: 'var(--intent-chat)'
-    },
-    'venting': {
-        name: 'Just venting',
-        icon: 'fas fa-wind',
-        color: 'var(--intent-venting)'
-    },
-    'reflection': {
-        name: 'Personal reflection',
-        icon: 'fas fa-brain',
-        color: 'var(--intent-reflection)'
-    },
-    'question': {
-        name: 'Asking a question',
-        icon: 'fas fa-question-circle',
-        color: 'var(--intent-question)'
-    },
-    'celebration': {
-        name: 'Celebration',
-        icon: 'fas fa-glass-cheers',
-        color: 'var(--intent-celebration)'
-    }
-};
-
-// Moods
-const statusMoods = {
-    'happy': {
-        name: 'Happy',
-        emoji: '😊',
-        color: 'var(--mood-happy)'
-    },
-    'stressed': {
-        name: 'Stressed',
-        emoji: '😫',
-        color: 'var(--mood-stressed)'
-    },
-    'motivated': {
-        name: 'Motivated',
-        emoji: '💪',
-        color: 'var(--mood-motivated)'
-    },
-    'lonely': {
-        name: 'Lonely',
-        emoji: '😔',
-        color: 'var(--mood-lonely)'
-    },
-    'excited': {
-        name: 'Excited',
-        emoji: '🤩',
-        color: 'var(--mood-excited)'
-    },
-    'calm': {
-        name: 'Calm',
-        emoji: '😌',
-        color: 'var(--mood-calm)'
-    },
-    'sad': {
-        name: 'Sad',
-        emoji: '😢',
-        color: 'var(--mood-sad)'
-    },
-    'angry': {
-        name: 'Angry',
-        emoji: '😠',
-        color: 'var(--mood-angry)'
-    }
-};
-
-// Categories
-const statusCategories = {
-    'life': {
-        name: 'Life',
-        icon: 'fas fa-heart',
-        color: 'var(--category-life)'
-    },
-    'business': {
-        name: 'Business',
-        icon: 'fas fa-briefcase',
-        color: 'var(--category-business)'
-    },
-    'study': {
-        name: 'Study',
-        icon: 'fas fa-graduation-cap',
-        color: 'var(--category-study)'
-    },
-    'motivation': {
-        name: 'Motivation',
-        icon: 'fas fa-fire',
-        color: 'var(--category-motivation)'
-    },
-    'event': {
-        name: 'Event',
-        icon: 'fas fa-calendar-alt',
-        color: 'var(--category-event)'
-    }
-};
-
-// Action buttons
-const actionButtons = {
-    'message': {
-        name: 'Message me',
-        icon: 'fas fa-comments',
-        color: 'var(--primary-color)'
-    },
-    'join': {
-        name: 'Join discussion',
-        icon: 'fas fa-users',
-        color: 'var(--success-color)'
-    },
-    'vote': {
-        name: 'Vote now',
-        icon: 'fas fa-vote-yea',
-        color: 'var(--warning-color)'
-    },
-    'book': {
-        name: 'Book a call',
-        icon: 'fas fa-phone',
-        color: 'var(--info-color)'
-    },
-    'learn': {
-        name: 'Learn more',
-        icon: 'fas fa-book',
-        color: 'var(--primary-color)'
-    },
-    'support': {
-        name: 'Show support',
-        icon: 'fas fa-hands-helping',
-        color: 'var(--success-color)'
-    },
-    'collaborate': {
-        name: 'Collaborate',
-        icon: 'fas fa-handshake',
-        color: 'var(--warning-color)'
-    },
-    'resource': {
-        name: 'View resource',
-        icon: 'fas fa-external-link-alt',
-        color: 'var(--info-color)'
-    }
-};
-
-// Privacy settings
-const privacySettings = {
-    'everyone': {
-        name: 'Everyone',
-        description: 'Visible to all Knecta users',
-        icon: 'fas fa-globe'
-    },
-    'friends': {
-        name: 'Friends Only',
-        description: 'Visible to your friends only',
-        icon: 'fas fa-user-friends'
-    },
-    'close-friends': {
-        name: 'Close Friends',
-        description: 'Visible to close friends only',
-        icon: 'fas fa-heart'
-    },
-    'except': {
-        name: 'All Except...',
-        description: 'Hide from specific people',
-        icon: 'fas fa-user-minus'
-    },
-    'specific': {
-        name: 'Specific People...',
-        description: 'Share with select individuals',
-        icon: 'fas fa-user-check'
-    },
-    'micro-circle': {
-        name: 'Micro Circle',
-        description: 'Share with a specific group',
-        icon: 'fas fa-users'
-    }
-};
-
-// Duration options
-const durationOptions = {
-    '3600': '1 hour',
-    '21600': '6 hours',
-    '43200': '12 hours',
-    '86400': '24 hours',
-    '0': 'Permanent'
-};
-
-// Report reasons
-const reportReasons = {
-    'spam': 'Spam',
-    'inappropriate': 'Inappropriate Content',
-    'harassment': 'Harassment',
-    'false-info': 'False Information',
-    'violence': 'Violence',
-    'hate-speech': 'Hate Speech',
-    'self-harm': 'Self-Harm',
-    'copyright': 'Copyright Violation'
-};
-
-// Reactions
-const reactions = {
-    'like': '👍',
-    'love': '❤️',
-    'helpful': '💡',
-    'inspiring': '✨',
-    'funny': '😂',
-    'not-useful': '👎'
-};
-
-// Emojis for picker
-const emojis = ['😊', '😂', '🥰', '😍', '🤩', '😎', '🤔', '😴', '🥳', '😢', '😠', '😱', '👍', '👎', '❤️', '🔥', '💯', '✨', '🎉', '🙏', '🤝', '💪', '👏', '🙌', '🤗', '😇', '🥺', '🤯', '😳', '🤪', '😜', '🤓', '😎', '🥶', '😈', '👻', '💀', '👀', '🦄', '🐶', '🐱', '🦁', '🐯', '🦊', '🐻', '🐼', '🐨', '🐵', '🦉', '🐣', '🦋', '🐝', '🐙', '🦑', '🐋', '🦈', '🐊', '🦒', '🐘', '🦏', '🦘', '🐫', '🦙', '🦌', '🐎', '🐖', '🐑', '🐕', '🐈', '🐇', '🦔', '🐿️', '🐉', '🐲', '🌵', '🎄', '🌲', '🌳', '🌴', '🌱', '🌿', '☘️', '🍀', '🎍', '🎋', '🍃', '🍂', '🍁', '🍄', '🐚', '🌾', '💐', '🌷', '🌹', '🥀', '🌺', '🌸', '🌼', '🌻', '🌞', '🌝', '🌛', '🌜', '🌚', '🌕', '🌖', '🌗', '🌘', '🌑', '🌒', '🌓', '🌔', '🌙', '🌎', '🌍', '🌏', '🪐', '💫', '⭐', '🌟', '✨', '⚡', '☄️', '💥', '🔥', '🌈', '☀️', '🌤️', '⛅', '🌥️', '☁️', '🌦️', '🌧️', '⛈️', '🌩️', '🌨️', '❄️', '☃️', '⛄', '🌬️', '💨', '💧', '💦', '☔', '☂️', '🌊', '🌫️'];
-
-// Background options
-const backgroundOptions = [
-    { id: '1', type: 'solid', color: 'var(--status-bg-1)' },
-    { id: '2', type: 'solid', color: 'var(--status-bg-2)' },
-    { id: '3', type: 'solid', color: 'var(--status-bg-3)' },
-    { id: '4', type: 'solid', color: 'var(--status-bg-4)' },
-    { id: '5', type: 'solid', color: 'var(--status-bg-5)' },
-    { id: '6', type: 'solid', color: 'var(--status-bg-6)' },
-    { id: '7', type: 'solid', color: 'var(--status-bg-7)' },
-    { id: '8', type: 'solid', color: 'var(--status-bg-8)' },
-    { id: 'gradient-1', type: 'gradient', gradient: 'linear-gradient(45deg, #667eea, #764ba2)' },
-    { id: 'gradient-2', type: 'gradient', gradient: 'linear-gradient(45deg, #f6d365, #fda085)' },
-    { id: 'gradient-3', type: 'gradient', gradient: 'linear-gradient(45deg, #a8edea, #fed6e3)' },
-    { id: 'gradient-4', type: 'gradient', gradient: 'linear-gradient(45deg, #ff6b6b, #ffa726)' }
-];
-
-// Templates
-const statusTemplates = {
-    'motivation': {
-        name: 'Motivation',
-        text: 'Today is a new opportunity to be better than yesterday. Keep pushing forward! 💪',
-        background: 'gradient-2',
-        mood: 'motivated',
-        intent: 'reflection'
-    },
-    'question': {
-        name: 'Question',
-        text: 'What\'s the best piece of advice you\'ve ever received? 🤔',
-        background: '3',
-        mood: 'curious',
-        intent: 'question'
-    },
-    'achievement': {
-        name: 'Achievement',
-        text: 'Just reached a personal milestone! Celebrating small wins along the way. 🎉',
-        background: 'gradient-1',
-        mood: 'happy',
-        intent: 'achievement'
-    },
-    'reflection': {
-        name: 'Reflection',
-        text: 'Taking a moment to reflect on what truly matters in life. Peace comes from within. ✨',
-        background: '6',
-        mood: 'calm',
-        intent: 'reflection'
-    }
-};
+import {
+    currentUser,
+    userData,
+    statuses,
+    myStatuses,
+    friendsStatuses,
+    closeFriendsStatuses,
+    pinnedStatuses,
+    mutedStatuses,
+    microCirclesStatuses,
+    highlights,
+    drafts,
+    scheduledStatuses,
+    viewedStatuses,
+    mutedUsers,
+    currentViewerStatus,
+    currentSlideIndex,
+    autoAdvanceInterval,
+    isAutoAdvancePaused,
+    progressInterval,
+    currentCategoryFilter,
+    currentIntentFilter,
+    currentMoodFilter,
+    isMobile,
+    isOfflineMode,
+    pendingReplies,
+    pendingReactions,
+    moodChartData,
+    streakCount,
+    lastPostDate,
+    activeFilters,
+    selectedDraft,
+    apiReadyReceived,
+    apiCheckInterval,
+    authValidated,
+    authChecked,
+    isBackgroundInitialized,
+    isTokenReady,
+    tokenReadyCallbacks,
+    pendingApiRequests,
+    parentCoordinator,
+    statusTypes,
+    statusIntents,
+    statusMoods,
+    statusCategories,
+    actionButtons,
+    privacySettings,
+    durationOptions,
+    reportReasons,
+    reactions,
+    emojis,
+    backgroundOptions,
+    statusTemplates,
+    LOCAL_STORAGE_KEYS,
+    UNIFIED_TOKEN_KEY,
+    initializeParentCoordination,
+    startHandshakeProtocol,
+    sendToParent,
+    handleSessionData,
+    validateSessionData,
+    updateLocalStateWithSession,
+    handleSessionUpdate,
+    handleLogout,
+    handleParentUnavailable,
+    startBackgroundInitializationWithSession,
+    makeParentApiRequest,
+    handleApiResponse,
+    handleApiError,
+    handleAuthValidated,
+    waitForTokenReady,
+    onTokenReady,
+    triggerTokenReadyCallbacks,
+    getUnifiedToken,
+    migrateLegacyTokens,
+    isAuthenticated,
+    queueApiRequest,
+    processPendingApiRequests,
+    startTokenReadinessCheck,
+    secureApiCall,
+    initializeUIWithCachedData,
+    loadUserFromCache,
+    loadCachedDataInstantly,
+    startBackgroundInitialization,
+    loadFreshDataInBackground,
+    safeApiOperation,
+    loadStatusesInBackground,
+    loadMyStatusesInBackground,
+    loadHighlightsInBackground,
+    loadUserDataInBackground,
+    bootstrapApplication,
+    handleAuthError,
+    initializeStatusSystem,
+    loadInitialData,
+    filterStatusesByPrivacy,
+    getStatusPreviewText,
+    updateCurrentSection,
+    filterStatusesByType,
+    getEmptyStateMessage,
+    addReactionToStatus,
+    voteOnPoll,
+    pinStatus,
+    unpinStatus,
+    muteUser,
+    unmuteUser,
+    postStatus,
+    updateStreakCounter,
+    scheduleStatus,
+    saveDraft,
+    reportStatus,
+    escapeHtml,
+    formatTimeAgo,
+    retryOperation,
+    generateSampleMoodData,
+    initPageCore
+} from './status-core.js';
 
 // DOM Elements
 const createStatusModal = document.getElementById('createStatusModal');
@@ -367,983 +147,6 @@ const pinnedStatusList = document.getElementById('pinnedStatusList');
 const mutedStatusList = document.getElementById('mutedStatusList');
 const microCirclesStatusList = document.getElementById('microCirclesStatusList');
 const myStatusList = document.getElementById('myStatusList');
-
-// Local Storage Keys
-const LOCAL_STORAGE_KEYS = {
-    USER: 'knecta_current_user',
-    USER_TOKEN: 'knecta_user_token',
-    STATUSES: 'knecta_statuses_cache',
-    MY_STATUSES: 'knecta_my_statuses_cache',
-    VIEWED_STATUSES: 'knecta_viewed_statuses',
-    MUTED_USERS: 'knecta_muted_users',
-    HIGHLIGHTS: 'knecta_status_highlights',
-    DRAFTS: 'knecta_status_drafts',
-    SCHEDULED: 'knecta_scheduled_statuses',
-    PENDING_REPLIES: 'knecta_pending_replies',
-    PENDING_REACTIONS: 'knecta_pending_reactions',
-    MOOD_DATA: 'knecta_mood_data',
-    STREAK: 'knecta_posting_streak',
-    LAST_POST_DATE: 'knecta_last_post_date',
-    OFFLINE_QUEUE: 'knecta_offline_status_queue',
-    LAST_SYNC: 'knecta_status_last_sync'
-};
-
-// Direct token access keys
-const TOKEN_KEYS = {
-    ACCESS_TOKEN: 'knecta_access_token',
-    REFRESH_TOKEN: 'knecta_refresh_token',
-    TOKEN_EXPIRY: 'knecta_token_expiry'
-};
-
-// =============================================
-// SAFE AUTH STATE ACCESS - IFRAME RULES
-// =============================================
-
-/**
- * Get valid token safely - read-only access without mutation
- * @returns {string|null} Valid token or null if not found
- */
-function getValidToken() {
-    // Priority 1: Parent window signal (if available)
-    if (window.parent && window.parent.getValidToken && typeof window.parent.getValidToken === 'function') {
-        try {
-            const parentToken = window.parent.getValidToken();
-            if (parentToken && typeof parentToken === 'string' && parentToken.length > 10) {
-                return parentToken;
-            }
-        } catch (error) {
-            console.warn('[Status] Failed to get token from parent:', error.message);
-        }
-    }
-    
-    // Priority 2: api.js global state
-    if (window.knectaAPI && typeof window.knectaAPI.getToken === 'function') {
-        try {
-            const apiToken = window.knectaAPI.getToken();
-            if (apiToken && typeof apiToken === 'string' && apiToken.length > 10) {
-                return apiToken;
-            }
-        } catch (error) {
-            console.warn('[Status] Failed to get token from api.js:', error.message);
-        }
-    }
-    
-    // Priority 3: localStorage (read-only, no mutations)
-    const possibleKeys = [
-        'knecta_access_token',
-        'accessToken',
-        'moodchat_token',
-        'token',
-        'auth_token',
-        'knecta_token'
-    ];
-    
-    for (const key of possibleKeys) {
-        try {
-            const token = localStorage.getItem(key);
-            if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
-                if (token.split('.').length === 3) {
-                    return token;
-                }
-            }
-        } catch (error) {
-            console.warn('[Status] Error reading token from localStorage:', error.message);
-        }
-    }
-    
-    return null;
-}
-
-/**
- * Get current user safely - read-only access without mutation
- * @returns {Object|null} User object or null if not found
- */
-function getCurrentUser() {
-    // Priority 1: Parent window signal
-    if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
-        try {
-            const parentUser = window.parent.AppState.currentUser;
-            if (parentUser && parentUser.id) {
-                return parentUser;
-            }
-        } catch (error) {
-            console.warn('[Status] Failed to get user from parent:', error.message);
-        }
-    }
-    
-    // Priority 2: localStorage (read-only)
-    try {
-        const userData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-        if (userData && userData !== 'undefined' && userData !== 'null') {
-            const user = JSON.parse(userData);
-            if (user && typeof user === 'object' && user.id) {
-                return user;
-            }
-        }
-    } catch (error) {
-        console.warn('[Status] Error reading user from localStorage:', error.message);
-    }
-    
-    return null;
-}
-
-/**
- * Check if auth is ready from parent/global state
- * @returns {boolean} True if auth is ready
- */
-function isAuthReady() {
-    // Check parent window signal
-    if (window.parent && window.parent.isAuthReady && typeof window.parent.isAuthReady === 'function') {
-        try {
-            return window.parent.isAuthReady() === true;
-        } catch (error) {
-            console.warn('[Status] Failed to check auth from parent:', error.message);
-        }
-    }
-    
-    // Check api.js state
-    if (window.knectaAPI && typeof window.knectaAPI.isReady === 'function') {
-        try {
-            return window.knectaAPI.isReady() === true;
-        } catch (error) {
-            console.warn('[Status] Failed to check auth from api.js:', error.message);
-        }
-    }
-    
-    // Fallback: check if we have a token
-    return getValidToken() !== null;
-}
-
-// =============================================
-// IMMEDIATE UI RENDERING WITH CACHED DATA
-// =============================================
-
-/**
- * Initialize UI immediately with cached data (non-blocking)
- */
-function initializeUIWithCachedData() {
-    console.log('[Status] Initializing UI with cached data');
-    
-    try {
-        // Get user immediately (read-only)
-        const cachedUser = getCurrentUser();
-        if (cachedUser) {
-            currentUser = cachedUser;
-            userData = cachedUser;
-            updateUserUIInstantly();
-        }
-        
-        // Load all cached data
-        loadCachedDataInstantly();
-        
-        // Setup basic UI interactions
-        setupBasicEventListeners();
-        
-        // Initialize UI components
-        initializeUIComponents();
-        
-        console.log('[Status] UI rendered with cached data');
-    } catch (error) {
-        console.error('[Status] Error initializing UI with cached data:', error);
-        setupBasicEventListeners();
-    }
-}
-
-/**
- * Update user UI instantly without waiting for API
- */
-function updateUserUIInstantly() {
-    if (!currentUser) return;
-    
-    const avatarElements = document.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar');
-    avatarElements.forEach(avatar => {
-        if (currentUser.photoURL) {
-            avatar.style.backgroundImage = `url('${escapeHtml(currentUser.photoURL)}')`;
-            avatar.innerHTML = '';
-        } else if (currentUser.displayName) {
-            const initials = currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-            avatar.innerHTML = `<span>${initials}</span>`;
-        }
-    });
-    
-    const nameElements = document.querySelectorAll('.user-name, .status-user-name');
-    nameElements.forEach(element => {
-        if (currentUser.displayName) {
-            element.textContent = currentUser.displayName;
-        }
-    });
-    
-    updateMyStatusPreview();
-    
-    const createStatusBtn = document.getElementById('createStatusBtn');
-    if (createStatusBtn) {
-        createStatusBtn.disabled = false;
-    }
-}
-
-/**
- * Load cached data instantly for offline use
- */
-function loadCachedDataInstantly() {
-    console.log('[Status] Loading cached data instantly...');
-    
-    try {
-        // Load user from cache
-        const cachedUser = getCurrentUser();
-        if (cachedUser) {
-            currentUser = cachedUser;
-            console.log('[Status] Loaded user from cache');
-            updateUserUIInstantly();
-        }
-        
-        // Load statuses
-        const statusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUSES);
-        if (statusesData) {
-            try {
-                statuses = JSON.parse(statusesData);
-                console.log('[Status] Loaded statuses from cache:', statuses.length);
-            } catch (parseError) {
-                console.error('[Status] Error parsing cached statuses:', parseError);
-            }
-        }
-        
-        // Load my statuses
-        const myStatusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_STATUSES);
-        if (myStatusesData) {
-            try {
-                myStatuses = JSON.parse(myStatusesData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing cached my statuses:', parseError);
-            }
-        }
-        
-        // Load viewed statuses
-        const viewedStatusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
-        if (viewedStatusesData) {
-            try {
-                viewedStatuses = new Set(JSON.parse(viewedStatusesData));
-            } catch (parseError) {
-                console.error('[Status] Error parsing viewed statuses:', parseError);
-            }
-        }
-        
-        // Load muted users
-        const mutedUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_USERS);
-        if (mutedUsersData) {
-            try {
-                mutedUsers = new Set(JSON.parse(mutedUsersData));
-            } catch (parseError) {
-                console.error('[Status] Error parsing muted users:', parseError);
-            }
-        }
-        
-        // Load highlights
-        const highlightsData = localStorage.getItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
-        if (highlightsData) {
-            try {
-                highlights = JSON.parse(highlightsData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing highlights:', parseError);
-            }
-        }
-        
-        // Load drafts
-        const draftsData = localStorage.getItem(LOCAL_STORAGE_KEYS.DRAFTS);
-        if (draftsData) {
-            try {
-                drafts = JSON.parse(draftsData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing drafts:', parseError);
-            }
-        }
-        
-        // Load scheduled statuses
-        const scheduledData = localStorage.getItem(LOCAL_STORAGE_KEYS.SCHEDULED);
-        if (scheduledData) {
-            try {
-                scheduledStatuses = JSON.parse(scheduledData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing scheduled statuses:', parseError);
-            }
-        }
-        
-        // Load pending replies
-        const pendingRepliesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
-        if (pendingRepliesData) {
-            try {
-                pendingReplies = JSON.parse(pendingRepliesData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing pending replies:', parseError);
-            }
-        }
-        
-        // Load pending reactions
-        const pendingReactionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
-        if (pendingReactionsData) {
-            try {
-                pendingReactions = JSON.parse(pendingReactionsData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing pending reactions:', parseError);
-            }
-        }
-        
-        // Load mood data
-        const moodData = localStorage.getItem(LOCAL_STORAGE_KEYS.MOOD_DATA);
-        if (moodData) {
-            try {
-                moodChartData = JSON.parse(moodData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing mood data:', parseError);
-            }
-        }
-        
-        // Load streak data
-        const streakData = localStorage.getItem(LOCAL_STORAGE_KEYS.STREAK);
-        if (streakData) {
-            try {
-                streakCount = parseInt(streakData);
-                const streakElement = document.getElementById('streakCount');
-                if (streakElement) {
-                    streakElement.textContent = streakCount;
-                }
-            } catch (parseError) {
-                console.error('[Status] Error parsing streak data:', parseError);
-            }
-        }
-        
-        // Load last post date
-        const lastPostDateData = localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
-        if (lastPostDateData) {
-            try {
-                lastPostDate = new Date(lastPostDateData);
-            } catch (parseError) {
-                console.error('[Status] Error parsing last post date:', parseError);
-            }
-        }
-        
-        console.log('[Status] Cached data loaded successfully');
-        renderStatusListInstantly();
-        
-    } catch (error) {
-        console.error('[Status] Error loading cached data:', error);
-    }
-}
-
-/**
- * Render status list instantly from cache
- */
-function renderStatusListInstantly() {
-    if (!allStatusList) return;
-    
-    allStatusList.innerHTML = '';
-    
-    if (statuses.length === 0) {
-        allStatusList.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-comment-dots"></i>
-                <p>No statuses yet</p>
-                <p class="subtext">Be the first to post a status!</p>
-            </div>
-        `;
-        return;
-    }
-    
-    const fragment = document.createDocumentFragment();
-    
-    statuses.slice(0, 20).forEach(status => {
-        addStatusItemInstant(status, fragment);
-    });
-    
-    allStatusList.appendChild(fragment);
-    allStatusList.classList.add('instant-load');
-}
-
-/**
- * Add status item instantly (for offline cache display)
- * @param {Object} statusData - Status data
- * @param {DocumentFragment} container - Container element
- */
-function addStatusItemInstant(statusData, container) {
-    const statusItem = document.createElement('div');
-    statusItem.className = 'status-item';
-    statusItem.dataset.statusId = statusData.id;
-    statusItem.dataset.userId = statusData.userId;
-    
-    const user = statusData.user || { displayName: 'Unknown User', photoURL: '', id: statusData.userId };
-    const initials = user.displayName ? 
-        user.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-        'U';
-    
-    const isViewed = viewedStatuses.has(statusData.id);
-    const isPinned = statusData.isPinned || false;
-    const isMuted = mutedUsers.has(statusData.userId);
-    const mood = statusData.mood || 'happy';
-    const intent = statusData.intent || 'reflection';
-    const category = statusData.category || 'life';
-    
-    let previewText = '';
-    if (statusData.type === 'text') {
-        previewText = statusData.text || 'Text status';
-    } else if (statusData.type === 'media') {
-        previewText = `<i class="fas fa-image"></i> Media status`;
-        if (statusData.caption) {
-            previewText += `: ${statusData.caption}`;
-        }
-    } else if (statusData.type === 'poll') {
-        previewText = `<i class="fas fa-poll"></i> Poll: ${statusData.question || 'Poll status'}`;
-    }
-    
-    const timeAgo = statusData.createdAt ? formatTimeAgo(new Date(statusData.createdAt)) : 'Just now';
-    
-    statusItem.innerHTML = `
-        <div class="status-avatar">
-            <div class="status-ring ${isViewed ? 'viewed' : ''}"></div>
-            <div class="status-avatar-inner" ${user.photoURL ? `style="background-image: url('${escapeHtml(user.photoURL)}')"` : ''}>
-                ${user.photoURL ? '' : `<span>${initials}</span>`}
-            </div>
-            <div class="status-indicators">
-                ${mood ? `<div class="status-indicator mood" style="background-color: ${statusMoods[mood]?.color || 'var(--mood-happy)'}" title="${statusMoods[mood]?.name || 'Mood'}"></div>` : ''}
-                ${intent ? `<div class="status-indicator intent" style="background-color: ${statusIntents[intent]?.color || 'var(--intent-feedback)'}" title="${statusIntents[intent]?.name || 'Intent'}"></div>` : ''}
-                ${isPinned ? `<div class="status-indicator pinned" title="Pinned Status"></div>` : ''}
-                ${isMuted ? `<div class="status-indicator muted" title="Muted User"></div>` : ''}
-            </div>
-        </div>
-        <div class="status-info">
-            <div class="status-name">
-                <span class="status-name-text">${escapeHtml(user.displayName || 'Unknown User')}</span>
-                <span class="status-time">${timeAgo}</span>
-            </div>
-            <div class="status-details">
-                <span class="status-type" style="color: ${statusTypes[statusData.type]?.color || 'var(--primary-color)'}">
-                    <i class="${statusTypes[statusData.type]?.icon || 'fas fa-comment'}"></i>
-                    ${statusTypes[statusData.type]?.name || 'Status'}
-                </span>
-                ${statusData.isSensitive ? '<span class="status-tag privacy"><i class="fas fa-eye-slash"></i> Sensitive</span>' : ''}
-                ${statusData.isSilent ? '<span class="status-tag privacy"><i class="fas fa-bell-slash"></i> Silent</span>' : ''}
-            </div>
-            <div class="status-preview ${statusData.type === 'media' || statusData.type === 'poll' ? statusData.type : ''}">
-                ${previewText}
-            </div>
-            <div class="status-tags">
-                ${mood ? `<span class="status-tag mood"><i class="fas fa-brain"></i> ${statusMoods[mood]?.name || 'Mood'}</span>` : ''}
-                ${intent ? `<span class="status-tag intent"><i class="fas fa-bullseye"></i> ${statusIntents[intent]?.name || 'Intent'}</span>` : ''}
-                ${category ? `<span class="status-tag category"><i class="${statusCategories[category]?.icon || 'fas fa-tag'}"></i> ${statusCategories[category]?.name || 'Category'}</span>` : ''}
-                ${statusData.privacy ? `<span class="status-tag privacy"><i class="${privacySettings[statusData.privacy]?.icon || 'fas fa-lock'}"></i> ${privacySettings[statusData.privacy]?.name || 'Privacy'}</span>` : ''}
-            </div>
-        </div>
-        <div class="status-actions">
-            <button class="status-action-btn" data-action="view" title="View Status">
-                <i class="fas fa-eye"></i>
-            </button>
-            ${isPinned ? `
-            <button class="status-action-btn warning" data-action="unpin" title="Unpin Status">
-                <i class="fas fa-thumbtack"></i>
-            </button>
-            ` : `
-            <button class="status-action-btn" data-action="pin" title="Pin Status">
-                <i class="fas fa-thumbtack"></i>
-            </button>
-            `}
-            ${isMuted ? `
-            <button class="status-action-btn" data-action="unmute" title="Unmute User">
-                <i class="fas fa-volume-up"></i>
-            </button>
-            ` : `
-            <button class="status-action-btn" data-action="mute" title="Mute User">
-                <i class="fas fa-volume-mute"></i>
-            </button>
-            `}
-        </div>
-    `;
-    
-    statusItem.addEventListener('click', (e) => {
-        if (!e.target.closest('.status-actions')) {
-            showStatusViewer(statusData);
-        }
-    });
-    
-    const actionButtons = statusItem.querySelectorAll('.status-action-btn');
-    actionButtons.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const action = btn.dataset.action;
-            handleStatusAction(action, statusData, btn);
-        });
-    });
-    
-    container.appendChild(statusItem);
-}
-
-// =============================================
-// SAFE BACKGROUND INITIALIZATION - IFRAME RULES
-// =============================================
-
-/**
- * Start background initialization when auth is ready
- */
-async function startBackgroundInitialization() {
-    if (isBackgroundInitialized) {
-        console.log('[Status] Background already initialized');
-        return;
-    }
-    
-    console.log('[Status] Starting background initialization');
-    
-    try {
-        // Wait for auth readiness signal
-        await waitForAuthReady();
-        
-        // Get fresh token (dynamic read)
-        const token = getValidToken();
-        if (!token) {
-            console.log('[Status] No access token available, staying in offline mode');
-            isOfflineMode = true;
-            showNotification('Using offline mode. Some features require connection.', 'warning');
-            return;
-        }
-        
-        // Load fresh data in background
-        await loadFreshDataInBackground();
-        
-        isBackgroundInitialized = true;
-        console.log('[Status] Background initialization complete');
-        
-    } catch (error) {
-        console.error('[Status] Background initialization error:', error);
-    }
-}
-
-/**
- * Wait for auth readiness signal from parent/api.js
- * @returns {Promise<void>}
- */
-function waitForAuthReady() {
-    return new Promise((resolve) => {
-        let attempts = 0;
-        const maxAttempts = 30; // 3 seconds max
-        let lastDelay = 0;
-        
-        const checkAuth = () => {
-            attempts++;
-            
-            if (isAuthReady()) {
-                console.log('[Status] Auth ready signal received');
-                resolve();
-                return;
-            }
-            
-            if (attempts >= maxAttempts) {
-                console.log('[Status] Auth not ready after maximum attempts, proceeding with cached data');
-                resolve();
-                return;
-            }
-            
-            const delay = Math.min(100 * Math.pow(1.5, attempts), 1000);
-            lastDelay = delay;
-            
-            setTimeout(checkAuth, delay);
-        };
-        
-        checkAuth();
-    });
-}
-
-/**
- * Load fresh data in background for silent updates
- */
-async function loadFreshDataInBackground() {
-    try {
-        console.log('[Status] Loading fresh data in background');
-        
-        const loadPromises = [];
-        
-        loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
-        loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
-        loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
-        
-        await Promise.allSettled(loadPromises);
-        
-        console.log('[Status] Background data loading complete');
-        
-    } catch (error) {
-        console.error('[Status] Background data loading error:', error);
-    }
-}
-
-/**
- * Safe API operation with error containment
- * @param {Function} operation - Async operation
- * @returns {Promise<any>}
- */
-async function safeApiOperation(operation) {
-    try {
-        if (!isAuthReady()) {
-            throw new Error('Auth not ready');
-        }
-        
-        return await operation();
-    } catch (error) {
-        console.log('[Status] Safe API operation failed:', error.message);
-        
-        // Don't switch to offline mode automatically
-        // Let parent handle auth recovery
-        
-        // Silently fail - user can still use cached data
-        return null;
-    }
-}
-
-/**
- * Load statuses in background
- */
-async function loadStatusesInBackground() {
-    try {
-        if (!window.knectaAPI || typeof window.knectaAPI.get !== 'function') {
-            throw new Error('api.js not available');
-        }
-        
-        const response = await window.knectaAPI.get('/api/statuses');
-        if (response && response.statuses) {
-            statuses = response.statuses;
-            statuses = filterStatusesByPrivacy(statuses);
-            statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-            
-            const activeSection = document.querySelector('.statuses-section.active');
-            if (activeSection && activeSection.id === 'allStatusSection') {
-                renderStatusesList(allStatusList, statuses);
-            }
-        }
-    } catch (error) {
-        console.log('[Status] Failed to load statuses:', error.message);
-        throw error;
-    }
-}
-
-/**
- * Load my statuses in background
- */
-async function loadMyStatusesInBackground() {
-    try {
-        if (!window.knectaAPI || typeof window.knectaAPI.get !== 'function') {
-            throw new Error('api.js not available');
-        }
-        
-        const response = await window.knectaAPI.get('/api/statuses/my');
-        if (response && response.statuses) {
-            myStatuses = response.statuses;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-            updateMyStatusPreview();
-        }
-    } catch (error) {
-        console.log('[Status] Failed to load my statuses:', error.message);
-        throw error;
-    }
-}
-
-/**
- * Load highlights in background
- */
-async function loadHighlightsInBackground() {
-    try {
-        if (!window.knectaAPI || typeof window.knectaAPI.get !== 'function') {
-            throw new Error('api.js not available');
-        }
-        
-        const response = await window.knectaAPI.get('/api/statuses/highlights');
-        if (response && response.highlights) {
-            highlights = response.highlights;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
-        }
-    } catch (error) {
-        console.log('[Status] Failed to load highlights:', error.message);
-        throw error;
-    }
-}
-
-// =============================================
-// SAFE API REQUESTS - IFRAME RULES
-// =============================================
-
-/**
- * Make authenticated request safely via api.js
- * @param {string} endpoint - API endpoint
- * @param {Object} options - Request options
- * @returns {Promise<any>} API response
- */
-async function makeAuthenticatedRequest(endpoint, options = {}) {
-    // If offline mode, queue for later
-    if (isOfflineMode) {
-        console.log('[Status] Offline mode: Queueing request for', endpoint);
-        return Promise.reject(new Error('Offline mode'));
-    }
-    
-    // Check auth state first
-    if (!isAuthReady()) {
-        console.log('[Status] Auth not ready, cannot make request');
-        throw new Error('Authentication not ready');
-    }
-    
-    // Ensure api.js is available
-    if (!window.knectaAPI) {
-        await waitForApiJs(3000);
-        if (!window.knectaAPI) {
-            throw new Error('API library not available');
-        }
-    }
-    
-    try {
-        console.log('[Status] Making API call via api.js to:', endpoint);
-        
-        let response;
-        const method = options.method?.toUpperCase() || 'GET';
-        
-        switch (method) {
-            case 'GET':
-                response = await window.knectaAPI.get(endpoint);
-                break;
-            case 'POST':
-                response = await window.knectaAPI.post(endpoint, options.body ? JSON.parse(options.body) : {});
-                break;
-            case 'PUT':
-                response = await window.knectaAPI.put(endpoint, options.body ? JSON.parse(options.body) : {});
-                break;
-            case 'DELETE':
-                response = await window.knectaAPI.delete(endpoint);
-                break;
-            default:
-                throw new Error(`Unsupported method: ${method}`);
-        }
-        
-        return response;
-        
-    } catch (error) {
-        console.error('[Status] API request error via api.js:', error);
-        
-        // Check for auth errors
-        const isAuthError = error.message?.includes('401') || 
-                           error.message?.includes('403') ||
-                           error.message?.includes('Unauthorized') || 
-                           error.message?.includes('Authentication') || 
-                           error.message?.includes('Session');
-        
-        if (isAuthError) {
-            console.log('[Status] Authentication failed, pausing requests');
-            isOfflineMode = true;
-            showNotification('Authentication issue. Using offline mode.', 'warning');
-        }
-        
-        throw error;
-    }
-}
-
-/**
- * Wait for api.js with timeout
- * @param {number} timeoutMs - Maximum wait time
- * @returns {Promise<void>}
- */
-function waitForApiJs(timeoutMs = 5000) {
-    return new Promise((resolve) => {
-        let attempts = 0;
-        const maxAttempts = Math.floor(timeoutMs / 100);
-        
-        const checkApi = () => {
-            attempts++;
-            
-            if (window.knectaAPI && typeof window.knectaAPI.get === 'function') {
-                resolve();
-                return;
-            }
-            
-            if (attempts >= maxAttempts) {
-                console.log('[Status] api.js not loaded after maximum attempts');
-                resolve();
-                return;
-            }
-            
-            const delay = Math.min(100 * Math.pow(1.5, attempts), 1000);
-            setTimeout(checkApi, delay);
-        };
-        
-        checkApi();
-    });
-}
-
-// =============================================
-// ENHANCED BOOTSTRAP WITH SAFE AUTH
-// =============================================
-
-/**
- * Enhanced bootstrap process for iframe
- * @returns {Promise<boolean>} Success status
- */
-async function bootstrapIframe() {
-    console.log('[Status] Enhanced iframe bootstrap start');
-    
-    try {
-        // Phase 1: Immediate UI with cached data (non-blocking)
-        initializeUIWithCachedData();
-        
-        // Phase 2: Delayed background initialization (waits for auth)
-        setTimeout(() => {
-            startBackgroundInitialization().catch(error => {
-                console.error('[Status] Background init failed:', error);
-            });
-        }, 500);
-        
-        // Phase 3: Setup event listeners
-        setTimeout(() => {
-            setupEventListeners();
-        }, 200);
-        
-        return true;
-        
-    } catch (error) {
-        console.error('[Status] Enhanced bootstrap error:', error);
-        return false;
-    }
-}
-
-// =============================================
-// ENHANCED AUTHENTICATION FUNCTIONS - SAFE
-// =============================================
-
-/**
- * Handle authentication errors gracefully without redirects
- * @param {string} message - Error message
- */
-function handleAuthError(message) {
-    console.error('[Status] Authentication failed:', message);
-    
-    if (statuses.length === 0 && myStatuses.length === 0) {
-        errorUI.classList.add('active');
-        document.getElementById('errorTitle').textContent = 'Connection Issue';
-        document.getElementById('errorMessage').textContent = 'Unable to connect to server. Using cached data.';
-        
-        const retryBtn = document.getElementById('retryConnectionBtn');
-        if (retryBtn) {
-            retryBtn.textContent = 'Retry Connection';
-            retryBtn.onclick = async function() {
-                errorUI.classList.remove('active');
-                showNotification('Retrying connection...', 'info');
-                
-                try {
-                    await startBackgroundInitialization();
-                } catch (error) {
-                    console.error('[Status] Retry failed:', error);
-                    errorUI.classList.add('active');
-                }
-            };
-        }
-        
-        const offlineBtn = document.getElementById('offlineModeBtn');
-        if (offlineBtn) {
-            offlineBtn.style.display = 'block';
-            offlineBtn.onclick = function() {
-                errorUI.classList.remove('active');
-                isOfflineMode = true;
-                showNotification('Offline mode enabled', 'warning');
-                loadCachedDataInstantly();
-            };
-        }
-    } else {
-        showNotification('Using cached data. Some features may be limited.', 'warning');
-        isOfflineMode = true;
-    }
-}
-
-/**
- * Initialize status system with fallback to cached data
- */
-async function initializeStatusSystem() {
-    console.log('[Status] Initializing status system');
-    
-    try {
-        // Try to load fresh data with timeout
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout loading data')), 10000)
-        );
-        
-        await Promise.race([loadInitialData(), timeoutPromise]);
-        
-        // Update UI
-        updateMyStatusPreview();
-        updateStreakCounter();
-        updateMoodChart();
-        
-        renderStatusListInstantly();
-        
-        if (currentUser) {
-            showNotification(`Welcome back, ${currentUser.displayName || 'User'}!`, 'success');
-        }
-        
-        console.log('[Status] Status system initialized successfully');
-        
-    } catch (error) {
-        console.error('[Status] Error initializing status system:', error);
-        
-        // Fallback to cached data
-        loadCachedDataInstantly();
-        
-        if (!isOfflineMode) {
-            showNotification('Could not connect to server. Using cached data.', 'warning');
-            isOfflineMode = true;
-        }
-    }
-}
-
-/**
- * Load initial data from API
- */
-async function loadInitialData() {
-    try {
-        console.log('[Status] Loading initial data from API');
-        
-        const loadPromises = [];
-        
-        loadPromises.push(safeApiOperation(async () => {
-            const statusesResponse = await makeAuthenticatedRequest('/api/statuses');
-            if (statusesResponse && statusesResponse.statuses) {
-                statuses = statusesResponse.statuses;
-                console.log('[Status] Loaded statuses from API:', statuses.length);
-                
-                statuses = filterStatusesByPrivacy(statuses);
-                statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                
-                localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-                updateCurrentSection();
-            }
-        }));
-        
-        loadPromises.push(safeApiOperation(async () => {
-            const myStatusesResponse = await makeAuthenticatedRequest('/api/statuses/my');
-            if (myStatusesResponse && myStatusesResponse.statuses) {
-                myStatuses = myStatusesResponse.statuses;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-                updateMyStatusPreview();
-            }
-        }));
-        
-        loadPromises.push(safeApiOperation(async () => {
-            const highlightsResponse = await makeAuthenticatedRequest('/api/statuses/highlights');
-            if (highlightsResponse && highlightsResponse.highlights) {
-                highlights = highlightsResponse.highlights;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
-            }
-        }));
-        
-        await Promise.allSettled(loadPromises);
-        
-        errorUI.classList.remove('active');
-        
-        console.log('[Status] Initial data loaded successfully');
-        
-    } catch (error) {
-        console.error('[Status] Error loading initial data:', error);
-        throw error;
-    }
-}
 
 // =============================================
 // UI COMPONENTS INITIALIZATION
@@ -1778,13 +581,16 @@ function initializeReactions() {
         
         reactionBtn.addEventListener('click', () => {
             if (currentViewerStatus) {
-                addReactionToStatus(currentViewerStatus.id, key);
-                reactionBtn.classList.add('selected');
-                
-                document.querySelectorAll('.reaction-btn').forEach(btn => {
-                    if (btn !== reactionBtn) {
-                        btn.classList.remove('selected');
-                    }
+                addReactionToStatus(currentViewerStatus.id, key).then(() => {
+                    reactionBtn.classList.add('selected');
+                    
+                    document.querySelectorAll('.reaction-btn').forEach(btn => {
+                        if (btn !== reactionBtn) {
+                            btn.classList.remove('selected');
+                        }
+                    });
+                }).catch(error => {
+                    showNotification('Failed to add reaction', 'error');
                 });
             }
         });
@@ -1989,45 +795,194 @@ function initializeRepeatOptions() {
 }
 
 // =============================================
-// CORE STATUS FUNCTIONS
+// INSTANT UI RENDERING WITH CACHED DATA
 // =============================================
 
 /**
- * Filter statuses by privacy
- * @param {Array} statuses - Statuses to filter
- * @returns {Array} Filtered statuses
+ * Update user UI instantly without waiting for API
  */
-function filterStatusesByPrivacy(statuses) {
-    return statuses.filter(status => {
-        if (mutedUsers.has(status.userId)) {
-            return false;
-        }
-        
-        const privacy = status.privacy || 'friends';
-        
-        switch(privacy) {
-            case 'everyone':
-                return true;
-            case 'friends':
-                return true;
-            case 'close-friends':
-                return false;
-            case 'except':
-                return true;
-            case 'specific':
-                return false;
-            case 'micro-circle':
-                return false;
-            default:
-                return true;
+export function updateUserUIInstantly() {
+    if (!currentUser) return;
+    
+    const avatarElements = document.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar');
+    avatarElements.forEach(avatar => {
+        if (currentUser.photoURL) {
+            avatar.style.backgroundImage = `url('${escapeHtml(currentUser.photoURL)}')`;
+            avatar.innerHTML = '';
+        } else if (currentUser.displayName) {
+            const initials = currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+            avatar.innerHTML = `<span>${initials}</span>`;
         }
     });
+    
+    const nameElements = document.querySelectorAll('.user-name, .status-user-name');
+    nameElements.forEach(element => {
+        if (currentUser.displayName) {
+            element.textContent = currentUser.displayName;
+        }
+    });
+    
+    updateMyStatusPreview();
+    
+    const createStatusBtn = document.getElementById('createStatusBtn');
+    if (createStatusBtn) {
+        createStatusBtn.disabled = false;
+    }
 }
+
+/**
+ * Render status list instantly from cache
+ */
+export function renderStatusListInstantly() {
+    if (!allStatusList) return;
+    
+    allStatusList.innerHTML = '';
+    
+    if (statuses.length === 0) {
+        allStatusList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-comment-dots"></i>
+                <p>No statuses yet</p>
+                <p class="subtext">Be the first to post a status!</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const fragment = document.createDocumentFragment();
+    
+    statuses.slice(0, 20).forEach(status => {
+        addStatusItemInstant(status, fragment);
+    });
+    
+    allStatusList.appendChild(fragment);
+    allStatusList.classList.add('instant-load');
+}
+
+/**
+ * Add status item instantly (for offline cache display)
+ * @param {Object} statusData - Status data
+ * @param {DocumentFragment} container - Container element
+ */
+function addStatusItemInstant(statusData, container) {
+    const statusItem = document.createElement('div');
+    statusItem.className = 'status-item';
+    statusItem.dataset.statusId = statusData.id;
+    statusItem.dataset.userId = statusData.userId;
+    
+    const user = statusData.user || { displayName: 'Unknown User', photoURL: '', id: statusData.userId };
+    const initials = user.displayName ? 
+        user.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+        'U';
+    
+    const isViewed = viewedStatuses.has(statusData.id);
+    const isPinned = statusData.isPinned || false;
+    const isMuted = mutedUsers.has(statusData.userId);
+    const mood = statusData.mood || 'happy';
+    const intent = statusData.intent || 'reflection';
+    const category = statusData.category || 'life';
+    
+    let previewText = '';
+    if (statusData.type === 'text') {
+        previewText = statusData.text || 'Text status';
+    } else if (statusData.type === 'media') {
+        previewText = `<i class="fas fa-image"></i> Media status`;
+        if (statusData.caption) {
+            previewText += `: ${statusData.caption}`;
+        }
+    } else if (statusData.type === 'poll') {
+        previewText = `<i class="fas fa-poll"></i> Poll: ${statusData.question || 'Poll status'}`;
+    }
+    
+    const timeAgo = statusData.createdAt ? formatTimeAgo(new Date(statusData.createdAt)) : 'Just now';
+    
+    statusItem.innerHTML = `
+        <div class="status-avatar">
+            <div class="status-ring ${isViewed ? 'viewed' : ''}"></div>
+            <div class="status-avatar-inner" ${user.photoURL ? `style="background-image: url('${escapeHtml(user.photoURL)}')"` : ''}>
+                ${user.photoURL ? '' : `<span>${initials}</span>`}
+            </div>
+            <div class="status-indicators">
+                ${mood ? `<div class="status-indicator mood" style="background-color: ${statusMoods[mood]?.color || 'var(--mood-happy)'}" title="${statusMoods[mood]?.name || 'Mood'}"></div>` : ''}
+                ${intent ? `<div class="status-indicator intent" style="background-color: ${statusIntents[intent]?.color || 'var(--intent-feedback)'}" title="${statusIntents[intent]?.name || 'Intent'}"></div>` : ''}
+                ${isPinned ? `<div class="status-indicator pinned" title="Pinned Status"></div>` : ''}
+                ${isMuted ? `<div class="status-indicator muted" title="Muted User"></div>` : ''}
+            </div>
+        </div>
+        <div class="status-info">
+            <div class="status-name">
+                <span class="status-name-text">${escapeHtml(user.displayName || 'Unknown User')}</span>
+                <span class="status-time">${timeAgo}</span>
+            </div>
+            <div class="status-details">
+                <span class="status-type" style="color: ${statusTypes[statusData.type]?.color || 'var(--primary-color)'}">
+                    <i class="${statusTypes[statusData.type]?.icon || 'fas fa-comment'}"></i>
+                    ${statusTypes[statusData.type]?.name || 'Status'}
+                </span>
+                ${statusData.isSensitive ? '<span class="status-tag privacy"><i class="fas fa-eye-slash"></i> Sensitive</span>' : ''}
+                ${statusData.isSilent ? '<span class="status-tag privacy"><i class="fas fa-bell-slash"></i> Silent</span>' : ''}
+            </div>
+            <div class="status-preview ${statusData.type === 'media' || statusData.type === 'poll' ? statusData.type : ''}">
+                ${previewText}
+            </div>
+            <div class="status-tags">
+                ${mood ? `<span class="status-tag mood"><i class="fas fa-brain"></i> ${statusMoods[mood]?.name || 'Mood'}</span>` : ''}
+                ${intent ? `<span class="status-tag intent"><i class="fas fa-bullseye"></i> ${statusIntents[intent]?.name || 'Intent'}</span>` : ''}
+                ${category ? `<span class="status-tag category"><i class="${statusCategories[category]?.icon || 'fas fa-tag'}"></i> ${statusCategories[category]?.name || 'Category'}</span>` : ''}
+                ${statusData.privacy ? `<span class="status-tag privacy"><i class="${privacySettings[statusData.privacy]?.icon || 'fas fa-lock'}"></i> ${privacySettings[statusData.privacy]?.name || 'Privacy'}</span>` : ''}
+            </div>
+        </div>
+        <div class="status-actions">
+            <button class="status-action-btn" data-action="view" title="View Status">
+                <i class="fas fa-eye"></i>
+            </button>
+            ${isPinned ? `
+            <button class="status-action-btn warning" data-action="unpin" title="Unpin Status">
+                <i class="fas fa-thumbtack"></i>
+            </button>
+            ` : `
+            <button class="status-action-btn" data-action="pin" title="Pin Status">
+                <i class="fas fa-thumbtack"></i>
+            </button>
+            `}
+            ${isMuted ? `
+            <button class="status-action-btn" data-action="unmute" title="Unmute User">
+                <i class="fas fa-volume-up"></i>
+            </button>
+            ` : `
+            <button class="status-action-btn" data-action="mute" title="Mute User">
+                <i class="fas fa-volume-mute"></i>
+            </button>
+            `}
+        </div>
+    `;
+    
+    statusItem.addEventListener('click', (e) => {
+        if (!e.target.closest('.status-actions')) {
+            showStatusViewer(statusData);
+        }
+    });
+    
+    const actionButtons = statusItem.querySelectorAll('.status-action-btn');
+    actionButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            handleStatusAction(action, statusData, btn);
+        });
+    });
+    
+    container.appendChild(statusItem);
+}
+
+// =============================================
+// UI HELPER FUNCTIONS
+// =============================================
 
 /**
  * Update my status preview
  */
-function updateMyStatusPreview() {
+export function updateMyStatusPreview() {
     const myStatusRing = document.getElementById('myStatusRing');
     const myStatusAvatar = document.getElementById('myStatusAvatar');
     const myStatusIndicator = document.getElementById('myStatusIndicator');
@@ -2050,36 +1005,9 @@ function updateMyStatusPreview() {
 }
 
 /**
- * Update streak counter
- */
-function updateStreakCounter() {
-    const today = new Date().toDateString();
-    if (lastPostDate && lastPostDate.toDateString() === today) {
-        return;
-    }
-    
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    if (lastPostDate && lastPostDate.toDateString() === yesterday.toDateString()) {
-        streakCount++;
-    } else if (lastPostDate) {
-        streakCount = 1;
-    } else {
-        streakCount = 1;
-    }
-    
-    const streakElement = document.getElementById('streakCount');
-    if (streakElement) {
-        streakElement.textContent = streakCount;
-    }
-    localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
-}
-
-/**
  * Update mood chart
  */
-function updateMoodChart() {
+export function updateMoodChart() {
     const moodChart = document.getElementById('moodChart');
     if (!moodChart) return;
     
@@ -2098,102 +1026,11 @@ function updateMoodChart() {
 }
 
 /**
- * Generate sample mood data for demo
- * @returns {Array} Sample mood data
- */
-function generateSampleMoodData() {
-    const moods = Object.keys(statusMoods);
-    const data = [];
-    
-    for (let i = 0; i < 30; i++) {
-        const randomMood = moods[Math.floor(Math.random() * moods.length)];
-        data.push({
-            mood: randomMood,
-            value: 20 + Math.floor(Math.random() * 60)
-        });
-    }
-    
-    return data;
-}
-
-/**
- * Get status preview text
- * @param {Object} status - Status object
- * @returns {string} Preview text
- */
-function getStatusPreviewText(status) {
-    if (status.type === 'text') {
-        return status.text.length > 30 ? status.text.substring(0, 30) + '...' : status.text;
-    } else if (status.type === 'media') {
-        return status.caption ? status.caption.substring(0, 30) + '...' : 'Media status';
-    } else if (status.type === 'poll') {
-        return status.question ? status.question.substring(0, 30) + '...' : 'Poll status';
-    }
-    return 'Status';
-}
-
-/**
- * Update current section based on active tab
- */
-function updateCurrentSection() {
-    const activeSection = document.querySelector('.statuses-section.active');
-    if (activeSection) {
-        const sectionId = activeSection.id;
-        
-        switch(sectionId) {
-            case 'allStatusSection':
-                if (allStatusList) renderStatusesList(allStatusList, statuses);
-                break;
-            case 'friendsStatusSection':
-                if (friendsStatusList) renderStatusesList(friendsStatusList, filterStatusesByType('friends'));
-                break;
-            case 'closeFriendsStatusSection':
-                if (closeFriendsStatusList) renderStatusesList(closeFriendsStatusList, filterStatusesByType('close-friends'));
-                break;
-            case 'pinnedStatusSection':
-                if (pinnedStatusList) renderStatusesList(pinnedStatusList, filterStatusesByType('pinned'));
-                break;
-            case 'mutedStatusSection':
-                if (mutedStatusList) renderStatusesList(mutedStatusList, filterStatusesByType('muted'));
-                break;
-            case 'microCirclesStatusSection':
-                if (microCirclesStatusList) renderStatusesList(microCirclesStatusList, filterStatusesByType('micro-circle'));
-                break;
-            case 'myStatusSection':
-                if (myStatusList) renderStatusesList(myStatusList, myStatuses);
-                break;
-        }
-    }
-}
-
-/**
- * Filter statuses by type
- * @param {string} type - Filter type
- * @returns {Array} Filtered statuses
- */
-function filterStatusesByType(type) {
-    switch(type) {
-        case 'friends':
-            return statuses.filter(status => status.privacy === 'friends' || status.privacy === 'everyone');
-        case 'close-friends':
-            return statuses.filter(status => status.privacy === 'close-friends');
-        case 'pinned':
-            return statuses.filter(status => status.isPinned);
-        case 'muted':
-            return statuses.filter(status => mutedUsers.has(status.userId));
-        case 'micro-circle':
-            return statuses.filter(status => status.privacy === 'micro-circle');
-        default:
-            return statuses;
-    }
-}
-
-/**
  * Render statuses list
  * @param {HTMLElement} container - Container element
  * @param {Array} statusesList - Statuses to render
  */
-function renderStatusesList(container, statusesList) {
+export function renderStatusesList(container, statusesList) {
     if (!container) return;
     
     container.innerHTML = '';
@@ -2239,23 +1076,6 @@ function renderStatusesList(container, statusesList) {
     filteredStatuses.forEach(status => {
         addStatusItem(status, container);
     });
-}
-
-/**
- * Get empty state message based on current filters
- * @returns {string} Empty state message
- */
-function getEmptyStateMessage() {
-    if (activeFilters.size > 0) {
-        return `No statuses match your filters`;
-    }
-    if (currentIntentFilter) {
-        return `No statuses with "${statusIntents[currentIntentFilter]?.name || currentIntentFilter}" intent`;
-    }
-    if (currentMoodFilter) {
-        return `No statuses with "${statusMoods[currentMoodFilter]?.name || currentMoodFilter}" mood`;
-    }
-    return 'Be the first to post a status!';
 }
 
 /**
@@ -2381,22 +1201,42 @@ function addStatusItem(statusData, container) {
  * @param {Object} statusData - Status data
  * @param {HTMLElement} button - Action button
  */
-function handleStatusAction(action, statusData, button) {
+async function handleStatusAction(action, statusData, button) {
     switch(action) {
         case 'view':
             showStatusViewer(statusData);
             break;
         case 'pin':
-            pinStatus(statusData);
+            pinStatus(statusData).then(() => {
+                showNotification('Status pinned', 'success');
+                updateCurrentSection();
+            }).catch(error => {
+                showNotification('Failed to pin status', 'error');
+            });
             break;
         case 'unpin':
-            unpinStatus(statusData);
+            unpinStatus(statusData).then(() => {
+                showNotification('Status unpinned', 'success');
+                updateCurrentSection();
+            }).catch(error => {
+                showNotification('Failed to unpin status', 'error');
+            });
             break;
         case 'mute':
-            muteUser(statusData.userId);
+            muteUser(statusData.userId).then(() => {
+                showNotification('User muted', 'success');
+                updateCurrentSection();
+            }).catch(error => {
+                showNotification('Failed to mute user', 'error');
+            });
             break;
         case 'unmute':
-            unmuteUser(statusData.userId);
+            unmuteUser(statusData.userId).then(() => {
+                showNotification('User unmuted', 'success');
+                updateCurrentSection();
+            }).catch(error => {
+                showNotification('Failed to unmute user', 'error');
+            });
             break;
     }
 }
@@ -2409,7 +1249,7 @@ function handleStatusAction(action, statusData, button) {
  * Show status viewer
  * @param {Object} statusData - Status data to view
  */
-function showStatusViewer(statusData) {
+export function showStatusViewer(statusData) {
     currentViewerStatus = statusData;
     currentSlideIndex = 0;
     
@@ -2630,7 +1470,61 @@ function createPollStatusSlide(statusData) {
         const pollOptions = slide.querySelectorAll('.poll-option');
         pollOptions.forEach(option => {
             option.addEventListener('click', () => {
-                voteOnPoll(statusData.id, option.dataset.option);
+                voteOnPoll(statusData.id, option.dataset.option).then(response => {
+                    if (response && response.success) {
+                        showNotification('Vote recorded', 'success');
+                        
+                        if (currentViewerStatus && currentViewerStatus.id === statusData.id) {
+                            const pollOption = document.querySelector(`.poll-option[data-option="${option.dataset.option}"]`);
+                            if (pollOption) {
+                                pollOption.classList.add('selected');
+                                
+                                if (currentViewerStatus.options) {
+                                    const option = currentViewerStatus.options.find(opt => opt.id === option.dataset.option);
+                                    if (option) {
+                                        option.votes = (option.votes || 0) + 1;
+                                        currentViewerStatus.hasVoted = true;
+                                        currentViewerStatus.userVote = option.dataset.option;
+                                        
+                                        const totalVotes = currentViewerStatus.options.reduce((sum, opt) => sum + (opt.votes || 0), 0);
+                                        const pollOptions = document.querySelectorAll('.poll-option');
+                                        pollOptions.forEach(opt => {
+                                            const optId = opt.dataset.option;
+                                            const optionData = currentViewerStatus.options.find(o => o.id === optId);
+                                            if (optionData) {
+                                                const percentage = totalVotes > 0 ? Math.round((optionData.votes || 0) / totalVotes * 100) : 0;
+                                                const percentageElement = opt.querySelector('.poll-option-percentage');
+                                                const barElement = opt.querySelector('.poll-option-bar');
+                                                
+                                                if (percentageElement) {
+                                                    percentageElement.textContent = `${percentage}% (${optionData.votes || 0} votes)`;
+                                                }
+                                                if (barElement) {
+                                                    barElement.style.width = `${percentage}%`;
+                                                }
+                                            }
+                                        });
+                                        
+                                        const totalVotesElement = document.querySelector('.poll-total-votes');
+                                        if (totalVotesElement) {
+                                            totalVotesElement.textContent = `Total votes: ${totalVotes}`;
+                                        }
+                                        
+                                        const pollContainer = document.querySelector('.poll-container');
+                                        if (pollContainer && !document.querySelector('.poll-voted-message')) {
+                                            const votedMessage = document.createElement('div');
+                                            votedMessage.className = 'poll-voted-message';
+                                            votedMessage.textContent = '✓ You have voted';
+                                            pollContainer.appendChild(votedMessage);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }).catch(error => {
+                    showNotification('Failed to vote', 'error');
+                });
             });
         });
     }
@@ -2669,7 +1563,11 @@ function handleActionButtonClick(actionKey, statusData) {
             }
             break;
         case 'support':
-            addReactionToStatus(statusData.id, 'love');
+            addReactionToStatus(statusData.id, 'love').then(() => {
+                showNotification('Reacted with ❤️', 'success');
+            }).catch(error => {
+                showNotification('Failed to add reaction', 'error');
+            });
             break;
         case 'collaborate':
             showNotification('Would start collaboration with ' + (statusData.user?.displayName || 'user'), 'info');
@@ -2744,336 +1642,118 @@ function toggleAutoAdvance() {
 }
 
 // =============================================
-// STATUS ACTIONS - WITH SAFE API CALLS
+// PARENT COORDINATION UI FUNCTIONS
 // =============================================
 
 /**
- * Add reaction to status
- * @param {string} statusId - Status ID
- * @param {string} reaction - Reaction type
+ * Enable protected UI elements
  */
-async function addReactionToStatus(statusId, reaction) {
-    try {
-        if (isOfflineMode) {
-            pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
-            localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, JSON.stringify(pendingReactions));
-            showNotification(`Reacted with ${reactions[reaction]} (offline)`, 'success');
-            return;
+export function enableProtectedUI() {
+    console.log('[Status] Enabling protected UI');
+    
+    const protectedElements = [
+        'createStatusBtn',
+        'viewMyStatusBtn',
+        'editMyStatusBtn',
+        'viewHighlightsBtn',
+        'createHighlightBtn',
+        'viewTimelineBtn',
+        'viewStatsBtn',
+        'viewDraftsBtn',
+        'viewScheduledBtn',
+        'myStatusPreview',
+        'postStatusBtn',
+        'saveDraftBtn',
+        'scheduleStatusBtn'
+    ];
+    
+    protectedElements.forEach(elementId => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.disabled = false;
+            element.style.opacity = '1';
+            element.style.pointerEvents = 'auto';
         }
-        
-        const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/react`, {
-            method: 'POST',
-            body: JSON.stringify({ reaction })
-        });
-        
-        if (response && response.success) {
-            showNotification(`Reacted with ${reactions[reaction]}`, 'success');
+    });
+    
+    // Update UI state
+    updateMyStatusPreview();
+}
+
+/**
+ * Disable protected UI elements
+ */
+export function disableProtectedUI() {
+    console.log('[Status] Disabling protected UI');
+    
+    const protectedElements = [
+        'createStatusBtn',
+        'viewMyStatusBtn',
+        'editMyStatusBtn',
+        'viewHighlightsBtn',
+        'createHighlightBtn',
+        'viewTimelineBtn',
+        'viewStatsBtn',
+        'viewDraftsBtn',
+        'viewScheduledBtn',
+        'myStatusPreview',
+        'postStatusBtn',
+        'saveDraftBtn',
+        'scheduleStatusBtn'
+    ];
+    
+    protectedElements.forEach(elementId => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.disabled = true;
+            element.style.opacity = '0.5';
+            element.style.pointerEvents = 'none';
         }
-    } catch (error) {
-        console.error('[Status] Error adding reaction:', error);
-        showNotification('Failed to add reaction', 'error');
+    });
+}
+
+/**
+ * Show logout state
+ */
+export function showLogoutState() {
+    const allStatusList = document.getElementById('allStatusList');
+    if (allStatusList) {
+        allStatusList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-sign-out-alt"></i>
+                <p>Signed out</p>
+                <p class="subtext">Please sign in to view statuses</p>
+            </div>
+        `;
+    }
+    
+    const myStatusPreview = document.getElementById('myStatusPreview');
+    if (myStatusPreview) {
+        myStatusPreview.innerHTML = `
+            <div class="my-status-preview-placeholder">
+                <i class="fas fa-user-circle"></i>
+                <p>Sign in to create status</p>
+            </div>
+        `;
     }
 }
 
 /**
- * Vote on poll
- * @param {string} statusId - Status ID
- * @param {string} optionId - Option ID
+ * Show reconnection state
  */
-async function voteOnPoll(statusId, optionId) {
-    try {
-        if (isOfflineMode) {
-            showNotification('Cannot vote while offline', 'warning');
-            return;
-        }
-        
-        const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/vote`, {
-            method: 'POST',
-            body: JSON.stringify({ optionId })
-        });
-        
-        if (response && response.success) {
-            showNotification('Vote recorded', 'success');
-            
-            if (currentViewerStatus && currentViewerStatus.id === statusId) {
-                const pollOption = document.querySelector(`.poll-option[data-option="${optionId}"]`);
-                if (pollOption) {
-                    pollOption.classList.add('selected');
-                    
-                    if (currentViewerStatus.options) {
-                        const option = currentViewerStatus.options.find(opt => opt.id === optionId);
-                        if (option) {
-                            option.votes = (option.votes || 0) + 1;
-                            currentViewerStatus.hasVoted = true;
-                            currentViewerStatus.userVote = optionId;
-                            
-                            const totalVotes = currentViewerStatus.options.reduce((sum, opt) => sum + (opt.votes || 0), 0);
-                            const pollOptions = document.querySelectorAll('.poll-option');
-                            pollOptions.forEach(opt => {
-                                const optId = opt.dataset.option;
-                                const optionData = currentViewerStatus.options.find(o => o.id === optId);
-                                if (optionData) {
-                                    const percentage = totalVotes > 0 ? Math.round((optionData.votes || 0) / totalVotes * 100) : 0;
-                                    const percentageElement = opt.querySelector('.poll-option-percentage');
-                                    const barElement = opt.querySelector('.poll-option-bar');
-                                    
-                                    if (percentageElement) {
-                                        percentageElement.textContent = `${percentage}% (${optionData.votes || 0} votes)`;
-                                    }
-                                    if (barElement) {
-                                        barElement.style.width = `${percentage}%`;
-                                    }
-                                }
-                            });
-                            
-                            const totalVotesElement = document.querySelector('.poll-total-votes');
-                            if (totalVotesElement) {
-                                totalVotesElement.textContent = `Total votes: ${totalVotes}`;
-                            }
-                            
-                            const pollContainer = document.querySelector('.poll-container');
-                            if (pollContainer && !document.querySelector('.poll-voted-message')) {
-                                const votedMessage = document.createElement('div');
-                                votedMessage.className = 'poll-voted-message';
-                                votedMessage.textContent = '✓ You have voted';
-                                pollContainer.appendChild(votedMessage);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } catch (error) {
-        console.error('[Status] Error voting on poll:', error);
-        showNotification('Failed to vote', 'error');
-    }
-}
-
-/**
- * Pin status
- * @param {Object} statusData - Status data
- */
-async function pinStatus(statusData) {
-    try {
-        const response = await makeAuthenticatedRequest(`/api/statuses/${statusData.id}/pin`, {
-            method: 'POST'
-        });
-        
-        if (response && response.success) {
-            statusData.isPinned = true;
-            pinnedStatuses.push(statusData);
-            showNotification('Status pinned', 'success');
-            updateCurrentSection();
-        }
-    } catch (error) {
-        console.error('[Status] Error pinning status:', error);
-        showNotification('Failed to pin status', 'error');
-    }
-}
-
-/**
- * Unpin status
- * @param {Object} statusData - Status data
- */
-async function unpinStatus(statusData) {
-    try {
-        const response = await makeAuthenticatedRequest(`/api/statuses/${statusData.id}/pin`, {
-            method: 'DELETE'
-        });
-        
-        if (response && response.success) {
-            statusData.isPinned = false;
-            pinnedStatuses = pinnedStatuses.filter(s => s.id !== statusData.id);
-            showNotification('Status unpinned', 'success');
-            updateCurrentSection();
-        }
-    } catch (error) {
-        console.error('[Status] Error unpinning status:', error);
-        showNotification('Failed to unpin status', 'error');
-    }
-}
-
-/**
- * Mute user
- * @param {string} userId - User ID
- */
-async function muteUser(userId) {
-    try {
-        const response = await makeAuthenticatedRequest(`/api/users/${userId}/mute`, {
-            method: 'POST'
-        });
-        
-        if (response && response.success) {
-            mutedUsers.add(userId);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
-            showNotification('User muted', 'success');
-            updateCurrentSection();
-        }
-    } catch (error) {
-        console.error('[Status] Error muting user:', error);
-        showNotification('Failed to mute user', 'error');
-    }
-}
-
-/**
- * Unmute user
- * @param {string} userId - User ID
- */
-async function unmuteUser(userId) {
-    try {
-        const response = await makeAuthenticatedRequest(`/api/users/${userId}/mute`, {
-            method: 'DELETE'
-        });
-        
-        if (response && response.success) {
-            mutedUsers.delete(userId);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
-            showNotification('User unmuted', 'success');
-            updateCurrentSection();
-        }
-    } catch (error) {
-        console.error('[Status] Error unmuting user:', error);
-        showNotification('Failed to unmute user', 'error');
-    }
-}
-
-/**
- * Post status
- * @param {Object} statusData - Status data
- */
-async function postStatus(statusData) {
-    try {
-        if (isOfflineMode) {
-            const offlineQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || '[]');
-            statusData.id = 'offline_' + Date.now();
-            statusData.createdAt = new Date().toISOString();
-            offlineQueue.push(statusData);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
-            
-            statuses.unshift(statusData);
-            myStatuses.unshift(statusData);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-            
-            lastPostDate = new Date();
-            localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
-            updateStreakCounter();
-            
-            showNotification('Status saved offline. Will post when connected.', 'success');
-            updateMyStatusPreview();
-            updateCurrentSection();
-            return;
-        }
-        
-        const response = await makeAuthenticatedRequest('/api/statuses/create', {
-            method: 'POST',
-            body: JSON.stringify(statusData)
-        });
-        
-        if (response && response.status) {
-            statuses.unshift(response.status);
-            myStatuses.unshift(response.status);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-            
-            lastPostDate = new Date();
-            localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
-            updateStreakCounter();
-            
-            if (statusData.mood) {
-                moodChartData.push({
-                    mood: statusData.mood,
-                    value: 50 + Math.floor(Math.random() * 30),
-                    date: new Date().toISOString()
-                });
-                if (moodChartData.length > 30) {
-                    moodChartData = moodChartData.slice(-30);
-                }
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MOOD_DATA, JSON.stringify(moodChartData));
-                updateMoodChart();
-            }
-            
-            showNotification('Status posted successfully', 'success');
-            updateMyStatusPreview();
-            updateCurrentSection();
-        }
-    } catch (error) {
-        console.error('[Status] Error posting status:', error);
-        showNotification('Failed to post status', 'error');
-    }
-}
-
-/**
- * Schedule status
- * @param {Object} statusData - Status data
- * @param {string} scheduleTime - Schedule time
- */
-async function scheduleStatus(statusData, scheduleTime) {
-    try {
-        const response = await makeAuthenticatedRequest('/api/statuses/schedule', {
-            method: 'POST',
-            body: JSON.stringify({
-                ...statusData,
-                scheduledFor: scheduleTime
-            })
-        });
-        
-        if (response && response.success) {
-            scheduledStatuses.push({
-                ...statusData,
-                scheduledFor: scheduleTime
-            });
-            localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
-            showNotification('Status scheduled successfully', 'success');
-            updateScheduledStatusesList();
-        }
-    } catch (error) {
-        console.error('[Status] Error scheduling status:', error);
-        showNotification('Failed to schedule status', 'error');
-    }
-}
-
-/**
- * Save draft
- * @param {Object} statusData - Status data
- */
-function saveDraft(statusData) {
-    try {
-        statusData.id = 'draft_' + Date.now();
-        statusData.createdAt = new Date().toISOString();
-        statusData.isDraft = true;
-        drafts.unshift(statusData);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
-        showNotification('Draft saved successfully', 'success');
-        updateDraftsList();
-    } catch (error) {
-        console.error('[Status] Error saving draft:', error);
-        showNotification('Failed to save draft', 'error');
-    }
-}
-
-/**
- * Report status
- * @param {string} statusId - Status ID
- * @param {string} reason - Report reason
- * @param {string} details - Report details
- */
-async function reportStatus(statusId, reason, details) {
-    try {
-        const response = await makeAuthenticatedRequest(`/api/statuses/${statusId}/report`, {
-            method: 'POST',
-            body: JSON.stringify({
-                reason,
-                details
-            })
-        });
-        
-        if (response && response.success) {
-            showNotification('Report submitted successfully', 'success');
-        }
-    } catch (error) {
-        console.error('[Status] Error reporting status:', error);
-        showNotification('Failed to submit report', 'error');
+export function showReconnectionState() {
+    const allStatusList = document.getElementById('allStatusList');
+    if (allStatusList) {
+        allStatusList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-unlink"></i>
+                <p>Connection lost</p>
+                <p class="subtext">Attempting to reconnect...</p>
+                <button class="btn primary" onclick="location.reload()">
+                    <i class="fas fa-redo"></i> Reload
+                </button>
+            </div>
+        `;
     }
 }
 
@@ -3246,7 +1926,7 @@ async function saveHighlight() {
     };
     
     try {
-        const response = await makeAuthenticatedRequest('/api/statuses/highlights', {
+        const response = await secureApiCall('/api/statuses/highlights', {
             method: 'POST',
             body: JSON.stringify(highlight)
         });
@@ -3721,7 +2401,7 @@ async function cancelScheduledStatus(scheduleId) {
     }
     
     try {
-        const response = await makeAuthenticatedRequest(`/api/statuses/schedule/${scheduleId}`, {
+        const response = await secureApiCall(`/api/statuses/schedule/${scheduleId}`, {
             method: 'DELETE'
         });
         
@@ -3816,7 +2496,7 @@ function clearAllFilters() {
  * @param {string} message - Notification message
  * @param {string} type - Notification type (success, error, warning, info)
  */
-function showNotification(message, type = 'success') {
+export function showNotification(message, type = 'success') {
     const notificationText = document.getElementById('notificationText');
     if (!notificationText) return;
     
@@ -3831,78 +2511,21 @@ function showNotification(message, type = 'success') {
 }
 
 // =============================================
-// UTILITY FUNCTIONS
-// =============================================
-
-/**
- * Escape HTML to prevent XSS
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-/**
- * Format time ago
- * @param {Date} date - Date to format
- * @returns {string} Formatted time ago string
- */
-function formatTimeAgo(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return `${Math.floor(diffDays / 7)}w ago`;
-}
-
-/**
- * Retry operation with exponential backoff
- * @param {Function} operation - Async operation to retry
- * @param {number} maxRetries - Maximum retry attempts
- * @returns {Promise<any>} Operation result
- */
-async function retryOperation(operation, maxRetries = 3) {
-    let lastError;
-    
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            return await operation();
-        } catch (error) {
-            lastError = error;
-            console.log(`[Status] Retry ${i + 1}/${maxRetries} failed:`, error.message);
-            
-            if (i < maxRetries - 1) {
-                const delay = Math.min(1000 * Math.pow(2, i), 10000);
-                const jitter = Math.random() * 200;
-                await new Promise(resolve => setTimeout(resolve, delay + jitter));
-            }
-        }
-    }
-    
-    throw lastError;
-}
-
-// =============================================
 // EVENT LISTENERS SETUP
 // =============================================
 
 /**
  * Setup basic event listeners (don't require auth)
  */
-function setupBasicEventListeners() {
+export function setupBasicEventListeners() {
     const createStatusBtn = document.getElementById('createStatusBtn');
     if (createStatusBtn) {
         createStatusBtn.addEventListener('click', () => {
+            // Check if authenticated using imported functions
+            if (!parentCoordinator.handshakeComplete && !isAuthenticated()) {
+                showNotification('Please sign in to create a status', 'error');
+                return;
+            }
             createStatusModal.classList.add('active');
             const textTab = document.querySelector('.create-status-tab[data-tab="text"]');
             if (textTab) {
@@ -3933,7 +2556,7 @@ function setupBasicEventListeners() {
 /**
  * Setup all event listeners
  */
-function setupEventListeners() {
+export function setupEventListeners() {
     setupBasicEventListeners();
     
     document.querySelectorAll('.create-status-tab').forEach(tab => {
@@ -4022,6 +2645,12 @@ function setupEventListeners() {
     const postStatusBtn = document.getElementById('postStatusBtn');
     if (postStatusBtn) {
         postStatusBtn.addEventListener('click', () => {
+            // Check authentication using imported functions
+            if (!parentCoordinator.handshakeComplete && !isAuthenticated()) {
+                showNotification('Please sign in to post a status', 'error');
+                return;
+            }
+            
             const activeTab = document.querySelector('.create-status-tab.active');
             if (!activeTab) return;
             
@@ -4113,8 +2742,16 @@ function setupEventListeners() {
                 }
             }
             
-            postStatus(statusData);
-            createStatusModal.classList.remove('active');
+            postStatus(statusData).then(response => {
+                if (response && response.success) {
+                    showNotification('Status posted successfully', 'success');
+                    updateMyStatusPreview();
+                    updateCurrentSection();
+                    createStatusModal.classList.remove('active');
+                }
+            }).catch(error => {
+                showNotification('Failed to post status', 'error');
+            });
         });
     }
     
@@ -4181,14 +2818,25 @@ function setupEventListeners() {
             if (selectedMood) draftData.mood = selectedMood;
             if (selectedCategory) draftData.category = selectedCategory;
             
-            saveDraft(draftData);
-            createStatusModal.classList.remove('active');
+            try {
+                saveDraft(draftData);
+                showNotification('Draft saved successfully', 'success');
+                createStatusModal.classList.remove('active');
+            } catch (error) {
+                showNotification('Failed to save draft', 'error');
+            }
         });
     }
     
     const scheduleStatusBtn = document.getElementById('scheduleStatusBtn');
     if (scheduleStatusBtn) {
         scheduleStatusBtn.addEventListener('click', () => {
+            // Check authentication using imported functions
+            if (!parentCoordinator.handshakeComplete && !isAuthenticated()) {
+                showNotification('Please sign in to schedule a status', 'error');
+                return;
+            }
+            
             scheduleModal.classList.add('active');
             
             const tomorrow = new Date();
@@ -4265,10 +2913,15 @@ function setupEventListeners() {
             
             const selectedRepeat = document.querySelector('.repeat-option.selected')?.dataset.repeat || 'none';
             
-            scheduleStatus(statusData, scheduleDateTime.toISOString());
-            showNotification('Status scheduled successfully', 'success');
-            scheduleModal.classList.remove('active');
-            createStatusModal.classList.remove('active');
+            scheduleStatus(statusData, scheduleDateTime.toISOString()).then(response => {
+                if (response && response.success) {
+                    showNotification('Status scheduled successfully', 'success');
+                    scheduleModal.classList.remove('active');
+                    createStatusModal.classList.remove('active');
+                }
+            }).catch(error => {
+                showNotification('Failed to schedule status', 'error');
+            });
         });
     }
     
@@ -4342,9 +2995,17 @@ function setupEventListeners() {
         muteUserBtn.addEventListener('click', () => {
             if (currentViewerStatus) {
                 if (mutedUsers.has(currentViewerStatus.userId)) {
-                    unmuteUser(currentViewerStatus.userId);
+                    unmuteUser(currentViewerStatus.userId).then(() => {
+                        showNotification('User unmuted', 'success');
+                    }).catch(error => {
+                        showNotification('Failed to unmute user', 'error');
+                    });
                 } else {
-                    muteUser(currentViewerStatus.userId);
+                    muteUser(currentViewerStatus.userId).then(() => {
+                        showNotification('User muted', 'success');
+                    }).catch(error => {
+                        showNotification('Failed to mute user', 'error');
+                    });
                 }
             }
         });
@@ -4463,9 +3124,14 @@ function setupEventListeners() {
             }
             
             if (currentViewerStatus) {
-                reportStatus(currentViewerStatus.id, selectedReason, details);
-                showNotification(`Report submitted ${isAnonymous ? 'anonymously' : ''}`, 'success');
-                reportModal.classList.remove('active');
+                reportStatus(currentViewerStatus.id, selectedReason, details).then(response => {
+                    if (response && response.success) {
+                        showNotification(`Report submitted ${isAnonymous ? 'anonymously' : ''}`, 'success');
+                        reportModal.classList.remove('active');
+                    }
+                }).catch(error => {
+                    showNotification('Failed to submit report', 'error');
+                });
             }
         });
     }
@@ -4513,6 +3179,11 @@ function setupEventListeners() {
     const createHighlightBtn = document.getElementById('createHighlightBtn');
     if (createHighlightBtn) {
         createHighlightBtn.addEventListener('click', () => {
+            // Check authentication using imported functions
+            if (!parentCoordinator.handshakeComplete && !isAuthenticated()) {
+                showNotification('Please sign in to create a highlight', 'error');
+                return;
+            }
             showHighlightsEditor();
         });
     }
@@ -4674,6 +3345,11 @@ function setupEventListeners() {
             if (myStatuses.length > 0) {
                 showStatusViewer(myStatuses[0]);
             } else {
+                // Check authentication using imported functions
+                if (!parentCoordinator.handshakeComplete && !isAuthenticated()) {
+                    showNotification('Please sign in to create a status', 'error');
+                    return;
+                }
                 createStatusModal.classList.add('active');
             }
         });
@@ -4695,7 +3371,7 @@ function setupEventListeners() {
             showNotification('Retrying connection...', 'info');
             
             try {
-                const success = await bootstrapIframe();
+                const success = await bootstrapApplication();
                 if (!success) {
                     errorUI.classList.add('active');
                 }
@@ -4790,28 +3466,34 @@ function stopAutoAdvance() {
 }
 
 // =============================================
-// IFRAME INITIALIZATION
+// APPLICATION INITIALIZATION
 // =============================================
 
 /**
- * Initialize the application with safe iframe bootstrap
+ * Initialize the application with centralized token system
  */
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('[Status] Page loaded - Safe iframe initialization');
+    console.log('[Status] Page loaded - UI initialization');
     
     // Immediately show UI with cached data
     loadCachedDataInstantly();
+    renderStatusListInstantly();
     setupBasicEventListeners();
+    initializeUIComponents();
     
-    // Start enhanced bootstrap process
-    setTimeout(async () => {
-        try {
-            await bootstrapIframe();
-        } catch (error) {
-            console.error('[Status] Bootstrap failed:', error);
-            showNotification('System initialized with limited functionality', 'warning');
-        }
-    }, 50);
+    // Wait for core to initialize
+    onTokenReady(() => {
+        updateUserUIInstantly();
+        enableProtectedUI();
+        
+        // Setup event listeners
+        setTimeout(() => {
+            setupEventListeners();
+        }, 200);
+    });
+    
+    // Start core initialization
+    initPageCore();
 });
 
-console.log('[Status] Safe iframe status system initialized successfully');
+console.log('[Status] UI system initialized successfully');

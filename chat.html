@@ -1,21 +1,31 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-    <link rel="manifest" href="../manifest.json">
-    <meta name="theme-color" content="#4F46E5">
-    <link rel="icon" href="../icons/moodchat-192.png">
-    <link rel="icon" href="../icons/moodchat-512.png">
+    <!-- Meta tags first -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kynecta - Advanced Mood-Based Chat</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
     <meta http-equiv="origin-trial" content="your-origin-trial-token">
     <meta name="ignore-tailwind-cdn-warning" content="true">
     
-    <script src="/js/api.js"></script>
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#4F46E5">
     
+    <!-- Favicons -->
+    <link rel="icon" href="../icons/moodchat-192.png" type="image/png">
+    <link rel="icon" href="../icons/moodchat-512.png" type="image/png">
+    
+    <title>Kynecta - Advanced Mood-Based Chat</title>
+    
+    <!-- CSS Dependencies - Fixed order and CDN issues -->
+    <!-- Tailwind CSS - Fixed CDN URL -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome - Correct version -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" 
+          integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" 
+          crossorigin="anonymous" referrerpolicy="no-referrer">
+    
+    <!-- Local CSS files -->
     <link rel="stylesheet" href="chat.css">
     
     <style>
@@ -1316,6 +1326,144 @@
                 display: none !important;
             }
         }
+        
+        /* New styles for user data management */
+        .user-data-status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 10001;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            display: none;
+        }
+        
+        .user-data-status.visible {
+            display: block;
+        }
+        
+        .user-data-status.authenticated {
+            background: rgba(34, 197, 94, 0.8);
+        }
+        
+        .user-data-status.loading {
+            background: rgba(59, 130, 246, 0.8);
+        }
+        
+        .user-data-status.error {
+            background: rgba(239, 68, 68, 0.8);
+        }
+        
+        .iframe-loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .iframe-loading-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .auth-status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            position: absolute;
+            bottom: 2px;
+            right: 2px;
+            border: 2px solid white;
+        }
+        
+        .auth-status-indicator.authenticated {
+            background-color: #10B981;
+        }
+        
+        .auth-status-indicator.loading {
+            background-color: #F59E0B;
+        }
+        
+        .auth-status-indicator.error {
+            background-color: #EF4444;
+        }
+        
+        .data-refresh-indicator {
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+            color: #6B7280;
+            font-size: 12px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: translateY(-50%) rotate(0deg); }
+            100% { transform: translateY(-50%) rotate(360deg); }
+        }
+        
+        .background-process-indicator {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .background-process-indicator.active {
+            opacity: 1;
+        }
+        
+        .user-data-cache-indicator {
+            position: fixed;
+            bottom: 130px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            z-index: 999;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .user-data-cache-indicator.visible {
+            opacity: 1;
+        }
     </style>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
@@ -1334,535 +1482,23 @@
         };
     </script>
 
-    <script>
-        // Enhanced authentication manager for iframes with safe API initialization
-        const IframeAuthManager = {
-            state: {
-                isAuthenticated: false,
-                isBootstrapped: false,
-                user: null,
-                token: null,
-                authPromise: null,
-                pendingApiCalls: [],
-                authCheckInterval: null,
-                lastAuthCheck: 0,
-                apiReady: false,
-                apiInitialized: false,
-                initializationSequence: {
-                    authReady: false,
-                    apiReady: false,
-                    iframeReady: false
-                }
-            },
-            
-            eventListeners: {
-                authReady: [],
-                authFailed: [],
-                apiReady: [],
-                initializationComplete: []
-            },
-            
-            async initialize() {
-                console.log('🔄 [IframeAuthManager] Initializing iframe authentication...');
-                
-                this.state.isBootstrapped = true;
-                
-                // Start initialization sequence
-                await this.runInitializationSequence();
-                
-                console.log('✅ [IframeAuthManager] Initialization complete');
-                
-                return {
-                    isAuthenticated: this.state.isAuthenticated,
-                    user: this.state.user,
-                    token: this.state.token,
-                    apiReady: this.state.apiReady
-                };
-            },
-            
-            async runInitializationSequence() {
-                console.log('🔢 [IframeAuthManager] Starting initialization sequence...');
-                
-                // Step 1: Wait for authentication
-                const authResult = await this.waitForAuthentication();
-                
-                // Step 2: Wait for API to be ready (only if authenticated)
-                if (authResult && authResult.user && authResult.token) {
-                    await this.waitForApiReady();
-                }
-                
-                // Step 3: Mark all initialization steps complete
-                this.state.initializationSequence.authReady = true;
-                this.state.initializationSequence.apiReady = this.state.apiReady;
-                this.state.initializationSequence.iframeReady = true;
-                
-                // Step 4: Trigger initialization complete event
-                this.triggerEvent('initializationComplete', {
-                    isAuthenticated: this.state.isAuthenticated,
-                    apiReady: this.state.apiReady,
-                    user: this.state.user
-                });
-                
-                // Step 5: Process any pending API calls
-                await this.processPendingApiCalls();
-            },
-            
-                     async waitForAuthentication() {
-                console.log('⏳ [IframeAuthManager] Waiting for authentication...');
-                
-                // Store 'this' reference to use in nested functions
-                const self = this;
-                
-                return new Promise((resolve, reject) => {
-                    const timeoutId = setTimeout(() => {
-                        window.removeEventListener('message', messageHandler);
-                        console.warn('⏰ [IframeAuthManager] Authentication timeout');
-                        
-                        // Try localStorage as fallback
-                        const fallbackToken = localStorage.getItem('access_token');
-                        const fallbackUser = localStorage.getItem('kynecta_user');
-                        
-                        if (fallbackToken && fallbackUser) {
-                            try {
-                                const user = JSON.parse(fallbackUser);
-                                self.state.isAuthenticated = true;
-                                self.state.user = user;
-                                self.state.token = fallbackToken;
-                                
-                                console.log('✅ [IframeAuthManager] Using cached auth from localStorage');
-                                
-                                resolve({
-                                    user: user,
-                                    token: fallbackToken
-                                });
-                                return;
-                            } catch (e) {
-                                // Continue to reject
-                            }
-                        }
-                        
-                        reject(new Error('Authentication timeout - no auth data received'));
-                    }, 15000);
-                    
-                    function messageHandler(event) {
-                        if (event.data && event.data.type === 'AUTH_STATUS') {
-                            clearTimeout(timeoutId);
-                            window.removeEventListener('message', messageHandler);
-                            
-                            switch(event.data.status) {
-                                case 'authenticated':
-                                    if (event.data.user && event.data.token) {
-                                        self.state.isAuthenticated = true;
-                                        self.state.user = event.data.user;
-                                        self.state.token = event.data.token;
-                                        
-                                        // Store for persistence
-                                        localStorage.setItem('kynecta_user', JSON.stringify(event.data.user));
-                                        localStorage.setItem('access_token', event.data.token);
-                                        
-                                        console.log('✅ [IframeAuthManager] Authenticated via parent');
-                                        
-                                        resolve({
-                                            user: event.data.user,
-                                            token: event.data.token
-                                        });
-                                    } else {
-                                        reject(new Error('Invalid auth data from parent'));
-                                    }
-                                    break;
-                                    
-                                case 'unauthenticated':
-                                    self.state.isAuthenticated = false;
-                                    console.log('🔒 [IframeAuthManager] User not authenticated');
-                                    reject(new Error('User not authenticated'));
-                                    break;
-                                    
-                                case 'auth-error':
-                                    self.state.isAuthenticated = false;
-                                    reject(new Error('Authentication error: ' + (event.data.error || 'Unknown error')));
-                                    break;
-                                    
-                                default:
-                                    reject(new Error('Unknown auth status: ' + event.data.status));
-                            }
-                        }
-                    }
-                    
-                    window.addEventListener('message', messageHandler);
-                    
-                    // Request auth status from parent
-                    window.parent.postMessage({
-                        type: 'REQUEST_AUTH_STATUS',
-                        timestamp: Date.now(),
-                        iframeId: window.frameElement ? window.frameElement.id : 'chat-iframe'
-                    }, '*');
-                });
-            },
+    <!-- User Data Status Indicator -->
+    <div id="userDataStatus" class="user-data-status">
+        <i class="fas fa-user mr-2"></i>
+        <span id="userStatusText">Loading user data...</span>
+    </div>
 
+    <!-- Background Process Indicator -->
+    <div id="backgroundProcessIndicator" class="background-process-indicator">
+        <i class="fas fa-sync-alt"></i>
+    </div>
 
-            async waitForApiReady() {
-                console.log('⏳ [IframeAuthManager] Waiting for API to be ready...');
-                
-                const maxWaitTime = 10000; // 10 seconds max
-                const startTime = Date.now();
-                
-                while (Date.now() - startTime < maxWaitTime) {
-                    // Check if window.api exists and is a function
-                    if (typeof window.api === 'function') {
-                        this.state.apiReady = true;
-                        this.state.apiInitialized = true;
-                        console.log('✅ [IframeAuthManager] API is ready');
-                        this.triggerEvent('apiReady');
-                        return true;
-                    }
-                    
-                    // Check if api.js exists but needs initialization
-                    if (typeof window.api !== 'undefined' && typeof window.api.initialize === 'function') {
-                        try {
-                            await window.api.initialize();
-                            this.state.apiReady = true;
-                            this.state.apiInitialized = true;
-                            console.log('✅ [IframeAuthManager] API initialized via manual call');
-                            this.triggerEvent('apiReady');
-                            return true;
-                        } catch (error) {
-                            console.warn('⚠️ [IframeAuthManager] API manual initialization failed:', error.message);
-                        }
-                    }
-                    
-                    // Wait 100ms before checking again
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                }
-                
-                console.warn('⚠️ [IframeAuthManager] API not ready after 10 seconds, proceeding without it');
-                this.state.apiReady = false;
-                return false;
-            },
-            
-            // SAFE API CALL METHOD - Only call after authentication and API are ready
-            async safeApiCall(endpoint, method = 'GET', data = null, options = {}) {
-                console.log(`🔍 [safeApiCall] Requesting: ${method} ${endpoint}`);
-                
-                // Check if we're properly initialized
-                if (!this.state.initializationComplete()) {
-                    console.warn('⚠️ [safeApiCall] Attempting API call before initialization complete');
-                    
-                    return new Promise((resolve, reject) => {
-                        // Queue the call for later
-                        this.state.pendingApiCalls.push({
-                            endpoint,
-                            method,
-                            data,
-                            options,
-                            resolve,
-                            reject,
-                            timestamp: Date.now()
-                        });
-                        
-                        console.log(`📦 [safeApiCall] Queued API call for later: ${endpoint}`);
-                        
-                        // Try to initialize if not already doing so
-                        if (!this.state.isBootstrapped) {
-                            this.initialize().catch(error => {
-                                console.error('❌ [safeApiCall] Initialization failed:', error);
-                                reject(new Error('API not available - initialization failed'));
-                            });
-                        }
-                    });
-                }
-                
-                // Check if API is available
-                if (!this.state.apiReady || typeof window.api !== 'function') {
-                    const error = new Error('API not available - api.js not loaded or not a function');
-                    console.error('❌ [safeApiCall]', error.message);
-                    throw error;
-                }
-                
-                // Check authentication
-                if (!this.state.isAuthenticated || !this.state.token) {
-                    const error = new Error('Not authenticated - cannot make API call');
-                    console.error('❌ [safeApiCall]', error.message);
-                    throw error;
-                }
-                
-                const defaultOptions = {
-                    timeout: 10000,
-                    maxRetries: 2,
-                    retryDelay: 1000,
-                    ...options
-                };
-                
-                let lastError = null;
-                
-                for (let attempt = 0; attempt <= defaultOptions.maxRetries; attempt++) {
-                    try {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), defaultOptions.timeout);
-                        
-                        try {
-                            const result = await window.api(endpoint, method, data, { signal: controller.signal });
-                            clearTimeout(timeoutId);
-                            return result;
-                        } catch (apiError) {
-                            clearTimeout(timeoutId);
-                            
-                            if (apiError.name === 'AbortError') {
-                                throw new Error(`Request timeout after ${defaultOptions.timeout}ms`);
-                            }
-                            
-                            throw apiError;
-                        }
-                    } catch (error) {
-                        lastError = error;
-                        
-                        // Don't retry on authentication/authorization errors
-                        if (error.message.includes('401') || error.message.includes('403') || 
-                            (error.message.includes('400') && !error.message.includes('429'))) {
-                            console.error(`❌ [safeApiCall] Client error (${error.message}), not retrying`);
-                            
-                            // Clear auth state if we get 401/403
-                            if (error.message.includes('401') || error.message.includes('403')) {
-                                this.state.isAuthenticated = false;
-                                this.state.token = null;
-                                this.state.user = null;
-                                localStorage.removeItem('access_token');
-                                localStorage.removeItem('kynecta_user');
-                                
-                                // Notify parent
-                                this.notifyParentAuthFailure();
-                            }
-                            
-                            throw error;
-                        }
-                        
-                        if (attempt < defaultOptions.maxRetries) {
-                            const delay = defaultOptions.retryDelay * Math.pow(2, attempt);
-                            console.warn(`⚠️ [safeApiCall] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message);
-                            await new Promise(resolve => setTimeout(resolve, delay));
-                        }
-                    }
-                }
-                
-                console.error(`❌ [safeApiCall] All ${defaultOptions.maxRetries + 1} attempts failed:`, lastError);
-                throw lastError;
-            },
-            
-            initializationComplete() {
-                return this.state.initializationSequence.authReady && 
-                       this.state.initializationSequence.apiReady && 
-                       this.state.initializationSequence.iframeReady;
-            },
-            
-            async processPendingApiCalls() {
-                if (this.state.pendingApiCalls.length === 0) return;
-                
-                console.log(`🔄 [IframeAuthManager] Processing ${this.state.pendingApiCalls.length} pending API calls`);
-                
-                const calls = [...this.state.pendingApiCalls];
-                this.state.pendingApiCalls = [];
-                
-                for (const pendingCall of calls) {
-                    try {
-                        // Skip if too old (more than 30 seconds)
-                        if (Date.now() - pendingCall.timestamp > 30000) {
-                            pendingCall.reject(new Error('API call timeout - authentication took too long'));
-                            continue;
-                        }
-                        
-                        // Make the API call
-                        const result = await this.safeApiCall(
-                            pendingCall.endpoint, 
-                            pendingCall.method, 
-                            pendingCall.data, 
-                            pendingCall.options
-                        );
-                        pendingCall.resolve(result);
-                    } catch (error) {
-                        pendingCall.reject(error);
-                    }
-                }
-            },
-            
-            on(event, callback) {
-                if (!this.eventListeners[event]) {
-                    this.eventListeners[event] = [];
-                }
-                this.eventListeners[event].push(callback);
-            },
-            
-            off(event, callback) {
-                if (this.eventListeners[event]) {
-                    this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
-                }
-            },
-            
-            triggerEvent(event, data) {
-                if (this.eventListeners[event]) {
-                    this.eventListeners[event].forEach(callback => {
-                        try {
-                            callback(data);
-                        } catch (error) {
-                            console.error(`❌ [IframeAuthManager] Error in ${event} callback:`, error);
-                        }
-                    });
-                }
-            },
-            
-            notifyParentAuthFailure() {
-                try {
-                    window.parent.postMessage({
-                        type: 'AUTH_REQUIRED',
-                        reason: 'iframe_authentication_failed',
-                        timestamp: Date.now(),
-                        iframeId: window.frameElement ? window.frameElement.id : 'chat-iframe'
-                    }, '*');
-                } catch (error) {
-                    console.error('❌ [IframeAuthManager] Failed to notify parent:', error);
-                }
-            },
-            
-            getCurrentUser() {
-                return this.state.user;
-            },
-            
-            getCurrentToken() {
-                return this.state.token;
-            },
-            
-            isAuthenticated() {
-                return this.state.isAuthenticated;
-            },
-            
-            isApiReady() {
-                return this.state.apiReady;
-            },
-            
-            isInitializationComplete() {
-                return this.initializationComplete();
-            },
-            
-            cleanup() {
-                if (this.state.authCheckInterval) {
-                    clearInterval(this.state.authCheckInterval);
-                    this.state.authCheckInterval = null;
-                }
-                
-                this.state.pendingApiCalls = [];
-                
-                Object.keys(this.eventListeners).forEach(event => {
-                    this.eventListeners[event] = [];
-                });
-            }
-        };
-        
-        // Replace window.safeApiFetch with our enhanced version
-        window.IframeAuthManager = IframeAuthManager;
-        
-        window.safeApiFetch = async function(endpoint, method = 'GET', data = null, options = {}) {
-            return IframeAuthManager.safeApiCall(endpoint, method, data, options);
-        };
-        
-        // Enhanced message handler for iframes
-        window.addEventListener('message', function(event) {
-            if (event.data && event.data.type) {
-                console.log('📨 [iframe] Received message:', event.data.type);
-                
-                switch(event.data.type) {
-                    case 'AUTH_STATUS':
-                        console.log('🔐 [iframe] Received AUTH_STATUS from parent:', event.data.status);
-                        
-                        if (event.data.status === 'authenticated' && event.data.user && event.data.token) {
-                            localStorage.setItem('kynecta_user', JSON.stringify(event.data.user));
-                            localStorage.setItem('access_token', event.data.token);
-                            
-                            IframeAuthManager.state.isAuthenticated = true;
-                            IframeAuthManager.state.user = event.data.user;
-                            IframeAuthManager.state.token = event.data.token;
-                            
-                            // Trigger auth ready event
-                            IframeAuthManager.triggerEvent('authReady', {
-                                user: event.data.user,
-                                token: event.data.token
-                            });
-                        } else if (event.data.status === 'unauthenticated' || event.data.status === 'auth-error') {
-                            IframeAuthManager.state.isAuthenticated = false;
-                            IframeAuthManager.state.user = null;
-                            IframeAuthManager.state.token = null;
-                            
-                            localStorage.removeItem('kynecta_user');
-                            localStorage.removeItem('access_token');
-                        }
-                        break;
-                    
-                    case 'go_back':
-                        console.log('🔙 [iframe] Received go_back command');
-                        if (typeof window.goBack === 'function') {
-                            window.goBack();
-                        } else if (window.history.length > 1) {
-                            window.history.back();
-                        }
-                        break;
-                    
-                    case 'get_fullscreen_status':
-                        const isFullscreen = document.body.classList.contains('in-chat-view') ||
-                                           document.body.classList.contains('in-status-view') ||
-                                           document.body.classList.contains('in-group-view') ||
-                                           document.body.classList.contains('in-fullscreen-view');
-                        
-                        window.parent.postMessage({
-                            type: 'fullscreen_status',
-                            isFullscreen: isFullscreen,
-                            timestamp: Date.now()
-                        }, '*');
-                        break;
-                    
-                    case 'UPDATE_SETTINGS':
-                        console.log('⚙️ [iframe] Settings updated via parent');
-                        if (event.data.settings) {
-                            localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
-                            window.dispatchEvent(new CustomEvent('settingsUpdated', { 
-                                detail: event.data.settings 
-                            }));
-                        }
-                        break;
-                        
-                    case 'API_INITIALIZATION_COMPLETE':
-                        console.log('✅ [iframe] Parent notified API initialization complete');
-                        break;
-                }
-            }
-        });
-        
-        // Initialize on load
-        window.addEventListener('load', function() {
-            console.log('📄 [iframe] Document loaded');
-            
-            // Initialize auth manager but don't start API calls yet
-            setTimeout(() => {
-                IframeAuthManager.initialize().catch(error => {
-                    console.warn('⚠️ [iframe] Background auth init failed:', error.message);
-                    
-                    // Even if auth fails, we should still load the UI
-                    // The UI should handle the unauthenticated state
-                });
-                
-                window.parent.postMessage({
-                    type: 'iframe_loaded',
-                    iframeId: window.frameElement ? window.frameElement.id : 'unknown',
-                    timestamp: Date.now(),
-                    url: window.location.href
-                }, '*');
-            }, 100);
-        });
-        
-        // Cleanup on unload
-        window.addEventListener('beforeunload', function() {
-            IframeAuthManager.cleanup();
-        });
-        
-        console.log('✅ [iframe] Enhanced authentication system initialized');
-    </script>
+    <!-- User Data Cache Indicator -->
+    <div id="userDataCacheIndicator" class="user-data-cache-indicator">
+        Data cached for offline use
+    </div>
 
+    <!-- Global notification container -->
     <div id="globalNotificationContainer" class="fixed top-4 right-4 z-10000 space-y-2">
     </div>
 
@@ -1952,9 +1588,12 @@
             </button>
         </div>
         
-        <button class="nav-icon text-gray-400 hover:text-white text-2xl p-3 rounded-2xl hover:bg-gray-800 transition-all" data-page="settings" title="Settings">
-            <i class="fas fa-cog"></i>
-        </button>
+        <div class="relative">
+            <button class="nav-icon text-gray-400 hover:text-white text-2xl p-3 rounded-2xl hover:bg-gray-800 transition-all" data-page="settings" title="Settings">
+                <i class="fas fa-cog"></i>
+            </button>
+            <div id="sidebarAuthIndicator" class="auth-status-indicator loading"></div>
+        </div>
     </div>
 
     <div id="mobileNavBar" class="mobile-nav-bar">
@@ -1988,37 +1627,96 @@
             <span id="mobileToolsBadge" class="mobile-nav-badge hidden"></span>
         </button>
         
-        <button class="mobile-nav-icon" data-page="settings" title="Settings">
-            <i class="fas fa-cog"></i>
-            <span id="mobileSettingsBadge" class="mobile-nav-badge hidden"></span>
-        </button>
+        <div class="relative">
+            <button class="mobile-nav-icon" data-page="settings" title="Settings">
+                <i class="fas fa-cog"></i>
+                <span id="mobileSettingsBadge" class="mobile-nav-badge hidden"></span>
+            </button>
+            <div id="mobileAuthIndicator" class="auth-status-indicator loading"></div>
+        </div>
     </div>
 
     <div id="messagesContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="messagesLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-comments text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading messages...</p>
+            </div>
+        </div>
         <iframe id="messagesIframe" class="content-iframe" src="message.html" title="Messages"></iframe>
     </div>
 
     <div id="statusContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="statusLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-circle text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading status...</p>
+            </div>
+        </div>
         <iframe id="statusIframe" class="content-iframe" src="status.html" title="Status"></iframe>
     </div>
 
     <div id="groupContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="groupLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-red-500 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-users text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading groups...</p>
+            </div>
+        </div>
         <iframe id="groupIframe" class="content-iframe" src="group.html" title="Groups"></iframe>
     </div>
 
     <div id="friendsContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="friendsLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-user-friends text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading friends...</p>
+            </div>
+        </div>
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" title="Friends"></iframe>
     </div>
 
     <div id="callsContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="callsLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-green-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-phone text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading calls...</p>
+            </div>
+        </div>
         <iframe id="callsIframe" class="content-iframe" src="calls.html" title="Calls"></iframe>
     </div>
 
     <div id="settingsContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="settingsLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-gray-600 to-gray-800 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-cog text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading settings...</p>
+            </div>
+        </div>
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" title="Settings"></iframe>
     </div>
 
     <div id="toolsContent" class="content-area iframe-container hidden">
+        <div class="iframe-loading-overlay" id="toolsLoadingOverlay">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <i class="fas fa-tools text-white"></i>
+                </div>
+                <p class="text-gray-600">Loading tools...</p>
+            </div>
+        </div>
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" title="Tools"></iframe>
     </div>
 
@@ -2124,919 +1822,1614 @@
         </div>
     </div>
 
-    <script>
-    // Parent Page Stabilization - Parent Page Only
-    // Enhanced Auth Coordinator for Parent Page with API timing control
+    <!-- Main application script - Load as module for proper execution -->
+    <script type="module">
+        // ================================
+        // SESSION BROKER MODULE
+        // ================================
+        
+        /**
+         * Centralized Session Broker for Kynecta Application
+         * Acts as the single source of truth for user authentication state
+         * Coordinates between api.auth, app.core, and all embedded iframes
+         */
+        class SessionBroker {
+            constructor() {
+                console.log('[SessionBridge] Initializing Session Broker...');
+                
+                // State management
+                this.state = {
+                    // Dependency readiness
+                    apiCoreReady: false,
+                    apiRequestReady: false,
+                    apiAuthReady: false,
+                    appCoreReady: false,
+                    
+                    // Session state
+                    currentUser: null,
+                    authToken: null,
+                    sessionValid: false,
+                    lastSynced: null,
+                    
+                    // Iframe registry
+                    iframes: new Map(),
+                    pendingFrames: [],
+                    frameSequences: {},
+                    
+                    // Message router
+                    messageHandlers: new Map(),
+                    
+                    // Event subscriptions
+                    authSubscriptions: [],
+                    
+                    // Lifecycle management
+                    initialized: false,
+                    initializationPromise: null,
+                    readyResolvers: [],
+                    
+                    // Security
+                    trustedOrigins: [window.location.origin],
+                    sessionId: this.generateSessionId(),
+                    
+                    // Performance
+                    broadcastDebounceTimer: null,
+                    heartbeatInterval: null,
+                    
+                    // Logging
+                    debugMode: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1',
+                    logPrefix: '[SessionBridge]'
+                };
+                
+                
+                // Initialize
+                this.init();
+            }
+            // ADD THIS METHOD to SessionBroker class:
+async initializeWithTimeout(timeoutMs = 10000) {
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`SessionBroker initialization timeout after ${timeoutMs}ms`)), timeoutMs);
+    });
     
-    const ParentAuthCoordinator = {
-        state: {
-            authStatus: 'pending', // 'pending', 'authenticated', 'unauthenticated', 'auth-error'
-            user: null,
-            token: null,
-            apiReady: false,
-            authChecked: false,
-            iframeAuthPromises: new Map(),
-            backgroundJobsStarted: false,
-            backgroundJobsLock: false,
-            apiInitialized: false,
-            protectedApiCallsBlocked: true, // Block protected API calls until auth confirmed
-            initializationSequence: {
-                apiLoaded: false,
-                authChecked: false,
-                iframesNotified: false,
-                backgroundJobsStarted: false
-            }
-        },
+    try {
+        await Promise.race([this.init(), timeoutPromise]);
+        console.log(`${this.state.logPrefix} Initialized successfully`);
+        return true;
+    } catch (error) {
+        console.error(`${this.state.logPrefix} Initialization failed:`, error);
         
-        iframeConnections: new Map(),
-        pendingProtectedCalls: [],
+        // Continue with limited functionality
+        this.state.initialized = true;
+        this.state.readyResolvers.forEach(resolve => resolve());
+        this.state.readyResolvers = [];
         
-        // Initialize the coordinator with proper sequencing
-        async initialize() {
-            console.log('🔧 ParentAuthCoordinator initializing with proper sequencing...');
-            
-            // Step 1: Wait for api.js to be loaded (but don't use it yet)
-            await this.waitForApiLoaded();
-            
-            // Step 2: Check auth status (without making API calls)
-            await this.checkAuthStatusSilent();
-            
-            // Step 3: If authenticated, verify API is functional
-            if (this.state.authStatus === 'authenticated') {
-                await this.verifyApiFunctionality();
-            }
-            
-            // Step 4: Unblock protected API calls
-            this.state.protectedApiCallsBlocked = false;
-            
-            // Step 5: Notify iframes
-            this.notifyIframesAboutAuthStatus();
-            
-            // Step 6: Start background jobs (only if authenticated)
-            if (this.state.authStatus === 'authenticated') {
-                this.startBackgroundJobs();
-            }
-            
-            // Step 7: Process any pending protected calls
-            await this.processPendingProtectedCalls();
-            
-            console.log('✅ ParentAuthCoordinator initialized with status:', this.state.authStatus);
-            console.log('📊 Initialization sequence:', this.state.initializationSequence);
-            
-            // Notify iframes that API is ready
-            this.notifyIframesApiReady();
-        },
+        // Still set up message router
+        this.setupMessageRouter();
         
-        // Wait for api.js to be loaded (not necessarily ready for calls)
-        async waitForApiLoaded() {
-            console.log('⏳ Waiting for api.js to be loaded...');
+        return false;
+    }
+}
+validateMessage(event) {
+    // 1. Check origin
+    if (!this.isTrustedOrigin(event.origin)) {
+        if (this.state.debugMode) {
+            console.warn(`${this.state.logPrefix} Untrusted origin:`, event.origin);
+        }
+        return { valid: false, reason: 'untrusted_origin' };
+    }
+    
+    // 2. Check message structure
+    if (!event.data || typeof event.data !== 'object') {
+        return { valid: false, reason: 'invalid_message_structure' };
+    }
+    
+    const { type, payload, frameId, sequence, timestamp } = event.data;
+    
+    // 3. Check required fields
+    if (!type || typeof type !== 'string') {
+        return { valid: false, reason: 'missing_message_type' };
+    }
+    
+    // 4. Check timestamp (prevent replay attacks)
+    if (timestamp) {
+        const now = Date.now();
+        const messageAge = now - timestamp;
+        
+        if (messageAge > 300000) { // 5 minutes
+            return { valid: false, reason: 'stale_message', age: messageAge };
+        }
+        
+        if (messageAge < 0) {
+            return { valid: false, reason: 'future_message' };
+        }
+    }
+    
+    // 5. Validate frameId if present
+    if (frameId && !this.state.iframes.has(frameId)) {
+        // Check if it's a registration request
+        if (type !== 'CHILD_READY' && type !== 'REQUEST_SESSION') {
+            return { valid: false, reason: 'unknown_frame', frameId };
+        }
+    }
+    
+    return { 
+        valid: true, 
+        data: { type, payload, frameId, sequence, timestamp } 
+    };
+}
             
-            const maxWaitTime = 5000; // 5 seconds max for loading
-            const startTime = Date.now();
+            // ================================
+            // 1. DEPENDENCY COORDINATION
+            // ================================
             
-            while (Date.now() - startTime < maxWaitTime) {
-                // Check if api.js script has been loaded
-                if (typeof window.api !== 'undefined') {
-                    this.state.apiReady = true;
-                    this.state.initializationSequence.apiLoaded = true;
-                    console.log('✅ api.js script loaded');
-                    return true;
-                }
+            async init() {
+                console.log(`${this.state.logPrefix} Starting initialization...`);
                 
-                // Wait 100ms before checking again
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            console.warn('⚠️ api.js not loaded after 5 seconds, proceeding without it');
-            this.state.initializationSequence.apiLoaded = true;
-            return false;
-        },
-        
-        // Check auth status without making API calls
-        async checkAuthStatusSilent() {
-            if (this.state.authChecked) {
-                console.log('🔍 Auth already checked, returning cached status:', this.state.authStatus);
-                return this.state.authStatus;
-            }
-            
-            console.log('🔍 Checking auth status silently (no API calls)...');
-            
-            // First check localStorage for existing auth
-            const localStorageAuth = this.checkLocalStorageAuth();
-            
-            if (localStorageAuth === 'authenticated') {
-                this.state.authStatus = 'authenticated';
-                this.state.initializationSequence.authChecked = true;
-                console.log('✅ Auth check: authenticated from localStorage');
-                return 'authenticated';
-            }
-            
-            // If no localStorage auth, check via API but only if api.js is ready
-            if (this.state.apiReady && typeof window.api === 'function') {
-                try {
-                    // Use a short timeout for auth check
-                    const authResult = await this.safeApiCall('/api/auth/check', 'GET', null, { timeout: 3000 });
-                    
-                    if (authResult && authResult.authenticated && authResult.user && authResult.token) {
-                        this.state.authStatus = 'authenticated';
-                        this.state.user = authResult.user;
-                        this.state.token = authResult.token;
-                        
-                        // Store for iframes
-                        localStorage.setItem('kynecta_user', JSON.stringify(authResult.user));
-                        localStorage.setItem('access_token', authResult.token);
-                        
-                        console.log('✅ Auth check: authenticated via API');
-                    } else {
-                        this.state.authStatus = 'unauthenticated';
-                        console.log('🔒 Auth check: not authenticated');
-                    }
-                } catch (error) {
-                    console.warn('⚠️ API auth check failed:', error.message);
-                    // Fall back to localStorage status
-                    this.state.authStatus = localStorageAuth;
-                }
-            } else {
-                // No API available, use localStorage status
-                this.state.authStatus = localStorageAuth;
-                console.log('🔍 Auth check: using localStorage status:', localStorageAuth);
-            }
-            
-            this.state.authChecked = true;
-            this.state.initializationSequence.authChecked = true;
-            
-            return this.state.authStatus;
-        },
-        
-        // Verify API functionality (only called after auth is confirmed)
-        async verifyApiFunctionality() {
-            if (!this.state.apiReady) {
-                console.log('🚫 API not ready, skipping functionality check');
-                return false;
-            }
-            
-            console.log('🔍 Verifying API functionality...');
-            
-            try {
-                // Make a simple, safe API call to verify functionality
-                const testResult = await this.safeApiCall('/api/ping', 'GET', null, { timeout: 3000 });
+                // Create initialization promise
+                this.state.initializationPromise = new Promise((resolve) => {
+                    this.state.readyResolvers.push(resolve);
+                });
                 
-                if (testResult && testResult.status === 'ok') {
-                    this.state.apiInitialized = true;
-                    console.log('✅ API functionality verified');
-                    return true;
-                }
-            } catch (error) {
-                console.warn('⚠️ API functionality check failed:', error.message);
-                this.state.apiInitialized = false;
+                // Setup message listener first
+                this.setupMessageRouter();
+                
+                // Wait for dependencies
+                await this.waitForDependencies();
+                
+                // Setup event subscriptions
+                this.setupEventSubscriptions();
+                
+                // Initialize session state
+                await this.initializeSession();
+                
+                // Start heartbeat
+                this.startHeartbeat();
+                
+                // Mark as initialized
+                this.state.initialized = true;
+                
+                // Resolve ready promises
+                this.state.readyResolvers.forEach(resolve => resolve());
+                this.state.readyResolvers = [];
+                
+                console.log(`${this.state.logPrefix} Initialization complete`);
+                this.logStatus();
             }
             
-            return false;
-        },
+           async waitForDependencies() {
+    console.log(`${this.state.logPrefix} Waiting for dependencies with timeout...`);
+    
+    // Use a timeout-based approach instead of infinite waiting
+    return new Promise((resolve) => {
+        let checkCount = 0;
+        const maxChecks = 50; // 5 seconds total (100ms * 50)
         
-        // Safe API call with initialization check
-        async safeApiCall(endpoint, method = 'GET', data = null, options = {}) {
-            // Check if protected API calls are blocked
-            if (this.state.protectedApiCallsBlocked && this.isProtectedEndpoint(endpoint)) {
-                console.warn(`⚠️ Protected API call blocked (${endpoint}) - auth not ready`);
-                
-                return new Promise((resolve, reject) => {
-                    this.pendingProtectedCalls.push({
-                        endpoint,
-                        method,
-                        data,
-                        options,
-                        resolve,
-                        reject,
-                        timestamp: Date.now()
-                    });
-                    
-                    console.log(`📦 Queued protected API call for later: ${endpoint}`);
+        const checkDependencies = () => {
+            checkCount++;
+            
+            // Check for APIs with more lenient detection
+            this.state.apiCoreReady = typeof window.api !== 'undefined' && 
+                                      typeof window.api.core !== 'undefined';
+            
+            this.state.apiRequestReady = typeof window.api !== 'undefined' && 
+                                         typeof window.api.request !== 'undefined';
+            
+            this.state.apiAuthReady = typeof window.api !== 'undefined' && 
+                                      typeof window.api.auth !== 'undefined';
+            
+            this.state.appCoreReady = typeof window.app !== 'undefined' && 
+                                      typeof window.app.core !== 'undefined';
+            
+            // Log status
+            if (this.state.debugMode && checkCount % 10 === 0) {
+                console.log(`${this.state.logPrefix} Dependency check ${checkCount}/50:`, {
+                    apiCore: this.state.apiCoreReady,
+                    apiRequest: this.state.apiRequestReady,
+                    apiAuth: this.state.apiAuthReady,
+                    appCore: this.state.appCoreReady
                 });
             }
             
-            // Check if API is ready
-            if (!this.state.apiReady || typeof window.api !== 'function') {
-                const error = new Error('API not available');
-                console.error('❌ API call failed:', error.message);
-                throw error;
+            // If all dependencies are ready OR we've timed out, continue
+            const allReady = this.state.apiCoreReady && 
+                           this.state.apiRequestReady && 
+                           this.state.apiAuthReady && 
+                           this.state.appCoreReady;
+            
+            if (allReady || checkCount >= maxChecks) {
+                console.log(`${this.state.logPrefix} Dependencies ready (all: ${allReady}, checks: ${checkCount})`);
+                resolve(allReady);
+            } else {
+                setTimeout(checkDependencies, 100);
+            }
+        };
+        
+        checkDependencies();
+    });
+}
+
+// REMOVE the individual waitForApiCore(), waitForApiRequest(), waitForApiAuth(), waitForAppCore() methods
+// They are replaced by the consolidated check above
+            
+            
+            
+            // ================================
+            // 2. SESSION AUTHORITY
+            // ================================
+            
+            async initializeSession() {
+                console.log(`${this.state.logPrefix} Initializing session...`);
+                
+                // Check if api.auth is available
+                if (this.state.apiAuthReady && window.api.auth) {
+                    try {
+                        // Get current user from api.auth
+                        const user = await window.api.auth.getCurrentUser();
+                        
+                        if (user) {
+                            // Store sanitized user data
+                            this.state.currentUser = this.sanitizeUserData(user);
+                            this.state.sessionValid = true;
+                            this.state.lastSynced = Date.now();
+                            
+                            // Get token if available
+                            if (window.api.auth.getToken) {
+                                this.state.authToken = await window.api.auth.getToken();
+                            }
+                            
+                            console.log(`${this.state.logPrefix} Session initialized for user:`, 
+                                      user.username || user.email || 'Unknown');
+                        } else {
+                            console.log(`${this.state.logPrefix} No authenticated user found`);
+                            this.state.currentUser = null;
+                            this.state.sessionValid = false;
+                        }
+                    } catch (error) {
+                        console.error(`${this.state.logPrefix} Failed to initialize session:`, error);
+                        this.state.currentUser = null;
+                        this.state.sessionValid = false;
+                    }
+                } else {
+                    console.warn(`${this.state.logPrefix} api.auth not available, session initialization skipped`);
+                }
+                
+                // Broadcast initial session state
+                this.debouncedBroadcastSession();
             }
             
-            const defaultOptions = {
-                timeout: 10000,
-                maxRetries: 1, // Reduced retries for initialization
-                retryDelay: 1000,
-                ...options
-            };
+            sanitizeUserData(user) {
+                // Create sanitized copy of user data
+                const sanitized = {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    avatar: user.avatar,
+                    displayName: user.displayName || user.username,
+                    mood: user.mood,
+                    status: user.status,
+                    interests: user.interests || [],
+                    settings: user.settings || {}
+                };
+                
+                // Remove any sensitive data
+                delete sanitized.password;
+                delete sanitized.token;
+                delete sanitized.accessToken;
+                delete sanitized.refreshToken;
+                delete sanitized._private;
+                
+                return sanitized;
+            }
             
-            let lastError = null;
-            
-            for (let attempt = 0; attempt <= defaultOptions.maxRetries; attempt++) {
+            async refreshSession() {
+                console.log(`${this.state.logPrefix} Refreshing session...`);
+                
+                if (!this.state.apiAuthReady) {
+                    console.warn(`${this.state.logPrefix} Cannot refresh: api.auth not ready`);
+                    return;
+                }
+                
                 try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), defaultOptions.timeout);
+                    // Get updated user data
+                    const user = await window.api.auth.getCurrentUser();
                     
-                    try {
-                        const result = await window.api(endpoint, method, data, { signal: controller.signal });
-                        clearTimeout(timeoutId);
-                        return result;
-                    } catch (apiError) {
-                        clearTimeout(timeoutId);
+                    if (user) {
+                        const oldUserId = this.state.currentUser?.id;
+                        this.state.currentUser = this.sanitizeUserData(user);
+                        this.state.sessionValid = true;
+                        this.state.lastSynced = Date.now();
                         
-                        if (apiError.name === 'AbortError') {
-                            throw new Error(`Request timeout after ${defaultOptions.timeout}ms`);
+                        // Update token if available
+                        if (window.api.auth.getToken) {
+                            this.state.authToken = await window.api.auth.getToken();
                         }
                         
-                        throw apiError;
+                        // Broadcast if user changed
+                        if (!oldUserId || oldUserId !== user.id) {
+                            this.broadcastSessionUpdate();
+                        }
+                        
+                        console.log(`${this.state.logPrefix} Session refreshed`);
+                    } else {
+                        // User logged out
+                        this.clearSession();
+                        console.log(`${this.state.logPrefix} Session cleared (user logged out)`);
                     }
                 } catch (error) {
-                    lastError = error;
+                    console.error(`${this.state.logPrefix} Failed to refresh session:`, error);
                     
-                    // Don't retry on authentication/authorization errors
-                    if (error.message.includes('401') || error.message.includes('403')) {
-                        console.error(`❌ Auth error (${error.message}), not retrying`);
-                        
-                        // Update auth status
-                        if (error.message.includes('401')) {
-                            this.state.authStatus = 'unauthenticated';
-                            this.state.user = null;
-                            this.state.token = null;
-                            localStorage.removeItem('access_token');
-                            localStorage.removeItem('kynecta_user');
-                            
-                            // Notify iframes
-                            this.notifyIframesAboutAuthStatus();
-                        }
-                        
-                        throw error;
-                    }
-                    
-                    if (attempt < defaultOptions.maxRetries) {
-                        const delay = defaultOptions.retryDelay * Math.pow(2, attempt);
-                        console.warn(`⚠️ Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message);
-                        await new Promise(resolve => setTimeout(resolve, delay));
+                    // Check if token is invalid
+                    if (error.message?.includes('token') || error.message?.includes('auth')) {
+                        this.clearSession();
                     }
                 }
             }
             
-            console.error(`❌ All ${defaultOptions.maxRetries + 1} attempts failed:`, lastError);
-            throw lastError;
-        },
-        
-        // Check if endpoint requires authentication
-        isProtectedEndpoint(endpoint) {
-            const protectedPatterns = [
-                /^\/api\/messages/,
-                /^\/api\/chats/,
-                /^\/api\/friends/,
-                /^\/api\/groups/,
-                /^\/api\/calls/,
-                /^\/api\/profile/,
-                /^\/api\/settings/,
-                /^\/api\/notifications/,
-                /^\/api\/status/
-            ];
+            clearSession() {
+                console.log(`${this.state.logPrefix} Clearing session...`);
+                
+                this.state.currentUser = null;
+                this.state.authToken = null;
+                this.state.sessionValid = false;
+                this.state.lastSynced = Date.now();
+                
+                // Broadcast logout
+                this.broadcastLogout();
+            }
             
-            const publicPatterns = [
-                /^\/api\/ping/,
-                /^\/api\/auth\/check/,
-                /^\/api\/public/
-            ];
+            // ================================
+            // 3. SECURE MESSAGING CHANNEL
+            // ================================
             
-            // Check if it's a public endpoint
-            for (const pattern of publicPatterns) {
-                if (pattern.test(endpoint)) {
+            setupMessageRouter() {
+                console.log(`${this.state.logPrefix} Setting up message router...`);
+                
+                // Register message handlers
+                this.registerMessageHandler('CHILD_READY', this.handleChildReady.bind(this));
+                this.registerMessageHandler('REQUEST_SESSION', this.handleRequestSession.bind(this));
+                this.registerMessageHandler('PING_PARENT', this.handlePingParent.bind(this));
+                this.registerMessageHandler('SESSION_ACK', this.handleSessionAck.bind(this));
+                this.registerMessageHandler('FRAME_UNLOAD', this.handleFrameUnload.bind(this));
+                
+                // Legacy message support
+                this.registerMessageHandler('REQUEST_USER_DATA', this.handleLegacyRequestUserData.bind(this));
+                this.registerMessageHandler('iframe_loaded', this.handleLegacyIframeLoaded.bind(this));
+                
+                // Setup window message listener
+                window.addEventListener('message', this.handleIncomingMessage.bind(this));
+                
+                console.log(`${this.state.logPrefix} Message router ready`);
+            }
+            
+            registerMessageHandler(type, handler) {
+                this.state.messageHandlers.set(type, handler);
+            }
+            handleIncomingMessage(event) {
+    const validation = this.validateMessage(event);
+    
+    if (!validation.valid) {
+        if (this.state.debugMode && validation.reason !== 'untrusted_origin') {
+            console.warn(`${this.state.logPrefix} Invalid message:`, validation.reason);
+        }
+        return;
+    }
+    
+    const { type, payload, frameId, sequence } = validation.data;
+    
+    // Log incoming message
+    if (this.state.debugMode) {
+        console.log(`${this.state.logPrefix} Received:`, { type, frameId, sequence });
+    }
+    
+    // Find handler
+    const handler = this.state.messageHandlers.get(type);
+    
+    if (handler) {
+        try {
+            handler(event, payload, frameId, sequence);
+        } catch (error) {
+            console.error(`${this.state.logPrefix} Error handling ${type}:`, error);
+            
+            // Send error back to sender if possible
+            if (frameId && this.state.iframes.has(frameId)) {
+                this.sendToFrame(frameId, 'ERROR', {
+                    originalType: type,
+                    error: error.message,
+                    timestamp: Date.now()
+                }, false);
+            }
+        }
+    } else if (this.state.debugMode) {
+        console.log(`${this.state.logPrefix} No handler for:`, type);
+    }
+}
+            
+            sendToFrame(frameId, type, payload = {}, expectAck = false) {
+                const frameInfo = this.state.iframes.get(frameId);
+                
+                if (!frameInfo || !frameInfo.element || !frameInfo.element.contentWindow) {
+                    console.warn(`${this.state.logPrefix} Cannot send to frame ${frameId}: not found or inaccessible`);
+                    return false;
+                }
+                
+                // Generate sequence number for tracking
+                const sequence = this.generateSequenceNumber(frameId);
+                
+                const message = {
+                    type,
+                    payload,
+                    frameId,
+                    sequence,
+                    timestamp: Date.now(),
+                    sessionId: this.state.sessionId,
+                    expectAck
+                };
+                
+                try {
+                    frameInfo.element.contentWindow.postMessage(message, '*');
+                    
+                    // Store for acknowledgement tracking
+                    if (expectAck) {
+                        frameInfo.pendingAcks = frameInfo.pendingAcks || new Map();
+                        frameInfo.pendingAcks.set(sequence, {
+                            message: { type, payload },
+                            timestamp: Date.now(),
+                            retries: 0
+                        });
+                        
+                        // Setup acknowledgement timeout
+                        setTimeout(() => {
+                            this.checkAcknowledgment(frameId, sequence);
+                        }, 5000);
+                    }
+                    
+                    if (this.state.debugMode) {
+                        console.log(`${this.state.logPrefix} Sent to frame ${frameId}:`, { type, sequence });
+                    }
+                    
+                    return true;
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Failed to send to frame ${frameId}:`, error);
                     return false;
                 }
             }
             
-            // Check if it's a protected endpoint
-            for (const pattern of protectedPatterns) {
-                if (pattern.test(endpoint)) {
-                    return true;
+            broadcastToAllFrames(type, payload = {}) {
+                console.log(`${this.state.logPrefix} Broadcasting to ${this.state.iframes.size} frames:`, type);
+                
+                let successCount = 0;
+                
+                for (const [frameId, frameInfo] of this.state.iframes.entries()) {
+                    if (frameInfo.ready) {
+                        const sent = this.sendToFrame(frameId, type, payload);
+                        if (sent) successCount++;
+                    }
+                }
+                
+                if (this.state.debugMode) {
+                    console.log(`${this.state.logPrefix} Broadcast complete: ${successCount}/${this.state.iframes.size} frames`);
+                }
+                
+                return successCount;
+            }
+            
+            // ================================
+            // 4. SESSION BROADCASTING
+            // ================================
+            
+            broadcastSessionUpdate() {
+                console.log(`${this.state.logPrefix} Broadcasting session update...`);
+                
+                const sessionData = this.getSessionData();
+                
+                // Send to all ready frames
+                this.broadcastToAllFrames('SESSION_UPDATE', sessionData);
+                
+                // Process pending frames
+                this.processPendingFrames();
+            }
+            
+            broadcastLogout() {
+                console.log(`${this.state.logPrefix} Broadcasting logout...`);
+                
+                this.broadcastToAllFrames('SESSION_LOGOUT', {
+                    timestamp: Date.now(),
+                    sessionId: this.state.sessionId
+                });
+                
+                // Clear all frame states
+                for (const [frameId, frameInfo] of this.state.iframes.entries()) {
+                    frameInfo.sessionAcknowledged = false;
+                    frameInfo.lastSessionUpdate = null;
                 }
             }
             
-            // Default to protected for unknown endpoints
-            return true;
-        },
-        
-        // Process pending protected calls
-        async processPendingProtectedCalls() {
-            if (this.pendingProtectedCalls.length === 0) return;
-            
-            console.log(`🔄 Processing ${this.pendingProtectedCalls.length} pending protected API calls`);
-            
-            const calls = [...this.pendingProtectedCalls];
-            this.pendingProtectedCalls = [];
-            
-            for (const pendingCall of calls) {
-                try {
-                    // Skip if too old (more than 30 seconds)
-                    if (Date.now() - pendingCall.timestamp > 30000) {
-                        pendingCall.reject(new Error('API call timeout - authentication took too long'));
-                        continue;
-                    }
-                    
-                    const result = await this.safeApiCall(
-                        pendingCall.endpoint,
-                        pendingCall.method,
-                        pendingCall.data,
-                        pendingCall.options
-                    );
-                    pendingCall.resolve(result);
-                } catch (error) {
-                    pendingCall.reject(error);
+            debouncedBroadcastSession() {
+                // Clear existing timer
+                if (this.state.broadcastDebounceTimer) {
+                    clearTimeout(this.state.broadcastDebounceTimer);
                 }
-            }
-        },
-        
-        // Check localStorage for existing auth
-        checkLocalStorageAuth() {
-            const token = localStorage.getItem('access_token');
-            const userData = localStorage.getItem('kynecta_user');
-            
-            if (token && userData) {
-                try {
-                    this.state.user = JSON.parse(userData);
-                    this.state.token = token;
-                    return 'authenticated';
-                } catch (e) {
-                    console.warn('⚠️ Failed to parse user data from localStorage');
-                    return 'auth-error';
-                }
+                
+                // Set new timer
+                this.state.broadcastDebounceTimer = setTimeout(() => {
+                    this.broadcastSessionUpdate();
+                    this.state.broadcastDebounceTimer = null;
+                }, 100);
             }
             
-            return 'unauthenticated';
-        },
-        
-        // Notify all iframes about auth status
-        notifyIframesAboutAuthStatus() {
-            const iframes = document.querySelectorAll('.content-iframe');
-            console.log(`📤 Notifying ${iframes.length} iframes about auth status: ${this.state.authStatus}`);
-            
-            iframes.forEach(iframe => {
-                try {
-                    if (iframe.contentWindow) {
-                        const message = {
-                            type: 'AUTH_STATUS',
-                            status: this.state.authStatus,
-                            timestamp: Date.now()
-                        };
-                        
-                        if (this.state.authStatus === 'authenticated' && this.state.user && this.state.token) {
-                            message.user = this.state.user;
-                            message.token = this.state.token;
-                        }
-                        
-                        iframe.contentWindow.postMessage(message, '*');
-                        console.log(`✅ Notified iframe ${iframe.id} about auth status`);
-                    }
-                } catch (error) {
-                    console.warn(`⚠️ Failed to notify iframe ${iframe.id}:`, error.message);
-                }
-            });
-            
-            this.state.initializationSequence.iframesNotified = true;
-            
-            // Resolve any pending iframe auth promises
-            this.iframeConnections.forEach((promise, iframeId) => {
-                if (promise.resolve) {
-                    promise.resolve({
-                        status: this.state.authStatus,
-                        user: this.state.user,
-                        token: this.state.token
-                    });
-                    this.iframeConnections.delete(iframeId);
-                }
-            });
-        },
-        
-        // Notify iframes that API is ready
-        notifyIframesApiReady() {
-            const iframes = document.querySelectorAll('.content-iframe');
-            console.log(`📤 Notifying ${iframes.length} iframes that API is ready`);
-            
-            iframes.forEach(iframe => {
-                try {
-                    if (iframe.contentWindow) {
-                        iframe.contentWindow.postMessage({
-                            type: 'API_INITIALIZATION_COMPLETE',
-                            timestamp: Date.now(),
-                            apiReady: this.state.apiReady,
-                            authStatus: this.state.authStatus
-                        }, '*');
-                    }
-                } catch (error) {
-                    console.warn(`⚠️ Failed to notify iframe ${iframe.id} about API ready:`, error.message);
-                }
-            });
-        },
-        
-        // Handle iframe requests for auth status
-        handleIframeAuthRequest(iframeId, resolve) {
-            console.log(`📨 Received auth request from iframe: ${iframeId}`);
-            
-            // If we already have auth status, respond immediately
-            if (this.state.authChecked) {
-                const response = {
-                    status: this.state.authStatus,
-                    user: this.state.user,
-                    token: this.state.token,
-                    apiReady: this.state.apiReady
+            getSessionData() {
+                return {
+                    user: this.state.currentUser,
+                    authenticated: !!this.state.currentUser,
+                    sessionId: this.state.sessionId,
+                    timestamp: Date.now(),
+                    lastSynced: this.state.lastSynced
                 };
-                console.log(`✅ Immediate response to ${iframeId}: ${this.state.authStatus}`);
-                resolve(response);
-                return;
             }
             
-            // Store the promise to resolve later
-            this.iframeConnections.set(iframeId, { resolve });
+            // ================================
+            // 5. IFRAME REGISTRY
+            // ================================
+            registerIframe(iframeElement, frameId = null) {
+    // Validate iframe element
+    if (!iframeElement || !iframeElement.tagName || iframeElement.tagName !== 'IFRAME') {
+        console.error(`${this.state.logPrefix} Invalid iframe element provided`);
+        return null;
+    }
+    
+    // Generate ID if not provided
+    const id = frameId || iframeElement.id || this.generateFrameId(iframeElement);
+    
+    // Check if already registered with this exact element
+    for (const [existingId, existingInfo] of this.state.iframes.entries()) {
+        if (existingInfo.element === iframeElement) {
+            console.log(`${this.state.logPrefix} Iframe element already registered as ${existingId}`);
             
-            // Start auth check if not already done
-            if (!this.state.authChecked) {
-                this.checkAuthStatusSilent();
-            }
-        },
-        
-        // Start background jobs (once per lifecycle)
-        startBackgroundJobs() {
-            if (this.state.backgroundJobsLock) {
-                console.log('🔒 Background jobs already locked, skipping');
-                return;
-            }
-            
-            if (this.state.authStatus !== 'authenticated') {
-                console.log('🚫 Not authenticated, skipping background jobs');
-                return;
-            }
-            
-            console.log('🔄 Starting background jobs...');
-            this.state.backgroundJobsLock = true;
-            this.state.backgroundJobsStarted = true;
-            this.state.initializationSequence.backgroundJobsStarted = true;
-            
-            // Start connectivity monitoring
-            this.startConnectivityMonitoring();
-            
-            // Start data sync if authenticated and API is ready
-            if (this.state.apiReady) {
-                this.startDataSync();
+            // Update ID if different
+            if (existingId !== id) {
+                console.log(`${this.state.logPrefix} Updating ID from ${existingId} to ${id}`);
+                this.state.iframes.delete(existingId);
+                existingInfo.id = id;
+                this.state.iframes.set(id, existingInfo);
             }
             
-            console.log('✅ Background jobs started');
-        },
-        
-        // Start connectivity monitoring
-        startConnectivityMonitoring() {
-            let wasOnline = navigator.onLine;
-            
-            const checkConnectivity = () => {
-                const isOnline = navigator.onLine;
-                
-                if (!wasOnline && isOnline) {
-                    console.log('🌐 Back online');
-                    showGlobalNotification('Back online', 'success', 3000);
-                } else if (wasOnline && !isOnline) {
-                    console.log('📴 Went offline');
-                    showGlobalNotification('You are offline', 'warning', 5000);
-                }
-                
-                wasOnline = isOnline;
-            };
-            
-            // Check immediately
-            checkConnectivity();
-            
-            // Set up event listeners
-            window.addEventListener('online', checkConnectivity);
-            window.addEventListener('offline', checkConnectivity);
-            
-            // Store for cleanup
-            this._connectivityCheck = checkConnectivity;
-        },
-        
-        // Start data sync - ONLY AFTER AUTH CONFIRMED
-        startDataSync() {
-            console.log('🔄 Starting data sync (after auth confirmed)...');
-            
-            // Sync unread messages every 30 seconds
-            const syncMessages = async () => {
-                if (!navigator.onLine) return;
-                if (!this.state.apiReady) return;
-                if (this.state.authStatus !== 'authenticated') return;
-                
-                try {
-                    const response = await this.safeApiCall('/api/messages/unread', 'GET', null, { timeout: 5000 });
-                    if (response && response.unreadCount > 0) {
-                        updateUnreadBadges(response.unreadCount);
-                    }
-                } catch (error) {
-                    // Silent fail - okay if this fails occasionally
-                }
-            };
-            
-            // Start interval
-            this._messageSyncInterval = setInterval(syncMessages, 30000);
-            
-            // Initial sync after 5 seconds
-            setTimeout(syncMessages, 5000);
-            
-            // Also sync notifications
-            this.startNotificationSync();
-        },
-        
-        // Start notification sync
-        startNotificationSync() {
-            const syncNotifications = async () => {
-                if (!navigator.onLine) return;
-                if (!this.state.apiReady) return;
-                if (this.state.authStatus !== 'authenticated') return;
-                
-                try {
-                    await this.safeApiCall('/api/notifications/sync', 'POST', null, { timeout: 3000 });
-                } catch (error) {
-                    // Silent fail
-                }
-            };
-            
-            // Sync every 60 seconds
-            this._notificationSyncInterval = setInterval(syncNotifications, 60000);
-            
-            // Initial sync
-            setTimeout(syncNotifications, 10000);
-        },
-        
-        // Cleanup
-        cleanup() {
-            console.log('🧹 ParentAuthCoordinator cleaning up...');
-            
-            // Clear intervals
-            if (this._messageSyncInterval) {
-                clearInterval(this._messageSyncInterval);
-            }
-            
-            if (this._notificationSyncInterval) {
-                clearInterval(this._notificationSyncInterval);
-            }
-            
-            // Remove event listeners
-            if (this._connectivityCheck) {
-                window.removeEventListener('online', this._connectivityCheck);
-                window.removeEventListener('offline', this._connectivityCheck);
-            }
-            
-            // Clear state
-            this.state.backgroundJobsLock = false;
-            this.state.backgroundJobsStarted = false;
-            this.state.protectedApiCallsBlocked = true;
-            this.iframeConnections.clear();
-            this.pendingProtectedCalls = [];
-            
-            console.log('✅ ParentAuthCoordinator cleaned up');
+            return id;
+        }
+    }
+    
+    // Check if ID already exists (different element)
+    if (this.state.iframes.has(id)) {
+        console.warn(`${this.state.logPrefix} Frame ID ${id} already exists with different element, generating new ID`);
+        const newId = this.generateFrameId(iframeElement);
+        return this.registerIframe(iframeElement, newId);
+    }
+    
+    const frameInfo = {
+        element: iframeElement,
+        id: id,
+        ready: false,
+        sessionAcknowledged: false,
+        lastSessionUpdate: null,
+        lastHeartbeat: Date.now(),
+        pendingAcks: new Map(),
+        requestQueue: [],
+        checkInterval: null,
+        metadata: {
+            src: iframeElement.src || 'about:blank',
+            title: iframeElement.title || iframeElement.getAttribute('title') || 'Untitled',
+            registeredAt: Date.now(),
+            elementId: iframeElement.id || 'none'
         }
     };
     
-    // Application state variables
-    let currentPage = 'messages';
-    let iframesLoaded = {};
-    let appVersion = '1.0.0';
-    let activeCall = null;
-    let bottomNavVisible = true;
-    let fullscreenPageDetectionEnabled = true;
-    let chatHistory = [];
-    let isInChatView = false;
-    let isInStatusView = false;
-    let isInGroupView = false;
-    let isInFullscreenView = false;
+    this.state.iframes.set(id, frameInfo);
     
-    let appInitialized = false;
-    let loadingTimeout = null;
+    console.log(`${this.state.logPrefix} Registered iframe: ${id}`, {
+        src: frameInfo.metadata.src,
+        title: frameInfo.metadata.title
+    });
     
-    // Modal control function
-    function closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.add('hidden');
-        }
-    }
+    // Remove from pending frames if it was there
+    this.state.pendingFrames = this.state.pendingFrames.filter(pending => 
+        !(pending.frameId === id || pending.source === iframeElement.contentWindow)
+    );
     
-    // Main initialization function with proper sequencing
-    async function quickInitialize() {
-        console.log('🚀 Quick initialization starting...');
-        
-        // Show loading screen briefly
+    // Send session data if available
+    if (this.state.initialized && this.state.sessionValid) {
         setTimeout(() => {
-            hideLoading();
-        }, 1000);
-        
-        // Initialize auth coordinator in background (non-blocking)
-        // This will handle API timing and auth sequencing
-        ParentAuthCoordinator.initialize().catch(error => {
-            console.error('❌ ParentAuthCoordinator init failed:', error);
-            // Still continue with UI setup even if auth init fails
-        });
-        
-        // Setup navigation immediately (UI never blocked)
-        setupNavigation();
-        
-        // Show sidebar on desktop
-        document.getElementById('permanentSidebar').classList.remove('hidden');
-        
-        // Show mobile nav on mobile
-        if (window.innerWidth < 768) {
-            const mobileNavBar = document.getElementById('mobileNavBar');
-            if (mobileNavBar) {
-                mobileNavBar.classList.remove('hidden');
-            }
-        }
-        
-        // Preload iframes (they won't make API calls until auth is ready)
-        preloadIframes();
-        
-        // Start on messages page
-        switchPage('messages');
-        
-        // Mark as initialized
-        appInitialized = true;
-        
-        console.log('[App] ✅ UI initialization complete.');
-        console.log('[App] 📊 Auth status:', ParentAuthCoordinator.state.authStatus);
-        console.log('[App] 📊 API ready:', ParentAuthCoordinator.state.apiReady);
-        console.log('[App] 📊 Protected API calls blocked:', ParentAuthCoordinator.state.protectedApiCallsBlocked);
-        
-        // Fullscreen detection
-        setTimeout(() => {
-            setupFullscreenPageDetection();
-        }, 500);
+            this.sendSessionToFrame(id);
+        }, 100); // Small delay to ensure iframe is ready
+    } else if (!this.state.initialized) {
+        // Queue for initialization
+        this.state.pendingFrames.push({ frameId: id, element: iframeElement });
     }
     
-    // Setup navigation
-    function setupNavigation() {
-        console.log('🗺️ Setting up navigation...');
-        
-        // Desktop navigation
-        document.querySelectorAll('.nav-icon').forEach(icon => {
-            icon.addEventListener('click', function() {
-                const page = this.dataset.page;
-                if (page) {
-                    if (isInChatView) setIsInChatView(false);
-                    if (isInStatusView) setIsInStatusView(false);
-                    if (isInGroupView) setIsInGroupView(false);
-                    if (isInFullscreenView) setIsInFullscreenView(false);
-                    switchPage(page);
-                }
-            });
-        });
-        
-        // Mobile navigation
-        document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
-            icon.addEventListener('click', function() {
-                const page = this.dataset.page;
-                if (page) {
-                    if (isInChatView) setIsInChatView(false);
-                    if (isInStatusView) setIsInStatusView(false);
-                    if (isInGroupView) setIsInGroupView(false);
-                    if (isInFullscreenView) setIsInFullscreenView(false);
-                    switchPage(page);
-                }
-            });
-        });
-        
-        // Setup back button
-        setupBackButton();
-    }
+    // Setup unload detection
+    this.setupFrameUnloadDetection(iframeElement, id);
     
-    // Setup back button functionality
-    function setupBackButton() {
-        window.goBack = function() {
-            if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) {
-                if (isInChatView) {
-                    setIsInChatView(false);
-                    const messagesIframe = document.getElementById('messagesIframe');
-                    if (messagesIframe && iframesLoaded['messagesIframe']) {
-                        messagesIframe.contentWindow.postMessage({
-                            type: 'go_back'
-                        }, '*');
-                    }
-                } else if (isInStatusView) {
-                    setIsInStatusView(false);
-                    const statusIframe = document.getElementById('statusIframe');
-                    if (statusIframe && iframesLoaded['statusIframe']) {
-                        statusIframe.contentWindow.postMessage({
-                            type: 'go_back'
-                        }, '*');
-                    }
-                } else if (isInGroupView) {
-                    setIsInGroupView(false);
-                    const groupIframe = document.getElementById('groupIframe');
-                    if (groupIframe && iframesLoaded['groupIframe']) {
-                        groupIframe.contentWindow.postMessage({
-                            type: 'go_back'
-                        }, '*');
-                    }
-                } else if (isInFullscreenView) {
-                    setIsInFullscreenView(false);
-                }
-                return true;
-            }
-            return false;
-        };
-    }
-    
-    // View state management functions
-    function setIsInChatView(inChatView) {
-        isInChatView = inChatView;
-        if (inChatView) {
-            document.body.classList.add('in-chat-view');
-            hideBottomNavigation();
-        } else {
-            document.body.classList.remove('in-chat-view');
-            showBottomNavigation();
-        }
-    }
-    
-    function setIsInStatusView(inStatusView) {
-        isInStatusView = inStatusView;
-        if (inStatusView) {
-            document.body.classList.add('in-status-view');
-            hideBottomNavigation();
-        } else {
-            document.body.classList.remove('in-status-view');
-            showBottomNavigation();
-        }
-    }
-    
-    function setIsInGroupView(inGroupView) {
-        isInGroupView = inGroupView;
-        if (inGroupView) {
-            document.body.classList.add('in-group-view');
-            hideBottomNavigation();
-        } else {
-            document.body.classList.remove('in-group-view');
-            showBottomNavigation();
-        }
-    }
-    
-    function setIsInFullscreenView(inFullscreenView) {
-        isInFullscreenView = inFullscreenView;
-        if (inFullscreenView) {
-            document.body.classList.add('in-fullscreen-view');
-            hideBottomNavigation();
-        } else {
-            document.body.classList.remove('in-fullscreen-view');
-            showBottomNavigation();
-        }
-    }
-    
-    // Fullscreen page detection
-    function setupFullscreenPageDetection() {
-        console.log('🔍 Setting up fullscreen page detection...');
-        
-        const iframeObserver = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
-                    setTimeout(() => {
-                        checkIframeForFullscreenPage();
-                    }, 100);
-                }
-            });
-        });
-        
-        document.querySelectorAll('.content-iframe').forEach(iframe => {
-            iframeObserver.observe(iframe, { attributes: true });
-        });
-        
-        setTimeout(() => {
-            checkIframeForFullscreenPage();
-        }, 500);
-    }
-    
-    function checkIframeForFullscreenPage() {
-        if (!fullscreenPageDetectionEnabled || window.innerWidth >= 768) return;
-        
-        const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-        if (!activeIframe) return;
-        
-        try {
-            const iframeSrc = activeIframe.src || '';
-            const iframeUrl = new URL(iframeSrc, window.location.origin);
+    return id;
+}
             
-            const fullscreenPatterns = [
-                /chat-view/i,
-                /conversation/i,
-                /message-detail/i,
-                /status-view/i,
-                /status-detail/i,
-                /call-view/i,
-                /call-detail/i,
-                /profile-view/i,
-                /settings-view/i,
-                /fullscreen/i,
-                /\?fullscreen=true/i,
-                /#fullscreen/i
-            ];
+            unregisterIframe(frameId) {
+    if (this.state.iframes.has(frameId)) {
+        const frameInfo = this.state.iframes.get(frameId);
+        
+        // Clean up pending acknowledgements
+        if (frameInfo.pendingAcks) {
+            frameInfo.pendingAcks.clear();
+        }
+        
+        // Clear check interval
+        if (frameInfo.checkInterval) {
+            clearInterval(frameInfo.checkInterval);
+        }
+        
+        // Clear request queue
+        if (frameInfo.requestQueue) {
+            frameInfo.requestQueue.length = 0;
+        }
+        
+        this.state.iframes.delete(frameId);
+        
+        // Remove from pending frames
+        this.state.pendingFrames = this.state.pendingFrames.filter(pending => 
+            !(pending.frameId === frameId || (pending.element && pending.element === frameInfo.element))
+        );
+        
+        console.log(`${this.state.logPrefix} Unregistered iframe: ${frameId}`);
+        
+        // Clean up any orphaned sequence tracking
+        if (this.state.frameSequences[frameId]) {
+            delete this.state.frameSequences[frameId];
+        }
+    }
+}
             
-            const isFullscreenPage = fullscreenPatterns.some(pattern => 
-                pattern.test(iframeUrl.pathname) || pattern.test(iframeUrl.search) || pattern.test(iframeUrl.hash)
-            );
-            
-            const hash = iframeUrl.hash.toLowerCase();
-            const isFullscreenHash = hash.includes('chat') && !hash.includes('chats') || 
-                                    hash.includes('status') && !hash.includes('status-list') ||
-                                    hash.includes('call') && !hash.includes('calls-list') ||
-                                    hash.includes('profile') ||
-                                    hash.includes('detail') ||
-                                    hash.includes('group-chat') ||
-                                    hash.includes('create-status') ||
-                                    hash.includes('view-status');
-            
-            if (isFullscreenPage || isFullscreenHash) {
-                hideBottomNavigation();
-            } else {
-                showBottomNavigation();
-            }
-        } catch (e) {
-            checkIframeForFullscreenViaMessages();
-        }
-    }
-    
-    function checkIframeForFullscreenViaMessages() {
-        const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-        if (activeIframe && activeIframe.contentWindow) {
-            try {
-                activeIframe.contentWindow.postMessage({
-                    type: 'get_fullscreen_status'
-                }, '*');
-            } catch (e) {
-                console.warn('⚠️ Failed to check iframe for fullscreen status');
-            }
-        }
-    }
-    
-    // Bottom navigation control
-    function showBottomNavigation() {
-        if (window.innerWidth >= 768) return;
-        if (isInChatView || isInStatusView || isInGroupView || isInFullscreenView) return;
-        
-        const mobileNavBar = document.getElementById('mobileNavBar');
-        if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
-            mobileNavBar.classList.remove('hidden-nav');
-            bottomNavVisible = true;
-        }
-    }
-    
-    function hideBottomNavigation() {
-        if (window.innerWidth >= 768) return;
-        
-        const mobileNavBar = document.getElementById('mobileNavBar');
-        if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
-            mobileNavBar.classList.add('hidden-nav');
-            bottomNavVisible = false;
-        }
-    }
-    
-    // Preload iframes for better performance
-    function preloadIframes() {
-        console.log('📦 Preloading iframes in background...');
-        
-        const iframes = [
-            { id: 'messagesIframe', src: 'message.html' },
-            { id: 'statusIframe', src: 'status.html' },
-            { id: 'groupIframe', src: 'group.html' },
-            { id: 'callsIframe', src: 'calls.html' },
-            { id: 'friendsIframe', src: 'friend.html' },
-            { id: 'settingsIframe', src: 'settings.html' },
-            { id: 'toolsIframe', src: 'Tools.html' }
-        ];
-        
-        iframes.forEach(iframe => {
-            const element = document.getElementById(iframe.id);
-            if (element) {
-                iframesLoaded[iframe.id] = false;
+            setupFrameUnloadDetection(iframeElement, frameId) {
+                // Track load events
+                iframeElement.addEventListener('load', () => {
+                    console.log(`${this.state.logPrefix} Frame ${frameId} loaded`);
+                    this.sendSessionToFrame(frameId);
+                });
                 
-                const cacheBuster = `?v=${appVersion}&t=${Date.now()}`;
-                const iframeSrc = iframe.src + cacheBuster;
-                
-                element.onload = function() {
-                    console.log(`✅ ${iframe.id} loaded successfully`);
-                    iframesLoaded[iframe.id] = true;
-                    this.classList.add('loaded');
+                // Periodically check if frame is still accessible
+                const checkInterval = setInterval(() => {
+                    const frameInfo = this.state.iframes.get(frameId);
                     
-                    // Send initial auth status to iframe
-                    setTimeout(() => {
-                        sendAuthStatusToIframe(this);
-                    }, 100);
-                };
-                
-                element.onerror = function() {
-                    console.error(`❌ Failed to load ${iframe.id}`);
-                    iframesLoaded[iframe.id] = true;
-                    this.classList.add('loaded');
+                    if (!frameInfo || frameInfo.element !== iframeElement) {
+                        clearInterval(checkInterval);
+                        return;
+                    }
                     
-                    // Show error in iframe
                     try {
-                        this.contentWindow.document.body.innerHTML = `
+                        // Try to access frame
+                        if (!iframeElement.contentWindow) {
+                            throw new Error('Frame window inaccessible');
+                        }
+                        
+                        // Send heartbeat
+                        this.sendToFrame(frameId, 'HEARTBEAT_PING', {}, false);
+                        
+                    } catch (error) {
+                        // Frame is dead, unregister
+                        console.log(`${this.state.logPrefix} Frame ${frameId} is no longer accessible, unregistering...`);
+                        clearInterval(checkInterval);
+                        this.unregisterIframe(frameId);
+                    }
+                }, 30000); // Check every 30 seconds
+                
+                // Store interval for cleanup
+                const frameInfo = this.state.iframes.get(frameId);
+                if (frameInfo) {
+                    frameInfo.checkInterval = checkInterval;
+                }
+            }
+            
+            // ================================
+            // 6. LIFECYCLE SYNCHRONIZATION
+            // ================================
+            
+            setupEventSubscriptions() {
+                console.log(`${this.state.logPrefix} Setting up event subscriptions...`);
+                
+                // Subscribe to auth events if available
+                if (this.state.apiAuthReady && window.api.auth && window.api.auth.on) {
+                    // Auth ready
+                    window.api.auth.on('ready', () => {
+                        console.log(`${this.state.logPrefix} Received auth:ready event`);
+                        this.state.apiAuthReady = true;
+                        this.initializeSession();
+                    });
+                    
+                    // Login
+                    window.api.auth.on('login', (userData) => {
+                        console.log(`${this.state.logPrefix} Received auth:login event`);
+                        this.handleAuthLogin(userData);
+                    });
+                    
+                    // Logout
+                    window.api.auth.on('logout', () => {
+                        console.log(`${this.state.logPrefix} Received auth:logout event`);
+                        this.clearSession();
+                    });
+                    
+                    // Refresh
+                    window.api.auth.on('refresh', (userData) => {
+                        console.log(`${this.state.logPrefix} Received auth:refresh event`);
+                        this.handleAuthRefresh(userData);
+                    });
+                    
+                    console.log(`${this.state.logPrefix} Auth event subscriptions established`);
+                } else {
+                    console.warn(`${this.state.logPrefix} Cannot establish auth event subscriptions`);
+                }
+                
+                // Subscribe to visibility change for re-sync
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && this.state.sessionValid) {
+                        console.log(`${this.state.logPrefix} Page visible, refreshing session...`);
+                        this.refreshSession();
+                    }
+                });
+                
+                // Subscribe to online/offline events
+                window.addEventListener('online', () => {
+                    console.log(`${this.state.logPrefix} Back online, refreshing session...`);
+                    this.refreshSession();
+                });
+            }
+            
+            handleAuthLogin(userData) {
+                if (userData) {
+                    this.state.currentUser = this.sanitizeUserData(userData);
+                    this.state.sessionValid = true;
+                    this.state.lastSynced = Date.now();
+                    
+                    // Get token if available
+                    if (window.api.auth && window.api.auth.getToken) {
+                        window.api.auth.getToken().then(token => {
+                            this.state.authToken = token;
+                        }).catch(console.error);
+                    }
+                    
+                    console.log(`${this.state.logPrefix} User logged in:`, 
+                              userData.username || userData.email || 'Unknown');
+                    
+                    this.broadcastSessionUpdate();
+                }
+            }
+            
+            handleAuthRefresh(userData) {
+                if (userData) {
+                    const oldUser = this.state.currentUser;
+                    this.state.currentUser = this.sanitizeUserData(userData);
+                    this.state.sessionValid = true;
+                    this.state.lastSynced = Date.now();
+                    
+                    // Broadcast if user data changed
+                    if (!oldUser || oldUser.id !== userData.id || 
+                        JSON.stringify(oldUser) !== JSON.stringify(this.state.currentUser)) {
+                        this.broadcastSessionUpdate();
+                    }
+                    
+                    console.log(`${this.state.logPrefix} User data refreshed`);
+                }
+            }
+            
+            // ================================
+            // 7. RACE CONDITION PROTECTION
+            // ================================
+            
+            processPendingFrames() {
+                if (this.state.pendingFrames.length === 0) return;
+                
+                console.log(`${this.state.logPrefix} Processing ${this.state.pendingFrames.length} pending frames...`);
+                
+                const processed = [];
+                
+                for (const frameId of this.state.pendingFrames) {
+                    const frameInfo = this.state.iframes.get(frameId);
+                    
+                    if (frameInfo && frameInfo.ready) {
+                        this.sendSessionToFrame(frameId);
+                        processed.push(frameId);
+                    }
+                }
+                
+                // Remove processed frames
+                this.state.pendingFrames = this.state.pendingFrames.filter(id => !processed.includes(id));
+                
+                if (processed.length > 0) {
+                    console.log(`${this.state.logPrefix} Processed ${processed.length} pending frames`);
+                }
+            }
+            
+            queueFrameRequest(frameId, request) {
+                const frameInfo = this.state.iframes.get(frameId);
+                
+                if (!frameInfo) {
+                    console.warn(`${this.state.logPrefix} Cannot queue request for unknown frame:`, frameId);
+                    return;
+                }
+                
+                // Initialize queue if needed
+                if (!frameInfo.requestQueue) {
+                    frameInfo.requestQueue = [];
+                }
+                
+                // Add to queue
+                frameInfo.requestQueue.push({
+                    ...request,
+                    queuedAt: Date.now()
+                });
+                
+                console.log(`${this.state.logPrefix} Request queued for frame ${frameId}:`, request.type);
+                
+                // Process queue when session is ready
+                if (this.state.sessionValid) {
+                    this.processFrameQueue(frameId);
+                }
+            }
+            
+            processFrameQueue(frameId) {
+                const frameInfo = this.state.iframes.get(frameId);
+                
+                if (!frameInfo || !frameInfo.requestQueue || frameInfo.requestQueue.length === 0) {
+                    return;
+                }
+                
+                console.log(`${this.state.logPrefix} Processing ${frameInfo.requestQueue.length} queued requests for frame ${frameId}`);
+                
+                // Process all queued requests
+                while (frameInfo.requestQueue.length > 0) {
+                    const request = frameInfo.requestQueue.shift();
+                    this.handleQueuedRequest(frameId, request);
+                }
+            }
+            
+            handleQueuedRequest(frameId, request) {
+                // Handle different request types
+                switch (request.type) {
+                    case 'REQUEST_SESSION':
+                        this.sendSessionToFrame(frameId);
+                        break;
+                    // Add other request types as needed
+                }
+            }
+            
+            // ================================
+            // 8. FAILURE RECOVERY
+            // ================================
+            
+            startHeartbeat() {
+                // Clear existing interval
+                if (this.state.heartbeatInterval) {
+                    clearInterval(this.state.heartbeatInterval);
+                }
+                
+                // Start new heartbeat
+                this.state.heartbeatInterval = setInterval(() => {
+                    this.performHeartbeat();
+                }, 30000); // Every 30 seconds
+                
+                console.log(`${this.state.logPrefix} Heartbeat started`);
+            }
+            
+            performHeartbeat() {
+                if (this.state.debugMode) {
+                    console.log(`${this.state.logPrefix} Performing heartbeat...`);
+                }
+                
+                const now = Date.now();
+                let activeFrames = 0;
+                let inactiveFrames = 0;
+                
+                // Check all frames
+                for (const [frameId, frameInfo] of this.state.iframes.entries()) {
+                    try {
+                        // Send heartbeat ping
+                        this.sendToFrame(frameId, 'HEARTBEAT_PING', {}, false);
+                        
+                        // Update last heartbeat time
+                        frameInfo.lastHeartbeat = now;
+                        activeFrames++;
+                        
+                    } catch (error) {
+                        // Frame might be dead
+                        inactiveFrames++;
+                        
+                        if (now - (frameInfo.lastHeartbeat || 0) > 120000) { // 2 minutes
+                            console.warn(`${this.state.logPrefix} Frame ${frameId} appears dead, will unregister on next check`);
+                        }
+                    }
+                }
+                
+                // Refresh session periodically
+                if (this.state.sessionValid && now - (this.state.lastSynced || 0) > 300000) { // 5 minutes
+                    this.refreshSession();
+                }
+                
+                if (this.state.debugMode && (activeFrames > 0 || inactiveFrames > 0)) {
+                    console.log(`${this.state.logPrefix} Heartbeat: ${activeFrames} active, ${inactiveFrames} inactive frames`);
+                }
+            }
+            
+            checkAcknowledgment(frameId, sequence) {
+                const frameInfo = this.state.iframes.get(frameId);
+                
+                if (!frameInfo || !frameInfo.pendingAcks) {
+                    return;
+                }
+                
+                const ackInfo = frameInfo.pendingAcks.get(sequence);
+                
+                if (!ackInfo) {
+                    // Already acknowledged
+                    return;
+                }
+                
+                // Check if retry limit reached
+                if (ackInfo.retries >= 3) {
+                    console.warn(`${this.state.logPrefix} Frame ${frameId} not acknowledging after ${ackInfo.retries} retries`);
+                    frameInfo.pendingAcks.delete(sequence);
+                    return;
+                }
+                
+                // Retry sending
+                ackInfo.retries++;
+                console.log(`${this.state.logPrefix} Retrying message to frame ${frameId} (attempt ${ackInfo.retries})`);
+                
+                this.sendToFrame(frameId, ackInfo.message.type, ackInfo.message.payload, true);
+            }
+            
+            // ================================
+            // 9. SECURITY ENFORCEMENT
+            // ================================
+            
+            isTrustedOrigin(origin) {
+                // Allow same origin
+                if (origin === window.location.origin) {
+                    return true;
+                }
+                
+                // Check trusted origins
+                return this.state.trustedOrigins.includes(origin);
+            }
+            
+            // ================================
+            // 10. BACKWARD COMPATIBILITY
+            // ================================
+            
+            handleLegacyRequestUserData(event, payload, frameId) {
+                console.log(`${this.state.logPrefix} Handling legacy REQUEST_USER_DATA from ${frameId}`);
+                
+                // Convert to new format
+                this.handleRequestSession(event, { frameId }, frameId);
+            }
+            
+            handleLegacyIframeLoaded(event, payload, frameId) {
+                console.log(`${this.state.logPrefix} Handling legacy iframe_loaded from ${frameId}`);
+                
+                // Convert to new format
+                this.handleChildReady(event, { frameId }, frameId);
+            }
+            
+            // ================================
+            // 11. MESSAGE HANDLERS
+            // ================================
+            
+            handleChildReady(event, payload, frameId) {
+    console.log(`${this.state.logPrefix} Child ready received:`, { frameId, payload });
+    
+    // If frameId is missing, generate one from the event source
+    let actualFrameId = frameId;
+    const iframeElement = this.findIframeElement(event.source);
+    
+    if (!actualFrameId || actualFrameId === 'undefined') {
+        if (iframeElement) {
+            // Use the iframe's ID attribute or generate one
+            actualFrameId = iframeElement.id || this.generateFrameId(iframeElement);
+            console.log(`${this.state.logPrefix} Generated frame ID: ${actualFrameId}`);
+        } else {
+            // Last resort: generate from timestamp
+            actualFrameId = `frame_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            console.warn(`${this.state.logPrefix} Could not find iframe, using generated ID: ${actualFrameId}`);
+        }
+    }
+    
+    // Register or update frame
+    if (iframeElement) {
+        // Check if already registered with this ID
+        if (this.state.iframes.has(actualFrameId)) {
+            const existing = this.state.iframes.get(actualFrameId);
+            if (existing.element !== iframeElement) {
+                // Different iframe with same ID - generate new ID
+                actualFrameId = this.generateFrameId(iframeElement);
+                console.log(`${this.state.logPrefix} ID conflict, using new ID: ${actualFrameId}`);
+            }
+        }
+        
+        const registeredId = this.registerIframe(iframeElement, actualFrameId);
+        
+        // Update frame info
+        const frameInfo = this.state.iframes.get(registeredId);
+        if (frameInfo) {
+            frameInfo.ready = true;
+            frameInfo.readyAt = Date.now();
+            
+            // Send acknowledgement back to child with its assigned ID
+            this.sendToFrame(registeredId, 'CHILD_ACKNOWLEDGED', {
+                assignedFrameId: registeredId,
+                sessionBrokerReady: this.state.initialized
+            }, false);
+            
+            // Send session data if available
+            if (this.state.sessionValid || this.state.initialized) {
+                this.sendSessionToFrame(registeredId);
+            }
+        }
+    } else {
+        console.warn(`${this.state.logPrefix} Could not find iframe element for child, storing as pending`);
+        
+        // Store as pending frame for later registration
+        this.state.pendingFrames.push({
+            frameId: actualFrameId,
+            source: event.source,
+            receivedAt: Date.now()
+        });
+        
+        // Send acknowledgement anyway
+        try {
+            event.source.postMessage({
+                type: 'CHILD_ACKNOWLEDGED',
+                assignedFrameId: actualFrameId,
+                sessionBrokerReady: this.state.initialized,
+                note: 'iframe_element_not_found'
+            }, event.origin || '*');
+        } catch (e) {
+            console.warn(`${this.state.logPrefix} Failed to acknowledge child`);
+        }
+    }
+}
+            handleRequestSession(event, payload, frameId) {
+                console.log(`${this.state.logPrefix} Session requested by:`, frameId);
+                
+                // Find iframe
+                const iframeElement = this.findIframeElement(event.source);
+                if (!iframeElement) {
+                    console.warn(`${this.state.logPrefix} Could not find iframe for session request:`, frameId);
+                    return;
+                }
+                
+                // Register if not already
+                let registeredId = frameId;
+                if (!this.state.iframes.has(frameId)) {
+                    registeredId = this.registerIframe(iframeElement, frameId);
+                }
+                
+                // Update frame info
+                const frameInfo = this.state.iframes.get(registeredId);
+                if (frameInfo) {
+                    frameInfo.ready = true;
+                    
+                    // Send session data
+                    this.sendSessionToFrame(registeredId);
+                }
+            }
+            
+            handlePingParent(event, payload, frameId) {
+                // Simple ping response
+                this.sendToFrame(frameId, 'PONG', {
+                    timestamp: Date.now(),
+                    sessionId: this.state.sessionId
+                }, false);
+                
+                if (this.state.debugMode) {
+                    console.log(`${this.state.logPrefix} Responded to ping from:`, frameId);
+                }
+            }
+            
+            handleSessionAck(event, payload, frameId, sequence) {
+                const frameInfo = this.state.iframes.get(frameId);
+                
+                if (frameInfo && frameInfo.pendingAcks) {
+                    // Clear pending acknowledgement
+                    if (frameInfo.pendingAcks.has(sequence)) {
+                        frameInfo.pendingAcks.delete(sequence);
+                        
+                        if (this.state.debugMode) {
+                            console.log(`${this.state.logPrefix} Received ACK from ${frameId} for sequence ${sequence}`);
+                        }
+                    }
+                    
+                    // Mark session as acknowledged
+                    if (payload.sessionId === this.state.sessionId) {
+                        frameInfo.sessionAcknowledged = true;
+                        frameInfo.lastSessionUpdate = Date.now();
+                        
+                        console.log(`${this.state.logPrefix} Frame ${frameId} acknowledged session`);
+                    }
+                }
+            }
+            
+            handleFrameUnload(event, payload, frameId) {
+                console.log(`${this.state.logPrefix} Frame unloading:`, frameId);
+                this.unregisterIframe(frameId);
+            }
+
+            
+            // ================================
+            // 12. UTILITY METHODS
+            // ================================
+            setupErrorHandling() {
+    // Global error handler for broker operations
+    window.addEventListener('error', (event) => {
+        if (event.filename && event.filename.includes('chat.html')) {
+            console.error(`${this.state.logPrefix} Global error:`, event.error);
+        }
+    });
+    
+    // Promise rejection handler
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error(`${this.state.logPrefix} Unhandled promise rejection:`, event.reason);
+    });
+}
+
+recoverFromError(error) {
+    console.error(`${this.state.logPrefix} Recovery triggered:`, error.message);
+    
+    // 1. Clear all intervals
+    if (this.state.heartbeatInterval) {
+        clearInterval(this.state.heartbeatInterval);
+        this.state.heartbeatInterval = null;
+    }
+    
+    // 2. Reset frame states
+    for (const [frameId, frameInfo] of this.state.iframes.entries()) {
+        if (frameInfo.checkInterval) {
+            clearInterval(frameInfo.checkInterval);
+            frameInfo.checkInterval = null;
+        }
+    }
+    
+    // 3. Reinitialize core components
+    setTimeout(() => {
+        this.setupMessageRouter();
+        this.startHeartbeat();
+        console.log(`${this.state.logPrefix} Recovery complete`);
+    }, 1000);
+}
+            findIframeElement(contentWindow) {
+                // Find iframe by its contentWindow
+                const iframes = document.querySelectorAll('iframe');
+                for (const iframe of iframes) {
+                    try {
+                        if (iframe.contentWindow === contentWindow) {
+                            return iframe;
+                        }
+                    } catch (error) {
+                        // Cross-origin iframe, skip
+                        continue;
+                    }
+                }
+                return null;
+            }
+            
+            generateSessionId() {
+                return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            }
+            
+            generateFrameId(iframeElement) {
+                // Generate unique ID for iframe
+                const src = iframeElement.src || 'unknown';
+                const timestamp = Date.now();
+                const random = Math.random().toString(36).substr(2, 5);
+                return `frame_${timestamp}_${random}`;
+            }
+            
+            generateSequenceNumber(frameId) {
+                // Generate sequence number for message tracking
+                if (!this.state.frameSequences[frameId]) {
+                    this.state.frameSequences[frameId] = 0;
+                }
+                return ++this.state.frameSequences[frameId];
+            }
+            
+            sendSessionToFrame(frameId) {
+                if (!this.state.initialized) {
+                    console.warn(`${this.state.logPrefix} Cannot send session: broker not initialized`);
+                    return false;
+                }
+                
+                const sessionData = this.getSessionData();
+                const sent = this.sendToFrame(frameId, 'SESSION_DATA', sessionData, true);
+                
+                if (sent) {
+                    console.log(`${this.state.logPrefix} Sent session to frame ${frameId}`);
+                }
+                
+                return sent;
+            }
+            
+            logStatus() {
+                console.log(`${this.state.logPrefix} Status Report:`);
+                console.log(`${this.state.logPrefix} - Initialized: ${this.state.initialized}`);
+                console.log(`${this.state.logPrefix} - Dependencies: api.core=${this.state.apiCoreReady}, api.request=${this.state.apiRequestReady}, api.auth=${this.state.apiAuthReady}, app.core=${this.state.appCoreReady}`);
+                console.log(`${this.state.logPrefix} - Session: ${this.state.sessionValid ? 'Valid' : 'Invalid'}`);
+                console.log(`${this.state.logPrefix} - User: ${this.state.currentUser ? (this.state.currentUser.username || this.state.currentUser.email || 'Unknown') : 'None'}`);
+                console.log(`${this.state.logPrefix} - Frames: ${this.state.iframes.size} registered, ${this.state.pendingFrames.length} pending`);
+                console.log(`${this.state.logPrefix} - Session ID: ${this.state.sessionId}`);
+            }
+            
+            // ================================
+            // PUBLIC API
+            // ================================
+            
+            async ready() {
+                if (this.state.initialized) {
+                    return true;
+                }
+                return this.state.initializationPromise || Promise.resolve(false);
+            }
+            
+            getSession() {
+                return this.getSessionData();
+            }
+            
+            getUser() {
+                return this.state.currentUser;
+            }
+            
+            isAuthenticated() {
+                return this.state.sessionValid && !!this.state.currentUser;
+            }
+            
+            getFrameCount() {
+                return this.state.iframes.size;
+            }
+            
+            refresh() {
+                return this.refreshSession();
+            }
+            
+            logout() {
+                this.clearSession();
+            }
+            
+            debug() {
+                return {
+                    state: this.state,
+                    frames: Array.from(this.state.iframes.entries()).map(([id, info]) => ({
+                        id,
+                        ready: info.ready,
+                        sessionAcknowledged: info.sessionAcknowledged,
+                        metadata: info.metadata
+                    })),
+                    session: this.getSessionData()
+                };
+            }
+        }
+        
+        // ================================
+        // PARENT APPLICATION MANAGER (UPDATED)
+        // ================================
+        
+        const ParentApplicationManager = {
+            state: {
+                initialized: false,
+                currentPage: 'messages',
+                iframesLoaded: {},
+                appVersion: '1.0.0',
+                activeCall: null,
+                bottomNavVisible: true,
+                fullscreenPageDetectionEnabled: true,
+                chatHistory: [],
+                isInChatView: false,
+                isInStatusView: false,
+                isInGroupView: false,
+                isInFullscreenView: false,
+                loadingTimeout: null,
+                navigationEnabled: true,
+                iframeLoadingOverlays: {},
+                sessionBroker: null
+            },
+            
+            async initialize() {
+                console.log('🚀 [ParentApplicationManager] Initializing application with Session Broker...');
+                
+                
+                this.state.sessionBroker = new SessionBroker();
+
+try {
+    // Use timeout-protected initialization
+    const initialized = await this.state.sessionBroker.initializeWithTimeout(8000);
+    
+    if (!initialized) {
+        console.warn('⚠️ SessionBroker initialized with limited functionality');
+        ParentApplicationManager.showGlobalNotification(
+            'Session manager initialized with limited functionality',
+            'warning',
+            3000
+        );
+    }
+} catch (error) {
+    console.error('❌ Failed to initialize SessionBroker:', error);
+    
+    // Create minimal broker for basic functionality
+    this.state.sessionBroker = {
+        ready: () => Promise.resolve(true),
+        getUser: () => null,
+        isAuthenticated: () => false,
+        sendToFrame: () => false,
+        broadcastToAllFrames: () => 0
+    };
+    
+    ParentApplicationManager.showGlobalNotification(
+        'Running in fallback mode - some features disabled',
+        'error',
+        5000
+    );
+    
+}
+
+                // Setup UI immediately
+                this.setupUI();
+                
+                // Preload iframes in background
+                this.preloadIframesInBackground();
+                
+                this.state.initialized = true;
+                console.log('✅ [ParentApplicationManager] Application initialized with Session Broker');
+            },
+            
+            setupUI() {
+                console.log('🖥️ [ParentApplicationManager] Setting up UI...');
+                
+                // Hide loading screen immediately
+                this.hideLoadingScreen();
+                
+                // Show sidebar
+                document.getElementById('permanentSidebar')?.classList.remove('hidden');
+                
+                // Show mobile nav bar
+                if (window.innerWidth < 768) {
+                    document.getElementById('mobileNavBar')?.classList.remove('hidden');
+                }
+                
+                // Setup navigation
+                this.setupNavigation();
+                
+                // Setup back button
+                this.setupBackButton();
+                
+                // Switch to default page
+                this.switchPage('messages');
+                
+                console.log('✅ [ParentApplicationManager] UI setup complete');
+            },
+            
+            setupNavigation() {
+                console.log('🗺️ [ParentApplicationManager] Setting up navigation...');
+                
+                // Desktop navigation
+                document.querySelectorAll('.nav-icon').forEach(icon => {
+                    icon.addEventListener('click', () => {
+                        const page = icon.dataset.page;
+                        if (page && this.state.navigationEnabled) {
+                            this.exitAllFullscreenViews();
+                            this.switchPage(page);
+                        }
+                    });
+                });
+                
+                
+                // Mobile navigation
+                document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
+                    icon.addEventListener('click', () => {
+                        const page = icon.dataset.page;
+                        if (page && this.state.navigationEnabled) {
+                            this.exitAllFullscreenViews();
+                            this.switchPage(page);
+                        }
+                    });
+                });
+            },
+            
+            
+            setupBackButton() {
+                window.goBack = () => {
+                    if (this.state.isInChatView || this.state.isInStatusView || 
+                        this.state.isInGroupView || this.state.isInFullscreenView) {
+                        
+                        if (this.state.isInChatView) {
+                            this.setIsInChatView(false);
+                            const messagesIframe = document.getElementById('messagesIframe');
+                            if (messagesIframe) {
+                                this.state.sessionBroker.sendToFrame('messagesIframe', 'NAVIGATE_BACK', {});
+                            }
+                        } else if (this.state.isInStatusView) {
+                            this.setIsInStatusView(false);
+                            const statusIframe = document.getElementById('statusIframe');
+                            if (statusIframe) {
+                                this.state.sessionBroker.sendToFrame('statusIframe', 'NAVIGATE_BACK', {});
+                            }
+                        } else if (this.state.isInGroupView) {
+                            this.setIsInGroupView(false);
+                            const groupIframe = document.getElementById('groupIframe');
+                            if (groupIframe) {
+                                this.state.sessionBroker.sendToFrame('groupIframe', 'NAVIGATE_BACK', {});
+                            }
+                        } else if (this.state.isInFullscreenView) {
+                            this.setIsInFullscreenView(false);
+                        }
+                        return true;
+                    }
+                    return false;
+                };
+            },
+            
+            
+            exitAllFullscreenViews() {
+                this.setIsInChatView(false);
+                this.setIsInStatusView(false);
+                this.setIsInGroupView(false);
+                this.setIsInFullscreenView(false);
+            },
+            
+            setIsInChatView(inChatView) {
+                this.state.isInChatView = inChatView;
+                if (inChatView) {
+                    document.body.classList.add('in-chat-view');
+                    this.hideBottomNavigation();
+                } else {
+                    document.body.classList.remove('in-chat-view');
+                    this.showBottomNavigation();
+                }
+            },
+            
+            setIsInStatusView(inStatusView) {
+                this.state.isInStatusView = inStatusView;
+                if (inStatusView) {
+                    document.body.classList.add('in-status-view');
+                    this.hideBottomNavigation();
+                } else {
+                    document.body.classList.remove('in-status-view');
+                    this.showBottomNavigation();
+                }
+            },
+            
+            setIsInGroupView(inGroupView) {
+                this.state.isInGroupView = inGroupView;
+                if (inGroupView) {
+                    document.body.classList.add('in-group-view');
+                    this.hideBottomNavigation();
+                } else {
+                    document.body.classList.remove('in-group-view');
+                    this.showBottomNavigation();
+                }
+            },
+            
+            setIsInFullscreenView(inFullscreenView) {
+                this.state.isInFullscreenView = inFullscreenView;
+                if (inFullscreenView) {
+                    document.body.classList.add('in-fullscreen-view');
+                    this.hideBottomNavigation();
+                } else {
+                    document.body.classList.remove('in-fullscreen-view');
+                    this.showBottomNavigation();
+                }
+            },
+            
+            showBottomNavigation() {
+                if (window.innerWidth >= 768) return;
+                if (this.state.isInChatView || this.state.isInStatusView || 
+                    this.state.isInGroupView || this.state.isInFullscreenView) return;
+                
+                const mobileNavBar = document.getElementById('mobileNavBar');
+                if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
+                    mobileNavBar.classList.remove('hidden-nav');
+                    this.state.bottomNavVisible = true;
+                }
+            },
+            
+            hideBottomNavigation() {
+                if (window.innerWidth >= 768) return;
+                
+                const mobileNavBar = document.getElementById('mobileNavBar');
+                if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
+                    mobileNavBar.classList.add('hidden-nav');
+                    this.state.bottomNavVisible = false;
+                }
+            },
+            
+            async preloadIframesInBackground() {
+                console.log('📦 [ParentApplicationManager] Preloading iframes with Session Broker...');
+                
+                const iframes = [
+                    { id: 'messagesIframe', src: 'message.html', loadingOverlay: 'messagesLoadingOverlay' },
+                    { id: 'statusIframe', src: 'status.html', loadingOverlay: 'statusLoadingOverlay' },
+                    { id: 'groupIframe', src: 'group.html', loadingOverlay: 'groupLoadingOverlay' },
+                    { id: 'callsIframe', src: 'calls.html', loadingOverlay: 'callsLoadingOverlay' },
+                    { id: 'friendsIframe', src: 'friend.html', loadingOverlay: 'friendsLoadingOverlay' },
+                    { id: 'settingsIframe', src: 'settings.html', loadingOverlay: 'settingsLoadingOverlay' },
+                    { id: 'toolsIframe', src: 'Tools.html', loadingOverlay: 'toolsLoadingOverlay' }
+                ];
+                
+                iframes.forEach(iframeConfig => {
+                    const iframe = document.getElementById(iframeConfig.id);
+                    if (iframe) {
+                        this.state.iframesLoaded[iframeConfig.id] = false;
+                        this.state.iframeLoadingOverlays[iframeConfig.id] = iframeConfig.loadingOverlay;
+                        
+                        // Show loading overlay
+                        this.showIframeLoadingOverlay(iframeConfig.id);
+                        
+                        // Register iframe with session broker
+                        this.state.sessionBroker.registerIframe(iframe, iframeConfig.id);
+                        
+                        // Set up iframe load handler
+                        iframe.onload = () => {
+                            console.log(`✅ [ParentApplicationManager] ${iframeConfig.id} loaded`);
+                            this.state.iframesLoaded[iframeConfig.id] = true;
+                            iframe.classList.add('loaded');
+                            
+                            // Hide loading overlay
+                            this.hideIframeLoadingOverlay(iframeConfig.id);
+                            
+                            // Notify iframe about its ID
+                            try {
+                                iframe.contentWindow.postMessage({
+                                    type: 'FRAME_ID_ASSIGNED',
+                                    frameId: iframeConfig.id,
+                                    sessionBrokerAvailable: true
+                                }, '*');
+                            } catch (error) {
+                                console.warn(`⚠️ Failed to send frame ID to ${iframeConfig.id}:`, error.message);
+                            }
+                        };
+                        
+                        iframe.onerror = () => {
+                            console.error(`❌ [ParentApplicationManager] Failed to load ${iframeConfig.id}`);
+                            this.state.iframesLoaded[iframeConfig.id] = true;
+                            
+                            // Hide loading overlay
+                            this.hideIframeLoadingOverlay(iframeConfig.id);
+                            
+                            // Show error state
+                            this.showIframeError(iframeConfig.id);
+                        };
+                        
+                        // Load iframe with cache buster
+                        const cacheBuster = `?v=${this.state.appVersion}&t=${Date.now()}`;
+                        iframe.src = iframeConfig.src + cacheBuster;
+                    }
+                });
+            },
+            
+            showIframeLoadingOverlay(iframeId) {
+                const overlayId = this.state.iframeLoadingOverlays[iframeId];
+                if (overlayId) {
+                    const overlay = document.getElementById(overlayId);
+                    if (overlay) {
+                        overlay.classList.add('active');
+                    }
+                }
+            },
+            
+            hideIframeLoadingOverlay(iframeId) {
+                const overlayId = this.state.iframeLoadingOverlays[iframeId];
+                if (overlayId) {
+                    const overlay = document.getElementById(overlayId);
+                    if (overlay) {
+                        overlay.classList.remove('active');
+                    }
+                }
+            },
+            
+            showIframeError(iframeId) {
+                const iframe = document.getElementById(iframeId);
+                if (iframe) {
+                    try {
+                        iframe.contentWindow.document.body.innerHTML = `
                             <div class="flex items-center justify-center h-full">
                                 <div class="text-center p-8">
                                     <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
@@ -3049,482 +3442,593 @@
                             </div>
                         `;
                     } catch (e) {
-                        // Iframe security restrictions
-                    }
-                };
-                
-                element.src = iframeSrc;
-            }
-        });
-    }
-    
-    // Send auth status to iframe
-    function sendAuthStatusToIframe(iframeElement) {
-        try {
-            if (iframeElement.contentWindow) {
-                const message = {
-                    type: 'AUTH_STATUS',
-                    status: ParentAuthCoordinator.state.authStatus,
-                    timestamp: Date.now()
-                };
-                
-                if (ParentAuthCoordinator.state.authStatus === 'authenticated' && 
-                    ParentAuthCoordinator.state.user && 
-                    ParentAuthCoordinator.state.token) {
-                    message.user = ParentAuthCoordinator.state.user;
-                    message.token = ParentAuthCoordinator.state.token;
-                }
-                
-                iframeElement.contentWindow.postMessage(message, '*');
-                console.log(`📤 Sent auth status to ${iframeElement.id}: ${ParentAuthCoordinator.state.authStatus}`);
-            }
-        } catch (error) {
-            console.warn(`⚠️ Failed to send auth status to ${iframeElement.id}:`, error.message);
-        }
-    }
-    
-    // Switch between pages
-    function switchPage(pageName) {
-        console.log('🔄 Switching to page:', pageName);
-        currentPage = pageName;
-        
-        // Exit any fullscreen views
-        if (isInChatView) setIsInChatView(false);
-        if (isInStatusView) setIsInStatusView(false);
-        if (isInGroupView) setIsInGroupView(false);
-        if (isInFullscreenView) setIsInFullscreenView(false);
-        
-        // Hide loading screen
-        hideLoading();
-        
-        // Hide all content areas
-        const contentAreas = document.querySelectorAll('.content-area');
-        contentAreas.forEach(area => {
-            area.classList.add('hidden');
-        });
-        
-        // Update active nav icon
-        updateActiveNavIcon(pageName);
-        
-        // Show the selected content area
-        const iframeContainer = document.getElementById(`${pageName}Content`);
-        if (iframeContainer) {
-            iframeContainer.classList.remove('hidden');
-            
-            const iframe = document.getElementById(`${pageName}Iframe`);
-            if (iframe) {
-                iframe.classList.remove('hidden');
-                iframe.style.display = 'block';
-                iframe.style.width = '100%';
-                iframe.style.height = '100%';
-                
-                // Send auth status if iframe is loaded
-                if (iframesLoaded[`${pageName}Iframe`]) {
-                    iframe.classList.add('loaded');
-                    sendAuthStatusToIframe(iframe);
-                }
-            }
-        }
-        
-        // Check for fullscreen pages after a delay
-        setTimeout(() => {
-            checkIframeForFullscreenPage();
-        }, 200);
-    }
-    
-    // Update active navigation icon
-    function updateActiveNavIcon(pageName) {
-        // Desktop icons
-        const navIcons = document.querySelectorAll('.nav-icon');
-        navIcons.forEach(icon => {
-            icon.classList.remove('text-white', 'bg-purple-700');
-            icon.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
-        });
-        
-        const activeIcon = document.querySelector(`[data-page="${pageName}"]`);
-        if (activeIcon) {
-            activeIcon.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
-            activeIcon.classList.add('text-white', 'bg-purple-700');
-        }
-        
-        // Mobile icons
-        const mobileNavIcons = document.querySelectorAll('.mobile-nav-icon');
-        mobileNavIcons.forEach(icon => {
-            icon.classList.remove('active');
-        });
-        
-        const mobileActiveIcon = document.querySelector(`.mobile-nav-icon[data-page="${pageName}"]`);
-        if (mobileActiveIcon) {
-            mobileActiveIcon.classList.add('active');
-        }
-    }
-    
-    // Loading screen control
-    function showLoading() {
-        const loadingScreen = document.getElementById('loadingScreen');
-        if (loadingScreen) {
-            loadingScreen.classList.remove('hidden');
-        }
-    }
-    
-    function hideLoading() {
-        if (loadingTimeout) {
-            clearTimeout(loadingTimeout);
-            loadingTimeout = null;
-        }
-        
-        const loadingScreen = document.getElementById('loadingScreen');
-        if (loadingScreen) {
-            loadingScreen.classList.add('hidden');
-        }
-    }
-    
-    // Global notification system
-    function showGlobalNotification(message, type = 'info', duration = 5000) {
-        const container = document.getElementById('globalNotificationContainer');
-        if (!container) return;
-        
-        const notificationId = 'notification_' + Date.now();
-        const notification = document.createElement('div');
-        notification.id = notificationId;
-        notification.className = `global-notification ${type}`;
-        
-        let icon = 'fa-info-circle';
-        if (type === 'success') icon = 'fa-check-circle';
-        if (type === 'error') icon = 'fa-exclamation-circle';
-        if (type === 'warning') icon = 'fa-exclamation-triangle';
-        if (type === 'message') icon = 'fa-comment-alt';
-        
-        notification.innerHTML = `
-            <div class="notification-content">
-                <div class="flex items-center">
-                    <i class="fas ${icon} mr-2"></i>
-                    <span>${message}</span>
-                </div>
-            </div>
-            <button class="notification-close" onclick="removeNotification('${notificationId}')">
-                <i class="fas fa-times"></i>
-            </button>
-        `;
-        
-        container.appendChild(notification);
-        
-        // Auto-remove after duration
-        setTimeout(() => {
-            removeNotification(notificationId);
-        }, duration);
-    }
-    
-    function removeNotification(notificationId) {
-        const notification = document.getElementById(notificationId);
-        if (notification) {
-            notification.remove();
-        }
-    }
-    
-    // Update unread badges
-    function updateUnreadBadges(unreadCount) {
-        // Update sidebar badge
-        const sidebarBadge = document.getElementById('sidebarStatusBadge');
-        if (sidebarBadge) {
-            if (unreadCount > 0) {
-                sidebarBadge.textContent = unreadCount > 99 ? '99+' : unreadCount;
-                sidebarBadge.classList.remove('hidden');
-            } else {
-                sidebarBadge.classList.add('hidden');
-            }
-        }
-        
-        // Update mobile badge
-        const mobileBadge = document.getElementById('mobileStatusBadge');
-        if (mobileBadge) {
-            if (unreadCount > 0) {
-                mobileBadge.textContent = unreadCount > 99 ? '99+' : unreadCount;
-                mobileBadge.classList.remove('hidden');
-            } else {
-                mobileBadge.classList.add('hidden');
-            }
-        }
-    }
-    
-    // Parent message handler for iframe communication
-    function handleIframeMessage(event) {
-        // Security: In production, validate event.origin
-        if (event.data && event.data.type) {
-            console.log('📨 Parent received from iframe:', event.data.type);
-            
-            switch(event.data.type) {
-                case 'iframe_loaded':
-                    const iframeId = event.data.iframeId || 'unknown';
-                    iframesLoaded[iframeId] = true;
-                    
-                    // Send current auth status to iframe
-                    setTimeout(() => {
-                        const iframeElement = document.getElementById(iframeId);
-                        if (iframeElement) {
-                            sendAuthStatusToIframe(iframeElement);
-                        }
-                    }, 100);
-                    break;
-                    
-                case 'REQUEST_AUTH_STATUS':
-                    console.log('🔐 Received auth status request from iframe');
-                    
-                    // Handle auth request with promise
-                    new Promise((resolve) => {
-                        ParentAuthCoordinator.handleIframeAuthRequest(event.data.iframeId || 'unknown', resolve);
-                    }).then(authResponse => {
-                        if (event.source) {
-                            const message = {
-                                type: 'AUTH_STATUS',
-                                status: authResponse.status,
-                                timestamp: Date.now()
-                            };
-                            
-                            if (authResponse.status === 'authenticated' && authResponse.user && authResponse.token) {
-                                message.user = authResponse.user;
-                                message.token = authResponse.token;
+                        // If we can't access iframe content, show overlay
+                        const overlayId = this.state.iframeLoadingOverlays[iframeId];
+                        if (overlayId) {
+                            const overlay = document.getElementById(overlayId);
+                            if (overlay) {
+                                overlay.innerHTML = `
+                                    <div class="text-center">
+                                        <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-3"></i>
+                                        <h3 class="text-lg font-semibold mb-2">Failed to load</h3>
+                                        <p class="text-gray-600">Please check your connection</p>
+                                    </div>
+                                `;
+                                overlay.classList.add('active');
                             }
-                            
-                            event.source.postMessage(message, '*');
-                            console.log(`📤 Responded to iframe auth request: ${authResponse.status}`);
                         }
-                    });
-                    break;
-                    
-                case 'navigate_to':
-                    if (event.data.page) {
-                        if (isInChatView) setIsInChatView(false);
-                        if (isInStatusView) setIsInStatusView(false);
-                        if (isInGroupView) setIsInGroupView(false);
-                        if (isInFullscreenView) setIsInFullscreenView(false);
-                        switchPage(event.data.page);
                     }
-                    break;
+                }
+            },
+            
+            switchPage(pageName) {
+                console.log('🔄 [ParentApplicationManager] Switching to page:', pageName);
+                
+                if (!this.state.navigationEnabled) return;
+                
+                this.state.currentPage = pageName;
+                this.exitAllFullscreenViews();
+                
+                // Hide all content areas
+                document.querySelectorAll('.content-area').forEach(area => {
+                    area.classList.add('hidden');
+                });
+                
+                // Update active nav icon
+                this.updateActiveNavIcon(pageName);
+                
+                // Show selected content area
+                const iframeContainer = document.getElementById(`${pageName}Content`);
+                if (iframeContainer) {
+                    iframeContainer.classList.remove('hidden');
                     
-                case 'enter_chat_view':
-                    setIsInChatView(true);
-                    chatHistory.push({
-                        page: currentPage,
-                        chatId: event.data.chatId,
-                        timestamp: Date.now()
-                    });
-                    break;
-                    
-                case 'exit_chat_view':
-                    setIsInChatView(false);
-                    chatHistory = [];
-                    break;
-                    
-                case 'enter_status_view':
-                    setIsInStatusView(true);
-                    break;
-                    
-                case 'exit_status_view':
-                    setIsInStatusView(false);
-                    break;
-                    
-                case 'enter_group_view':
-                    setIsInGroupView(true);
-                    break;
-                    
-                case 'exit_group_view':
-                    setIsInGroupView(false);
-                    break;
-                    
-                case 'enter_fullscreen_view':
-                    setIsInFullscreenView(true);
-                    break;
-                    
-                case 'exit_fullscreen_view':
-                    setIsInFullscreenView(false);
-                    break;
-                    
-                case 'back_button_clicked':
-                    window.goBack();
-                    break;
-                    
-                case 'global_notification':
-                    if (event.data.message) {
-                        showGlobalNotification(
-                            event.data.message, 
-                            event.data.notificationType || 'info', 
-                            event.data.duration || 5000
-                        );
+                    // Show loading overlay if iframe not loaded
+                    const iframe = document.getElementById(`${pageName}Iframe`);
+                    if (iframe && !this.state.iframesLoaded[`${pageName}Iframe`]) {
+                        this.showIframeLoadingOverlay(`${pageName}Iframe`);
                     }
-                    break;
                     
-                case 'fullscreen_status':
-                    if (event.data.isFullscreen) {
-                        hideBottomNavigation();
+                    // Ensure session is sent to iframe
+                    if (iframe && this.state.sessionBroker) {
+                        // Send session data immediately
+                        this.state.sessionBroker.sendSessionToFrame(`${pageName}Iframe`);
+                    }
+                }
+                
+                // Setup fullscreen detection after switching
+                setTimeout(() => {
+                    this.checkIframeForFullscreenPage();
+                }, 200);
+            },
+            
+            updateActiveNavIcon(pageName) {
+                // Desktop icons
+                document.querySelectorAll('.nav-icon').forEach(icon => {
+                    icon.classList.remove('text-white', 'bg-purple-700');
+                    icon.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                });
+                
+                const activeIcon = document.querySelector(`[data-page="${pageName}"]`);
+                if (activeIcon) {
+                    activeIcon.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                    activeIcon.classList.add('text-white', 'bg-purple-700');
+                }
+                
+                // Mobile icons
+                document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
+                    icon.classList.remove('active');
+                });
+                
+                const mobileActiveIcon = document.querySelector(`.mobile-nav-icon[data-page="${pageName}"]`);
+                if (mobileActiveIcon) {
+                    mobileActiveIcon.classList.add('active');
+                }
+            },
+            
+            checkIframeForFullscreenPage() {
+                if (!this.state.fullscreenPageDetectionEnabled || window.innerWidth >= 768) return;
+                
+                const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                if (!activeIframe) return;
+                
+                try {
+                    const iframeSrc = activeIframe.src || '';
+                    const iframeUrl = new URL(iframeSrc, window.location.origin);
+                    
+                    const fullscreenPatterns = [
+                        /chat-view/i,
+                        /conversation/i,
+                        /message-detail/i,
+                        /status-view/i,
+                        /status-detail/i,
+                        /call-view/i,
+                        /call-detail/i,
+                        /profile-view/i,
+                        /settings-view/i,
+                        /fullscreen/i,
+                        /\?fullscreen=true/i,
+                        /#fullscreen/i
+                    ];
+                    
+                    const isFullscreenPage = fullscreenPatterns.some(pattern => 
+                        pattern.test(iframeUrl.pathname) || pattern.test(iframeUrl.search) || pattern.test(iframeUrl.hash)
+                    );
+                    
+                    const hash = iframeUrl.hash.toLowerCase();
+                    const isFullscreenHash = hash.includes('chat') && !hash.includes('chats') || 
+                                            hash.includes('status') && !hash.includes('status-list') ||
+                                            hash.includes('call') && !hash.includes('calls-list') ||
+                                            hash.includes('profile') ||
+                                            hash.includes('detail') ||
+                                            hash.includes('group-chat') ||
+                                            hash.includes('create-status') ||
+                                            hash.includes('view-status');
+                    
+                    if (isFullscreenPage || isFullscreenHash) {
+                        this.hideBottomNavigation();
                     } else {
-                        showBottomNavigation();
+                        this.showBottomNavigation();
                     }
-                    break;
+                } catch (e) {
+                    this.checkIframeForFullscreenViaMessages();
+                }
+            },
+            
+            checkIframeForFullscreenViaMessages() {
+                const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                if (activeIframe && activeIframe.contentWindow) {
+                    try {
+                        this.state.sessionBroker.sendToFrame(activeIframe.id, 'GET_FULLSCREEN_STATUS', {});
+                    } catch (e) {
+                        console.warn('⚠️ Failed to check iframe for fullscreen status');
+                    }
+                }
+            },
+            
+            hideLoadingScreen() {
+                const loadingScreen = document.getElementById('loadingScreen');
+                if (loadingScreen) {
+                    loadingScreen.style.opacity = '0';
+                    setTimeout(() => {
+                        loadingScreen.classList.add('hidden');
+                    }, 300);
+                }
+            },
+            
+            showGlobalNotification(message, type = 'info', duration = 5000) {
+                const container = document.getElementById('globalNotificationContainer');
+                if (!container) return;
+                
+                const notificationId = 'notification_' + Date.now();
+                const notification = document.createElement('div');
+                notification.id = notificationId;
+                notification.className = `global-notification ${type}`;
+                
+                let icon = 'fa-info-circle';
+                if (type === 'success') icon = 'fa-check-circle';
+                if (type === 'error') icon = 'fa-exclamation-circle';
+                if (type === 'warning') icon = 'fa-exclamation-triangle';
+                if (type === 'message') icon = 'fa-comment-alt';
+                
+                notification.innerHTML = `
+                    <div class="notification-content">
+                        <div class="flex items-center">
+                            <i class="fas ${icon} mr-2"></i>
+                            <span>${message}</span>
+                        </div>
+                    </div>
+                    <button class="notification-close" onclick="removeNotification('${notificationId}')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                
+                container.appendChild(notification);
+                
+                setTimeout(() => {
+                    this.removeNotification(notificationId);
+                }, duration);
+            },
+            
+            removeNotification(notificationId) {
+                const notification = document.getElementById(notificationId);
+                if (notification) {
+                    notification.remove();
+                }
+            },
+            
+            handleIframeMessage(event) {
+                if (event.data && event.data.type) {
+                    console.log('📨 [ParentApplicationManager] Received message from iframe:', event.data.type);
                     
-                case 'UPDATE_SETTINGS':
-                    if (event.data.settings) {
-                        localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
-                        
-                        // Notify all iframes about settings change
-                        document.querySelectorAll('.content-iframe').forEach(iframe => {
-                            try {
-                                if (iframe.contentWindow) {
-                                    iframe.contentWindow.postMessage({
-                                        type: 'UPDATE_SETTINGS',
-                                        settings: event.data.settings,
-                                        timestamp: Date.now()
-                                    }, '*');
-                                }
-                            } catch (e) {
-                                console.warn('⚠️ Failed to notify iframe about settings');
+                    switch(event.data.type) {
+                        case 'navigate_to':
+                            if (event.data.page) {
+                                this.exitAllFullscreenViews();
+                                this.switchPage(event.data.page);
                             }
-                        });
-                    }
-                    break;
-                    
-                case 'PROTECTED_API_CALL':
-                    // If iframes try to make protected API calls before auth is ready,
-                    // we intercept them and queue them
-                    if (ParentAuthCoordinator.state.protectedApiCallsBlocked) {
-                        console.warn('⚠️ Intercepted protected API call from iframe before auth ready');
-                        
-                        // Send message back to iframe
-                        if (event.source) {
-                            event.source.postMessage({
-                                type: 'API_CALL_BLOCKED',
-                                reason: 'authentication_not_ready',
-                                endpoint: event.data.endpoint,
+                            break;
+                            
+                        case 'enter_chat_view':
+                            this.setIsInChatView(true);
+                            this.state.chatHistory.push({
+                                page: this.state.currentPage,
+                                chatId: event.data.chatId,
                                 timestamp: Date.now()
-                            }, '*');
-                        }
+                            });
+                            break;
+                            
+                        case 'exit_chat_view':
+                            this.setIsInChatView(false);
+                            this.state.chatHistory = [];
+                            break;
+                            
+                        case 'enter_status_view':
+                            this.setIsInStatusView(true);
+                            break;
+                            
+                        case 'exit_status_view':
+                            this.setIsInStatusView(false);
+                            break;
+                            
+                        case 'enter_group_view':
+                            this.setIsInGroupView(true);
+                            break;
+                            
+                        case 'exit_group_view':
+                            this.setIsInGroupView(false);
+                            break;
+                            
+                        case 'enter_fullscreen_view':
+                            this.setIsInFullscreenView(true);
+                            break;
+                            
+                        case 'exit_fullscreen_view':
+                            this.setIsInFullscreenView(false);
+                            break;
+                            
+                        case 'back_button_clicked':
+                            window.goBack();
+                            break;
+                            
+                        case 'global_notification':
+                            if (event.data.message) {
+                                this.showGlobalNotification(
+                                    event.data.message, 
+                                    event.data.notificationType || 'info', 
+                                    event.data.duration || 5000
+                                );
+                            }
+                            break;
+                            
+                        case 'fullscreen_status':
+                            if (event.data.isFullscreen) {
+                                this.hideBottomNavigation();
+                            } else {
+                                this.showBottomNavigation();
+                            }
+                            break;
+                            
+                        case 'UPDATE_SETTINGS':
+                            if (event.data.settings) {
+                                localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
+                                
+                                // Notify all iframes about settings update
+                                document.querySelectorAll('.content-iframe').forEach(iframe => {
+                                    try {
+                                        if (iframe.contentWindow) {
+                                            iframe.contentWindow.postMessage({
+                                                type: 'UPDATE_SETTINGS',
+                                                settings: event.data.settings,
+                                                timestamp: Date.now()
+                                            }, '*');
+                                        }
+                                    } catch (e) {
+                                        console.warn('⚠️ Failed to notify iframe about settings');
+                                    }
+                                });
+                            }
+                            break;
+                            
+                        default:
+                            // Forward to session broker if it's a session-related message
+                            if (this.state.sessionBroker) {
+                                const sessionMessageTypes = [
+                                    'CHILD_READY',
+                                    'REQUEST_SESSION',
+                                    'PING_PARENT',
+                                    'SESSION_ACK',
+                                    'FRAME_UNLOAD',
+                                    'REQUEST_USER_DATA',
+                                    'iframe_loaded'
+                                ];
+                                
+                                if (sessionMessageTypes.includes(event.data.type)) {
+                                    // Session broker will handle it via its own message listener
+                                    return;
+                                }
+                            }
+                            break;
                     }
-                    break;
-                    
-                default:
-                    console.log('📨 Unhandled message type:', event.data.type);
-                    break;
+                }
+            },
+            
+            // Public methods
+            getCurrentUser() {
+                return this.state.sessionBroker ? this.state.sessionBroker.getUser() : null;
+            },
+            
+            isUserDataLoaded() {
+                return this.state.sessionBroker ? this.state.sessionBroker.isAuthenticated() : false;
+            },
+            
+            async waitForUserData() {
+                if (!this.state.sessionBroker) {
+                    return null;
+                }
+                
+                await this.state.sessionBroker.ready();
+                return this.state.sessionBroker.getUser();
+            },
+            
+            getSessionBroker() {
+                return this.state.sessionBroker;
             }
-        }
-    }
-    
-    // Handle user logout from iframe
-    function handleLogout() {
-        console.log('👋 Logging out user');
+        };
         
-        // Clear parent auth state
-        ParentAuthCoordinator.state.authStatus = 'unauthenticated';
-        ParentAuthCoordinator.state.user = null;
-        ParentAuthCoordinator.state.token = null;
-        ParentAuthCoordinator.state.authChecked = false;
-        ParentAuthCoordinator.state.protectedApiCallsBlocked = true;
         
-        // Clear localStorage
-        localStorage.removeItem('kynecta_user');
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('moodchat_token');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('refresh_token');
+        // ================================
+        // GLOBAL EXPORTS
+        // ================================
         
-        // Stop background jobs
-        ParentAuthCoordinator.cleanup();
+        // Export managers to window
+        window.SessionBroker = SessionBroker;
+        window.ParentApplicationManager = ParentApplicationManager;
         
-        // Notify all iframes
-        notifyAllIframesAboutLogout();
+        // Export utility functions
+        window.getCurrentUser = () => ParentApplicationManager.getCurrentUser();
+        window.isUserDataLoaded = () => ParentApplicationManager.isUserDataLoaded();
+        window.waitForUserData = () => ParentApplicationManager.waitForUserData();
+        window.getSessionBroker = () => ParentApplicationManager.getSessionBroker();
         
-        // Redirect to login page
-        setTimeout(() => {
-            window.location.href = '../index.html';
-        }, 500);
-    }
-    
-    // Notify all iframes about logout
-    function notifyAllIframesAboutLogout() {
-        document.querySelectorAll('.content-iframe').forEach(iframe => {
-            try {
-                if (iframe.contentWindow) {
-                    iframe.contentWindow.postMessage({
-                        type: 'AUTH_STATUS',
-                        status: 'unauthenticated',
+        // Export notification functions
+        window.showGlobalNotification = (message, type, duration) => 
+            ParentApplicationManager.showGlobalNotification(message, type, duration);
+        
+        window.removeNotification = (id) => ParentApplicationManager.removeNotification(id);
+        
+        // Export navigation functions
+        window.switchPage = (page) => ParentApplicationManager.switchPage(page);
+        window.goBack = () => window.goBack();
+        window.setIsInChatView = (value) => ParentApplicationManager.setIsInChatView(value);
+        window.setIsInStatusView = (value) => ParentApplicationManager.setIsInStatusView(value);
+        window.setIsInGroupView = (value) => ParentApplicationManager.setIsInGroupView(value);
+        window.setIsInFullscreenView = (value) => ParentApplicationManager.setIsInFullscreenView(value);
+        
+        // ================================
+        // INITIALIZATION
+        // ================================
+        
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('📄 [Main] DOM loaded, initializing application with Session Broker...');
+            
+            // Start application initialization in background
+            ParentApplicationManager.initialize().catch(error => {
+                console.error('❌ [Main] Application initialization failed:', error);
+                
+                // Still show UI even if initialization failed
+                ParentApplicationManager.setupUI();
+                ParentApplicationManager.hideLoadingScreen();
+                
+                // Show error notification
+                ParentApplicationManager.showGlobalNotification(
+                    'Application initialization failed. Some features may be limited.',
+                    'error',
+                    5000
+                );
+            });
+            
+            // Set timeout to hide loading screen
+            ParentApplicationManager.state.loadingTimeout = setTimeout(() => {
+                ParentApplicationManager.hideLoadingScreen();
+            }, 3000);
+        });
+        
+        // Handle iframe messages
+        window.addEventListener('message', (event) => {
+            ParentApplicationManager.handleIframeMessage(event);
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (window.innerWidth < 768) {
+                setTimeout(() => {
+                    ParentApplicationManager.checkIframeForFullscreenPage();
+                    
+                    if (!ParentApplicationManager.state.isInChatView && 
+                        !ParentApplicationManager.state.isInStatusView && 
+                        !ParentApplicationManager.state.isInGroupView && 
+                        !ParentApplicationManager.state.isInFullscreenView) {
+                        ParentApplicationManager.showBottomNavigation();
+                    }
+                }, 100);
+            } else {
+                document.getElementById('permanentSidebar')?.classList.remove('hidden');
+                document.getElementById('mobileNavBar')?.classList.add('hidden-nav');
+            }
+        });
+        
+        // Cleanup before unload
+        window.addEventListener('beforeunload', () => {
+            if (ParentApplicationManager.state.loadingTimeout) {
+                clearTimeout(ParentApplicationManager.state.loadingTimeout);
+            }
+            
+            // Notify iframes about page unload
+            if (ParentApplicationManager.state.sessionBroker) {
+                ParentApplicationManager.state.sessionBroker.broadcastToAllFrames('PARENT_UNLOADING', {
+                    timestamp: Date.now()
+                });
+            }
+        });
+        
+        console.log('✅ [Main] Application with Session Broker loaded successfully');
+        
+    </script>
+
+    <!-- Fallback script for older browsers -->
+    <script>
+        // Fallback for older browsers that don't support modules
+        if (typeof window.SessionBroker === 'undefined') {
+            console.warn('⚠️ Module script not loaded, using fallback session management');
+            
+            // Simple session management fallback
+            window.currentUser = JSON.parse(localStorage.getItem('kynecta_user') || 'null');
+            window.userDataLoaded = !!window.currentUser;
+            
+            // Simple iframe message handler with fallback
+            window.addEventListener('message', function(event) {
+                // Handle legacy messages
+                if (event.data && event.data.type === 'REQUEST_USER_DATA' && window.currentUser) {
+                    event.source.postMessage({
+                        type: 'USER_DATA',
+                        user: window.currentUser,
                         timestamp: Date.now()
                     }, '*');
                 }
-            } catch (e) {
-                console.warn('⚠️ Failed to notify iframe about logout');
-            }
-        });
-    }
-    
-    // DOM loaded handler - FIXED: Added proper closing
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('📄 DOM loaded, starting quick initialization...');
-        
-        showLoading();
-        
-        // Set timeout for loading screen
-        loadingTimeout = setTimeout(() => {
-            console.log('⏰ Loading timeout - showing app anyway');
-            hideLoading();
-            if (!appInitialized) {
-                quickInitialize();
-            }
-        }, 3000);
-        
-        // Start initialization
-        quickInitialize();
-    });
-    
-    // Event listeners
-    window.addEventListener('message', handleIframeMessage);
-    
-    window.addEventListener('resize', function() {
-        if (window.innerWidth < 768) {
-            setTimeout(() => {
-                checkIframeForFullscreenPage();
                 
-                if (!isInChatView && !isInStatusView && !isInGroupView && !isInFullscreenView) {
-                    showBottomNavigation();
+                // Handle parent application messages
+                if (event.data && event.data.type === 'navigate_to') {
+                    if (window.switchPage && typeof window.switchPage === 'function') {
+                        window.switchPage(event.data.page);
+                    }
                 }
-            }, 100);
-        } else {
-            document.getElementById('permanentSidebar').classList.remove('hidden');
-            document.getElementById('mobileNavBar').classList.add('hidden-nav');
+            });
+            
+            // Global utility functions fallback
+            window.closeModal = function(modalId) {
+                const modal = document.getElementById(modalId);
+                if (modal) {
+                    modal.classList.add('hidden');
+                }
+            };
+            
+            window.showBottomNavigation = function() {
+                if (window.innerWidth >= 768) return;
+                
+                const mobileNavBar = document.getElementById('mobileNavBar');
+                if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
+                    mobileNavBar.classList.remove('hidden-nav');
+                }
+            };
+            
+            window.hideBottomNavigation = function() {
+                if (window.innerWidth >= 768) return;
+                
+                const mobileNavBar = document.getElementById('mobileNavBar');
+                if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
+                    mobileNavBar.classList.add('hidden-nav');
+                }
+            };
+            
+            window.handleLogout = function() {
+                console.log('👋 Logging out...');
+                
+                // Clear all user data
+                localStorage.clear();
+                window.currentUser = null;
+                window.userDataLoaded = false;
+                
+                // Notify iframes
+                document.querySelectorAll('.content-iframe').forEach(iframe => {
+                    try {
+                        if (iframe.contentWindow) {
+                            iframe.contentWindow.postMessage({
+                                type: 'USER_LOGOUT',
+                                timestamp: Date.now()
+                            }, '*');
+                        }
+                    } catch (e) {
+                        // Silent fail
+                    }
+                });
+                
+                // Redirect to login
+                setTimeout(() => {
+                    window.location.href = '../index.html';
+                }, 500);
+            };
+            
+            // Initialize UI immediately
+            document.addEventListener('DOMContentLoaded', function() {
+                // Hide loading screen after a short delay
+                setTimeout(() => {
+                    const loadingScreen = document.getElementById('loadingScreen');
+                    if (loadingScreen) {
+                        loadingScreen.classList.add('hidden');
+                    }
+                    
+                    // Show sidebar
+                    const sidebar = document.getElementById('permanentSidebar');
+                    if (sidebar) {
+                        sidebar.classList.remove('hidden');
+                    }
+                    
+                    // Show mobile nav on small screens
+                    if (window.innerWidth < 768) {
+                        const mobileNav = document.getElementById('mobileNavBar');
+                        if (mobileNav) {
+                            mobileNav.classList.remove('hidden');
+                        }
+                    }
+                    
+                    // Setup navigation
+                    const setupFallbackNavigation = () => {
+                        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(icon => {
+                            icon.addEventListener('click', function() {
+                                const page = this.dataset.page;
+                                if (page) {
+                                    // Hide all content areas
+                                    document.querySelectorAll('.content-area').forEach(area => {
+                                        area.classList.add('hidden');
+                                    });
+                                    
+                                    // Show selected
+                                    const content = document.getElementById(page + 'Content');
+                                    if (content) {
+                                        content.classList.remove('hidden');
+                                    }
+                                    
+                                    // Update active states
+                                    document.querySelectorAll('.nav-icon').forEach(nav => {
+                                        nav.classList.remove('text-white', 'bg-purple-700');
+                                        nav.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                                    });
+                                    
+                                    document.querySelectorAll('.mobile-nav-icon').forEach(mobile => {
+                                        mobile.classList.remove('active');
+                                    });
+                                    
+                                    if (this.classList.contains('nav-icon')) {
+                                        this.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                                        this.classList.add('text-white', 'bg-purple-700');
+                                    }
+                                    
+                                    if (this.classList.contains('mobile-nav-icon')) {
+                                        this.classList.add('active');
+                                    }
+                                }
+                            });
+                        });
+                    };
+                    
+                    setupFallbackNavigation();
+                    
+                }, 500);
+            });
         }
-    });
-
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', function() {
-        ParentAuthCoordinator.cleanup();
-    });
-    
-    // Expose functions to global scope
-    window.removeNotification = removeNotification;
-    window.showBottomNavigation = showBottomNavigation;
-    window.hideBottomNavigation = hideBottomNavigation;
-    window.goBack = function() {
-        window.history.back();
-    };
-    window.setIsInChatView = setIsInChatView;
-    window.setIsInStatusView = setIsInStatusView;
-    window.setIsInGroupView = setIsInGroupView;
-    window.setIsInFullscreenView = setIsInFullscreenView;
-    window.closeModal = closeModal;
-    window.showGlobalNotification = showGlobalNotification;
-    window.ParentAuthCoordinator = ParentAuthCoordinator;
-    window.handleLogout = handleLogout;
-    
-    // Expose safe API call method for iframes to use
-    window.makeSafeApiCall = async function(endpoint, method = 'GET', data = null, options = {}) {
-        return ParentAuthCoordinator.safeApiCall(endpoint, method, data, options);
-    };
-    
-    console.log('✅ Parent page initialization system loaded');
-    console.log('📊 ParentAuthCoordinator state:', {
-        authStatus: ParentAuthCoordinator.state.authStatus,
-        apiReady: ParentAuthCoordinator.state.apiReady,
-        authChecked: ParentAuthCoordinator.state.authChecked,
-        protectedApiCallsBlocked: ParentAuthCoordinator.state.protectedApiCallsBlocked
-    });
+        
+        console.log('✅ Parent page with centralized Session Broker loaded');
     </script>
 </body>
 </html>
