@@ -1,7 +1,8 @@
 // js/api.messages.js
 // ES Module for Message Handling - Contains ONLY functions missing from existing API modules
-// Version: 1.0.0
+// Version: 1.0.2
 // Date: 2024-01-02
+// Updated: Fixed exports and validation, added global fallback
 
 /**
  * MESSAGE_TYPES constant - Defines standard message types for parent-child iframe communication
@@ -46,6 +47,36 @@ export const MESSAGE_TYPES = {
     APP_SPECIFIC: 'APP_SPECIFIC'
 };
 
+// Initialize global API namespace
+if (!window.__API_MESSAGES) {
+    window.__API_MESSAGES = {
+        ready: false,
+        version: '1.0.2',
+        exports: {}
+    };
+}
+
+/**
+ * validateMessageType() - Validate message type against MESSAGE_TYPES
+ * 
+ * @param {string} type - Message type to validate
+ * @returns {boolean} True if valid
+ */
+function validateMessageType(type) {
+    if (!type || typeof type !== 'string') {
+        console.error('❌ validateMessageType: Invalid message type', type);
+        return false;
+    }
+    
+    // Check if type exists in MESSAGE_TYPES
+    const validTypes = Object.values(MESSAGE_TYPES);
+    if (!validTypes.includes(type) && !type.endsWith('_RESPONSE')) {
+        console.warn('⚠️ validateMessageType: Unknown message type, but will allow:', type);
+    }
+    
+    return true;
+}
+
 /**
  * sendParentMessage() - Send a message from an iframe to its parent window
  * This function was missing from all existing API modules and is required for in-frame pages
@@ -58,7 +89,7 @@ export const MESSAGE_TYPES = {
 export function sendParentMessage(type, data, targetOrigin = '*') {
     try {
         // Validate input
-        if (!type || typeof type !== 'string') {
+        if (!validateMessageType(type)) {
             console.error('❌ sendParentMessage: Invalid message type', type);
             return false;
         }
@@ -74,7 +105,7 @@ export function sendParentMessage(type, data, targetOrigin = '*') {
             data: data || {},
             timestamp: Date.now(),
             source: 'iframe',
-            version: '1.0.0'
+            version: '1.0.2'
         };
         
         // Send the message to parent
@@ -87,6 +118,17 @@ export function sendParentMessage(type, data, targetOrigin = '*') {
         console.error('❌ sendParentMessage: Failed to send message', error);
         return false;
     }
+}
+
+/**
+ * sendToParent() - Alias for sendParentMessage for compatibility
+ * 
+ * @param {string} type - Message type from MESSAGE_TYPES
+ * @param {any} payload - Message payload
+ * @returns {boolean} True if message was sent successfully
+ */
+export function sendToParent(type, payload) {
+    return sendParentMessage(type, payload);
 }
 
 /**
@@ -170,7 +212,7 @@ export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
             return false;
         }
         
-        if (!type || typeof type !== 'string') {
+        if (!validateMessageType(type)) {
             console.error('❌ sendMessageToIframe: Invalid message type', type);
             return false;
         }
@@ -180,7 +222,7 @@ export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
             data: data || {},
             timestamp: Date.now(),
             source: 'parent',
-            version: '1.0.0'
+            version: '1.0.2'
         };
         
         iframe.contentWindow.postMessage(message, targetOrigin);
@@ -358,6 +400,20 @@ export async function fetchMessages(conversationId, limit = 50, before = null, a
 }
 
 /**
+ * getMessages() - Get messages for a conversation (alias for fetchMessages)
+ * This function is requested by other modules
+ * 
+ * @param {string} conversationId - ID of the conversation
+ * @param {number} [limit=50] - Number of messages to fetch
+ * @param {string} [before] - Fetch messages before this timestamp
+ * @param {string} [after] - Fetch messages after this timestamp
+ * @returns {Promise<Array>} Array of messages
+ */
+export async function getMessages(conversationId, limit = 50, before = null, after = null) {
+    return fetchMessages(conversationId, limit, before, after);
+}
+
+/**
  * markAsRead() - Mark messages as read in a conversation
  * This function was missing from existing API modules
  * 
@@ -405,6 +461,18 @@ export async function markAsRead(conversationId, messageIds) {
         console.error('❌ markAsRead: Failed to mark messages as read', error);
         throw error;
     }
+}
+
+/**
+ * markChatAsRead() - Mark chat as read (alias for markAsRead)
+ * This function is requested by other modules
+ * 
+ * @param {string} conversationId - ID of the conversation
+ * @param {Array<string>} messageIds - Array of message IDs to mark as read
+ * @returns {Promise<object>} Status response
+ */
+export async function markChatAsRead(conversationId, messageIds) {
+    return markAsRead(conversationId, messageIds);
 }
 
 /**
@@ -884,17 +952,296 @@ export async function leaveConversation(conversationId) {
     }
 }
 
+/**
+ * simulateIncomingCall() - Function needed by calls-core.js
+ * This simulates an incoming call for testing
+ * 
+ * @param {object} callerInfo - Information about the caller
+ * @returns {boolean} True if simulation was successful
+ */
+export function simulateIncomingCall(callerInfo) {
+    try {
+        if (!callerInfo || typeof callerInfo !== 'object') {
+            console.warn('⚠️ simulateIncomingCall: Invalid caller info');
+            return false;
+        }
+        
+        // Ensure callerInfo has required fields
+        const defaultCallerInfo = {
+            id: 'simulated-caller-' + Date.now(),
+            name: 'Test Caller',
+            avatar: null,
+            isVideo: false,
+            ...callerInfo
+        };
+        
+        const event = new CustomEvent('incoming-call', {
+            detail: {
+                caller: defaultCallerInfo,
+                timestamp: Date.now(),
+                callId: 'simulated-call-' + Date.now()
+            }
+        });
+        window.dispatchEvent(event);
+        
+        // Also send to parent if in iframe
+        if (window.parent !== window) {
+            sendParentMessage(MESSAGE_TYPES.CALL_START, {
+                type: 'INCOMING_CALL',
+                caller: defaultCallerInfo,
+                simulated: true,
+                timestamp: Date.now()
+            });
+        }
+        
+        console.log('✅ simulateIncomingCall: Incoming call simulated', defaultCallerInfo);
+        return true;
+    } catch (error) {
+        console.error('❌ simulateIncomingCall: Failed to simulate call', error);
+        return false;
+    }
+}
+
+/**
+ * buildSettingsMenu() - Function needed by settings-core.js
+ * Builds the settings menu structure
+ * 
+ * @param {string} containerId - ID of the container element
+ * @param {object} options - Configuration options
+ * @returns {boolean} True if menu was built successfully
+ */
+export function buildSettingsMenu(containerId, options = {}) {
+    try {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            console.error('❌ buildSettingsMenu: Container not found', containerId);
+            return false;
+        }
+        
+        const menuStructure = options.menuStructure || [
+            { id: 'general', label: 'General', icon: '⚙️', enabled: true },
+            { id: 'privacy', label: 'Privacy', icon: '🔒', enabled: true },
+            { id: 'notifications', label: 'Notifications', icon: '🔔', enabled: true },
+            { id: 'appearance', label: 'Appearance', icon: '🎨', enabled: true },
+            { id: 'account', label: 'Account', icon: '👤', enabled: true },
+            { id: 'about', label: 'About', icon: 'ℹ️', enabled: true }
+        ];
+        
+        const menuHTML = `
+            <div class="settings-menu-container">
+                ${menuStructure.map(item => `
+                    <div class="settings-menu-item ${item.enabled ? '' : 'disabled'}" 
+                         data-section="${item.id}"
+                         onclick="if(!this.classList.contains('disabled')) window.dispatchEvent(new CustomEvent('settings-section-change', {detail: {section: '${item.id}'}}))">
+                        <span class="settings-menu-icon">${item.icon}</span>
+                        <span class="settings-menu-label">${item.label}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        
+        container.innerHTML = menuHTML;
+        
+        // Add styles if not present
+        if (!document.querySelector('#settings-menu-styles')) {
+            const style = document.createElement('style');
+            style.id = 'settings-menu-styles';
+            style.textContent = `
+                .settings-menu-container {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                    padding: 16px;
+                    background-color: #f8f9fa;
+                    border-radius: 8px;
+                    min-width: 200px;
+                }
+                .settings-menu-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    padding: 12px 16px;
+                    cursor: pointer;
+                    border-radius: 8px;
+                    transition: all 0.2s ease;
+                    background-color: white;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                }
+                .settings-menu-item:hover {
+                    background-color: #e9ecef;
+                    transform: translateY(-1px);
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+                }
+                .settings-menu-item.active {
+                    background-color: #007bff;
+                    color: white;
+                }
+                .settings-menu-item.disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+                .settings-menu-icon {
+                    font-size: 20px;
+                    width: 24px;
+                    text-align: center;
+                }
+                .settings-menu-label {
+                    font-size: 14px;
+                    font-weight: 500;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        console.log('✅ buildSettingsMenu: Settings menu built for', containerId);
+        return true;
+        
+    } catch (error) {
+        console.error('❌ buildSettingsMenu: Failed to build menu', error);
+        return false;
+    }
+}
+
+/**
+ * sendTypingIndicator() - Send typing indicator to conversation
+ * 
+ * @param {string} conversationId - ID of the conversation
+ * @param {boolean} isTyping - Whether user is typing
+ * @returns {boolean} True if indicator was sent
+ */
+export function sendTypingIndicator(conversationId, isTyping = true) {
+    try {
+        if (window.parent !== window) {
+            sendParentMessage(MESSAGE_TYPES.DATA_UPDATE, {
+                type: 'TYPING_INDICATOR',
+                conversationId: conversationId,
+                isTyping: isTyping,
+                userId: localStorage.getItem('user_id') || 'unknown',
+                timestamp: Date.now()
+            });
+        }
+        
+        // Also send to server if needed
+        const typingEvent = new CustomEvent('user-typing', {
+            detail: {
+                conversationId,
+                isTyping,
+                userId: localStorage.getItem('user_id') || 'unknown'
+            }
+        });
+        window.dispatchEvent(typingEvent);
+        
+        console.log(`✅ sendTypingIndicator: ${isTyping ? 'Started' : 'Stopped'} typing in conversation ${conversationId}`);
+        return true;
+    } catch (error) {
+        console.error('❌ sendTypingIndicator: Failed to send indicator', error);
+        return false;
+    }
+}
+
+/**
+ * logTransparencyAction() - Log transparency action (for group-core.js compatibility)
+ * 
+ * @param {string} action - Action being performed
+ * @param {object} data - Action data
+ * @returns {boolean} True if logged successfully
+ */
+export function logTransparencyAction(action, data = {}) {
+    try {
+        const logData = {
+            action: action,
+            data: data,
+            timestamp: Date.now(),
+            userAgent: navigator.userAgent,
+            url: window.location.href
+        };
+        
+        console.log('📊 Transparency Action:', logData);
+        
+        // Send to parent if in iframe
+        if (window.parent !== window) {
+            sendParentMessage(MESSAGE_TYPES.DATA_UPDATE, {
+                type: 'TRANSPARENCY_LOG',
+                ...logData
+            });
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('❌ logTransparencyAction: Failed to log action', error);
+        return false;
+    }
+}
+
+// Initialize global exports and ready state
+function initializeGlobalAPI() {
+    // Populate global namespace
+    window.__API_MESSAGES.exports = {
+        MESSAGE_TYPES,
+        sendParentMessage,
+        listenToParentMessages,
+        sendToParent,
+        sendMessageToIframe,
+        validateMessage,
+        messageResponse,
+        sendMessage,
+        fetchMessages,
+        getMessages,
+        markAsRead,
+        markChatAsRead,
+        addReaction,
+        clearChatHistory,
+        deleteMessage,
+        editMessage,
+        forwardMessage,
+        pinMessage,
+        searchMessages,
+        getConversationInfo,
+        createConversation,
+        leaveConversation,
+        simulateIncomingCall,
+        buildSettingsMenu,
+        sendTypingIndicator,
+        logTransparencyAction
+    };
+    
+    // Set ready flag
+    window.__API_MESSAGES.ready = true;
+    
+    // Dispatch ready event
+    const readyEvent = new CustomEvent('api-messages-ready', {
+        detail: {
+            version: '1.0.2',
+            timestamp: Date.now()
+        }
+    });
+    window.dispatchEvent(readyEvent);
+    
+    // Set global fallback
+    if (!window.apiMessages) {
+        window.apiMessages = window.__API_MESSAGES.exports;
+    }
+    
+    console.log('✅ api.messages.js: Module initialized and ready');
+}
+
+// Execute initialization after a short delay to ensure all exports are available
+setTimeout(initializeGlobalAPI, 0);
+
 // Export all functions and constants
 export default {
     MESSAGE_TYPES,
     sendParentMessage,
     listenToParentMessages,
+    sendToParent,
     sendMessageToIframe,
     validateMessage,
     messageResponse,
     sendMessage,
     fetchMessages,
+    getMessages,
     markAsRead,
+    markChatAsRead,
     addReaction,
     clearChatHistory,
     deleteMessage,
@@ -904,5 +1251,9 @@ export default {
     searchMessages,
     getConversationInfo,
     createConversation,
-    leaveConversation
+    leaveConversation,
+    simulateIncomingCall,
+    buildSettingsMenu,
+    sendTypingIndicator,
+    logTransparencyAction
 };

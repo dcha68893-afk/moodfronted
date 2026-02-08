@@ -3016,6 +3016,388 @@ export const AppState = {
 // DOM Elements
 export const elements = {};
 
+// ==================== INCOMING CALL SIMULATION FUNCTION ====================
+export function simulateIncomingCall(callerId, metadata = {}) {
+    console.log('[Calls iframe] Simulating incoming call for:', callerId, metadata);
+    
+    // Don't simulate if already in a call
+    if (AppState.isInCall) {
+        console.log('[Calls iframe] Already in a call, ignoring simulation');
+        showNotification('Already in a call', 'warning');
+        return false;
+    }
+    
+    // Find contact by ID or create a mock contact
+    let callerContact = null;
+    
+    if (AppState.contacts && AppState.contacts.length > 0) {
+        callerContact = AppState.contacts.find(c => c.id === callerId);
+    }
+    
+    if (!callerContact) {
+        // Create mock contact for simulation
+        callerContact = {
+            id: callerId,
+            name: metadata.name || 'Test Caller',
+            avatar: metadata.avatar || null,
+            isPremium: metadata.isPremium || false
+        };
+    }
+    
+    // Prepare call metadata
+    const callMetadata = {
+        callType: metadata.callType || 'voice',
+        mood: metadata.mood || 'neutral',
+        intention: metadata.intention || 'quick',
+        isGroup: metadata.isGroup || false,
+        callId: metadata.callId || 'simulated-call-' + Date.now(),
+        timestamp: Date.now(),
+        ...metadata
+    };
+    
+    // Update UI elements for incoming call
+    if (elements.incomingCallModal && elements.incomingCallAvatar && elements.incomingCallName) {
+        // Set caller info
+        elements.incomingCallName.textContent = callerContact.name;
+        
+        // Set avatar
+        if (callerContact.avatar) {
+            elements.incomingCallAvatar.src = callerContact.avatar;
+            elements.incomingCallAvatar.alt = callerContact.name;
+        } else {
+            // Generate avatar color and initials
+            const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+            const bgColor = stringToColor(callerContact.name);
+            elements.incomingCallAvatar.style.backgroundColor = bgColor;
+            elements.incomingCallAvatar.textContent = initials;
+            elements.incomingCallAvatar.src = '';
+        }
+        
+        // Set call type
+        if (elements.incomingCallType) {
+            elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
+            elements.incomingCallType.className = `call-type-badge ${callMetadata.callType}`;
+        }
+        
+        // Set mood if available
+        if (elements.incomingCallMood && callMetadata.mood) {
+            elements.incomingCallMood.innerHTML = `
+                <div class="mood-indicator mood-${callMetadata.mood}">
+                    <i class="fas fa-smile"></i>
+                    <span>${callMetadata.mood}</span>
+                </div>
+            `;
+            elements.incomingCallMood.style.display = 'block';
+        } else if (elements.incomingCallMood) {
+            elements.incomingCallMood.style.display = 'none';
+        }
+        
+        // Set intention if available
+        if (elements.incomingCallIntention && callMetadata.intention) {
+            elements.incomingCallIntention.innerHTML = `
+                <div class="intention-indicator intention-${callMetadata.intention}">
+                    <i class="fas fa-bullseye"></i>
+                    <span>${callMetadata.intention}</span>
+                </div>
+            `;
+            elements.incomingCallIntention.style.display = 'block';
+        } else if (elements.incomingCallIntention) {
+            elements.incomingCallIntention.style.display = 'none';
+        }
+        
+        // Show the incoming call modal
+        elements.incomingCallModal.classList.add('active');
+        
+        // Set up auto-decline timer (30 seconds)
+        let timeLeft = 30;
+        if (elements.autoDeclineTimer) {
+            elements.autoDeclineTimer.textContent = timeLeft;
+        }
+        
+        const declineTimer = setInterval(() => {
+            timeLeft--;
+            if (elements.autoDeclineTimer) {
+                elements.autoDeclineTimer.textContent = timeLeft;
+            }
+            
+            if (timeLeft <= 0) {
+                clearInterval(declineTimer);
+                handleDeclineSimulatedCall(callMetadata.callId);
+            }
+        }, 1000);
+        
+        // Store timer reference
+        window._simulatedCallTimer = declineTimer;
+        window._simulatedCallMetadata = callMetadata;
+        window._simulatedCallerContact = callerContact;
+        
+        // Play incoming call sound (if available)
+        playIncomingCallSound();
+        
+        // Emit call event
+        emitCallEvent('incoming_call_simulated', {
+            callerId: callerId,
+            callerContact: callerContact,
+            metadata: callMetadata,
+            timestamp: Date.now()
+        });
+        
+        // Notify parent window if in iframe
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'INCOMING_CALL_SIMULATED',
+                source: 'calls-iframe',
+                callerId: callerId,
+                metadata: callMetadata,
+                timestamp: Date.now()
+            }, '*');
+        }
+        
+        console.log('[Calls iframe] Incoming call simulation started');
+        return true;
+    } else {
+        console.error('[Calls iframe] Could not find required UI elements for incoming call simulation');
+        return false;
+    }
+}
+
+function handleDeclineSimulatedCall(callId) {
+    console.log('[Calls iframe] Simulated call auto-declined:', callId);
+    
+    if (elements.incomingCallModal) {
+        elements.incomingCallModal.classList.remove('active');
+    }
+    
+    if (window._simulatedCallTimer) {
+        clearInterval(window._simulatedCallTimer);
+        window._simulatedCallTimer = null;
+    }
+    
+    // Emit call declined event
+    emitCallEvent('call_declined', {
+        callId: callId,
+        reason: 'auto_decline',
+        timestamp: Date.now()
+    });
+    
+    // Show notification
+    showNotification('Simulated call declined (auto)', 'info');
+    
+    // Clean up
+    window._simulatedCallMetadata = null;
+    window._simulatedCallerContact = null;
+    
+    // Stop incoming call sound
+    stopIncomingCallSound();
+}
+
+function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false) {
+    console.log('[Calls iframe] Accepting simulated call:', callMetadata.callId);
+    
+    // Stop timer
+    if (window._simulatedCallTimer) {
+        clearInterval(window._simulatedCallTimer);
+        window._simulatedCallTimer = null;
+    }
+    
+    // Hide incoming call modal
+    if (elements.incomingCallModal) {
+        elements.incomingCallModal.classList.remove('active');
+    }
+    
+    // Set up call state
+    AppState.isInCall = true;
+    AppState.callType = isVideo ? 'video' : callMetadata.callType;
+    AppState.activeCallId = callMetadata.callId;
+    AppState.callParticipants = [callerContact];
+    AppState.callStartTime = Date.now();
+    AppState.currentMood = callMetadata.mood || 'neutral';
+    AppState.currentIntention = callMetadata.intention || 'quick';
+    
+    // Update UI for active call
+    if (elements.callContainer) {
+        elements.callContainer.classList.add('active');
+    }
+    
+    if (elements.callWithName) {
+        elements.callWithName.textContent = callerContact.name;
+    }
+    
+    if (elements.callTypeIcon) {
+        elements.callTypeIcon.className = `call-type-icon ${AppState.callType}`;
+        elements.callTypeIcon.innerHTML = `<i class="fas fa-${AppState.callType === 'video' ? 'video' : 'phone'}"></i>`;
+    }
+    
+    if (elements.callStatusText) {
+        elements.callStatusText.textContent = 'Connected (Simulated)';
+    }
+    
+    // Update mood and intention indicators
+    updateMoodIndicator(AppState.currentMood);
+    updateIntentionIndicator(AppState.currentIntention);
+    
+    // Start call timer
+    startCallTimer();
+    
+    // Initialize call features
+    initializeCallFeatures();
+    
+    // Show video if this is a video call
+    if (isVideo || callMetadata.callType === 'video') {
+        showSimulatedVideo(callerContact);
+    }
+    
+    // Emit call accepted event
+    emitCallEvent('call_accepted', {
+        callId: callMetadata.callId,
+        callType: AppState.callType,
+        callerContact: callerContact,
+        metadata: callMetadata,
+        timestamp: Date.now()
+    });
+    
+    // Notify parent window
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'CALL_ACCEPTED_SIMULATED',
+            source: 'calls-iframe',
+            callId: callMetadata.callId,
+            callType: AppState.callType,
+            callerContact: callerContact,
+            timestamp: Date.now()
+        }, '*');
+    }
+    
+    // Show notification
+    showNotification(`Simulated ${AppState.callType} call started`, 'success');
+    
+    // Clean up
+    window._simulatedCallMetadata = null;
+    window._simulatedCallerContact = null;
+    
+    // Stop incoming call sound
+    stopIncomingCallSound();
+}
+
+function showSimulatedVideo(callerContact) {
+    if (elements.videoGrid) {
+        // Clear existing video containers
+        elements.videoGrid.innerHTML = '';
+        
+        // Create local video container (simulated)
+        const localVideoContainer = document.createElement('div');
+        localVideoContainer.className = 'video-container local';
+        localVideoContainer.innerHTML = `
+            <video class="local-video" autoplay muted playsinline></video>
+            <div class="video-overlay">
+                <div class="video-name">You (Simulated)</div>
+                <div class="video-status">Simulated Video</div>
+            </div>
+        `;
+        elements.videoGrid.appendChild(localVideoContainer);
+        
+        // Create remote video container (simulated)
+        const remoteVideoContainer = document.createElement('div');
+        remoteVideoContainer.className = 'video-container remote';
+        remoteVideoContainer.innerHTML = `
+            <div class="video-placeholder" style="background-color: ${stringToColor(callerContact.name)}">
+                <div class="placeholder-initials">${callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase()}</div>
+            </div>
+            <div class="video-overlay">
+                <div class="video-name">${callerContact.name}</div>
+                <div class="video-status">Simulated Participant</div>
+            </div>
+        `;
+        elements.videoGrid.appendChild(remoteVideoContainer);
+        
+        // Update video layout
+        updateVideoLayout();
+        
+        // For testing, we could simulate video stream with a test pattern
+        simulateTestVideoPattern();
+    }
+}
+
+function simulateTestVideoPattern() {
+    // This is a placeholder for actual video simulation
+    // In a real implementation, you might use a test pattern or mock stream
+    console.log('[Calls iframe] Video simulation placeholder - would initialize WebRTC in real implementation');
+}
+
+function playIncomingCallSound() {
+    // Create and play a simple incoming call sound
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        
+        // Pulse pattern
+        const pulseTime = 0.5;
+        const silenceTime = 1.5;
+        
+        function playPulse() {
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + pulseTime);
+        }
+        
+        oscillator.start();
+        
+        playPulse();
+        window._soundInterval = setInterval(playPulse, (pulseTime + silenceTime) * 1000);
+        window._audioContext = audioContext;
+        window._oscillator = oscillator;
+        
+    } catch (error) {
+        console.log('[Calls iframe] Could not play audio:', error);
+    }
+}
+
+function stopIncomingCallSound() {
+    if (window._soundInterval) {
+        clearInterval(window._soundInterval);
+        window._soundInterval = null;
+    }
+    
+    if (window._oscillator) {
+        try {
+            window._oscillator.stop();
+            window._oscillator = null;
+        } catch (error) {
+            console.log('[Calls iframe] Error stopping oscillator:', error);
+        }
+    }
+    
+    if (window._audioContext) {
+        try {
+            window._audioContext.close();
+            window._audioContext = null;
+        } catch (error) {
+            console.log('[Calls iframe] Error closing audio context:', error);
+        }
+    }
+}
+
+function emitCallEvent(eventType, data) {
+    // Emit event for internal listeners
+    const event = new CustomEvent(`call:${eventType}`, { detail: data });
+    window.dispatchEvent(event);
+    
+    // Also emit to global event bus if available
+    if (window.EventBus) {
+        window.EventBus.emit(`call.${eventType}`, data);
+    }
+    
+    console.log(`[Calls iframe] Call event emitted: ${eventType}`, data);
+}
+
 // ==================== EXPORTED FUNCTIONS ====================
 export function cacheElements() {
     elements.menuDotsBtn = document.getElementById('menuDotsBtn');
@@ -3710,6 +4092,7 @@ export function joinUrlParamCall() {
         AppState.isInCall = true;
         AppState.callType = callType;
         AppState.callParticipants = [randomContact];
+        AppState.callStartTime = Date.now();
         
         showCallUI();
         startCallTimer();
@@ -4091,6 +4474,71 @@ export function bootstrapIframe() {
     console.log('[Calls iframe] Bootstrap complete - UI ready with enhanced parent coordination');
 }
 
+// ==================== SETUP EVENT LISTENERS FOR SIMULATED CALLS ====================
+function setupEventListeners() {
+    // Set up incoming call button handlers
+    if (elements.declineCallBtn) {
+        elements.declineCallBtn.addEventListener('click', () => {
+            if (window._simulatedCallMetadata) {
+                handleDeclineSimulatedCall(window._simulatedCallMetadata.callId);
+            }
+        });
+    }
+    
+    if (elements.acceptCallBtn) {
+        elements.acceptCallBtn.addEventListener('click', () => {
+            if (window._simulatedCallMetadata && window._simulatedCallerContact) {
+                handleAcceptSimulatedCall(window._simulatedCallMetadata, window._simulatedCallerContact, false);
+            }
+        });
+    }
+    
+    if (elements.acceptVideoCallBtn) {
+        elements.acceptVideoCallBtn.addEventListener('click', () => {
+            if (window._simulatedCallMetadata && window._simulatedCallerContact) {
+                handleAcceptSimulatedCall(window._simulatedCallMetadata, window._simulatedCallerContact, true);
+            }
+        });
+    }
+}
+
+// ==================== CALL MANAGEMENT FUNCTIONS ====================
+function startCallTimer() {
+    if (AppState.callDurationInterval) {
+        clearInterval(AppState.callDurationInterval);
+    }
+    
+    AppState.callDurationInterval = setInterval(() => {
+        if (AppState.callStartTime && elements.callDuration) {
+            const elapsedSeconds = Math.floor((Date.now() - AppState.callStartTime) / 1000);
+            elements.callDuration.textContent = formatDuration(elapsedSeconds);
+        }
+    }, 1000);
+}
+
+function initializeCallFeatures() {
+    // Initialize call controls and features
+    console.log('[Calls iframe] Initializing call features for simulated call');
+}
+
+function showCallUI() {
+    if (elements.callContainer) {
+        elements.callContainer.classList.add('active');
+    }
+    
+    if (elements.appContainer) {
+        elements.appContainer.classList.add('in-call');
+    }
+}
+
+function enableFocusMode() {
+    console.log('[Calls iframe] Focus mode enabled for simulated call');
+}
+
+function disableFocusMode() {
+    console.log('[Calls iframe] Focus mode disabled for simulated call');
+}
+
 // ==================== GLOBAL EXPORTS ====================
 window.CallApp = {
     simulateIncomingCall,
@@ -4110,6 +4558,16 @@ window.CallApp = {
             tokenReady: window.callAPI ? window.callAPI.tokenManager.isTokenReady() : false,
             parentCoordinator: parentCoordinator ? parentCoordinator.getStatus() : null
         };
+    },
+    notifyParent: (type, data) => {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: type,
+                source: 'calls-iframe',
+                ...data,
+                timestamp: Date.now()
+            }, '*');
+        }
     }
 };
 

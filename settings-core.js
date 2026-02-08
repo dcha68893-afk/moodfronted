@@ -492,6 +492,425 @@ export const SETTINGS_MENU = [
 ];
 
 // =============================================
+// DYNAMIC MENU RENDERING SYSTEM
+// =============================================
+
+/**
+ * Builds the settings menu dynamically
+ * @param {HTMLElement} container - Container element to render menu into
+ * @param {Object} config - Configuration options for menu rendering
+ * @param {boolean} config.sessionAware - Whether to check authentication state
+ * @param {boolean} config.iframeCompatible - Whether to handle iframe-specific logic
+ * @param {string} config.activeSection - Currently active section ID
+ * @param {Function} config.onSectionChange - Callback when section changes
+ */
+export function buildSettingsMenu(container = null, config = {}) {
+    const {
+        sessionAware = true,
+        iframeCompatible = true,
+        activeSection = currentSection,
+        onSectionChange = null
+    } = config;
+    
+    console.log('[Settings] Building dynamic menu', {
+        sessionAware,
+        iframeCompatible,
+        activeSection,
+        hasContainer: !!container
+    });
+    
+    try {
+        // Get container if not provided
+        if (!container) {
+            container = document.getElementById('settingsMenu');
+        }
+        
+        // Validate container exists
+        if (!container) {
+            console.warn('[Settings] No container found for menu');
+            return false;
+        }
+        
+        // Check authentication state if session aware
+        let canShowProtectedUI = true;
+        if (sessionAware) {
+            canShowProtectedUI = checkAuthenticationState();
+            if (!canShowProtectedUI) {
+                console.log('[Settings] Authentication check failed, showing limited menu');
+            }
+        }
+        
+        // Clear existing menu
+        container.innerHTML = '';
+        
+        // Create menu wrapper
+        const menuWrapper = document.createElement('div');
+        menuWrapper.className = 'settings-menu-wrapper';
+        menuWrapper.setAttribute('data-iframe-compatible', iframeCompatible);
+        menuWrapper.setAttribute('data-session-aware', sessionAware);
+        menuWrapper.setAttribute('data-auth-state', canShowProtectedUI ? 'authenticated' : 'unauthenticated');
+        
+        // Filter menu items based on authentication
+        const menuItems = filterMenuItems(SETTINGS_MENU, {
+            canShowProtectedUI,
+            iframeCompatible
+        });
+        
+        // Generate menu HTML
+        const menuHTML = generateMenuHTML(menuItems, {
+            activeSection,
+            canShowProtectedUI
+        });
+        
+        menuWrapper.innerHTML = menuHTML;
+        container.appendChild(menuWrapper);
+        
+        // Add event listeners to menu items
+        attachMenuEventListeners(menuWrapper, {
+            onSectionChange,
+            canShowProtectedUI
+        });
+        
+        // Add accessibility attributes
+        enhanceMenuAccessibility(menuWrapper);
+        
+        // Log menu build completion
+        console.log(`[Settings] Menu built with ${menuItems.length} items, active: ${activeSection}`);
+        
+        return true;
+        
+    } catch (error) {
+        console.error('[Settings] Error building menu:', error);
+        
+        // Show fallback menu on error
+        showFallbackMenu(container, error);
+        return false;
+    }
+}
+
+/**
+ * Filters menu items based on current state
+ */
+function filterMenuItems(menuItems, state) {
+    const { canShowProtectedUI, iframeCompatible } = state;
+    
+    return menuItems.filter(item => {
+        // Always show non-danger items in unauthenticated state
+        if (!canShowProtectedUI) {
+            // Show only safe, non-danger sections
+            return !item.danger && 
+                   !['security', 'privacy', 'danger', 'backup'].includes(item.id);
+        }
+        
+        // In iframe mode, filter out items that require parent navigation
+        if (iframeCompatible && item.requiresParentNavigation) {
+            return false;
+        }
+        
+        // Show all items when authenticated
+        return true;
+    });
+}
+
+/**
+ * Generates HTML for menu items
+ */
+function generateMenuHTML(menuItems, options) {
+    const { activeSection, canShowProtectedUI } = options;
+    
+    return menuItems.map(item => {
+        const isActive = item.id === activeSection;
+        const isDisabled = !canShowProtectedUI && item.requiresAuth;
+        const hasBadge = item.badge && item.badge !== null;
+        
+        const classes = [
+            'settings-menu-item',
+            isActive ? 'active' : '',
+            isDisabled ? 'disabled' : '',
+            item.danger ? 'danger-item' : ''
+        ].filter(Boolean).join(' ');
+        
+        const attributes = [
+            `data-section="${item.id}"`,
+            `data-badge="${hasBadge ? item.badge : ''}"`,
+            isDisabled ? 'aria-disabled="true"' : '',
+            `tabindex="${isDisabled ? '-1' : '0'}"`
+        ].filter(Boolean).join(' ');
+        
+        return `
+            <div class="${classes}" ${attributes}>
+                <div class="menu-item-content">
+                    <i class="${item.icon} menu-item-icon"></i>
+                    <span class="menu-item-title">${item.title}</span>
+                    ${hasBadge ? `<span class="menu-item-badge">${item.badge}</span>` : ''}
+                </div>
+                ${isActive ? '<i class="fas fa-chevron-right menu-item-arrow"></i>' : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Attaches event listeners to menu items
+ */
+function attachMenuEventListeners(menuWrapper, options) {
+    const { onSectionChange, canShowProtectedUI } = options;
+    
+    const menuItems = menuWrapper.querySelectorAll('.settings-menu-item:not(.disabled)');
+    
+    menuItems.forEach(item => {
+        const sectionId = item.getAttribute('data-section');
+        
+        // Click handler
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            if (item.classList.contains('disabled')) {
+                console.log(`[Settings] Section ${sectionId} is disabled`);
+                return;
+            }
+            
+            handleSectionChange(sectionId, {
+                onSectionChange,
+                canShowProtectedUI
+            });
+        });
+        
+        // Keyboard navigation
+        item.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                item.click();
+            }
+            
+            // Arrow key navigation
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                navigateMenuWithKeyboard(e, menuItems, item);
+            }
+        });
+    });
+}
+
+/**
+ * Handles section change with validation
+ */
+function handleSectionChange(sectionId, options) {
+    const { onSectionChange, canShowProtectedUI } = options;
+    
+    console.log(`[Settings] Section change requested: ${sectionId}`);
+    
+    // Check if we can access this section
+    if (!canShowProtectedUI && requiresAuthentication(sectionId)) {
+        showAuthenticationRequiredMessage();
+        return;
+    }
+    
+    // Check for unsaved changes
+    if (unsavedChanges && sectionId !== currentSection) {
+        showUnsavedChangesWarning(sectionId);
+        return;
+    }
+    
+    // Update current section
+    currentSection = sectionId;
+    
+    // Update UI
+    updateActiveMenuState(sectionId);
+    
+    // Call external callback if provided
+    if (onSectionChange && typeof onSectionChange === 'function') {
+        onSectionChange(sectionId);
+    }
+    
+    // Load the section
+    loadSection(sectionId);
+    
+    // Notify parent if in iframe mode
+    if (window.parent !== window) {
+        sendMessageToParent({
+            type: 'SECTION_CHANGE',
+            childId: 'settings',
+            section: sectionId,
+            timestamp: Date.now()
+        });
+    }
+}
+
+/**
+ * Updates active state in menu
+ */
+function updateActiveMenuState(activeSectionId) {
+    const menuWrapper = document.querySelector('.settings-menu-wrapper');
+    if (!menuWrapper) return;
+    
+    // Remove active class from all items
+    const allItems = menuWrapper.querySelectorAll('.settings-menu-item');
+    allItems.forEach(item => {
+        item.classList.remove('active');
+        const arrow = item.querySelector('.menu-item-arrow');
+        if (arrow) arrow.remove();
+    });
+    
+    // Add active class to current item
+    const activeItem = menuWrapper.querySelector(`[data-section="${activeSectionId}"]`);
+    if (activeItem) {
+        activeItem.classList.add('active');
+        
+        // Add arrow indicator
+        const arrow = document.createElement('i');
+        arrow.className = 'fas fa-chevron-right menu-item-arrow';
+        activeItem.appendChild(arrow);
+    }
+}
+
+/**
+ * Navigates menu with keyboard
+ */
+function navigateMenuWithKeyboard(event, menuItems, currentItem) {
+    event.preventDefault();
+    
+    const currentIndex = Array.from(menuItems).indexOf(currentItem);
+    let nextIndex = currentIndex;
+    
+    if (event.key === 'ArrowDown') {
+        nextIndex = (currentIndex + 1) % menuItems.length;
+    } else if (event.key === 'ArrowUp') {
+        nextIndex = (currentIndex - 1 + menuItems.length) % menuItems.length;
+    }
+    
+    const nextItem = menuItems[nextIndex];
+    if (nextItem && !nextItem.classList.contains('disabled')) {
+        nextItem.focus();
+        
+        // Auto-select on arrow navigation with Enter
+        if (event.shiftKey) {
+            nextItem.click();
+        }
+    }
+}
+
+/**
+ * Enhances menu accessibility
+ */
+function enhanceMenuAccessibility(menuWrapper) {
+    menuWrapper.setAttribute('role', 'menu');
+    menuWrapper.setAttribute('aria-label', 'Settings navigation menu');
+    
+    const menuItems = menuWrapper.querySelectorAll('.settings-menu-item');
+    menuItems.forEach((item, index) => {
+        item.setAttribute('role', 'menuitem');
+        item.setAttribute('aria-posinset', index + 1);
+        item.setAttribute('aria-setsize', menuItems.length);
+    });
+}
+
+/**
+ * Shows fallback menu on error
+ */
+function showFallbackMenu(container, error) {
+    console.warn('[Settings] Showing fallback menu due to error:', error.message);
+    
+    const fallbackHTML = `
+        <div class="settings-menu-fallback">
+            <div class="fallback-header">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </div>
+            <div class="fallback-items">
+                <div class="fallback-item active" data-section="profile">
+                    <i class="fas fa-user"></i>
+                    <span>Profile</span>
+                </div>
+                <div class="fallback-item" data-section="appearance">
+                    <i class="fas fa-palette"></i>
+                    <span>Appearance</span>
+                </div>
+                <div class="fallback-item" data-section="notifications">
+                    <i class="fas fa-bell"></i>
+                    <span>Notifications</span>
+                </div>
+            </div>
+            <div class="fallback-error">
+                <small>Limited menu due to error: ${error.message}</small>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = fallbackHTML;
+    
+    // Add basic event listeners to fallback
+    const fallbackItems = container.querySelectorAll('.fallback-item');
+    fallbackItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const sectionId = item.getAttribute('data-section');
+            currentSection = sectionId;
+            loadSection(sectionId);
+            
+            // Update active state
+            fallbackItems.forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+        });
+    });
+}
+
+/**
+ * Checks if a section requires authentication
+ */
+function requiresAuthentication(sectionId) {
+    const protectedSections = [
+        'security', 'privacy', 'danger', 'backup', 
+        'safety', 'advanced', 'storage'
+    ];
+    return protectedSections.includes(sectionId);
+}
+
+/**
+ * Shows authentication required message
+ */
+function showAuthenticationRequiredMessage() {
+    showNotification('Authentication required to access this section', 'warning');
+    
+    // Visual feedback
+    const menuWrapper = document.querySelector('.settings-menu-wrapper');
+    if (menuWrapper) {
+        menuWrapper.classList.add('auth-required-shake');
+        setTimeout(() => {
+            menuWrapper.classList.remove('auth-required-shake');
+        }, 500);
+    }
+}
+
+/**
+ * Shows unsaved changes warning
+ */
+function showUnsavedChangesWarning(nextSectionId) {
+    showConfirmation(
+        'Unsaved Changes',
+        'You have unsaved changes in the current section. Do you want to save before switching?',
+        () => {
+            // Save and switch
+            saveSettings().then(() => {
+                handleSectionChange(nextSectionId, {
+                    onSectionChange: null,
+                    canShowProtectedUI: true
+                });
+            });
+        },
+        () => {
+            // Discard and switch
+            unsavedChanges = false;
+            updateSaveButton();
+            handleSectionChange(nextSectionId, {
+                onSectionChange: null,
+                canShowProtectedUI: true
+            });
+        },
+        'Save & Switch',
+        'Discard & Switch'
+    );
+}
+
+// =============================================
 // PARENT COMMUNICATION & SESSION AUTHORITY SYSTEM
 // =============================================
 

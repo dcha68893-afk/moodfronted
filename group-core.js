@@ -24,7 +24,6 @@ import {
   acceptGroupInvite as acceptGroupInviteAPI,
   declineGroupInvite as declineGroupInviteAPI,
   getGroupTransparency,
-  logTransparencyAction,
   getGroupNotes,
   getGroupEvents,
   getGroupPurposes,

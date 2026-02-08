@@ -26,7 +26,7 @@ import {
     clearChatHistory as apiClearChatHistory,
     voteInPoll as apiVoteInPoll,
     reportMessage as apiReportMessage
-} from './js/api.messages.js';
+} from '../messages.js';
 
 console.log('[Iframe Controller] Initializing with centralized session authority');
 
