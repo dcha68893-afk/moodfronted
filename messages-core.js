@@ -12,7 +12,7 @@ import {
     refreshSession,
     validateSession,
     clearSession
-} from './js/api.core.js';
+} from '../api.core.js';
 
 import {
     fetchContacts,
@@ -26,9 +26,7 @@ import {
     clearChatHistory as apiClearChatHistory,
     voteInPoll as apiVoteInPoll,
     reportMessage as apiReportMessage
-} from '../messages.js';
-
-console.log('[Iframe Controller] Initializing with centralized session authority');
+} from '../messages.api.js';
 
 // Global variables
 export let currentUser = null;
@@ -74,11 +72,22 @@ export let isDraggingToCancel = false;
 // Parent coordination state
 let parentConnection = null;
 let sessionData = null;
+let messageSequence = 0;
 export let isParentReady = false;
 export let isSessionReceived = false;
 export let isInitialized = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
+const HEARTBEAT_INTERVAL = 10000;
+const HEARTBEAT_TIMEOUT = 60000;
+
+// Handshake protocol state
+let handshakeInProgress = false;
+let sessionValid = false;
+let handshakeTimeout = null;
+const HANDSHAKE_TIMEOUT = 5000;
+let pendingSessionRequest = false;
+let acceptedOrigins = new Set();
 
 // Message types for parent-child communication
 export const MESSAGE_TYPES = {
@@ -89,6 +98,8 @@ export const MESSAGE_TYPES = {
     API_REQUEST: 'API_REQUEST',
     CHILD_ERROR: 'CHILD_ERROR',
     CHILD_STATE_UPDATE: 'CHILD_STATE_UPDATE',
+    CHILD_ACKNOWLEDGED: 'CHILD_ACKNOWLEDGED',
+    MESSAGE_RECEIVED: 'MESSAGE_RECEIVED',
     
     // Parent to Child
     PARENT_READY: 'PARENT_READY',
@@ -104,6 +115,7 @@ export const MESSAGE_TYPES = {
 export const LOCAL_STORAGE_KEYS = {
     CHATS: 'knecta_chats',
     MESSAGES: 'knecta_messages_',
+    CONTACTS: 'knecta_contacts',
     CHAT_THEMES: 'knecta_chat_themes',
     OFFLINE_MESSAGES: 'knecta_offline_messages',
     STARRED_MESSAGES: 'knecta_starred_messages',
@@ -120,38 +132,166 @@ export const LOCAL_STORAGE_KEYS = {
     UI_STATE: 'knecta_ui_state'
 };
 
+// Message deduplication cache
+let messageDeduplicationCache = new Map();
+const DEDUPE_CACHE_TIMEOUT = 30000; // 30 seconds
+
+/**
+ * Validate message structure
+ */
+function validateMessageStructure(message) {
+    if (!message || typeof message !== 'object') {
+        return { valid: false, error: 'Message must be an object' };
+    }
+    
+    const requiredFields = ['type', 'source', 'payload', 'sequence'];
+    for (const field of requiredFields) {
+        if (!message[field]) {
+            return { valid: false, error: `Message must have a ${field} field` };
+        }
+    }
+    
+    if (typeof message.type !== 'string') {
+        return { valid: false, error: 'Message type must be a string' };
+    }
+    
+    if (typeof message.source !== 'string') {
+        return { valid: false, error: 'Message source must be a string' };
+    }
+    
+    if (typeof message.payload !== 'object') {
+        return { valid: false, error: 'Message payload must be an object' };
+    }
+    
+    if (typeof message.sequence !== 'number') {
+        return { valid: false, error: 'Message sequence must be a number' };
+    }
+    
+    return { valid: true };
+}
+
+/**
+ * Validate message payload content
+ */
+function validateMessagePayload(payload, messageType) {
+    if (!payload || typeof payload !== 'object') {
+        return { valid: false, error: 'Invalid payload' };
+    }
+    
+    // Basic validation for different message types
+    switch (messageType) {
+        case 'text':
+            if (typeof payload.content !== 'string' || payload.content.trim().length === 0) {
+                return { valid: false, error: 'Text message must have content' };
+            }
+            break;
+            
+        case 'image':
+        case 'video':
+        case 'file':
+            if (!payload.content || typeof payload.content !== 'string') {
+                return { valid: false, error: 'Media message must have content URL' };
+            }
+            if (!payload.fileName || typeof payload.fileName !== 'string') {
+                return { valid: false, error: 'Media message must have file name' };
+            }
+            break;
+            
+        case 'audio':
+            if (!payload.content || typeof payload.content !== 'string') {
+                return { valid: false, error: 'Audio message must have content URL' };
+            }
+            if (typeof payload.duration !== 'number' || payload.duration <= 0) {
+                return { valid: false, error: 'Audio message must have valid duration' };
+            }
+            break;
+    }
+    
+    // Check for duplicate message
+    if (payload.id) {
+        const cacheKey = `${payload.chatId || 'global'}_${payload.id}`;
+        if (messageDeduplicationCache.has(cacheKey)) {
+            return { valid: false, error: 'Duplicate message detected' };
+        }
+        // Cache for deduplication
+        messageDeduplicationCache.set(cacheKey, Date.now());
+        
+        // Clean old cache entries periodically
+        setTimeout(() => {
+            messageDeduplicationCache.delete(cacheKey);
+        }, DEDUPE_CACHE_TIMEOUT);
+    }
+    
+    return { valid: true };
+}
+
+/**
+ * Sanitize message payload to prevent XSS and preserve formatting
+ */
+function sanitizePayload(payload) {
+    if (!payload || typeof payload !== 'object') return {};
+    
+    const sanitized = {};
+    for (const [key, value] of Object.entries(payload)) {
+        if (typeof value === 'string') {
+            // Preserve formatting markers during sanitization
+            sanitized[key] = preserveFormatting(escapeHtml(value));
+        } else if (Array.isArray(value)) {
+            sanitized[key] = value.map(item => 
+                typeof item === 'string' ? preserveFormatting(escapeHtml(item)) : item
+            );
+        } else if (value && typeof value === 'object') {
+            sanitized[key] = sanitizePayload(value);
+        } else {
+            sanitized[key] = value;
+        }
+    }
+    return sanitized;
+}
+
+/**
+ * Preserve formatting markers during sanitization
+ */
+function preserveFormatting(text) {
+    if (!text) return '';
+    
+    // Temporarily replace formatting markers
+    const markers = {
+        '**bold**': '###BOLD###',
+        '*italic*': '###ITALIC###',
+        '`code`': '###CODE###',
+        '```\ncode block\n```': '###CODE_BLOCK###'
+    };
+    
+    let processed = text;
+    Object.entries(markers).forEach(([marker, placeholder]) => {
+        processed = processed.replace(new RegExp(marker.replace(/\*/g, '\\*').replace(/`/g, '\\`'), 'g'), placeholder);
+    });
+    
+    // Escape HTML
+    processed = escapeHtml(processed);
+    
+    // Restore formatting markers
+    Object.entries(markers).forEach(([marker, placeholder]) => {
+        processed = processed.replace(new RegExp(placeholder, 'g'), marker);
+    });
+    
+    return processed;
+}
+
 /**
  * Initialize parent coordination system
- * 1. Verify parent presence
- * 2. Establish secure messaging channel
- * 3. Start handshake protocol
  */
 export function initializeParentCoordination() {
-    console.log('[Parent] Initializing parent coordination system');
-    
     // Verify parent presence
     if (!window.parent || window.parent === window) {
-        console.error('[Parent] No parent window detected or same window');
         showReconnectState('No parent connection available');
+        initializeOfflineFallback();
         return;
     }
     
-    // Verify same-origin
-    try {
-        const parentOrigin = window.parent.location.origin;
-        const currentOrigin = window.location.origin;
-        
-        if (parentOrigin !== currentOrigin) {
-            console.error('[Parent] Cross-origin parent detected:', parentOrigin, currentOrigin);
-            showReconnectState('Security violation: Cross-origin access denied');
-            return;
-        }
-        
-        console.log('[Parent] Same-origin verified:', parentOrigin);
-    } catch (error) {
-        console.error('[Parent] Cannot access parent origin (security restriction):', error);
-        // Continue anyway - may be iframed from same origin but restricted
-    }
+    // Initialize accepted origins dynamically
+    initializeAcceptedOrigins();
     
     // Setup message event listener
     window.addEventListener('message', handleParentMessage, false);
@@ -161,7 +301,9 @@ export function initializeParentCoordination() {
         isConnected: false,
         lastHeartbeat: Date.now(),
         sessionId: null,
-        parentWindow: window.parent
+        parentWindow: window.parent,
+        pendingAcknowledgment: new Map(),
+        retryQueue: []
     };
     
     // Start handshake protocol
@@ -172,71 +314,269 @@ export function initializeParentCoordination() {
 }
 
 /**
+ * Initialize accepted origins for secure message validation
+ */
+function initializeAcceptedOrigins() {
+    // Always accept current origin
+    acceptedOrigins.add(window.location.origin);
+    
+    // Accept common development origins
+    acceptedOrigins.add('http://127.0.0.1:5500');
+    acceptedOrigins.add('http://localhost:5500');
+    acceptedOrigins.add('http://127.0.0.1:3000');
+    acceptedOrigins.add('http://localhost:3000');
+    acceptedOrigins.add('http://127.0.0.1:8080');
+    acceptedOrigins.add('http://localhost:8080');
+    
+    // Accept HTTPS versions
+    acceptedOrigins.add('https://127.0.0.1:5500');
+    acceptedOrigins.add('https://localhost:5500');
+    acceptedOrigins.add('https://127.0.0.1:3000');
+    acceptedOrigins.add('https://localhost:3000');
+    acceptedOrigins.add('https://127.0.0.1:8080');
+    acceptedOrigins.add('https://localhost:8080');
+    
+    // Try to add parent origin if accessible
+    try {
+        const parentOrigin = window.parent.location.origin;
+        if (parentOrigin) {
+            acceptedOrigins.add(parentOrigin);
+            console.log(`[Security] Added parent origin: ${parentOrigin}`);
+        }
+    } catch (error) {
+        // Parent origin not accessible (cross-origin restriction)
+        console.log('[Security] Parent origin not accessible, using dynamic validation');
+    }
+}
+
+/**
+ * Check if origin is acceptable
+ */
+function isOriginAccepted(origin) {
+    // Always accept current origin
+    if (origin === window.location.origin) {
+        return true;
+    }
+    
+    // Check against accepted origins
+    if (acceptedOrigins.has(origin)) {
+        return true;
+    }
+    
+    // Dynamic validation for localhost variations
+    if (origin.startsWith('http://127.0.0.1:') || 
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('https://127.0.0.1:') || 
+        origin.startsWith('https://localhost:')) {
+        console.log(`[Security] Dynamically accepted origin: ${origin}`);
+        acceptedOrigins.add(origin);
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Initialize offline fallback mode
+ */
+function initializeOfflineFallback() {
+    console.log('[Offline] Initializing offline fallback mode');
+    
+    try {
+        // Load cached data
+        loadUserSettings();
+        loadMessageDrafts();
+        loadScheduledMessages();
+        loadOfflineQueue();
+        loadChatThemes();
+        
+        // Try to load cached chats and contacts
+        const cachedChats = localStorage.getItem(LOCAL_STORAGE_KEYS.CHATS);
+        if (cachedChats) {
+            try {
+                chats = JSON.parse(cachedChats);
+            } catch (e) {
+                chats = [];
+            }
+        }
+        
+        const cachedContacts = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
+        if (cachedContacts) {
+            try {
+                contacts = JSON.parse(cachedContacts);
+            } catch (e) {
+                contacts = [];
+            }
+        }
+        
+        // Set up offline sync
+        startOfflineSync();
+        
+        isInitialized = true;
+        
+    } catch (error) {
+        console.error('[Offline] Error initializing offline fallback:', error);
+    }
+}
+
+/**
  * Handle messages from parent window
  */
 function handleParentMessage(event) {
-    // Verify message origin (if possible)
     try {
-        // Note: We may not be able to check event.origin due to same-origin restrictions
-        // But we can validate the message structure
-        if (!event.data || typeof event.data !== 'object') {
+        // Validate origin
+        if (!isOriginAccepted(event.origin)) {
+            console.warn('[Security] Rejected message from unknown origin:', event.origin);
+            return;
+        }
+        
+        // Validate message structure
+        if (!event || !event.data || typeof event.data !== 'object') {
             console.warn('[Parent] Invalid message format received');
             return;
         }
         
-    const { type, data, requestId } = event.data;
-    
-    if (!MESSAGE_TYPES[type]) {
-        console.warn('[Parent] Unknown message type:', type);
-        return;
+        const { type, data, requestId, source, sequence } = event.data;
+        
+        // Validate source
+        if (!source || source !== 'parent') {
+            console.warn('[Parent] Invalid message source:', source);
+            return;
+        }
+        
+        // Validate required fields
+        if (!type || !MESSAGE_TYPES[type]) {
+            console.warn('[Parent] Invalid or unknown message type:', type);
+            return;
+        }
+        
+        // Handle session data specifically with secure handshake
+        if (type === MESSAGE_TYPES.SESSION_DATA) {
+            handleSecureSessionData(event.data, event.origin);
+            return;
+        }
+        
+        // Validate payload for other message types
+        const validation = validateMessagePayload(data || {}, type);
+        if (!validation.valid) {
+            console.warn('[Parent] Invalid message payload:', validation.error);
+            return;
+        }
+        
+        // Acknowledge receipt
+        sendToParent(MESSAGE_TYPES.CHILD_ACKNOWLEDGED, { 
+            receivedSequence: sequence,
+            timestamp: Date.now()
+        });
+        
+        switch (type) {
+            case MESSAGE_TYPES.PARENT_READY:
+                handleParentReady(data || {});
+                break;
+                
+            case MESSAGE_TYPES.SESSION_UPDATE:
+                handleSessionUpdate(data || {});
+                break;
+                
+            case MESSAGE_TYPES.SESSION_EXPIRED:
+                handleSessionExpired();
+                break;
+                
+            case MESSAGE_TYPES.LOGOUT:
+                handleLogout();
+                break;
+                
+            case MESSAGE_TYPES.API_RESPONSE:
+                handleApiResponse(requestId, data || {});
+                break;
+                
+            case MESSAGE_TYPES.FORCE_RELOAD:
+                handleForceReload();
+                break;
+                
+            default:
+                console.warn('[Parent] Unhandled message type:', type);
+        }
+        
+    } catch (error) {
+        console.error('[Parent] Error handling parent message:', error);
+        sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
+            error: error.message,
+            timestamp: Date.now()
+        });
     }
-    
-    console.log(`[Parent] Received message: ${type}`, data ? '[with data]' : '');
-    
-    switch (type) {
-        case MESSAGE_TYPES.PARENT_READY:
-            handleParentReady(data);
-            break;
-            
-        case MESSAGE_TYPES.SESSION_DATA:
-            handleSessionData(data);
-            break;
-            
-        case MESSAGE_TYPES.SESSION_UPDATE:
-            handleSessionUpdate(data);
-            break;
-            
-        case MESSAGE_TYPES.SESSION_EXPIRED:
-            handleSessionExpired();
-            break;
-            
-        case MESSAGE_TYPES.LOGOUT:
-            handleLogout();
-            break;
-            
-        case MESSAGE_TYPES.API_RESPONSE:
-            handleApiResponse(requestId, data);
-            break;
-            
-        case MESSAGE_TYPES.FORCE_RELOAD:
-            handleForceReload();
-            break;
-            
-        default:
-            console.warn('[Parent] Unhandled message type:', type);
-    }
-    
-} catch (error) {
-    console.error('[Parent] Error handling parent message:', error);
-    sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
-        error: error.message,
-        timestamp: Date.now()
-    });
-}
 }
 
 /**
- * Send message to parent window
+ * Handle secure session data with handshake protocol
+ */
+function handleSecureSessionData(message, origin) {
+    const { data, source } = message;
+    
+    // Validate source
+    if (source !== 'parent') {
+        console.warn('[Security] Invalid session data source:', source);
+        handshakeInProgress = false;
+        return;
+    }
+    
+    // Validate session data structure
+    if (!data || typeof data !== 'object' || !data.token || !data.user) {
+        console.log('❌ Received invalid session from parent');
+        handshakeInProgress = false;
+        
+        // Single retry if session fails
+        if (!pendingSessionRequest) {
+            setTimeout(() => {
+                console.log('🔄 Retrying session request...');
+                requestSession();
+            }, 1000);
+        }
+        return;
+    }
+    
+    // Validate user object
+    if (!data.user.uid || typeof data.user.uid !== 'string') {
+        console.log('❌ Invalid user data in session');
+        handshakeInProgress = false;
+        return;
+    }
+    
+    // Success - clear timeout and update state
+    sessionValid = true;
+    handshakeInProgress = false;
+    pendingSessionRequest = false;
+    
+    if (handshakeTimeout) {
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = null;
+    }
+    
+    console.log('✅ Session received successfully');
+    
+    // Store session data
+    sessionData = data;
+    isSessionReceived = true;
+    reconnectAttempts = 0;
+    
+    // Extract user data
+    if (data.user) {
+        currentUser = data.user;
+    }
+    
+    // Send acknowledgment
+    sendToParent(MESSAGE_TYPES.CHILD_STATE_UPDATE, {
+        state: 'authenticated',
+        userId: currentUser?.uid,
+        timestamp: Date.now()
+    });
+    
+    // Initialize app with session (bind UI after session)
+    initializeWithSession();
+}
+
+/**
+ * Send message to parent window with acknowledgment and retry logic
  */
 export function sendToParent(type, data = null, requestId = null) {
     if (!window.parent || !parentConnection) {
@@ -245,19 +585,33 @@ export function sendToParent(type, data = null, requestId = null) {
     }
     
     try {
+        const sequence = ++messageSequence;
         const message = {
             type: type,
             data: data,
             requestId: requestId,
             timestamp: Date.now(),
-            source: 'chat-iframe'
+            source: 'child',
+            sequence: sequence,
+            payload: sanitizePayload(data || {})
         };
         
         // Send to parent window
         window.parent.postMessage(message, window.location.origin);
         
-        console.log(`[Parent] Sent message: ${type}`, data ? '[with data]' : '');
-        return true;
+        // Set up acknowledgment tracking
+        parentConnection.pendingAcknowledgment.set(sequence, {
+            message: message,
+            sentAt: Date.now(),
+            retries: 0
+        });
+        
+        // Start acknowledgment timeout
+        setTimeout(() => {
+            checkAcknowledgment(sequence);
+        }, 5000);
+        
+        return sequence;
         
     } catch (error) {
         console.error('[Parent] Error sending message to parent:', error);
@@ -266,11 +620,37 @@ export function sendToParent(type, data = null, requestId = null) {
 }
 
 /**
+ * Check if message was acknowledged
+ */
+function checkAcknowledgment(sequence) {
+    if (!parentConnection || !parentConnection.pendingAcknowledgment.has(sequence)) {
+        return;
+    }
+    
+    const pending = parentConnection.pendingAcknowledgment.get(sequence);
+    if (pending.retries >= 3) {
+        console.warn(`[Parent] Message ${sequence} not acknowledged after ${pending.retries} retries`);
+        parentConnection.pendingAcknowledgment.delete(sequence);
+        
+        // Add to retry queue for later
+        parentConnection.retryQueue.push(pending.message);
+        return;
+    }
+    
+    // Retry sending
+    pending.retries++;
+    window.parent.postMessage(pending.message, window.location.origin);
+    
+    // Check again after delay
+    setTimeout(() => {
+        checkAcknowledgment(sequence);
+    }, 3000);
+}
+
+/**
  * Start handshake protocol with parent
  */
 function startHandshake() {
-    console.log('[Parent] Starting handshake protocol');
-    
     // Send CHILD_READY message
     sendToParent(MESSAGE_TYPES.CHILD_READY, {
         version: '1.0',
@@ -278,8 +658,47 @@ function startHandshake() {
         readyAt: Date.now()
     });
     
-    // Schedule REQUEST_SESSION with exponential backoff
-    scheduleSessionRequest(0);
+    // Start secure session request
+    requestSession();
+}
+
+/**
+ * Secure session request with handshake protocol
+ */
+function requestSession() {
+    if (handshakeInProgress || pendingSessionRequest) {
+        console.log('[Handshake] Session request already in progress');
+        return;
+    }
+    
+    handshakeInProgress = true;
+    pendingSessionRequest = true;
+    
+    console.log('⏳ Waiting for session from parent...');
+    
+    // Send session request to parent
+    sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
+        handshake: true,
+        timestamp: Date.now(),
+        sourceVerification: window.location.origin
+    });
+    
+    // Set handshake timeout
+    handshakeTimeout = setTimeout(() => {
+        if (!sessionValid) {
+            handshakeInProgress = false;
+            pendingSessionRequest = false;
+            console.log('❌ Session request failed. Will retry once.');
+            
+            // Single retry
+            setTimeout(() => {
+                if (!sessionValid && !handshakeInProgress) {
+                    console.log('🔄 Retrying session request...');
+                    requestSession();
+                }
+            }, 2000);
+        }
+    }, HANDSHAKE_TIMEOUT);
 }
 
 /**
@@ -287,20 +706,17 @@ function startHandshake() {
  */
 function scheduleSessionRequest(attempt) {
     if (isSessionReceived) {
-        console.log('[Parent] Session already received, skipping request');
         return;
     }
     
     if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-        console.error('[Parent] Max reconnection attempts reached');
         showReconnectState('Unable to establish connection with parent');
+        initializeOfflineFallback();
         return;
     }
     
-    const delay = Math.min(1000 * Math.pow(2, attempt), 30000); // Exponential backoff up to 30s
-    const jitter = Math.random() * 1000; // Add jitter to avoid thundering herd
-    
-    console.log(`[Parent] Scheduling session request in ${Math.round(delay + jitter)}ms (attempt ${attempt + 1})`);
+    const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+    const jitter = Math.random() * 1000;
     
     setTimeout(() => {
         if (!isSessionReceived) {
@@ -321,67 +737,20 @@ function scheduleSessionRequest(attempt) {
  * Handle PARENT_READY message
  */
 function handleParentReady(data) {
-    console.log('[Parent] Parent is ready', data);
-    
     isParentReady = true;
     parentConnection.isConnected = true;
     parentConnection.lastHeartbeat = Date.now();
     
     // If we haven't received session yet, request it
-    if (!isSessionReceived) {
-        sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
-            immediate: true,
-            timestamp: Date.now()
-        });
+    if (!isSessionReceived && !handshakeInProgress) {
+        requestSession();
     }
-}
-
-/**
- * Handle SESSION_DATA message
- */
-function handleSessionData(data) {
-    console.log('[Parent] Received session data');
-    
-    // Validate session data schema
-    if (!validateSessionData(data)) {
-        console.error('[Parent] Invalid session data schema');
-        sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
-            error: 'Invalid session data schema',
-            receivedData: data
-        });
-        return;
-    }
-    
-    // Store session data
-    sessionData = data;
-    isSessionReceived = true;
-    reconnectAttempts = 0;
-    
-    // Extract user data
-    if (data.user) {
-        currentUser = data.user;
-        console.log('[Parent] User authenticated:', currentUser.displayName || currentUser.email || 'Unknown');
-    }
-    
-    // Extract token if available
-    if (data.token) {
-        console.log('[Parent] Token received (not stored locally)');
-    }
-    
-    // Send acknowledgment
-    sendToParent(MESSAGE_TYPES.CHILD_STATE_UPDATE, {
-        state: 'authenticated',
-        userId: currentUser?.uid,
-        timestamp: Date.now()
-    });
 }
 
 /**
  * Handle SESSION_UPDATE message
  */
 function handleSessionUpdate(data) {
-    console.log('[Parent] Received session update');
-    
     if (!validateSessionData(data)) {
         console.error('[Parent] Invalid session update schema');
         return;
@@ -392,7 +761,6 @@ function handleSessionUpdate(data) {
     
     if (data.user) {
         currentUser = data.user;
-        console.log('[Parent] User data updated');
     }
 }
 
@@ -400,19 +768,15 @@ function handleSessionUpdate(data) {
  * Handle SESSION_EXPIRED message
  */
 function handleSessionExpired() {
-    console.warn('[Parent] Session expired');
-    
     // Clear local session state
     sessionData = null;
     isSessionReceived = false;
     currentUser = null;
+    sessionValid = false;
     
-    // Request new session
+    // Request new session with handshake
     setTimeout(() => {
-        sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
-            reason: 'session_expired',
-            timestamp: Date.now()
-        });
+        requestSession();
     }, 2000);
 }
 
@@ -420,12 +784,18 @@ function handleSessionExpired() {
  * Handle LOGOUT message
  */
 function handleLogout() {
-    console.log('[Parent] Logout requested by parent');
-    
     // Clear all sensitive data
     sessionData = null;
     isSessionReceived = false;
     currentUser = null;
+    sessionValid = false;
+    handshakeInProgress = false;
+    pendingSessionRequest = false;
+    
+    if (handshakeTimeout) {
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = null;
+    }
     
     // Clear local storage (keep non-sensitive UI state)
     clearSensitiveLocalStorage();
@@ -435,16 +805,14 @@ function handleLogout() {
  * Handle API_RESPONSE message
  */
 function handleApiResponse(requestId, data) {
-    // This would be handled by the API request system
-    // Implementation depends on how API requests are managed
-    console.log(`[Parent] API response for request ${requestId}`, data);
+    // Handle API response based on requestId
+    // This would be extended based on specific API request handling
 }
 
 /**
  * Handle FORCE_RELOAD message
  */
 function handleForceReload() {
-    console.log('[Parent] Force reload requested');
     window.location.reload();
 }
 
@@ -467,7 +835,6 @@ function validateSessionData(data) {
             return false;
         }
         
-        // Basic user validation
         const requiredUserFields = ['uid', 'email'];
         for (const field of requiredUserFields) {
             if (!data.user[field]) {
@@ -489,44 +856,64 @@ function validateSessionData(data) {
  * Start heartbeat monitoring
  */
 function startHeartbeatMonitoring() {
-    setInterval(() => {
+    if (!parentConnection) return;
+    
+    const heartbeatInterval = setInterval(() => {
         if (parentConnection && parentConnection.isConnected) {
             const timeSinceHeartbeat = Date.now() - parentConnection.lastHeartbeat;
             
-            if (timeSinceHeartbeat > 60000) { // 60 seconds
-                console.warn('[Parent] No heartbeat from parent for', timeSinceHeartbeat, 'ms');
+            if (timeSinceHeartbeat > HEARTBEAT_TIMEOUT) {
                 parentConnection.isConnected = false;
                 
-                // Try to reconnect
+                // Try to reconnect with handshake
                 sendToParent(MESSAGE_TYPES.CHILD_READY, {
                     reconnecting: true,
                     timestamp: Date.now()
                 });
             }
         }
-    }, 10000); // Check every 10 seconds
+    }, HEARTBEAT_INTERVAL);
+    
+    // Store interval for cleanup
+    parentConnection.heartbeatInterval = heartbeatInterval;
 }
 
 /**
  * Show reconnect state when parent connection is lost
  */
 export function showReconnectState(message) {
-    console.error('[Parent] Showing reconnect state:', message);
+    try {
+        const reconnectElement = document.getElementById('reconnectOverlay');
+        if (reconnectElement) {
+            reconnectElement.style.display = 'flex';
+            const messageElement = reconnectElement.querySelector('.reconnect-message');
+            if (messageElement) {
+                messageElement.textContent = message;
+            }
+        }
+    } catch (error) {
+        console.error('[Parent] Error showing reconnect state:', error);
+    }
 }
 
 /**
  * Hide reconnect state
  */
 export function hideReconnectState() {
-    // Implementation in UI file
+    try {
+        const reconnectElement = document.getElementById('reconnectOverlay');
+        if (reconnectElement) {
+            reconnectElement.style.display = 'none';
+        }
+    } catch (error) {
+        console.warn('[Parent] Error hiding reconnect state:', error);
+    }
 }
 
 /**
  * Clear sensitive data from local storage
  */
 function clearSensitiveLocalStorage() {
-    // Clear any potentially sensitive data
-    // Note: We never stored tokens, but clear any user-specific cached data
     const sensitiveKeys = [
         'knecta_current_user',
         'knecta_user_profile',
@@ -553,6 +940,55 @@ function clearSensitiveLocalStorage() {
                 console.warn('[Parent] Error clearing message cache:', key, error);
             }
         }
+    }
+}
+
+/**
+ * Initialize app with session data (binds UI after session is validated)
+ */
+function initializeWithSession() {
+    try {
+        // Only bind UI if session is valid
+        if (!sessionValid || !currentUser) {
+            console.error('[Init] Cannot initialize: Invalid session');
+            return;
+        }
+        
+        console.log('[Init] Binding UI with valid session');
+        
+        loadUserSettings();
+        loadMessageDrafts();
+        loadScheduledMessages();
+        loadOfflineQueue();
+        loadChatThemes();
+        
+        // Load data asynchronously
+        Promise.all([
+            loadContacts(),
+            loadChats()
+        ]).then(() => {
+            isInitialized = true;
+            startBackgroundSync();
+            checkScheduledMessages();
+            
+            // Try to open chat from URL params (UI binding)
+            const userFromURL = getUserFromURL();
+            if (userFromURL) {
+                openChatPanel(userFromURL.userId, userFromURL.username, userFromURL.userAvatar);
+            }
+            
+            // Notify parent that UI is ready
+            sendToParent(MESSAGE_TYPES.CHILD_STATE_UPDATE, {
+                state: 'ui_ready',
+                timestamp: Date.now()
+            });
+            
+        }).catch(error => {
+            console.error('[Init] Error initializing app:', error);
+        });
+        
+    } catch (error) {
+        console.error('[Init] Error in initialization:', error);
     }
 }
 
@@ -585,7 +1021,7 @@ export async function apiRequest(endpoint, options = {}) {
 }
 
 // =============================================
-// CORE CHAT FUNCTIONS (UPDATED FOR MODULAR IMPORTS)
+// CORE CHAT FUNCTIONS
 // =============================================
 
 export function loadUserSettings() {
@@ -609,9 +1045,14 @@ export function loadUserSettings() {
             };
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SETTINGS, JSON.stringify(defaultSettings));
         } else {
-            const parsed = JSON.parse(settings);
-            silentReactionsEnabled = parsed.silentReactions !== false;
-            readOnlyMode = parsed.readOnlyMode === true;
+            try {
+                const parsed = JSON.parse(settings);
+                silentReactionsEnabled = parsed.silentReactions !== false;
+                readOnlyMode = parsed.readOnlyMode === true;
+            } catch (e) {
+                silentReactionsEnabled = true;
+                readOnlyMode = false;
+            }
         }
     } catch (error) {
         console.error('Error loading user settings:', error);
@@ -622,7 +1063,11 @@ export function loadMessageDrafts() {
     try {
         const drafts = localStorage.getItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS);
         if (drafts) {
-            messageDrafts = JSON.parse(drafts);
+            try {
+                messageDrafts = JSON.parse(drafts);
+            } catch (e) {
+                messageDrafts = {};
+            }
         }
     } catch (error) {
         console.error('Error loading message drafts:', error);
@@ -632,51 +1077,131 @@ export function loadMessageDrafts() {
 export function saveMessageDraft() {
     if (!currentChat) return;
     
-    const messageInput = document.getElementById('messageInput');
-    const attachmentPreview = document.getElementById('attachmentPreview');
-    
-    const draft = messageInput ? messageInput.value.trim() : '';
-    const attachment = currentAttachment ? {
-        type: currentAttachment.type,
-        data: currentAttachment.data,
-        name: currentAttachment.name,
-        size: currentAttachment.size
-    } : null;
-    
-    if (draft || attachment) {
-        messageDrafts[currentChat.id] = {
-            text: draft,
-            attachment: attachment,
-            timestamp: Date.now()
-        };
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
-    } else if (messageDrafts[currentChat.id]) {
-        delete messageDrafts[currentChat.id];
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
+    try {
+        const messageInput = document.getElementById('messageInput');
+        const attachmentPreview = document.getElementById('attachmentPreview');
+        
+        const draft = messageInput ? (messageInput.value || '').trim() : '';
+        const attachment = currentAttachment ? {
+            type: currentAttachment.type,
+            data: currentAttachment.data,
+            name: currentAttachment.name,
+            size: currentAttachment.size
+        } : null;
+        
+        if (draft || attachment) {
+            messageDrafts[currentChat.id] = {
+                text: draft,
+                attachment: attachment,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
+        } else if (messageDrafts[currentChat.id]) {
+            delete messageDrafts[currentChat.id];
+            localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
+        }
+    } catch (error) {
+        console.error('Error saving message draft:', error);
     }
 }
 
 export function loadMessageDraft() {
     if (!currentChat) return;
+    
+    try {
+        const draft = messageDrafts[currentChat.id];
+        if (draft) {
+            const messageInput = document.getElementById('messageInput');
+            if (messageInput) {
+                messageInput.value = draft.text || '';
+            }
+            
+            if (draft.attachment) {
+                currentAttachment = draft.attachment;
+                showAttachmentPreview(draft.attachment);
+            }
+            
+            updateDraftBadge(true);
+        } else {
+            updateDraftBadge(false);
+        }
+    } catch (error) {
+        console.error('Error loading message draft:', error);
+    }
 }
 
 export function updateDraftBadge(hasDraft) {
-    // Implementation in UI file
+    try {
+        const draftBadge = document.getElementById('draftBadge');
+        if (draftBadge) {
+            draftBadge.style.display = hasDraft ? 'inline-block' : 'none';
+        }
+    } catch (error) {
+        console.warn('Error updating draft badge:', error);
+    }
 }
 
 export function showAttachmentPreview(attachment) {
-    // Implementation in UI file
+    try {
+        const attachmentPreview = document.getElementById('attachmentPreview');
+        if (!attachmentPreview) return;
+        
+        attachmentPreview.innerHTML = '';
+        
+        if (!attachment) return;
+        
+        const preview = document.createElement('div');
+        preview.className = 'attachment-preview-item';
+        
+        if (attachment.type === 'image') {
+            const img = document.createElement('img');
+            img.src = attachment.data || '';
+            img.alt = attachment.name || '';
+            preview.appendChild(img);
+        } else if (attachment.type === 'audio') {
+            preview.innerHTML = `<i class="fas fa-microphone"></i> Audio Recording (${Math.floor(attachment.duration || 0)}s)`;
+        } else if (attachment.type === 'video') {
+            preview.innerHTML = `<i class="fas fa-video"></i> Video (${formatFileSize(attachment.size || 0)})`;
+        } else if (attachment.type === 'file') {
+            preview.innerHTML = `<i class="fas fa-file"></i> ${attachment.name || 'File'} (${formatFileSize(attachment.size || 0)})`;
+        }
+        
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-attachment';
+        removeBtn.innerHTML = '×';
+        removeBtn.onclick = removeAttachment;
+        preview.appendChild(removeBtn);
+        
+        attachmentPreview.appendChild(preview);
+        attachmentPreview.style.display = 'block';
+    } catch (error) {
+        console.error('Error showing attachment preview:', error);
+    }
 }
 
 export function removeAttachment() {
-    currentAttachment = null;
+    try {
+        currentAttachment = null;
+        const attachmentPreview = document.getElementById('attachmentPreview');
+        if (attachmentPreview) {
+            attachmentPreview.innerHTML = '';
+            attachmentPreview.style.display = 'none';
+        }
+        saveMessageDraft();
+    } catch (error) {
+        console.error('Error removing attachment:', error);
+    }
 }
 
 export function loadScheduledMessages() {
     try {
         const scheduled = localStorage.getItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES);
         if (scheduled) {
-            scheduledMessages = JSON.parse(scheduled);
+            try {
+                scheduledMessages = JSON.parse(scheduled);
+            } catch (e) {
+                scheduledMessages = [];
+            }
         }
     } catch (error) {
         console.error('Error loading scheduled messages:', error);
@@ -687,7 +1212,11 @@ export function loadOfflineQueue() {
     try {
         const queue = localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
         if (queue) {
-            offlineQueue = JSON.parse(queue);
+            try {
+                offlineQueue = JSON.parse(queue);
+            } catch (e) {
+                offlineQueue = [];
+            }
         }
     } catch (error) {
         console.error('Error loading offline queue:', error);
@@ -698,10 +1227,13 @@ export async function loadContacts() {
     try {
         // Check if we have a session
         if (!isSessionReceived || !currentUser) {
-            console.log('[Contacts] No session, using cached contacts');
             const cachedContacts = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
             if (cachedContacts) {
-                contacts = JSON.parse(cachedContacts);
+                try {
+                    contacts = JSON.parse(cachedContacts);
+                } catch (e) {
+                    contacts = [];
+                }
             }
             return;
         }
@@ -710,15 +1242,18 @@ export async function loadContacts() {
         try {
             const contactsData = await fetchContacts();
             if (contactsData && contactsData.contacts) {
-                contacts = contactsData.contacts;
+                contacts = contactsData.contacts || [];
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
             }
         } catch (error) {
-            console.log('[Contacts] Could not fetch fresh contacts:', error.message);
             // Use cached contacts
             const cachedContacts = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
             if (cachedContacts) {
-                contacts = JSON.parse(cachedContacts);
+                try {
+                    contacts = JSON.parse(cachedContacts);
+                } catch (e) {
+                    contacts = [];
+                }
             }
         }
     } catch (error) {
@@ -730,10 +1265,13 @@ export async function loadChats() {
     try {
         // Check if we have a session
         if (!isSessionReceived || !currentUser) {
-            console.log('[Chats] No session, using cached chats');
             const cachedChats = localStorage.getItem(LOCAL_STORAGE_KEYS.CHATS);
             if (cachedChats) {
-                chats = JSON.parse(cachedChats);
+                try {
+                    chats = JSON.parse(cachedChats);
+                } catch (e) {
+                    chats = [];
+                }
             }
             return;
         }
@@ -742,15 +1280,18 @@ export async function loadChats() {
         try {
             const chatsData = await fetchChats();
             if (chatsData && chatsData.chats) {
-                chats = chatsData.chats;
+                chats = chatsData.chats || [];
                 localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
             }
         } catch (error) {
-            console.log('[Chats] Could not fetch fresh chats:', error.message);
             // Use cached chats
             const cachedChats = localStorage.getItem(LOCAL_STORAGE_KEYS.CHATS);
             if (cachedChats) {
-                chats = JSON.parse(cachedChats);
+                try {
+                    chats = JSON.parse(cachedChats);
+                } catch (e) {
+                    chats = [];
+                }
             }
         }
     } catch (error) {
@@ -760,6 +1301,8 @@ export async function loadChats() {
 
 export async function openChat(chat) {
     try {
+        if (!chat) return false;
+        
         if (chat.blocked && chat.type !== 'note') {
             return false;
         }
@@ -794,6 +1337,8 @@ export async function openChat(chat) {
 
 export async function loadChatByFriendId(friendId) {
     try {
+        if (!friendId) return;
+        
         let existingChat = chats.find(chat => chat.friendId === friendId);
         
         if (existingChat) {
@@ -801,59 +1346,55 @@ export async function loadChatByFriendId(friendId) {
             return;
         }
         
+        // Check if we have a session
+        if (!isSessionReceived || !currentUser) {
+            createLocalChat(friendId, {
+                displayName: 'Unknown User',
+                photoURL: ''
+            });
+            return;
+        }
+        
+        // Use imported API functions
         try {
-            // Check if we have a session
-            if (!isSessionReceived || !currentUser) {
-                console.log('[Chat] No session, creating local chat');
-                createLocalChat(friendId, {
-                    displayName: 'Unknown User',
-                    photoURL: ''
+            const userResponse = await secureFetch(`/api/user/${friendId}`);
+            if (userResponse.ok) {
+                const friendData = await userResponse.json();
+                const chatResponse = await secureFetch('/api/chats', {
+                    method: 'POST',
+                    body: JSON.stringify({ friendId })
                 });
-                return;
-            }
-            
-            // Use imported API functions
-            try {
-                const userResponse = await secureFetch(`/api/user/${friendId}`);
-                if (userResponse.ok) {
-                    const friendData = await userResponse.json();
-                    const chatResponse = await secureFetch('/api/chats', {
-                        method: 'POST',
-                        body: JSON.stringify({ friendId })
-                    });
-                    
-                    if (chatResponse.ok) {
-                        const newChat = await chatResponse.json();
-                        chats.unshift(newChat);
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                        
-                        await openChat(newChat);
-                    }
-                }
                 
-            } catch (error) {
-                console.error('Error loading chat by friend ID:', error);
-                createLocalChat(friendId, {
-                    displayName: 'Unknown User',
-                    photoURL: ''
-                });
+                if (chatResponse.ok) {
+                    const newChat = await chatResponse.json();
+                    chats.unshift(newChat);
+                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                    
+                    await openChat(newChat);
+                }
             }
             
         } catch (error) {
-            console.error('Error in loadChatByFriendId:', error);
+            createLocalChat(friendId, {
+                displayName: 'Unknown User',
+                photoURL: ''
+            });
         }
+        
     } catch (error) {
         console.error('Error in loadChatByFriendId:', error);
     }
 }
 
 export function createLocalChat(friendId, friendData) {
+    if (!friendId) return;
+    
     const newChat = {
         id: 'chat_' + Date.now(),
         friendId: friendId,
-        friendName: friendData.displayName,
+        friendName: friendData.displayName || 'Unknown User',
         friendUsername: '',
-        friendAvatar: friendData.photoURL,
+        friendAvatar: friendData.photoURL || '',
         lastMessage: '',
         lastMessageAt: new Date(),
         unreadCount: 0,
@@ -874,22 +1415,52 @@ export async function loadMessages() {
         editingMessageId = null;
         replyToMessage = null;
         
+        if (!currentChat) return;
+        
         // Try to load from cache first
         const cachedMessages = localStorage.getItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`);
         if (cachedMessages) {
-            messages = JSON.parse(cachedMessages);
+            try {
+                const parsedMessages = JSON.parse(cachedMessages);
+                
+                // Remove duplicates from cache
+                const uniqueMessages = [];
+                const seenIds = new Set();
+                
+                for (const msg of parsedMessages) {
+                    if (msg && msg.id && !seenIds.has(msg.id)) {
+                        seenIds.add(msg.id);
+                        uniqueMessages.push(msg);
+                    }
+                }
+                
+                messages = uniqueMessages;
+            } catch (e) {
+                messages = [];
+            }
         }
         
         // Then try to fetch fresh messages if we have a session
-        if (isSessionReceived && currentUser) {
+        if (isSessionReceived && currentUser && currentChat) {
             try {
                 const messagesData = await fetchMessages(currentChat.id);
                 if (messagesData && messagesData.messages) {
-                    messages = messagesData.messages;
+                    // Merge with existing messages, avoiding duplicates
+                    const serverMessages = messagesData.messages || [];
+                    const existingIds = new Set(messages.map(m => m.id));
+                    
+                    for (const serverMsg of serverMessages) {
+                        if (serverMsg && serverMsg.id && !existingIds.has(serverMsg.id)) {
+                            messages.push(serverMsg);
+                        }
+                    }
+                    
+                    // Sort by timestamp
+                    messages.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+                    
                     localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                 }
             } catch (error) {
-                console.log('Could not fetch fresh messages:', error.message);
                 // Keep cached messages
             }
         }
@@ -900,6 +1471,8 @@ export async function loadMessages() {
 }
 
 export function formatMessageText(text) {
+    if (!text) return '';
+    
     let formatted = escapeHtml(text);
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
@@ -910,8 +1483,10 @@ export function formatMessageText(text) {
 }
 
 export function initializeAudioWaveforms() {
+    if (!messages || !currentUser) return;
+    
     messages.forEach(message => {
-        if (message.type === 'audio' && message.content) {
+        if (message && message.type === 'audio' && message.content) {
             const waveformId = `waveform_${message.id}`;
             
             if (!audioPlayers.has(message.id)) {
@@ -953,10 +1528,10 @@ export async function sendMessage(content, type = 'text', options = {}) {
     
     try {
         const messageData = {
-            id: 'temp_' + Date.now(),
+            id: 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             senderId: currentUser.uid,
             senderName: currentUser.displayName || 'You',
-            content: content,
+            content: content || '',
             type: type,
             timestamp: new Date(),
             status: 'sending',
@@ -967,10 +1542,10 @@ export async function sendMessage(content, type = 'text', options = {}) {
         };
         
         if (currentAttachment) {
-            messageData.type = currentAttachment.type;
-            messageData.content = currentAttachment.data;
-            messageData.fileName = currentAttachment.name;
-            messageData.fileSize = currentAttachment.size;
+            messageData.type = currentAttachment.type || 'file';
+            messageData.content = currentAttachment.data || '';
+            messageData.fileName = currentAttachment.name || '';
+            messageData.fileSize = currentAttachment.size || 0;
             if (currentAttachment.duration) {
                 messageData.duration = currentAttachment.duration;
             }
@@ -989,12 +1564,26 @@ export async function sendMessage(content, type = 'text', options = {}) {
         
         const isOnline = navigator.onLine;
         
-        if (!isOnline) {
+        if (!isOnline || !isSessionReceived) {
+            // Offline mode: save to queue
             offlineQueue.push(messageData);
             localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
+            
+            // Also save to local cache
+            messages.push(messageData);
+            messageData.status = 'sent';
+            
+            // Cache for deduplication
+            const cacheKey = `${currentChat.id}_${messageData.id}`;
+            messageDeduplicationCache.set(cacheKey, Date.now());
+            
+            setTimeout(() => {
+                messageDeduplicationCache.delete(cacheKey);
+            }, DEDUPE_CACHE_TIMEOUT);
+        } else {
+            // Online mode: send immediately
+            messages.push(messageData);
         }
-        
-        messages.push(messageData);
         
         replyToMessage = null;
         removeAttachment();
@@ -1009,15 +1598,24 @@ export async function sendMessage(content, type = 'text', options = {}) {
             try {
                 const savedMessage = await apiSendMessage(currentChat.id, messageData);
                 
-                const messageIndex = messages.findIndex(m => m.id === messageData.id);
-                if (messageIndex !== -1) {
-                    messages[messageIndex].id = savedMessage.id;
-                    messages[messageIndex].status = 'sent';
-                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                if (savedMessage && savedMessage.id) {
+                    const messageIndex = messages.findIndex(m => m.id === messageData.id);
+                    if (messageIndex !== -1) {
+                        messages[messageIndex].id = savedMessage.id;
+                        messages[messageIndex].status = 'sent';
+                        localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                        
+                        // Remove from offline queue if it was there
+                        const queueIndex = offlineQueue.findIndex(m => m.id === messageData.id);
+                        if (queueIndex !== -1) {
+                            offlineQueue.splice(queueIndex, 1);
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
+                        }
+                    }
                 }
             } catch (error) {
                 console.error('Error sending message to API:', error);
-                // Message stays in "sending" state
+                // Message stays in "sending" state, will be retried
             }
         }
         
@@ -1043,11 +1641,11 @@ export async function sendMessageWithOptions(content, options = {}) {
         if (!notesChat) {
             notesChat = {
                 id: 'notes_' + Date.now(),
-                friendId: currentUser.uid,
+                friendId: currentUser ? currentUser.uid : 'system',
                 friendName: 'Notes',
                 friendUsername: 'notes',
                 friendAvatar: '',
-                lastMessage: content,
+                lastMessage: content || '',
                 lastMessageAt: new Date(),
                 unreadCount: 0,
                 type: 'note',
@@ -1072,10 +1670,10 @@ export async function scheduleMessage(content, scheduleTime, options = {}) {
     }
     
     const scheduledMessage = {
-        id: 'scheduled_' + Date.now(),
-        content: content,
+        id: 'scheduled_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        content: content || '',
         scheduleTime: scheduleTime,
-        chatId: currentChat.id,
+        chatId: currentChat ? currentChat.id : '',
         options: options,
         status: 'scheduled',
         attachment: currentAttachment
@@ -1092,7 +1690,7 @@ export function checkScheduledMessages() {
     const toSend = [];
     
     scheduledMessages = scheduledMessages.filter(msg => {
-        if (msg.scheduleTime <= now && msg.status === 'scheduled') {
+        if (msg && msg.scheduleTime <= now && msg.status === 'scheduled') {
             toSend.push(msg);
             return false;
         }
@@ -1103,10 +1701,10 @@ export function checkScheduledMessages() {
         if (msg.chatId === currentChat?.id) {
             if (msg.attachment) {
                 currentAttachment = msg.attachment;
-                await sendMessageWithOptions(msg.content, msg.options);
+                await sendMessageWithOptions(msg.content || '', msg.options || {});
                 currentAttachment = null;
             } else {
-                await sendMessageWithOptions(msg.content, msg.options);
+                await sendMessageWithOptions(msg.content || '', msg.options || {});
             }
         }
         localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
@@ -1116,7 +1714,15 @@ export function checkScheduledMessages() {
 }
 
 export function updateScheduleBadge() {
-    // Implementation in UI file
+    try {
+        const scheduleBadge = document.getElementById('scheduleBadge');
+        if (scheduleBadge) {
+            scheduleBadge.textContent = scheduledMessages.length.toString();
+            scheduleBadge.style.display = scheduledMessages.length > 0 ? 'inline-block' : 'none';
+        }
+    } catch (error) {
+        console.warn('Error updating schedule badge:', error);
+    }
 }
 
 export async function checkOfflineQueue() {
@@ -1126,12 +1732,25 @@ export async function checkOfflineQueue() {
     
     for (const message of offlineQueue) {
         try {
+            if (!message) continue;
+            
+            // Check for duplicates before sending
+            const cacheKey = `${message.chatId}_${message.id}`;
+            if (messageDeduplicationCache.has(cacheKey)) {
+                // Skip duplicate
+                continue;
+            }
+            
             await apiSendMessage(message.chatId, message);
             
             const localIndex = messages.findIndex(m => m.id === message.id);
             if (localIndex !== -1) {
                 messages.splice(localIndex, 1);
             }
+            
+            // Cache to prevent resending
+            messageDeduplicationCache.set(cacheKey, Date.now());
+            
         } catch (error) {
             console.error('Failed to send queued message:', error);
             failedMessages.push(message);
@@ -1142,12 +1761,28 @@ export async function checkOfflineQueue() {
     localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
 }
 
+/**
+ * Start offline sync for retrying failed messages
+ */
+function startOfflineSync() {
+    const offlineSyncInterval = setInterval(() => {
+        if (navigator.onLine && isSessionReceived) {
+            checkOfflineQueue();
+        }
+    }, 30000); // Check every 30 seconds
+    
+    // Store for cleanup
+    if (parentConnection) {
+        parentConnection.offlineSyncInterval = offlineSyncInterval;
+    }
+}
+
 export async function sendToMultipleChats(content, chatIds) {
     if (!content && !currentAttachment) {
         return false;
     }
     
-    if (chatIds.length === 0) {
+    if (!chatIds || chatIds.length === 0) {
         return false;
     }
     
@@ -1161,7 +1796,7 @@ export async function sendToMultipleChats(content, chatIds) {
     for (const chatId of chatIds) {
         try {
             const messageData = {
-                content: content,
+                content: content || '',
                 type: currentAttachment ? currentAttachment.type : 'text',
                 timestamp: new Date(),
                 chatId: chatId
@@ -1202,6 +1837,8 @@ export async function sendToMultipleChats(content, chatIds) {
 
 export async function editMessage(messageId, newContent) {
     try {
+        if (!messageId || !newContent) return false;
+        
         const messageIndex = messages.findIndex(m => m.id === messageId);
         if (messageIndex === -1) return false;
         
@@ -1226,11 +1863,16 @@ export async function editMessage(messageId, newContent) {
 }
 
 export function saveEditedMessage(messageId) {
-    const input = document.getElementById(`editMessageInput_${messageId}`);
-    if (input && input.value.trim()) {
-        return editMessage(messageId, input.value.trim());
+    try {
+        const input = document.getElementById(`editMessageInput_${messageId}`);
+        if (input && input.value && input.value.trim()) {
+            return editMessage(messageId, input.value.trim());
+        }
+        return false;
+    } catch (error) {
+        console.error('Error saving edited message:', error);
+        return false;
     }
-    return false;
 }
 
 export function cancelEditMessage() {
@@ -1239,6 +1881,8 @@ export function cancelEditMessage() {
 
 export async function deleteMessage(messageId, forEveryone = false) {
     try {
+        if (!messageId) return false;
+        
         const messageIndex = messages.findIndex(m => m.id === messageId);
         if (messageIndex === -1) return false;
         
@@ -1264,6 +1908,8 @@ export async function deleteMessage(messageId, forEveryone = false) {
 }
 
 export function updateChatLastMessage(content, type) {
+    if (!currentChat) return;
+    
     const chatIndex = chats.findIndex(chat => chat.id === currentChat.id);
     if (chatIndex !== -1) {
         chats[chatIndex].lastMessage = content || `Sent a ${type}`;
@@ -1276,6 +1922,8 @@ export function updateChatLastMessage(content, type) {
 
 export async function markChatAsRead(chatId) {
     try {
+        if (!chatId) return false;
+        
         const chatIndex = chats.findIndex(chat => chat.id === chatId);
         if (chatIndex !== -1) {
             chats[chatIndex].unreadCount = 0;
@@ -1296,10 +1944,29 @@ export async function markChatAsRead(chatId) {
 
 export function showMessageActions(message, x, y) {
     selectedMessage = message;
+    
+    try {
+        const actionsMenu = document.getElementById('messageActionsMenu');
+        if (actionsMenu) {
+            actionsMenu.style.left = `${x}px`;
+            actionsMenu.style.top = `${y}px`;
+            actionsMenu.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error showing message actions:', error);
+    }
 }
 
 export function closeMessageActions() {
-    // Implementation in UI file
+    try {
+        const actionsMenu = document.getElementById('messageActionsMenu');
+        if (actionsMenu) {
+            actionsMenu.style.display = 'none';
+        }
+        selectedMessage = null;
+    } catch (error) {
+        console.warn('Error closing message actions:', error);
+    }
 }
 
 export function handleMessageAction(action) {
@@ -1311,7 +1978,7 @@ export function handleMessageAction(action) {
             break;
             
         case 'edit':
-            if (selectedMessage.senderId === currentUser.uid && (selectedMessage.type === 'text' || selectedMessage.type === 'note')) {
+            if (selectedMessage.senderId === currentUser?.uid && (selectedMessage.type === 'text' || selectedMessage.type === 'note')) {
                 editingMessageId = selectedMessage.id;
             }
             break;
@@ -1322,9 +1989,9 @@ export function handleMessageAction(action) {
             
         case 'copy':
             if (selectedMessage.type === 'text' || selectedMessage.type === 'note') {
-                navigator.clipboard.writeText(selectedMessage.content);
+                navigator.clipboard.writeText(selectedMessage.content || '');
             } else if (selectedMessage.type === 'image' || selectedMessage.type === 'file') {
-                navigator.clipboard.writeText(selectedMessage.content);
+                navigator.clipboard.writeText(selectedMessage.content || '');
             }
             break;
             
@@ -1349,7 +2016,7 @@ export function handleMessageAction(action) {
             break;
             
         case 'delete':
-            const forEveryone = selectedMessage.senderId === currentUser.uid;
+            const forEveryone = selectedMessage.senderId === currentUser?.uid;
             deleteMessage(selectedMessage.id, forEveryone);
             break;
             
@@ -1362,7 +2029,8 @@ export function handleMessageAction(action) {
 }
 
 export function showForwardMessage(message) {
-    const forwardText = `[Forwarded] ${message.content}`;
+    if (!message) return;
+    const forwardText = `[Forwarded] ${message.content || ''}`;
     navigator.clipboard.writeText(forwardText);
 }
 
@@ -1387,6 +2055,8 @@ export function toggleStarMessage(messageId) {
 }
 
 export function showMessageInfo(message) {
+    if (!message) return '';
+    
     const infoText = `
 Message Information:
 
@@ -1396,42 +2066,53 @@ ${message.deleted ? `Deleted: ${formatDateTime(message.deletedAt)}\n` : ''}
 ${message.viewOnce ? `View once: ${message.viewed ? 'Viewed' : 'Not viewed'}\n` : ''}
 ${message.expiresAt ? `Expires: ${formatDateTime(message.expiresAt)}\n` : ''}
 Status: ${message.status || 'unknown'}
-Type: ${message.type}
+Type: ${message.type || 'unknown'}
 ${message.fileName ? `File: ${message.fileName}\n` : ''}
 ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}
 ${message.duration ? `Duration: ${Math.floor(message.duration / 60)}:${(message.duration % 60).toString().padStart(2, '0')}\n` : ''}
 ${message.mood ? `Mood: ${message.mood}\n` : ''}
-Message ID: ${message.id.substring(0, 8)}...
+Message ID: ${message.id ? message.id.substring(0, 8) + '...' : 'N/A'}
     `;
     
     return infoText;
 }
 
 export function showReportModal(message) {
-    localStorage.setItem('knecta_reported_message', JSON.stringify({
-        messageId: message.id,
-        chatId: currentChat.id,
-        senderId: message.senderId,
-        content: message.content,
-        type: message.type,
-        timestamp: new Date()
-    }));
+    try {
+        if (!message) return;
+        
+        localStorage.setItem('knecta_reported_message', JSON.stringify({
+            messageId: message.id,
+            chatId: currentChat ? currentChat.id : '',
+            senderId: message.senderId,
+            content: message.content,
+            type: message.type,
+            timestamp: new Date()
+        }));
+        
+        const reportModal = document.getElementById('reportModal');
+        if (reportModal) {
+            reportModal.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error showing report modal:', error);
+    }
 }
 
 export function submitReport() {
-    const reportText = document.getElementById('reportText');
-    if (!reportText) return false;
-    
-    const reportTextValue = reportText.value.trim();
-    if (!reportTextValue) {
-        return false;
-    }
-    
     try {
+        const reportText = document.getElementById('reportText');
+        if (!reportText) return false;
+        
+        const reportTextValue = (reportText.value || '').trim();
+        if (!reportTextValue) {
+            return false;
+        }
+        
         const reportData = {
-            message: JSON.parse(localStorage.getItem('knecta_reported_message')),
+            message: JSON.parse(localStorage.getItem('knecta_reported_message') || '{}'),
             reason: reportTextValue,
-            reporterId: currentUser.uid,
+            reporterId: currentUser ? currentUser.uid : '',
             timestamp: new Date()
         };
         
@@ -1441,6 +2122,11 @@ export function submitReport() {
         
         if (isSessionReceived) {
             apiReportMessage(reportData);
+        }
+        
+        const reportModal = document.getElementById('reportModal');
+        if (reportModal) {
+            reportModal.style.display = 'none';
         }
         
         return true;
@@ -1496,93 +2182,179 @@ export async function addReaction(messageId, emoji, silent = false) {
 }
 
 export function initEmojiPicker() {
-    emojiPicker = document.querySelector('emoji-picker');
-    if (emojiPicker) {
-        emojiPicker.addEventListener('emoji-click', event => {
-            const messageInput = document.getElementById('messageInput');
-            if (messageInput) {
-                messageInput.value += event.detail.unicode;
-                messageInput.focus();
-            }
-        });
+    try {
+        emojiPicker = document.querySelector('emoji-picker');
+        if (emojiPicker) {
+            emojiPicker.addEventListener('emoji-click', event => {
+                const messageInput = document.getElementById('messageInput');
+                if (messageInput) {
+                    messageInput.value += event.detail.unicode || '';
+                    messageInput.focus();
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error initializing emoji picker:', error);
     }
 }
 
 export function toggleEmojiPicker() {
-    // Implementation in UI file
+    try {
+        const emojiContainer = document.getElementById('emojiPickerContainer');
+        if (emojiContainer) {
+            const isVisible = emojiContainer.style.display === 'block';
+            emojiContainer.style.display = isVisible ? 'none' : 'block';
+        }
+    } catch (error) {
+        console.error('Error toggling emoji picker:', error);
+    }
 }
 
 export function closeEmojiPickerOnClickOutside(event) {
-    // Implementation in UI file
+    try {
+        const emojiContainer = document.getElementById('emojiPickerContainer');
+        const emojiButton = document.getElementById('emojiButton');
+        
+        if (emojiContainer && emojiContainer.style.display === 'block') {
+            if (!emojiContainer.contains(event.target) && (!emojiButton || !emojiButton.contains(event.target))) {
+                emojiContainer.style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.warn('Error closing emoji picker:', error);
+    }
 }
 
 export function toggleFormattingToolbar() {
-    // Implementation in UI file
+    try {
+        const formattingToolbar = document.getElementById('formattingToolbar');
+        if (formattingToolbar) {
+            const isVisible = formattingToolbar.style.display === 'block';
+            formattingToolbar.style.display = isVisible ? 'none' : 'block';
+        }
+    } catch (error) {
+        console.error('Error toggling formatting toolbar:', error);
+    }
 }
 
 export function closeFormattingToolbarOnClickOutside(event) {
-    // Implementation in UI file
+    try {
+        const formattingToolbar = document.getElementById('formattingToolbar');
+        const formattingButton = document.getElementById('formattingButton');
+        
+        if (formattingToolbar && formattingToolbar.style.display === 'block') {
+            if (!formattingToolbar.contains(event.target) && (!formattingButton || !formattingButton.contains(event.target))) {
+                formattingToolbar.style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.warn('Error closing formatting toolbar:', error);
+    }
 }
 
 export function toggleAttachmentOptions() {
-    // Implementation in UI file
+    try {
+        const attachmentOptions = document.getElementById('attachmentOptions');
+        if (attachmentOptions) {
+            const isVisible = attachmentOptions.style.display === 'block';
+            attachmentOptions.style.display = isVisible ? 'none' : 'block';
+        }
+    } catch (error) {
+        console.error('Error toggling attachment options:', error);
+    }
 }
 
 export function closeAttachmentOptionsOnClickOutside(event) {
-    // Implementation in UI file
+    try {
+        const attachmentOptions = document.getElementById('attachmentOptions');
+        const attachmentButton = document.getElementById('attachmentButton');
+        
+        if (attachmentOptions && attachmentOptions.style.display === 'block') {
+            if (!attachmentOptions.contains(event.target) && (!attachmentButton || !attachmentButton.contains(event.target))) {
+                attachmentOptions.style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.warn('Error closing attachment options:', error);
+    }
 }
 
 export function applyFormatting(tag) {
     const messageInput = document.getElementById('messageInput');
     if (!messageInput) return;
     
-    const input = messageInput;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    const selectedText = input.value.substring(start, end);
-    
-    let wrappedText = selectedText;
-    
-    switch (tag) {
-        case 'b':
-            wrappedText = `**${selectedText}**`;
-            break;
-        case 'i':
-            wrappedText = `*${selectedText}*`;
-            break;
-        case 'code':
-            wrappedText = `\`${selectedText}\``;
-            break;
-        case 'pre':
-            wrappedText = `\`\`\`\n${selectedText}\n\`\`\``;
-            break;
+    try {
+        const input = messageInput;
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        const selectedText = input.value.substring(start, end);
+        
+        let wrappedText = selectedText;
+        
+        switch (tag) {
+            case 'b':
+                wrappedText = `**${selectedText}**`;
+                break;
+            case 'i':
+                wrappedText = `*${selectedText}*`;
+                break;
+            case 'code':
+                wrappedText = `\`${selectedText}\``;
+                break;
+            case 'pre':
+                wrappedText = `\`\`\`\n${selectedText}\n\`\`\``;
+                break;
+        }
+        
+        input.value = input.value.substring(0, start) + wrappedText + input.value.substring(end);
+        input.focus();
+        input.setSelectionRange(start + wrappedText.length, start + wrappedText.length);
+    } catch (error) {
+        console.error('Error applying formatting:', error);
     }
-    
-    input.value = input.value.substring(0, start) + wrappedText + input.value.substring(end);
-    input.focus();
-    input.setSelectionRange(start + wrappedText.length, start + wrappedText.length);
 }
 
 export function setupScrollDetection() {
-    // Implementation in UI file
+    try {
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (messagesContainer) {
+            messagesContainer.addEventListener('scroll', updateJumpButtonVisibility);
+        }
+    } catch (error) {
+        console.error('Error setting up scroll detection:', error);
+    }
 }
 
 export function updateJumpButtonVisibility() {
-    // Implementation in UI file
+    try {
+        const messagesContainer = document.getElementById('messagesContainer');
+        const jumpButton = document.getElementById('jumpToLatest');
+        
+        if (messagesContainer && jumpButton) {
+            const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 100;
+            jumpButton.style.display = isNearBottom ? 'none' : 'block';
+        }
+    } catch (error) {
+        console.warn('Error updating jump button visibility:', error);
+    }
 }
 
 export function jumpToLatest() {
-    const messagesContainer = document.getElementById('messagesContainer');
-    if (messagesContainer) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    try {
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (messagesContainer) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    } catch (error) {
+        console.error('Error jumping to latest:', error);
     }
 }
 
 export function searchInChat(query) {
-    if (!query.trim()) {
+    if (!query || !query.trim()) {
         searchResults = [];
         currentSearchIndex = -1;
-        return;
+        return [];
     }
     
     searchResults = messages.filter(msg => 
@@ -1595,22 +2367,42 @@ export function searchInChat(query) {
 }
 
 export function highlightText(text, query) {
-    if (!text || !query) return escapeHtml(text);
+    if (!text || !query) return escapeHtml(text || '');
     
     const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
     return escapeHtml(text).replace(regex, '<span class="search-highlight">$1</span>');
 }
 
 export function escapeRegex(string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return (string || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function highlightSearchResults(query) {
-    // Implementation in UI file
+    try {
+        const messageElements = document.querySelectorAll('.message-content');
+        messageElements.forEach(element => {
+            const originalText = element.getAttribute('data-original') || element.textContent;
+            element.setAttribute('data-original', originalText);
+            element.innerHTML = highlightText(originalText, query);
+        });
+    } catch (error) {
+        console.error('Error highlighting search results:', error);
+    }
 }
 
 export function removeSearchHighlights() {
-    // Implementation in UI file
+    try {
+        const messageElements = document.querySelectorAll('.message-content');
+        messageElements.forEach(element => {
+            const originalText = element.getAttribute('data-original');
+            if (originalText) {
+                element.innerHTML = escapeHtml(originalText);
+                element.removeAttribute('data-original');
+            }
+        });
+    } catch (error) {
+        console.error('Error removing search highlights:', error);
+    }
 }
 
 export function navigateToSearchResult(index) {
@@ -1621,9 +2413,13 @@ export function navigateToSearchResult(index) {
 }
 
 export function scrollToMessage(messageId) {
-    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (messageElement) {
-        messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    try {
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageElement) {
+            messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    } catch (error) {
+        console.error('Error scrolling to message:', error);
     }
 }
 
@@ -1749,13 +2545,18 @@ export function handleAttachment(type) {
 }
 
 export function createNote() {
-    const messageInput = document.getElementById('messageInput');
-    const noteContent = messageInput ? messageInput.value.trim() : '';
-    if (!noteContent && !currentAttachment) {
+    try {
+        const messageInput = document.getElementById('messageInput');
+        const noteContent = messageInput ? messageInput.value.trim() : '';
+        if (!noteContent && !currentAttachment) {
+            return false;
+        }
+        
+        return sendMessageWithOptions(noteContent || 'Note', { isNote: true });
+    } catch (error) {
+        console.error('Error creating note:', error);
         return false;
     }
-    
-    return sendMessageWithOptions(noteContent || 'Note', { isNote: true });
 }
 
 export function selectImage() {
@@ -1939,25 +2740,30 @@ export function shareLocation() {
 }
 
 export function createPoll() {
-    const question = prompt('Enter poll question:');
-    if (!question) return null;
-    
-    const options = [];
-    for (let i = 1; i <= 4; i++) {
-        const option = prompt(`Enter option ${i} (leave empty to finish):`);
-        if (!option) break;
-        options.push({
-            text: option,
-            votes: 0,
-            voters: []
-        });
-    }
-    
-    if (options.length < 2) {
+    try {
+        const question = prompt('Enter poll question:');
+        if (!question) return null;
+        
+        const options = [];
+        for (let i = 1; i <= 4; i++) {
+            const option = prompt(`Enter option ${i} (leave empty to finish):`);
+            if (!option) break;
+            options.push({
+                text: option,
+                votes: 0,
+                voters: []
+            });
+        }
+        
+        if (options.length < 2) {
+            return null;
+        }
+        
+        return { question, options };
+    } catch (error) {
+        console.error('Error creating poll:', error);
         return null;
     }
-    
-    return { question, options };
 }
 
 export async function voteInPoll(messageId, optionIndex) {
@@ -2009,16 +2815,18 @@ export async function loadThreadMessages(messageId) {
 }
 
 export function showChatInfo(chat) {
+    if (!chat) return {};
+    
     return {
         title: chat.type === 'note' ? 'Notes' : chat.friendName,
         sections: [
             {
                 title: 'Chat Information',
                 items: [
-                    { label: 'Name', value: chat.type === 'note' ? 'Notes' : chat.friendName },
+                    { label: 'Name', value: chat.type === 'note' ? 'Notes' : chat.friendName || 'Unknown' },
                     { label: 'Status', value: chat.blocked ? 'Blocked' : chat.archived ? 'Archived' : chat.type === 'note' ? 'Notes' : 'Active' },
                     { label: 'Last Message', value: formatTime(chat.lastMessageAt) },
-                    { label: 'Unread Messages', value: chat.unreadCount },
+                    { label: 'Unread Messages', value: chat.unreadCount || 0 },
                     { label: 'Chat Type', value: chat.type === 'group' ? 'Group' : chat.type === 'note' ? 'Notes' : 'Direct' },
                     { label: 'Read Only', value: chat.readOnly ? 'Yes' : 'No' }
                 ]
@@ -2031,7 +2839,11 @@ export function loadChatThemes() {
     try {
         const themes = localStorage.getItem(LOCAL_STORAGE_KEYS.CHAT_THEMES);
         if (themes) {
-            chatThemes = JSON.parse(themes);
+            try {
+                chatThemes = JSON.parse(themes);
+            } catch (e) {
+                chatThemes = {};
+            }
         }
     } catch (error) {
         console.error('Error loading chat themes:', error);
@@ -2039,22 +2851,26 @@ export function loadChatThemes() {
 }
 
 export function applyChatTheme(friendId) {
-    const theme = chatThemes[friendId];
-    if (theme) {
-        document.documentElement.style.setProperty('--chat-bubble-sent', theme.sentColor);
-        document.documentElement.style.setProperty('--chat-bubble-received', theme.receivedColor);
-        document.documentElement.style.setProperty('--chat-background', theme.background);
-        document.documentElement.style.setProperty('--chat-font-family', theme.fontFamily);
-    } else {
-        document.documentElement.style.setProperty('--chat-bubble-sent', 'var(--primary-color)');
-        document.documentElement.style.setProperty('--chat-bubble-received', 'var(--secondary-color)');
-        document.documentElement.style.setProperty('--chat-background', 'url(\'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="%23ffffff"/></svg>\')');
-        document.documentElement.style.setProperty('--chat-font-family', '\'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif');
+    try {
+        const theme = chatThemes[friendId];
+        if (theme) {
+            document.documentElement.style.setProperty('--chat-bubble-sent', theme.sentColor);
+            document.documentElement.style.setProperty('--chat-bubble-received', theme.receivedColor);
+            document.documentElement.style.setProperty('--chat-background', theme.background);
+            document.documentElement.style.setProperty('--chat-font-family', theme.fontFamily);
+        } else {
+            document.documentElement.style.setProperty('--chat-bubble-sent', 'var(--primary-color)');
+            document.documentElement.style.setProperty('--chat-bubble-received', 'var(--secondary-color)');
+            document.documentElement.style.setProperty('--chat-background', 'url(\'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="%23ffffff"/></svg>\')');
+            document.documentElement.style.setProperty('--chat-font-family', '\'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif');
+        }
+    } catch (error) {
+        console.error('Error applying chat theme:', error);
     }
 }
 
 export function startBackgroundSync() {
-    setInterval(async () => {
+    const syncInterval = setInterval(async () => {
         try {
             if (!isSyncing && navigator.onLine && isSessionReceived) {
                 isSyncing = true;
@@ -2062,7 +2878,7 @@ export function startBackgroundSync() {
                 try {
                     const chatsData = await fetchChats();
                     if (chatsData && chatsData.chats) {
-                        chats = chatsData.chats;
+                        chats = chatsData.chats || [];
                         localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                     }
                 } catch (error) {
@@ -2072,7 +2888,7 @@ export function startBackgroundSync() {
                 try {
                     const contactsData = await fetchContacts();
                     if (contactsData && contactsData.contacts) {
-                        contacts = contactsData.contacts;
+                        contacts = contactsData.contacts || [];
                         localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
                     }
                 } catch (error) {
@@ -2083,7 +2899,7 @@ export function startBackgroundSync() {
                     try {
                         const messagesData = await fetchMessages(currentChat.id);
                         if (messagesData && messagesData.messages) {
-                            messages = messagesData.messages;
+                            messages = messagesData.messages || [];
                             localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
                         }
                     } catch (error) {
@@ -2101,31 +2917,47 @@ export function startBackgroundSync() {
         }
     }, 30000);
     
-    setInterval(() => {
-        if (currentChat) {
-            localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-            saveMessageDraft();
+    const saveInterval = setInterval(() => {
+        try {
+            if (currentChat) {
+                localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                saveMessageDraft();
+            }
+            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+            saveUIState();
+        } catch (error) {
+            console.error('Error in auto-save:', error);
         }
-        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-        saveUIState();
     }, 60000);
     
     window.addEventListener('online', () => {
         checkOfflineQueue();
     });
+    
+    // Store intervals for cleanup
+    if (parentConnection) {
+        parentConnection.syncInterval = syncInterval;
+        parentConnection.saveInterval = saveInterval;
+    }
 }
 
 export function playNotificationSound() {
-    const settings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_SETTINGS) || '{}');
-    if (settings.notificationSound !== false) {
-        const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ');
-        audio.volume = 0.3;
-        audio.play().catch(() => {});
+    try {
+        const settings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_SETTINGS) || '{}');
+        if (settings.notificationSound !== false) {
+            const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ');
+            audio.volume = 0.3;
+            audio.play().catch(() => {});
+        }
+    } catch (error) {
+        console.error('Error playing notification sound:', error);
     }
 }
 
 export async function toggleReadOnly(chatId, readOnly) {
     try {
+        if (!chatId) return false;
+        
         const chatIndex = chats.findIndex(chat => chat.id === chatId);
         if (chatIndex !== -1) {
             chats[chatIndex].readOnly = readOnly;
@@ -2144,6 +2976,8 @@ export async function toggleReadOnly(chatId, readOnly) {
 
 export async function toggleArchiveChat(chatId, archive) {
     try {
+        if (!chatId) return false;
+        
         const archivedChats = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS) || '[]');
         
         if (archive) {
@@ -2177,6 +3011,8 @@ export async function toggleArchiveChat(chatId, archive) {
 
 export async function toggleBlockUser(friendId, block) {
     try {
+        if (!friendId) return false;
+        
         const blockedUsers = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.BLOCKED_USERS) || '[]');
         
         if (block) {
@@ -2212,6 +3048,8 @@ export async function toggleBlockUser(friendId, block) {
 
 export async function clearChatHistory(chatId) {
     try {
+        if (!chatId) return false;
+        
         localStorage.removeItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${chatId}`);
         
         const chatIndex = chats.findIndex(chat => chat.id === chatId);
@@ -2271,25 +3109,35 @@ export function saveUIState() {
 // =============================================
 
 export function getUserFromURL() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const userId = urlParams.get('userId') || urlParams.get('friendId') || urlParams.get('user');
-    const username = urlParams.get('username') || urlParams.get('name') || 'Unknown User';
-    const userAvatar = urlParams.get('avatar') || urlParams.get('photoURL') || '';
-    
-    if (userId) {
-        return {
-            userId: userId,
-            username: decodeURIComponent(username),
-            userAvatar: userAvatar
-        };
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('userId') || urlParams.get('friendId') || urlParams.get('user');
+        const username = urlParams.get('username') || urlParams.get('name') || 'Unknown User';
+        const userAvatar = urlParams.get('avatar') || urlParams.get('photoURL') || '';
+        
+        if (userId) {
+            return {
+                userId: userId,
+                username: decodeURIComponent(username),
+                userAvatar: userAvatar
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error('Error getting user from URL:', error);
+        return null;
     }
-    return null;
 }
 
 export async function openChatPanel(userId, username, userAvatar = '') {
     try {
-        if (!currentUser) {
-            return false;
+        if (!currentUser && !isSessionReceived) {
+            // Offline mode: create local chat
+            createLocalChat(userId, {
+                displayName: username,
+                photoURL: userAvatar
+            });
+            return true;
         }
         
         currentFriend = {
@@ -2326,14 +3174,12 @@ export async function openChatPanel(userId, username, userAvatar = '') {
                         }
                     }
                 } else {
-                    console.log('No session, creating local chat');
                     createLocalChat(userId, {
                         displayName: username,
                         photoURL: userAvatar
                     });
                 }
             } catch (error) {
-                console.log('Could not fetch chat from API, creating local chat:', error);
                 createLocalChat(userId, {
                     displayName: username,
                     photoURL: userAvatar
@@ -2356,79 +3202,104 @@ export async function openChatPanel(userId, username, userAvatar = '') {
 export function formatTime(date) {
     if (!date) return 'Unknown';
     
-    const now = new Date();
-    const messageDate = new Date(date);
-    const diffMs = now - messageDate;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    
-    const hours = messageDate.getHours();
-    const minutes = messageDate.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const hour12 = hours % 12 || 12;
-    
-    return `${messageDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${hour12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+    try {
+        const now = new Date();
+        const messageDate = new Date(date);
+        const diffMs = now - messageDate;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        
+        const hours = messageDate.getHours();
+        const minutes = messageDate.getMinutes();
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const hour12 = hours % 12 || 12;
+        
+        return `${messageDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${hour12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+    } catch (error) {
+        console.error('Error formatting time:', error);
+        return 'Unknown';
+    }
 }
 
 export function formatDate(date) {
     if (!date) return 'Unknown';
     
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const messageDate = new Date(date);
-    
-    if (messageDate.toDateString() === today.toDateString()) {
-        return 'Today';
-    } else if (messageDate.toDateString() === yesterday.toDateString()) {
-        return 'Yesterday';
-    } else if (today.getFullYear() === messageDate.getFullYear()) {
-        return messageDate.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric'
-        });
-    } else {
-        return messageDate.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-        });
+    try {
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const messageDate = new Date(date);
+        
+        if (messageDate.toDateString() === today.toDateString()) {
+            return 'Today';
+        } else if (messageDate.toDateString() === yesterday.toDateString()) {
+            return 'Yesterday';
+        } else if (today.getFullYear() === messageDate.getFullYear()) {
+            return messageDate.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric'
+            });
+        } else {
+            return messageDate.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+            });
+        }
+    } catch (error) {
+        console.error('Error formatting date:', error);
+        return 'Unknown';
     }
 }
 
 export function formatDateTime(date) {
     if (!date) return 'Unknown';
     
-    const messageDate = new Date(date);
-    return messageDate.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        second: '2-digit'
-    });
+    try {
+        const messageDate = new Date(date);
+        return messageDate.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    } catch (error) {
+        console.error('Error formatting date/time:', error);
+        return 'Unknown';
+    }
 }
 
 export function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    if (!bytes || bytes === 0) return '0 Bytes';
+    try {
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    } catch (error) {
+        console.error('Error formatting file size:', error);
+        return 'Unknown';
+    }
 }
 
 export function escapeHtml(text) {
     if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    try {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    } catch (error) {
+        console.error('Error escaping HTML:', error);
+        return text;
+    }
 }
 
 // =============================================
@@ -2444,55 +3315,71 @@ export function playVideo(url) {
 }
 
 export function playAudio(messageId, url, duration) {
-    const wavesurfer = audioPlayers.get(messageId);
-    if (wavesurfer) {
-        if (activeAudioElement && activeAudioElement !== messageId) {
-            const otherWavesurfer = audioPlayers.get(activeAudioElement);
-            if (otherWavesurfer) {
-                otherWavesurfer.pause();
+    try {
+        const wavesurfer = audioPlayers.get(messageId);
+        if (wavesurfer) {
+            if (activeAudioElement && activeAudioElement !== messageId) {
+                const otherWavesurfer = audioPlayers.get(activeAudioElement);
+                if (otherWavesurfer) {
+                    otherWavesurfer.pause();
+                }
+            }
+            
+            if (wavesurfer.isPlaying()) {
+                wavesurfer.pause();
+                return 'paused';
+            } else {
+                wavesurfer.play();
+                activeAudioElement = messageId;
+                
+                wavesurfer.on('finish', () => {
+                    activeAudioElement = null;
+                });
+                
+                return 'playing';
             }
         }
-        
-        if (wavesurfer.isPlaying()) {
-            wavesurfer.pause();
-            return 'paused';
-        } else {
-            wavesurfer.play();
-            activeAudioElement = messageId;
-            
-            wavesurfer.on('audioprocess', () => {
-                // Progress handling in UI
-            });
-            
-            wavesurfer.on('finish', () => {
-                activeAudioElement = null;
-            });
-            
-            return 'playing';
-        }
+        return 'error';
+    } catch (error) {
+        console.error('Error playing audio:', error);
+        return 'error';
     }
-    return 'error';
 }
 
 export function downloadFile(url, fileName) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return true;
+    try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return true;
+    } catch (error) {
+        console.error('Error downloading file:', error);
+        return false;
+    }
 }
 
 export function openLocation(latitude, longitude) {
-    const url = `https://www.google.com/maps?q=${latitude},${longitude}`;
-    window.open(url, '_blank');
-    return url;
+    try {
+        const url = `https://www.google.com/maps?q=${latitude},${longitude}`;
+        window.open(url, '_blank');
+        return url;
+    } catch (error) {
+        console.error('Error opening location:', error);
+        return null;
+    }
 }
 
 export function retryConnection() {
-    initializeParentCoordination();
-    return true;
+    try {
+        initializeParentCoordination();
+        return true;
+    } catch (error) {
+        console.error('Error retrying connection:', error);
+        return false;
+    }
 }
 
 // =============================================
@@ -2511,6 +3398,12 @@ export function initChildSession() {
                     resolve({ user: currentUser, sessionData });
                 }
             }, 100);
+            
+            // Timeout after 30 seconds
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                resolve(null);
+            }, 30000);
         }
     });
 }
@@ -2527,4 +3420,12 @@ export function requestSessionUpdate() {
         return true;
     }
     return false;
+}
+
+// Initialize when module loads
+if (typeof window !== 'undefined') {
+    // Set a small delay to ensure DOM is ready
+    setTimeout(() => {
+        initializeParentCoordination();
+    }, 100);
 }

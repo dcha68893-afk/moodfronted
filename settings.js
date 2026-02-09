@@ -1471,7 +1471,7 @@ async function safeLoadUserGroups() {
     if (!tokenReady && !parentSessionReceived) return;
     
     try {
-        const response = await secureFetchWrapper('GET', '/api/groups');
+        const response = await secureFetchWrapper('GET', '/api/group');
         if (response && response.groups) {
             userGroups = response.groups;
         }

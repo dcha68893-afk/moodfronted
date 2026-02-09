@@ -22,6 +22,15 @@ export let reconnectionAttempts = 0;
 export const maxReconnectionAttempts = 5;
 export const reconnectionDelay = 1000;
 
+// ==================== SECURE HANDSHAKE VARIABLES ====================
+export let secureHandshakeInProgress = false;
+export let secureSessionValid = false;
+export let secureHandshakeTimeout = null;
+export let secureHandshakeAttempts = 0;
+export const maxHandshakeAttempts = 2;
+export const handshakeTimeout = 5000;
+export const sessionRetryDelay = 3000;
+
 // ==================== PARENT COORDINATION CONTROLLER ====================
 export class ParentCoordinator {
     constructor() {
@@ -41,10 +50,13 @@ export class ParentCoordinator {
         this.fallbackState = 'waiting';
         this.sessionUpdateCallbacks = [];
         this.uiBindings = [];
+        this.sessionWaitingLogged = false;
+        this.secureSessionValid = false;
+        this.secureHandshakeRequested = false;
     }
     
     async initialize() {
-        console.log('[Calls iframe] Initializing parent coordination...');
+        console.info('[Calls iframe] Initializing parent coordination...');
         
         this.detectParent();
         
@@ -61,7 +73,8 @@ export class ParentCoordinator {
         
         this.establishMessagingChannel();
         
-        await this.initiateHandshake();
+        // Start secure handshake protocol
+        this.startSecureHandshake();
         
         this.startHeartbeat();
         
@@ -75,9 +88,9 @@ export class ParentCoordinator {
             if (this.parentDetected) {
                 try {
                     this.sameOrigin = window.location.origin === window.parent.location.origin;
-                    console.log(`[Calls iframe] Parent detected, same-origin: ${this.sameOrigin}`);
+                    console.info(`[Calls iframe] Parent detected, same-origin: ${this.sameOrigin}`);
                 } catch (error) {
-                    console.log('[Calls iframe] Cross-origin parent detected');
+                    console.info('[Calls iframe] Cross-origin parent detected');
                     this.sameOrigin = false;
                 }
             }
@@ -90,7 +103,7 @@ export class ParentCoordinator {
     
     establishMessagingChannel() {
         window.addEventListener('message', this.handleParentMessage.bind(this));
-        console.log('[Calls iframe] Secure messaging channel established');
+        console.info('[Calls iframe] Secure messaging channel established');
         this.secureChannelEstablished = true;
     }
     
@@ -101,10 +114,6 @@ export class ParentCoordinator {
         }
         
         const data = event.data;
-        
-        if (data.type && !data.type.includes('HEARTBEAT')) {
-            console.log('[Calls iframe] Received message from parent:', data.type, data);
-        }
         
         if (this.messageHandlers.has(data.type)) {
             this.messageHandlers.get(data.type)(data);
@@ -126,6 +135,7 @@ export class ParentCoordinator {
     isValidOrigin(origin) {
         if (origin === window.location.origin) return true;
         
+        // Allow localhost for development
         if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) return true;
         
         try {
@@ -140,16 +150,207 @@ export class ParentCoordinator {
         }
     }
     
+    // ==================== SECURE HANDSHAKE PROTOCOL ====================
+    startSecureHandshake() {
+        if (secureHandshakeInProgress || this.secureSessionValid) {
+            console.info('[Calls iframe] Secure handshake already in progress or complete');
+            return;
+        }
+        
+        secureHandshakeInProgress = true;
+        this.secureHandshakeRequested = true;
+        secureHandshakeAttempts = 0;
+        
+        console.info('[Calls iframe] Starting secure handshake protocol...');
+        this.requestSecureSession();
+    }
+    
+    requestSecureSession() {
+        if (!this.parentDetected || !window.parent) {
+            console.warn('[Calls iframe] Cannot request secure session - no parent detected');
+            this.handleSecureHandshakeFailure('No parent window');
+            return;
+        }
+        
+        if (secureHandshakeAttempts >= maxHandshakeAttempts) {
+            console.warn('[Calls iframe] Max secure handshake attempts reached');
+            this.handleSecureHandshakeFailure('Max attempts reached');
+            return;
+        }
+        
+        secureHandshakeAttempts++;
+        
+        if (secureHandshakeAttempts === 1) {
+            console.info('[Calls iframe] ⏳ Waiting for secure session from parent...');
+        } else {
+            console.info(`[Calls iframe] ⏳ Retrying secure session request (attempt ${secureHandshakeAttempts}/${maxHandshakeAttempts})...`);
+        }
+        
+        // Clear any existing timeout
+        if (secureHandshakeTimeout) {
+            clearTimeout(secureHandshakeTimeout);
+        }
+        
+        const requestId = 'secure_session_req_' + Date.now();
+        
+        this.sendToParent({
+            type: 'REQUEST_SESSION',
+            source: 'calls-iframe',
+            requestId: requestId,
+            timestamp: Date.now(),
+            version: '1.0',
+            secure: true,
+            iframeId: this.getIframeId()
+        });
+        
+        // Set timeout for handshake response
+        secureHandshakeTimeout = setTimeout(() => {
+            if (!this.secureSessionValid) {
+                console.warn(`[Calls iframe] ⚠️ Secure session request timeout (attempt ${secureHandshakeAttempts})`);
+                if (secureHandshakeAttempts < maxHandshakeAttempts) {
+                    // Retry once
+                    console.info('[Calls iframe] Will retry secure handshake...');
+                    setTimeout(() => this.requestSecureSession(), sessionRetryDelay);
+                } else {
+                    this.handleSecureHandshakeFailure('Handshake timeout');
+                }
+            }
+        }, handshakeTimeout);
+    }
+    
+    handleSecureHandshakeFailure(reason) {
+        console.warn(`[Calls iframe] ❌ Secure handshake failed: ${reason}`);
+        secureHandshakeInProgress = false;
+        this.secureHandshakeRequested = false;
+        
+        // Fall back to legacy handshake if secure handshake fails
+        if (!this.handshakeComplete) {
+            console.info('[Calls iframe] Falling back to legacy handshake protocol...');
+            this.initiateHandshake();
+        }
+    }
+    
+    handleSecureSessionData(sessionData) {
+        // Validate session data structure
+        if (!this.validateSecureSessionSchema(sessionData)) {
+            console.warn('[Calls iframe] ❌ Received invalid secure session from parent');
+            this.handleSecureHandshakeFailure('Invalid session schema');
+            return;
+        }
+        
+        // Verify source
+        if (!this.verifySessionSource(sessionData)) {
+            console.warn('[Calls iframe] ❌ Session source verification failed');
+            this.handleSecureHandshakeFailure('Source verification failed');
+            return;
+        }
+        
+        // Clear timeout
+        if (secureHandshakeTimeout) {
+            clearTimeout(secureHandshakeTimeout);
+            secureHandshakeTimeout = null;
+        }
+        
+        this.sessionData = sessionData;
+        this.sessionValidated = true;
+        this.secureSessionValid = true;
+        secureHandshakeInProgress = false;
+        this.handshakeComplete = true;
+        this.handshakeInProgress = false;
+        
+        console.info('[Calls iframe] ✅ Secure session received and validated successfully');
+        
+        this.setFallbackState('connected');
+        
+        this.updateGlobalStateFromSession();
+        
+        this.bindUIAfterSessionConfirmation();
+        
+        this.sendToParent({
+            type: 'SESSION_CONSUMED',
+            source: 'calls-iframe',
+            timestamp: Date.now(),
+            sessionId: sessionData.sessionId,
+            userId: sessionData.user?.id,
+            secure: true
+        });
+        
+        console.info('[Calls iframe] Secure session data consumed successfully');
+    }
+    
+    validateSecureSessionSchema(sessionData) {
+        if (!sessionData || typeof sessionData !== 'object') {
+            console.warn('[Calls iframe] Session data is not an object');
+            return false;
+        }
+        
+        // Required fields for secure session
+        const requiredFields = ['sessionId', 'timestamp', 'token', 'user'];
+        for (const field of requiredFields) {
+            if (!sessionData.hasOwnProperty(field)) {
+                console.warn(`[Calls iframe] Missing required field: ${field}`);
+                return false;
+            }
+        }
+        
+        // Validate user object
+        if (!sessionData.user.id || !sessionData.user.username) {
+            console.warn('[Calls iframe] Invalid user data in secure session');
+            return false;
+        }
+        
+        // Validate token
+        if (typeof sessionData.token !== 'string' || sessionData.token.length < 10) {
+            console.warn('[Calls iframe] Invalid token in secure session');
+            return false;
+        }
+        
+        // Validate authenticated flag
+        if (sessionData.authenticated !== undefined && typeof sessionData.authenticated !== 'boolean') {
+            console.warn('[Calls iframe] Invalid authenticated field');
+            return false;
+        }
+        
+        return true;
+    }
+    
+    verifySessionSource(sessionData) {
+        // Check for source verification token or signature
+        if (sessionData.sourceVerification) {
+            // Implement source verification logic here
+            // This could be a signature, token, or other verification method
+            console.info('[Calls iframe] Source verification present, would validate here');
+        }
+        
+        // For now, accept sessions from validated origins only
+        return true;
+    }
+    
+    getIframeId() {
+        // Generate or retrieve iframe identifier
+        try {
+            const iframeId = localStorage.getItem('calls_iframe_id');
+            if (!iframeId) {
+                const newId = 'iframe_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('calls_iframe_id', newId);
+                return newId;
+            }
+            return iframeId;
+        } catch (error) {
+            return 'iframe_' + Date.now();
+        }
+    }
+    
     async initiateHandshake() {
         if (this.handshakeInProgress || this.handshakeComplete) {
-            console.log('[Calls iframe] Handshake already in progress or complete');
+            console.info('[Calls iframe] Handshake already in progress or complete');
             return;
         }
         
         this.handshakeInProgress = true;
         this.setFallbackState('waiting');
         
-        console.log('[Calls iframe] Starting handshake protocol...');
+        console.info('[Calls iframe] Starting handshake protocol...');
         
         this.sendToParent({
             type: 'CHILD_READY',
@@ -171,7 +372,7 @@ export class ParentCoordinator {
             attempt++;
             const delay = baseDelay * Math.pow(2, attempt - 1);
             
-            console.log(`[Calls iframe] Requesting session (attempt ${attempt}/${maxAttempts})...`);
+            console.info(`[Calls iframe] Requesting session (attempt ${attempt}/${maxAttempts})...`);
             
             this.sendToParent({
                 type: 'REQUEST_SESSION',
@@ -183,7 +384,7 @@ export class ParentCoordinator {
             
             await new Promise(resolve => {
                 const timeoutId = setTimeout(() => {
-                    console.log(`[Calls iframe] Session request timeout (attempt ${attempt})`);
+                    console.info(`[Calls iframe] Session request timeout (attempt ${attempt})`);
                     resolve();
                 }, delay);
                 
@@ -250,7 +451,7 @@ export class ParentCoordinator {
     }
     
     handleSessionData(sessionData) {
-        console.log('[Calls iframe] Received SESSION_DATA:', sessionData);
+        console.info('[Calls iframe] Received SESSION_DATA');
         
         if (!this.validateSessionSchema(sessionData)) {
             console.error('[Calls iframe] Invalid session schema');
@@ -282,7 +483,7 @@ export class ParentCoordinator {
             userId: sessionData.user?.id
         });
         
-        console.log('[Calls iframe] Session data consumed successfully');
+        console.info('[Calls iframe] Session data consumed successfully');
     }
     
     validateSessionSchema(sessionData) {
@@ -314,7 +515,18 @@ export class ParentCoordinator {
     }
     
     updateGlobalStateFromSession() {
-        if (!this.sessionData) return;
+        // Add defensive guard for session data
+        if (!this.sessionData || !this.sessionData.token) {
+            // Log only once per session initialization to prevent spam
+            if (!this.sessionWaitingLogged) {
+                console.info('[Calls iframe] Session not ready, waiting...');
+                this.sessionWaitingLogged = true;
+            }
+            return; // Skip processing until session is ready
+        }
+        
+        // Reset the waiting flag since we have a valid session
+        this.sessionWaitingLogged = false;
         
         if (this.sessionData.user) {
             currentUser = this.sessionData.user;
@@ -350,7 +562,7 @@ export class ParentCoordinator {
             return;
         }
         
-        console.log('[Calls iframe] Binding UI with session data...');
+        console.info('[Calls iframe] Binding UI with session data...');
         
         this.uiBindings.forEach(binding => {
             try {
@@ -364,13 +576,11 @@ export class ParentCoordinator {
         
         this.enableProtectedUI();
         
-        console.log('[Calls iframe] UI binding complete');
+        console.info('[Calls iframe] UI binding complete');
     }
     
     updateUIWithSessionData() {
         if (!currentUser) return;
-        
-        console.log('[Calls iframe] Updating UI with session data:', currentUser.username || currentUser.name);
         
         const userElements = {
             'userAvatar': currentUser.avatar,
@@ -386,48 +596,60 @@ export class ParentCoordinator {
     }
     
     updateUserSpecificUI(userElements) {
-        document.querySelectorAll('.user-avatar, .avatar-img').forEach(el => {
-            if (userElements.userAvatar) {
-                if (el.tagName === 'IMG') {
-                    el.src = userElements.userAvatar;
-                    el.alt = userElements.userName;
-                } else {
-                    el.style.backgroundImage = `url(${userElements.userAvatar})`;
+        try {
+            document.querySelectorAll('.user-avatar, .avatar-img').forEach(el => {
+                if (userElements.userAvatar) {
+                    if (el.tagName === 'IMG') {
+                        el.src = userElements.userAvatar;
+                        el.alt = userElements.userName;
+                    } else {
+                        el.style.backgroundImage = `url(${userElements.userAvatar})`;
+                    }
                 }
+            });
+            
+            document.querySelectorAll('.user-name, .username').forEach(el => {
+                if (el.textContent.includes('User') || el.textContent.includes('Loading')) {
+                    el.textContent = userElements.userName;
+                }
+            });
+            
+            const callStatusText = document.getElementById('callStatusText');
+            if (callStatusText && callStatusText.textContent.includes('Waiting for API')) {
+                callStatusText.textContent = `Ready (${userElements.userName})`;
             }
-        });
-        
-        document.querySelectorAll('.user-name, .username').forEach(el => {
-            if (el.textContent.includes('User') || el.textContent.includes('Loading')) {
-                el.textContent = userElements.userName;
-            }
-        });
-        
-        const callStatusText = document.getElementById('callStatusText');
-        if (callStatusText && callStatusText.textContent.includes('Waiting for API')) {
-            callStatusText.textContent = `Ready (${userElements.userName})`;
+        } catch (error) {
+            console.error('[Calls iframe] Error updating user UI:', error);
         }
     }
     
     updateApiStatusIndicator() {
-        const apiStatusIndicator = document.getElementById('apiStatusIndicator');
-        const apiStatusText = document.getElementById('apiStatusText');
-        
-        if (apiStatusIndicator && apiStatusText) {
-            apiStatusIndicator.className = 'api-status-indicator connected';
-            apiStatusText.textContent = `Authenticated as ${currentUser?.name || currentUser?.username || 'User'}`;
+        try {
+            const apiStatusIndicator = document.getElementById('apiStatusIndicator');
+            const apiStatusText = document.getElementById('apiStatusText');
             
-            setTimeout(() => {
-                apiStatusIndicator.style.display = 'none';
-            }, 2000);
+            if (apiStatusIndicator && apiStatusText) {
+                apiStatusIndicator.className = 'api-status-indicator connected';
+                apiStatusText.textContent = `Authenticated as ${currentUser?.name || currentUser?.username || 'User'}`;
+                
+                setTimeout(() => {
+                    apiStatusIndicator.style.display = 'none';
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error updating API status:', error);
         }
     }
     
     updateSyncIndicator() {
-        const syncIndicator = document.getElementById('syncIndicator');
-        if (syncIndicator) {
-            syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
-            syncIndicator.classList.remove('syncing');
+        try {
+            const syncIndicator = document.getElementById('syncIndicator');
+            if (syncIndicator) {
+                syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+                syncIndicator.classList.remove('syncing');
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error updating sync indicator:', error);
         }
     }
     
@@ -437,23 +659,27 @@ export class ParentCoordinator {
             return;
         }
         
-        console.log('[Calls iframe] Enabling protected UI features...');
+        console.info('[Calls iframe] Enabling protected UI features...');
         
-        const newCallBtn = document.getElementById('newCallBtn');
-        if (newCallBtn) newCallBtn.disabled = false;
-        
-        const quickVoiceBtn = document.getElementById('quickVoiceBtn');
-        const quickVideoBtn = document.getElementById('quickVideoBtn');
-        if (quickVoiceBtn) quickVoiceBtn.disabled = false;
-        if (quickVideoBtn) quickVideoBtn.disabled = false;
-        
-        this.loadUserSpecificData();
+        try {
+            const newCallBtn = document.getElementById('newCallBtn');
+            if (newCallBtn) newCallBtn.disabled = false;
+            
+            const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+            const quickVideoBtn = document.getElementById('quickVideoBtn');
+            if (quickVoiceBtn) quickVoiceBtn.disabled = false;
+            if (quickVideoBtn) quickVideoBtn.disabled = false;
+            
+            this.loadUserSpecificData();
+        } catch (error) {
+            console.error('[Calls iframe] Error enabling protected UI:', error);
+        }
     }
     
     async loadUserSpecificData() {
         if (!currentUser || !userDataLoaded) return;
         
-        console.log('[Calls iframe] Loading user-specific data through parent coordination...');
+        console.info('[Calls iframe] Loading user-specific data through parent coordination...');
         
         try {
             await this.routeApiCall('/api/contacts', 'GET');
@@ -498,7 +724,7 @@ export class ParentCoordinator {
     }
     
     handleSessionUpdate(updateData) {
-        console.log('[Calls iframe] Received SESSION_UPDATE:', updateData);
+        console.info('[Calls iframe] Received SESSION_UPDATE');
         
         if (updateData.sessionData) {
             this.sessionData = { ...this.sessionData, ...updateData.sessionData };
@@ -523,17 +749,21 @@ export class ParentCoordinator {
             }
         });
         
-        console.log('[Calls iframe] Session updated successfully');
+        console.info('[Calls iframe] Session updated successfully');
     }
     
     handleLogout() {
-        console.log('[Calls iframe] Logout received from parent coordination');
+        console.info('[Calls iframe] Logout received from parent coordination');
         
         currentUser = null;
         userDataLoaded = false;
         sessionAuthorityReady = false;
         this.sessionValidated = false;
         this.sessionData = null;
+        this.sessionWaitingLogged = false;
+        this.secureSessionValid = false;
+        secureHandshakeInProgress = false;
+        this.secureHandshakeRequested = false;
         
         if (window.AppState) {
             window.AppState.user = null;
@@ -549,60 +779,74 @@ export class ParentCoordinator {
             window.CallApp.notifyParent('USER_LOGGED_OUT', {});
         }
         
-        console.log('[Calls iframe] Logout handled successfully');
+        console.info('[Calls iframe] Logout handled successfully');
     }
     
     disableProtectedUI() {
-        console.log('[Calls iframe] Disabling protected UI...');
+        console.info('[Calls iframe] Disabling protected UI...');
         
-        const newCallBtn = document.getElementById('newCallBtn');
-        if (newCallBtn) newCallBtn.disabled = true;
-        
-        const quickVoiceBtn = document.getElementById('quickVoiceBtn');
-        const quickVideoBtn = document.getElementById('quickVideoBtn');
-        if (quickVoiceBtn) quickVoiceBtn.disabled = true;
-        if (quickVideoBtn) quickVideoBtn.disabled = true;
-        
-        this.showReconnectState();
+        try {
+            const newCallBtn = document.getElementById('newCallBtn');
+            if (newCallBtn) newCallBtn.disabled = true;
+            
+            const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+            const quickVideoBtn = document.getElementById('quickVideoBtn');
+            if (quickVoiceBtn) quickVoiceBtn.disabled = true;
+            if (quickVideoBtn) quickVideoBtn.disabled = true;
+            
+            this.showReconnectState();
+        } catch (error) {
+            console.error('[Calls iframe] Error disabling protected UI:', error);
+        }
     }
     
     showReconnectState() {
-        const appContainer = document.getElementById('appContainer');
-        if (!appContainer) return;
-        
-        const existingOverlay = document.querySelector('.reconnect-overlay');
-        if (existingOverlay) existingOverlay.remove();
-        
-        const reconnectOverlay = document.createElement('div');
-        reconnectOverlay.className = 'reconnect-overlay';
-        reconnectOverlay.innerHTML = `
-            <div class="reconnect-message">
-                <i class="fas fa-sync-alt"></i>
-                <h3>Session Update Required</h3>
-                <p>Your session has been updated. Please wait for reconnection...</p>
-                <div class="reconnect-progress">
-                    <div class="reconnect-progress-bar"></div>
+        try {
+            const appContainer = document.getElementById('appContainer');
+            if (!appContainer) return;
+            
+            const existingOverlay = document.querySelector('.reconnect-overlay');
+            if (existingOverlay) existingOverlay.remove();
+            
+            const reconnectOverlay = document.createElement('div');
+            reconnectOverlay.className = 'reconnect-overlay';
+            reconnectOverlay.innerHTML = `
+                <div class="reconnect-message">
+                    <i class="fas fa-sync-alt"></i>
+                    <h3>Session Update Required</h3>
+                    <p>Your session has been updated. Please wait for reconnection...</p>
+                    <div class="reconnect-progress">
+                        <div class="reconnect-progress-bar"></div>
+                    </div>
+                    <button id="retryReconnectBtn" class="quick-action-btn">
+                        <i class="fas fa-redo"></i> Retry Connection
+                    </button>
                 </div>
-                <button id="retryReconnectBtn" class="quick-action-btn">
-                    <i class="fas fa-redo"></i> Retry Connection
-                </button>
-            </div>
-        `;
-        
-        appContainer.appendChild(reconnectOverlay);
-        
-        document.getElementById('retryReconnectBtn')?.addEventListener('click', () => {
-            this.initiateHandshake();
-        });
+            `;
+            
+            appContainer.appendChild(reconnectOverlay);
+            
+            const retryBtn = document.getElementById('retryReconnectBtn');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => {
+                    this.startSecureHandshake();
+                });
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error showing reconnect state:', error);
+        }
     }
     
     handleTokenUpdate(tokenData) {
-        console.log('[Calls iframe] Received token update from parent coordination');
+        console.info('[Calls iframe] Received token update from parent coordination');
+        
+        if (!tokenData || !tokenData.token) {
+            console.warn('[Calls iframe] Invalid token data received');
+            return;
+        }
         
         if (window.callAPI && window.callAPI.tokenManager) {
-            if (tokenData.token) {
-                window.callAPI.tokenManager.setToken(tokenData.token);
-            }
+            window.callAPI.tokenManager.setToken(tokenData.token);
         }
         
         if (this.sessionData) {
@@ -611,7 +855,7 @@ export class ParentCoordinator {
     }
     
     handleApiConfigUpdate(apiConfig) {
-        console.log('[Calls iframe] Received API config update');
+        console.info('[Calls iframe] Received API config update');
         
         if (window.callAPI) {
             window.callAPI.apiConfig = { ...window.callAPI.apiConfig, ...apiConfig };
@@ -619,33 +863,44 @@ export class ParentCoordinator {
     }
     
     handleDefaultMessage(data) {
-        switch (data.type) {
-            case 'SESSION_DATA':
-                this.handleSessionData(data.payload || data);
-                break;
-            case 'SESSION_UPDATE':
-                this.handleSessionUpdate(data.payload || data);
-                break;
-            case 'LOGOUT':
-                this.handleLogout();
-                break;
-            case 'TOKEN_UPDATE':
-                this.handleTokenUpdate(data.payload || data);
-                break;
-            case 'API_READY':
-                this.handleApiReady();
-                break;
-            case 'HEARTBEAT_RESPONSE':
-                this.handleHeartbeatResponse();
-                break;
-            case 'CHILD_READY_ACK':
-                this.handleChildReadyAck();
-                break;
-            case 'SESSION_REQUEST_ACK':
-                this.handleSessionRequestAck();
-                break;
-            default:
-                console.log('[Calls iframe] Unhandled message type:', data.type);
+        try {
+            switch (data.type) {
+                case 'SESSION_DATA':
+                    // Check if this is a secure session response
+                    if (this.secureHandshakeRequested && data.token && data.user) {
+                        this.handleSecureSessionData(data.payload || data);
+                    } else {
+                        this.handleSessionData(data.payload || data);
+                    }
+                    break;
+                case 'SESSION_UPDATE':
+                    this.handleSessionUpdate(data.payload || data);
+                    break;
+                case 'LOGOUT':
+                    this.handleLogout();
+                    break;
+                case 'TOKEN_UPDATE':
+                    this.handleTokenUpdate(data.payload || data);
+                    break;
+                case 'API_READY':
+                    this.handleApiReady();
+                    break;
+                case 'HEARTBEAT_RESPONSE':
+                    this.handleHeartbeatResponse();
+                    break;
+                case 'CHILD_READY_ACK':
+                    this.handleChildReadyAck();
+                    break;
+                case 'SESSION_REQUEST_ACK':
+                    this.handleSessionRequestAck();
+                    break;
+                case 'SECURE_SESSION':
+                    // Handle explicitly secure session
+                    this.handleSecureSessionData(data.payload || data);
+                    break;
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error handling default message:', error);
         }
     }
     
@@ -693,15 +948,15 @@ export class ParentCoordinator {
     }
     
     handleChildReadyAck() {
-        console.log('[Calls iframe] CHILD_READY acknowledged by parent');
+        console.info('[Calls iframe] CHILD_READY acknowledged by parent');
     }
     
     handleSessionRequestAck() {
-        console.log('[Calls iframe] SESSION_REQUEST acknowledged by parent');
+        console.info('[Calls iframe] SESSION_REQUEST acknowledged by parent');
     }
     
     handleApiReady() {
-        console.log('[Calls iframe] Parent API ready signal received');
+        console.info('[Calls iframe] Parent API ready signal received');
         
         if (window.AppState) {
             window.AppState.apiReady = true;
@@ -734,65 +989,80 @@ export class ParentCoordinator {
     }
     
     showWaitingState() {
-        console.log('[Calls iframe] Showing waiting state for parent coordination');
+        console.info('[Calls iframe] Showing waiting state for parent coordination');
     }
     
     showReconnectingState() {
-        console.log('[Calls iframe] Showing reconnecting state');
+        console.info('[Calls iframe] Showing reconnecting state');
         this.showReconnectState();
     }
     
     showUnavailableState() {
-        console.log('[Calls iframe] Parent coordination unavailable');
+        console.info('[Calls iframe] Parent coordination unavailable');
         
-        const appContainer = document.getElementById('appContainer');
-        if (!appContainer) return;
-        
-        document.querySelectorAll('.reconnect-overlay, .unavailable-overlay').forEach(el => el.remove());
-        
-        const unavailableOverlay = document.createElement('div');
-        unavailableOverlay.className = 'unavailable-overlay';
-        unavailableOverlay.innerHTML = `
-            <div class="unavailable-message">
-                <i class="fas fa-unlink"></i>
-                <h3>Connection Required</h3>
-                <p>This feature requires connection to the main application.</p>
-                <p>Please return to the main app and try again.</p>
-                <button id="refreshPageBtn" class="quick-action-btn">
-                    <i class="fas fa-redo"></i> Refresh Page
-                </button>
-            </div>
-        `;
-        
-        appContainer.appendChild(unavailableOverlay);
-        
-        document.getElementById('refreshPageBtn')?.addEventListener('click', () => {
-            location.reload();
-        });
+        try {
+            const appContainer = document.getElementById('appContainer');
+            if (!appContainer) return;
+            
+            document.querySelectorAll('.reconnect-overlay, .unavailable-overlay').forEach(el => el.remove());
+            
+            const unavailableOverlay = document.createElement('div');
+            unavailableOverlay.className = 'unavailable-overlay';
+            unavailableOverlay.innerHTML = `
+                <div class="unavailable-message">
+                    <i class="fas fa-unlink"></i>
+                    <h3>Connection Required</h3>
+                    <p>This feature requires connection to the main application.</p>
+                    <p>Please return to the main app and try again.</p>
+                    <button id="refreshPageBtn" class="quick-action-btn">
+                        <i class="fas fa-redo"></i> Refresh Page
+                    </button>
+                </div>
+            `;
+            
+            appContainer.appendChild(unavailableOverlay);
+            
+            const refreshBtn = document.getElementById('refreshPageBtn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => {
+                    location.reload();
+                });
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error showing unavailable state:', error);
+        }
     }
     
     hideFallbackState() {
-        document.querySelectorAll('.reconnect-overlay, .unavailable-overlay').forEach(el => el.remove());
+        try {
+            document.querySelectorAll('.reconnect-overlay, .unavailable-overlay').forEach(el => el.remove());
+        } catch (error) {
+            console.error('[Calls iframe] Error hiding fallback state:', error);
+        }
     }
     
     setupResynchronization() {
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && this.parentDetected) {
-                this.checkParentConnection();
-            }
-        });
-        
-        window.addEventListener('online', () => {
-            if (this.parentDetected) {
-                this.checkParentConnection();
-            }
-        });
+        try {
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && this.parentDetected) {
+                    this.checkParentConnection();
+                }
+            });
+            
+            window.addEventListener('online', () => {
+                if (this.parentDetected) {
+                    this.checkParentConnection();
+                }
+            });
+        } catch (error) {
+            console.error('[Calls iframe] Error setting up resynchronization:', error);
+        }
     }
     
     checkParentConnection() {
         if (!this.handshakeComplete && this.parentDetected) {
-            console.log('[Calls iframe] Checking parent connection...');
-            this.initiateHandshake();
+            console.info('[Calls iframe] Checking parent connection...');
+            this.startSecureHandshake();
         }
     }
     
@@ -807,10 +1077,16 @@ export class ParentCoordinator {
             this.reconnectionTimer = null;
         }
         
+        if (secureHandshakeTimeout) {
+            clearTimeout(secureHandshakeTimeout);
+            secureHandshakeTimeout = null;
+        }
+        
         this.messageHandlers.clear();
         this.pendingRequests.clear();
         this.uiBindings = [];
         this.sessionUpdateCallbacks = [];
+        this.sessionWaitingLogged = false;
     }
     
     getStatus() {
@@ -821,6 +1097,8 @@ export class ParentCoordinator {
             handshakeComplete: this.handshakeComplete,
             sessionValidated: this.sessionValidated,
             fallbackState: this.fallbackState,
+            secureSessionValid: this.secureSessionValid,
+            secureHandshakeInProgress: secureHandshakeInProgress,
             sessionData: this.sessionData ? { ...this.sessionData, token: '***' } : null
         };
     }
@@ -835,21 +1113,24 @@ export class ParentChildCommunication {
         this.dataFetchLock = false;
         this.authVerified = false;
         this.parentOrigin = window.location.origin;
-        this.parentCoordinator = parentCoordinator;
+        this.parentCoordinator = null;
     }
     
     async initialize() {
-        console.log('[Calls iframe] Initializing parent-child communication with coordination...');
+        console.info('[Calls iframe] Initializing parent-child communication with coordination...');
         
         if (!parentCoordinator) {
-            parentCoordinator = new ParentCoordinator();
-            this.parentCoordinator = parentCoordinator;
-            await this.parentCoordinator.initialize();
+            console.info('[Calls iframe] Parent coordinator not yet available, waiting...');
+            await this.waitForParentCoordinator();
         }
+        
+        this.parentCoordinator = parentCoordinator;
         
         this.setupLegacyMessageListener();
         
-        if (!this.parentCoordinator.handshakeComplete) {
+        if (this.parentCoordinator && this.parentCoordinator.handshakeComplete) {
+            console.info('[Calls iframe] Parent coordinator handshake already complete');
+        } else {
             this.requestDataFromParent();
         }
         
@@ -858,10 +1139,29 @@ export class ParentChildCommunication {
         this.loadCachedUserData();
         
         this.registerWithCoordinator();
+        
+        console.info('[Calls iframe] Parent-child communication initialized');
+    }
+    
+    async waitForParentCoordinator() {
+        const maxWaitTime = 5000;
+        const startTime = Date.now();
+        
+        return new Promise((resolve) => {
+            const checkInterval = setInterval(() => {
+                if (parentCoordinator || Date.now() - startTime > maxWaitTime) {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 100);
+        });
     }
     
     registerWithCoordinator() {
-        if (!this.parentCoordinator) return;
+        if (!this.parentCoordinator) {
+            console.warn('[Calls iframe] Cannot register with coordinator - not available');
+            return;
+        }
         
         this.parentCoordinator.registerMessageHandler('USER_DATA', (data) => {
             this.handleParentUserData(data.payload || data);
@@ -908,8 +1208,6 @@ export class ParentChildCommunication {
         this.parentOrigin = event.origin;
         const data = event.data;
         
-        console.log('[Calls iframe] Received legacy message from parent:', data.type);
-        
         switch (data.type) {
             case 'USER_DATA':
                 this.handleParentUserData(data.payload);
@@ -940,17 +1238,21 @@ export class ParentChildCommunication {
         
         if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) return true;
         
-        const parentHost = window.location.hostname;
-        const originHost = new URL(origin).hostname;
-        
-        return originHost === parentHost || 
-               originHost.endsWith('.' + parentHost) ||
-               parentHost.endsWith('.' + originHost);
+        try {
+            const parentHost = window.location.hostname;
+            const originHost = new URL(origin).hostname;
+            
+            return originHost === parentHost || 
+                   originHost.endsWith('.' + parentHost) ||
+                   parentHost.endsWith('.' + originHost);
+        } catch (error) {
+            return false;
+        }
     }
     
     requestDataFromParent() {
-        if (window.parent && window.parent !== window && !this.parentCoordinator.handshakeComplete) {
-            console.log('[Calls iframe] Requesting user data from parent (legacy fallback)...');
+        if (window.parent && window.parent !== window) {
+            console.info('[Calls iframe] Requesting user data from parent (legacy fallback)...');
             
             const requestId = 'req_' + Date.now();
             
@@ -972,10 +1274,10 @@ export class ParentChildCommunication {
             
             parentCommunicationAttempted = true;
         } else {
-            console.log('[Calls iframe] No parent window detected, will use coordination system');
+            console.info('[Calls iframe] No parent window detected, will use coordination system');
             this.parentDataReceived = false;
             
-            if (!this.parentCoordinator || !this.parentCoordinator.handshakeComplete) {
+            if (this.parentCoordinator && !this.parentCoordinator.handshakeComplete) {
                 this.startCoordinatedFetch();
             }
         }
@@ -983,13 +1285,13 @@ export class ParentChildCommunication {
     
     async startCoordinatedFetch() {
         if (this.dataFetchLock || userDataLoaded) {
-            console.log('[Calls iframe] Data fetch already in progress or completed, skipping...');
+            console.info('[Calls iframe] Data fetch already in progress or completed, skipping...');
             return;
         }
         
         this.dataFetchLock = true;
         
-        console.log('[Calls iframe] Starting coordinated data fetch...');
+        console.info('[Calls iframe] Starting coordinated data fetch...');
         
         try {
             if (this.parentCoordinator) {
@@ -1006,6 +1308,10 @@ export class ParentChildCommunication {
     }
     
     async waitForSessionData() {
+        if (!this.parentCoordinator) {
+            throw new Error('Parent coordinator not available');
+        }
+        
         return new Promise((resolve, reject) => {
             if (this.parentCoordinator.sessionValidated && currentUser) {
                 resolve();
@@ -1034,13 +1340,13 @@ export class ParentChildCommunication {
     
     startParentResponseTimeout() {
         if (this.parentCoordinator && this.parentCoordinator.parentDetected) {
-            console.log('[Calls iframe] Using parent coordinator, skipping legacy timeout');
+            console.info('[Calls iframe] Using parent coordinator, skipping legacy timeout');
             return;
         }
         
         this.parentResponseTimeout = setTimeout(() => {
             if (!this.parentDataReceived && !this.directFetchInProgress) {
-                console.log('[Calls iframe] Parent response timeout, starting coordinated fetch...');
+                console.info('[Calls iframe] Parent response timeout, starting coordinated fetch...');
                 this.startCoordinatedFetch();
             }
         }, parentDataTimeout);
@@ -1048,11 +1354,9 @@ export class ParentChildCommunication {
     
     handleParentUserData(userData) {
         if (this.dataFetchLock || userDataLoaded) {
-            console.log('[Calls iframe] Data already loaded or fetch in progress, ignoring parent data');
+            console.info('[Calls iframe] Data already loaded or fetch in progress, ignoring parent data');
             return;
         }
-        
-        console.log('[Calls iframe] Received user data from parent (legacy):', userData);
         
         if (this.parentResponseTimeout) {
             clearTimeout(this.parentResponseTimeout);
@@ -1068,8 +1372,6 @@ export class ParentChildCommunication {
     }
     
     handleAuthUpdate(authData) {
-        console.log('[Calls iframe] Received auth update from parent:', authData);
-        
         if (this.parentCoordinator && authData.authenticated !== undefined) {
             if (authData.authenticated && authData.user) {
                 this.parentCoordinator.handleSessionData({
@@ -1093,8 +1395,6 @@ export class ParentChildCommunication {
     }
     
     handleProfileUpdate(profileData) {
-        console.log('[Calls iframe] Received profile update from parent:', profileData);
-        
         if (currentUser) {
             currentUser = {
                 ...currentUser,
@@ -1110,7 +1410,7 @@ export class ParentChildCommunication {
     }
     
     handleLogout() {
-        console.log('[Calls iframe] Logout requested by parent');
+        console.info('[Calls iframe] Logout requested by parent');
         
         if (this.parentCoordinator) {
             this.parentCoordinator.handleLogout();
@@ -1134,26 +1434,22 @@ export class ParentChildCommunication {
     }
     
     handleParentPong() {
-        console.log('[Calls iframe] Parent is responsive (legacy)');
+        console.info('[Calls iframe] Parent is responsive (legacy)');
     }
     
     handleTokenUpdate(tokenData) {
-        console.log('[Calls iframe] Received token update from parent');
         if (this.parentCoordinator) {
             this.parentCoordinator.handleTokenUpdate(tokenData);
         }
     }
     
     handleApiReady() {
-        console.log('[Calls iframe] Parent API ready signal received');
         if (this.parentCoordinator) {
             this.parentCoordinator.handleApiReady();
         }
     }
     
     processUserData(userData, source) {
-        console.log(`[Calls iframe] Processing user data from ${source}:`, userData);
-        
         if (!userData || !userData.id) {
             throw new Error('Invalid user data received');
         }
@@ -1170,7 +1466,7 @@ export class ParentChildCommunication {
         
         this.showNotification(`User data loaded from ${source}`, 'success');
         
-        console.log(`[Calls iframe] User data successfully loaded from ${source}`);
+        console.info(`[Calls iframe] User data successfully loaded from ${source}`);
     }
     
     handleDataFetchFailure(error) {
@@ -1178,7 +1474,7 @@ export class ParentChildCommunication {
         
         const cachedUser = this.getCachedUserData();
         if (cachedUser) {
-            console.log('[Calls iframe] Using cached user data');
+            console.info('[Calls iframe] Using cached user data');
             currentUser = cachedUser;
             userDataLoaded = true;
             this.updateUIWithUserData();
@@ -1196,8 +1492,6 @@ export class ParentChildCommunication {
     updateUIWithUserData() {
         if (!currentUser) return;
         
-        console.log('[Calls iframe] Updating UI with user data:', currentUser.username || currentUser.name);
-        
         const userElements = {
             'userAvatar': currentUser.avatar,
             'userName': currentUser.name || currentUser.username,
@@ -1212,48 +1506,60 @@ export class ParentChildCommunication {
     }
     
     updateUserSpecificUI(userElements) {
-        document.querySelectorAll('.user-avatar, .avatar-img').forEach(el => {
-            if (userElements.userAvatar) {
-                if (el.tagName === 'IMG') {
-                    el.src = userElements.userAvatar;
-                    el.alt = userElements.userName;
-                } else {
-                    el.style.backgroundImage = `url(${userElements.userAvatar})`;
+        try {
+            document.querySelectorAll('.user-avatar, .avatar-img').forEach(el => {
+                if (userElements.userAvatar) {
+                    if (el.tagName === 'IMG') {
+                        el.src = userElements.userAvatar;
+                        el.alt = userElements.userName;
+                    } else {
+                        el.style.backgroundImage = `url(${userElements.userAvatar})`;
+                    }
                 }
+            });
+            
+            document.querySelectorAll('.user-name, .username').forEach(el => {
+                if (el.textContent.includes('User') || el.textContent.includes('Loading')) {
+                    el.textContent = userElements.userName;
+                }
+            });
+            
+            const callStatusText = document.getElementById('callStatusText');
+            if (callStatusText && callStatusText.textContent.includes('Waiting for API')) {
+                callStatusText.textContent = `Ready (${userElements.userName})`;
             }
-        });
-        
-        document.querySelectorAll('.user-name, .username').forEach(el => {
-            if (el.textContent.includes('User') || el.textContent.includes('Loading')) {
-                el.textContent = userElements.userName;
-            }
-        });
-        
-        const callStatusText = document.getElementById('callStatusText');
-        if (callStatusText && callStatusText.textContent.includes('Waiting for API')) {
-            callStatusText.textContent = `Ready (${userElements.userName})`;
+        } catch (error) {
+            console.error('[Calls iframe] Error updating user specific UI:', error);
         }
     }
     
     updateApiStatusIndicator() {
-        const apiStatusIndicator = document.getElementById('apiStatusIndicator');
-        const apiStatusText = document.getElementById('apiStatusText');
-        
-        if (apiStatusIndicator && apiStatusText) {
-            apiStatusIndicator.className = 'api-status-indicator connected';
-            apiStatusText.textContent = `Authenticated as ${currentUser?.name || currentUser?.username || 'User'}`;
+        try {
+            const apiStatusIndicator = document.getElementById('apiStatusIndicator');
+            const apiStatusText = document.getElementById('apiStatusText');
             
-            setTimeout(() => {
-                apiStatusIndicator.style.display = 'none';
-            }, 2000);
+            if (apiStatusIndicator && apiStatusText) {
+                apiStatusIndicator.className = 'api-status-indicator connected';
+                apiStatusText.textContent = `Authenticated as ${currentUser?.name || currentUser?.username || 'User'}`;
+                
+                setTimeout(() => {
+                    apiStatusIndicator.style.display = 'none';
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error updating API status indicator:', error);
         }
     }
     
     updateSyncIndicator() {
-        const syncIndicator = document.getElementById('syncIndicator');
-        if (syncIndicator) {
-            syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
-            syncIndicator.classList.remove('syncing');
+        try {
+            const syncIndicator = document.getElementById('syncIndicator');
+            if (syncIndicator) {
+                syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+                syncIndicator.classList.remove('syncing');
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error updating sync indicator:', error);
         }
     }
     
@@ -1272,21 +1578,25 @@ export class ParentChildCommunication {
     }
     
     enableUIFeatures() {
-        const newCallBtn = document.getElementById('newCallBtn');
-        if (newCallBtn) newCallBtn.disabled = false;
-        
-        const quickVoiceBtn = document.getElementById('quickVoiceBtn');
-        const quickVideoBtn = document.getElementById('quickVideoBtn');
-        if (quickVoiceBtn) quickVoiceBtn.disabled = false;
-        if (quickVideoBtn) quickVideoBtn.disabled = false;
-        
-        this.loadUserSpecificData();
+        try {
+            const newCallBtn = document.getElementById('newCallBtn');
+            if (newCallBtn) newCallBtn.disabled = false;
+            
+            const quickVoiceBtn = document.getElementById('quickVoiceBtn');
+            const quickVideoBtn = document.getElementById('quickVideoBtn');
+            if (quickVoiceBtn) quickVoiceBtn.disabled = false;
+            if (quickVideoBtn) quickVideoBtn.disabled = false;
+            
+            this.loadUserSpecificData();
+        } catch (error) {
+            console.error('[Calls iframe] Error enabling UI features:', error);
+        }
     }
     
     async loadUserSpecificData() {
         if (!currentUser || !userDataLoaded) return;
         
-        console.log('[Calls iframe] Loading user-specific data...');
+        console.info('[Calls iframe] Loading user-specific data...');
         
         try {
             if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
@@ -1311,8 +1621,6 @@ export class ParentChildCommunication {
             
             localStorage.setItem('authUser', JSON.stringify(currentUser));
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
-            
-            console.log('[Calls iframe] User data cached successfully');
         } catch (error) {
             console.error('[Calls iframe] Error caching user data:', error);
         }
@@ -1330,7 +1638,6 @@ export class ParentChildCommunication {
                         const userData = data.user || data;
                         
                         if (userData && userData.id) {
-                            console.log(`[Calls iframe] Loaded cached user data from ${key}`);
                             currentUser = userData;
                             userDataLoaded = true;
                             
@@ -1338,7 +1645,7 @@ export class ParentChildCommunication {
                             return true;
                         }
                     } catch (e) {
-                        console.log(`[Calls iframe] Failed to parse cached data from ${key}:`, e);
+                        console.error(`[Calls iframe] Failed to parse cached data from ${key}:`, e);
                     }
                 }
             }
@@ -1367,7 +1674,6 @@ export class ParentChildCommunication {
             localStorage.removeItem('cachedUserData');
             localStorage.removeItem('authUser');
             localStorage.removeItem('currentUser');
-            console.log('[Calls iframe] Cached user data cleared');
         } catch (error) {
             console.error('[Calls iframe] Error clearing cached data:', error);
         }
@@ -1378,24 +1684,31 @@ export class ParentChildCommunication {
             return;
         }
         
-        const appContainer = document.getElementById('appContainer');
-        if (appContainer) {
-            const loginOverlay = document.createElement('div');
-            loginOverlay.className = 'login-overlay';
-            loginOverlay.innerHTML = `
-                <div class="login-message">
-                    <i class="fas fa-sign-in-alt"></i>
-                    <h3>Authentication Required</h3>
-                    <p>Please log in to use the Calls feature</p>
-                    <button id="retryLoginBtn" class="quick-action-btn">Retry Login</button>
-                </div>
-            `;
-            
-            appContainer.appendChild(loginOverlay);
-            
-            document.getElementById('retryLoginBtn')?.addEventListener('click', () => {
-                location.reload();
-            });
+        try {
+            const appContainer = document.getElementById('appContainer');
+            if (appContainer) {
+                const loginOverlay = document.createElement('div');
+                loginOverlay.className = 'login-overlay';
+                loginOverlay.innerHTML = `
+                    <div class="login-message">
+                        <i class="fas fa-sign-in-alt"></i>
+                        <h3>Authentication Required</h3>
+                        <p>Please log in to use the Calls feature</p>
+                        <button id="retryLoginBtn" class="quick-action-btn">Retry Login</button>
+                    </div>
+                `;
+                
+                appContainer.appendChild(loginOverlay);
+                
+                const retryBtn = document.getElementById('retryLoginBtn');
+                if (retryBtn) {
+                    retryBtn.addEventListener('click', () => {
+                        location.reload();
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error showing login screen:', error);
         }
     }
     
@@ -1410,7 +1723,7 @@ export class ParentChildCommunication {
                 return token;
             }
         } catch (error) {
-            console.log('[Calls iframe] Error getting token from api.core.js:', error);
+            console.error('[Calls iframe] Error getting token from api.core.js:', error);
         }
         
         const tokenSources = [
@@ -1427,6 +1740,7 @@ export class ParentChildCommunication {
                     return token;
                 }
             } catch (e) {
+                continue;
             }
         }
         
@@ -1439,31 +1753,38 @@ export class ParentChildCommunication {
             return;
         }
         
-        const notificationArea = document.getElementById('notificationArea');
-        if (notificationArea) {
-            const notification = document.createElement('div');
-            notification.className = `call-notification ${type}`;
-            notification.innerHTML = `
-                <div class="call-notification-content">
-                    <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                    <div class="call-notification-message">${message}</div>
-                </div>
-                <button class="call-notification-close">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
-            
-            notificationArea.appendChild(notification);
-            
-            notification.querySelector('.call-notification-close').addEventListener('click', () => {
-                notification.remove();
-            });
-            
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
+        try {
+            const notificationArea = document.getElementById('notificationArea');
+            if (notificationArea) {
+                const notification = document.createElement('div');
+                notification.className = `call-notification ${type}`;
+                notification.innerHTML = `
+                    <div class="call-notification-content">
+                        <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                        <div class="call-notification-message">${message}</div>
+                    </div>
+                    <button class="call-notification-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                
+                notificationArea.appendChild(notification);
+                
+                const closeBtn = notification.querySelector('.call-notification-close');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', () => {
+                        notification.remove();
+                    });
                 }
-            }, 3000);
+                
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                }, 3000);
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error showing notification:', error);
         }
     }
     
@@ -1476,16 +1797,6 @@ export class ParentChildCommunication {
                 dataSource: source
             }, '*');
         }
-        
-        this.broadcastToOtherIframes({
-            type: 'USER_DATA_LOADED',
-            source: 'calls-iframe',
-            userData: currentUser
-        });
-    }
-    
-    broadcastToOtherIframes(message) {
-        console.log('[Calls iframe] Broadcast message:', message);
     }
     
     cleanup() {
@@ -1505,21 +1816,26 @@ export class TokenManager {
         this.apiInitialized = false;
         this.tokenCheckInterval = null;
         this.migrationDone = false;
-        this.parentCoordinator = parentCoordinator;
+        this.parentCoordinator = null;
         this.coordinatedToken = false;
+        this.tokenRetryCount = 0;
+        this.maxTokenRetries = 3;
     }
     
     async initialize() {
-        console.log('[Calls iframe] Initializing token manager with parent coordination...');
+        console.info('[Calls iframe] Initializing token manager with parent coordination...');
         
-        if (this.parentCoordinator && this.parentCoordinator.sessionData?.token) {
-            console.log('[Calls iframe] Got token from parent coordinator');
-            this.setToken(this.parentCoordinator.sessionData.token);
-            this.coordinatedToken = true;
-            return;
+        if (!parentCoordinator) {
+            console.info('[Calls iframe] Parent coordinator not yet available');
+        } else {
+            this.parentCoordinator = parentCoordinator;
+            if (this.parentCoordinator?.sessionData?.token) {
+                this.setToken(this.parentCoordinator.sessionData.token);
+                this.coordinatedToken = true;
+            }
         }
         
-        this.tryGetTokenFromAPI();
+        await this.tryGetTokenFromAPI();
         
         this.loadCachedData();
         
@@ -1531,33 +1847,56 @@ export class TokenManager {
     }
     
     setupCoordinatedListener() {
-        if (!this.parentCoordinator) return;
+        if (!this.parentCoordinator) {
+            const checkInterval = setInterval(() => {
+                if (parentCoordinator) {
+                    this.parentCoordinator = parentCoordinator;
+                    clearInterval(checkInterval);
+                    
+                    this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
+                        if (updateData.token) {
+                            this.setToken(updateData.token);
+                            this.coordinatedToken = true;
+                        }
+                    });
+                }
+            }, 100);
+            return;
+        }
         
         this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
             if (updateData.token) {
-                console.log('[Calls iframe] Received token update from coordinator');
                 this.setToken(updateData.token);
                 this.coordinatedToken = true;
             }
         });
     }
     
-    tryGetTokenFromAPI() {
+    async tryGetTokenFromAPI() {
+        if (this.coordinatedToken) {
+            return false;
+        }
+        
         try {
-            if (this.coordinatedToken) {
+            if (this.tokenRetryCount >= this.maxTokenRetries) {
+                console.warn('[Calls iframe] Maximum token retry attempts reached');
                 return false;
             }
             
+            this.tokenRetryCount++;
             const token = getUserToken();
+            
             if (token && this.validateToken(token)) {
-                console.log('[Calls iframe] Got token from api.core.js');
                 this.setToken(token);
+                this.tokenRetryCount = 0;
                 return true;
             }
+            
+            return false;
         } catch (error) {
-            console.log('[Calls iframe] Error getting token from api.core.js:', error.message);
+            console.error('[Calls iframe] Error getting token from api.core.js:', error.message);
+            return false;
         }
-        return false;
     }
     
     startTokenPolling() {
@@ -1566,7 +1905,7 @@ export class TokenManager {
         }
         
         if (this.coordinatedToken) {
-            console.log('[Calls iframe] Using coordinated token, skipping API polling');
+            console.info('[Calls iframe] Using coordinated token, skipping API polling');
             return;
         }
         
@@ -1581,37 +1920,39 @@ export class TokenManager {
             if (gotToken) {
                 clearInterval(this.tokenCheckInterval);
                 this.apiInitialized = true;
-                console.log('[Calls iframe] API initialized successfully');
                 this.executeWaitingCallbacks();
             } else if (attempts >= maxAttempts) {
                 clearInterval(this.tokenCheckInterval);
-                console.log('[Calls iframe] API initialization timeout, using coordinated token only');
+                console.info('[Calls iframe] API initialization timeout, using coordinated token only');
                 this.executeWaitingCallbacks();
             }
             
             const storedToken = localStorage.getItem('USER_TOKEN');
             if (storedToken && this.validateToken(storedToken) && !this.token) {
-                console.log('[Calls iframe] Using stored USER_TOKEN');
                 this.setToken(storedToken);
             }
         }, 500);
     }
     
     setToken(token) {
+        if (!this.validateToken(token)) {
+            console.warn('[Calls iframe] Attempted to set invalid token');
+            return;
+        }
+        
         this.token = token;
         this.tokenReady = true;
+        this.tokenRetryCount = 0;
         
         try {
             localStorage.setItem('USER_TOKEN', token);
         } catch (error) {
-            console.log('[Calls iframe] Error storing token:', error);
+            console.error('[Calls iframe] Error storing token:', error);
         }
         
         if (window.AppState) {
             window.AppState.isAuthenticated = true;
         }
-        
-        console.log('[Calls iframe] Token set successfully');
         
         this.executeWaitingCallbacks();
     }
@@ -1643,7 +1984,24 @@ export class TokenManager {
         if (!token || typeof token !== 'string') return false;
         if (token.length < 10) return false;
         if (token.trim() !== token) return false;
-        return true;
+        
+        try {
+            const parts = token.split('.');
+            if (parts.length !== 3) return false;
+            
+            const payload = JSON.parse(atob(parts[1]));
+            if (!payload.exp) return true;
+            
+            const now = Math.floor(Date.now() / 1000);
+            if (payload.exp < now) {
+                console.warn('[Calls iframe] Token expired');
+                return false;
+            }
+            
+            return true;
+        } catch (e) {
+            return true;
+        }
     }
     
     migrateOldTokens() {
@@ -1664,7 +2022,6 @@ export class TokenManager {
                 const oldToken = localStorage.getItem(key);
                 if (oldToken && this.validateToken(oldToken)) {
                     localStorage.setItem('USER_TOKEN', oldToken);
-                    console.log(`[Calls iframe] Migrated token from ${key} to USER_TOKEN`);
                     migrated = true;
                 }
             }
@@ -1673,16 +2030,11 @@ export class TokenManager {
                 const oldToken = sessionStorage.getItem(key);
                 if (oldToken && this.validateToken(oldToken)) {
                     localStorage.setItem('USER_TOKEN', oldToken);
-                    console.log(`[Calls iframe] Migrated token from sessionStorage.${key} to USER_TOKEN`);
                     migrated = true;
                 }
             }
             
             this.migrationDone = true;
-            
-            if (migrated) {
-                console.log('[Calls iframe] Token migration completed');
-            }
         } catch (error) {
             console.error('[Calls iframe] Error during token migration:', error);
         }
@@ -1700,10 +2052,9 @@ export class TokenManager {
                     if (window.AppState) {
                         window.AppState.user = userData;
                         window.AppState.currentUser = userData;
-                        console.log('[Calls iframe] Loaded user data from cache');
                     }
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached user data');
+                    console.error('[Calls iframe] Failed to parse cached user data');
                 }
             }
             
@@ -1711,9 +2062,8 @@ export class TokenManager {
             if (cachedContacts && window.AppState) {
                 try {
                     window.AppState.contacts = JSON.parse(cachedContacts);
-                    console.log('[Calls iframe] Loaded contacts from cache');
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached contacts');
+                    console.error('[Calls iframe] Failed to parse cached contacts');
                 }
             }
             
@@ -1721,9 +2071,8 @@ export class TokenManager {
             if (cachedCalls && window.AppState) {
                 try {
                     window.AppState.callHistory = JSON.parse(cachedCalls);
-                    console.log('[Calls iframe] Loaded call history from cache');
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached call history');
+                    console.error('[Calls iframe] Failed to parse cached call history');
                 }
             }
         } catch (error) {
@@ -1741,21 +2090,19 @@ export class TokenManager {
             const data = event.data;
             
             if (data.type === 'TOKEN_UPDATE') {
-                console.log('[Calls iframe] Received token update from parent');
                 if (data.token && this.validateToken(data.token)) {
                     this.setToken(data.token);
                 }
             }
             
             if (data.type === 'API_READY') {
-                console.log('[Calls iframe] Received API_READY from parent');
                 setTimeout(() => this.tryGetTokenFromAPI(), 100);
             }
         });
     }
     
     getToken() {
-        if (this.parentCoordinator && this.parentCoordinator.sessionData?.token) {
+        if (this.parentCoordinator?.sessionData?.token) {
             return this.parentCoordinator.sessionData.token;
         }
         
@@ -1765,14 +2112,14 @@ export class TokenManager {
                 return token;
             }
         } catch (error) {
-            console.log('[Calls iframe] Error getting token from api.core.js:', error);
+            console.error('[Calls iframe] Error getting token from api.core.js:', error);
         }
         
         return this.token;
     }
     
     isTokenReady() {
-        if (this.parentCoordinator && this.parentCoordinator.sessionData?.token) {
+        if (this.parentCoordinator?.sessionData?.token) {
             return true;
         }
         
@@ -1782,10 +2129,10 @@ export class TokenManager {
                 return true;
             }
         } catch (error) {
-            console.log('[Calls iframe] Error checking token from api.core.js:', error);
+            console.error('[Calls iframe] Error checking token from api.core.js:', error);
         }
         
-        return this.tokenReady;
+        return this.tokenReady && this.validateToken(this.token);
     }
     
     clearToken() {
@@ -1793,6 +2140,7 @@ export class TokenManager {
         this.tokenReady = false;
         this.apiInitialized = false;
         this.coordinatedToken = false;
+        this.tokenRetryCount = 0;
         
         try {
             localStorage.removeItem('USER_TOKEN');
@@ -1823,17 +2171,21 @@ export class SecureAPIClient {
         this.processingQueue = false;
         this.maxRetries = 3;
         this.retryDelay = 1000;
-        this.parentCoordinator = parentCoordinator;
+        this.parentCoordinator = null;
         this.useCoordinatedRouting = false;
+        this.requestTimeout = 10000;
     }
     
     async fetch(url, options = {}) {
-        if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
+        if (!this.parentCoordinator && parentCoordinator) {
+            this.parentCoordinator = parentCoordinator;
+        }
+        
+        if (this.parentCoordinator?.sessionValidated) {
             try {
-                console.log('[Calls iframe] Routing API request through parent coordination:', url);
                 return await this.fetchThroughCoordinator(url, options);
             } catch (error) {
-                console.log('[Calls iframe] Coordinated routing failed, falling back:', error.message);
+                console.warn('[Calls iframe] Coordinator fetch failed, falling back:', error.message);
                 this.useCoordinatedRouting = false;
             }
         }
@@ -1841,14 +2193,14 @@ export class SecureAPIClient {
         try {
             return await secureFetch(url, options);
         } catch (error) {
-            console.log('[Calls iframe] api.core.js secureFetch failed, falling back:', error.message);
+            console.error('[Calls iframe] api.core.js secureFetch failed:', error.message);
         }
         
         return this.secureFetchFallback(url, options);
     }
     
     async fetchThroughCoordinator(url, options = {}) {
-        if (!this.parentCoordinator || !this.parentCoordinator.sessionValidated) {
+        if (!this.parentCoordinator?.sessionValidated) {
             throw new Error('Parent coordinator not available');
         }
         
@@ -1858,6 +2210,7 @@ export class SecureAPIClient {
                 const urlObj = new URL(url);
                 endpoint = urlObj.pathname + urlObj.search;
             } catch (error) {
+                console.error('[Calls iframe] Error parsing URL:', error);
             }
         }
         
@@ -1885,8 +2238,9 @@ export class SecureAPIClient {
             }
             
             const token = this.tokenManager.getToken();
-            if (!token) {
-                throw new Error('No authentication token available');
+            if (!token || !this.tokenManager.validateToken(token)) {
+                console.warn('[Calls iframe] No valid authentication token available');
+                return this.queueRequest(url, options);
             }
             
             const headers = {
@@ -1895,14 +2249,18 @@ export class SecureAPIClient {
                 ...options.headers
             };
             
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+            
             const response = await fetch(url, {
                 ...options,
-                headers
+                headers,
+                signal: controller.signal
             });
             
+            clearTimeout(timeoutId);
+            
             if (response.status === 401) {
-                console.log('[Calls iframe] Authentication failed (401)');
-                
                 this.tokenManager.clearToken();
                 
                 if (this.parentCoordinator) {
@@ -1930,6 +2288,10 @@ export class SecureAPIClient {
             
             return response;
         } catch (error) {
+            if (error.name === 'AbortError') {
+                throw new Error('Request timeout');
+            }
+            
             if (retryCount < this.maxRetries && 
                 (error.message.includes('Network') || error.message.includes('Failed to fetch'))) {
                 const delay = this.retryDelay * Math.pow(2, retryCount);
@@ -2025,31 +2387,38 @@ export class SecureAPIClient {
             return;
         }
         
-        const notificationArea = document.getElementById('notificationArea');
-        if (notificationArea) {
-            const notification = document.createElement('div');
-            notification.className = `call-notification ${type}`;
-            notification.innerHTML = `
-                <div class="call-notification-content">
-                    <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                    <div class="call-notification-message">${message}</div>
-                </div>
-                <button class="call-notification-close">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
-            
-            notificationArea.appendChild(notification);
-            
-            notification.querySelector('.call-notification-close').addEventListener('click', () => {
-                notification.remove();
-            });
-            
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
+        try {
+            const notificationArea = document.getElementById('notificationArea');
+            if (notificationArea) {
+                const notification = document.createElement('div');
+                notification.className = `call-notification ${type}`;
+                notification.innerHTML = `
+                    <div class="call-notification-content">
+                        <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                        <div class="call-notification-message">${message}</div>
+                    </div>
+                    <button class="call-notification-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                
+                notificationArea.appendChild(notification);
+                
+                const closeBtn = notification.querySelector('.call-notification-close');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', () => {
+                        notification.remove();
+                    });
                 }
-            }, 3000);
+                
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                }, 3000);
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error showing notification:', error);
         }
     }
 }
@@ -2064,54 +2433,86 @@ export class CallAPIIntegration {
         this.backgroundJobsStarted = false;
         this.initialDataLoaded = false;
         this.parentCommunication = new ParentChildCommunication();
-        this.parentCoordinator = parentCoordinator;
+        this.parentCoordinator = null;
         this.sessionInitialized = false;
         this.apiConfig = {};
+        this.initAttempts = 0;
+        this.maxInitAttempts = 3;
+        this.isInitializing = false;
     }
     
     async initialize() {
-        console.log('[Calls iframe] Initializing API integration with parent coordination...');
+        if (this.isInitializing) {
+            console.info('[Calls iframe] Initialization already in progress');
+            return this;
+        }
         
         if (sessionInitializationLock) {
-            console.log('[Calls iframe] Initialization already in progress, skipping...');
+            console.info('[Calls iframe] Initialization already in progress, skipping...');
             return this;
         }
         
         sessionInitializationLock = true;
+        this.isInitializing = true;
+        this.initAttempts++;
         
         try {
+            console.info('[Calls iframe] Initializing API integration with parent coordination...');
+            
             if (!parentCoordinator) {
+                console.info('[Calls iframe] Creating new parent coordinator...');
                 parentCoordinator = new ParentCoordinator();
-                this.parentCoordinator = parentCoordinator;
+                await parentCoordinator.initialize();
             }
+            
+            this.parentCoordinator = parentCoordinator;
+            
+            this.parentCommunication.parentCoordinator = this.parentCoordinator;
+            this.tokenManager.parentCoordinator = this.parentCoordinator;
+            this.apiClient.parentCoordinator = this.parentCoordinator;
             
             await this.parentCommunication.initialize();
             
-            this.tokenManager.initialize();
+            await this.tokenManager.initialize();
             
             this.setupInitialUI();
             
-            this.startBackgroundAuthCheck();
+            await this.startBackgroundAuthCheck();
             
             window.addEventListener('beforeunload', () => this.cleanup());
             
             this.registerWithCoordinator();
             
             sessionInitialized = true;
-            console.log('[Calls iframe] API integration with parent coordination initialized');
+            this.isInitializing = false;
+            this.initAttempts = 0;
             
+            console.info('[Calls iframe] API integration with parent coordination initialized');
             return this;
         } catch (error) {
             console.error('[Calls iframe] API integration initialization failed:', error);
-            sessionInitializationLock = false;
-            throw error;
+            
+            if (this.initAttempts < this.maxInitAttempts) {
+                console.info(`[Calls iframe] Retrying initialization (${this.initAttempts}/${this.maxInitAttempts})...`);
+                setTimeout(() => this.initialize(), 1000 * this.initAttempts);
+            } else {
+                console.error('[Calls iframe] Max initialization attempts reached');
+                this.isInitializing = false;
+                sessionInitializationLock = false;
+                throw error;
+            }
         } finally {
-            sessionInitializationLock = false;
+            if (!this.isInitializing) {
+                sessionInitializationLock = false;
+            }
         }
     }
     
     registerWithCoordinator() {
-        if (!this.parentCoordinator) return;
+        if (!this.parentCoordinator) {
+            console.warn('[Calls iframe] Cannot register with coordinator - not available');
+            return;
+        }
         
         this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
             this.handleCoordinatedSessionUpdate(updateData);
@@ -2125,7 +2526,7 @@ export class CallAPIIntegration {
     }
     
     handleCoordinatedSessionUpdate(updateData) {
-        console.log('[Calls iframe] Handling coordinated session update:', updateData);
+        if (!updateData) return;
         
         if (updateData.apiConfig) {
             this.apiConfig = { ...this.apiConfig, ...updateData.apiConfig };
@@ -2141,39 +2542,49 @@ export class CallAPIIntegration {
     }
     
     setupInitialUI() {
-        const apiStatusIndicator = document.getElementById('apiStatusIndicator');
-        const apiStatusText = document.getElementById('apiStatusText');
-        
-        if (apiStatusIndicator && apiStatusText) {
-            apiStatusIndicator.className = 'api-status-indicator connecting';
-            apiStatusText.textContent = 'Initializing with parent...';
-            apiStatusIndicator.style.display = 'block';
+        try {
+            const apiStatusIndicator = document.getElementById('apiStatusIndicator');
+            const apiStatusText = document.getElementById('apiStatusText');
+            
+            if (apiStatusIndicator && apiStatusText) {
+                apiStatusIndicator.className = 'api-status-indicator connecting';
+                apiStatusText.textContent = 'Initializing with parent...';
+                apiStatusIndicator.style.display = 'block';
+            }
+            
+            this.loadCachedDataToUI();
+            
+            this.showUI();
+        } catch (error) {
+            console.error('[Calls iframe] Error setting up initial UI:', error);
         }
-        
-        this.loadCachedDataToUI();
-        
-        this.showUI();
     }
     
     showUI() {
-        const appContainer = document.getElementById('appContainer');
-        if (appContainer) {
-            appContainer.style.display = 'block';
-            appContainer.style.opacity = '1';
+        try {
+            const appContainer = document.getElementById('appContainer');
+            if (appContainer) {
+                appContainer.style.display = 'block';
+                appContainer.style.opacity = '1';
+            }
+            
+            this.enableBasicUI();
+        } catch (error) {
+            console.error('[Calls iframe] Error showing UI:', error);
         }
-        
-        this.enableBasicUI();
     }
     
     enableBasicUI() {
-        const settingsToggle = document.getElementById('settingsToggle');
-        if (settingsToggle) {
-            settingsToggle.disabled = false;
+        try {
+            const settingsToggle = document.getElementById('settingsToggle');
+            if (settingsToggle) {
+                settingsToggle.disabled = false;
+            }
+            
+            this.renderCachedCallHistory();
+        } catch (error) {
+            console.error('[Calls iframe] Error enabling basic UI:', error);
         }
-        
-        this.renderCachedCallHistory();
-        
-        console.log('[Calls iframe] Basic UI enabled immediately');
     }
     
     async startBackgroundAuthCheck() {
@@ -2184,11 +2595,16 @@ export class CallAPIIntegration {
                 await this.waitForTokenAuth();
             }
         } catch (error) {
-            console.log('[Calls iframe] Background auth check failed:', error.message);
+            console.error('[Calls iframe] Background auth check failed:', error.message);
         }
     }
     
     async waitForCoordinatorSession() {
+        if (!this.parentCoordinator) {
+            console.warn('[Calls iframe] No parent coordinator available');
+            return;
+        }
+        
         return new Promise((resolve, reject) => {
             if (this.parentCoordinator.sessionValidated && currentUser) {
                 this.onAuthenticationSuccess();
@@ -2197,7 +2613,7 @@ export class CallAPIIntegration {
             }
             
             const timeout = setTimeout(() => {
-                console.log('[Calls iframe] Coordinator session timeout, using cached data');
+                console.info('[Calls iframe] Coordinator session timeout, using cached data');
                 resolve();
             }, 5000);
             
@@ -2212,7 +2628,7 @@ export class CallAPIIntegration {
                 if (this.parentCoordinator.fallbackState === 'unavailable') {
                     clearTimeout(timeout);
                     clearInterval(checkInterval);
-                    console.log('[Calls iframe] Coordinator unavailable, using cached data');
+                    console.info('[Calls iframe] Coordinator unavailable, using cached data');
                     resolve();
                 }
             }, 100);
@@ -2227,16 +2643,14 @@ export class CallAPIIntegration {
         const token = await Promise.race([tokenPromise, timeoutPromise]);
         
         if (token) {
-            console.log('[Calls iframe] Authentication confirmed via token');
             this.onAuthenticationSuccess(token);
         } else {
-            console.log('[Calls iframe] Token not ready yet, continuing with cached data');
+            console.info('[Calls iframe] Token not ready yet, continuing with cached data');
         }
     }
     
     onAuthenticationSuccess(token) {
         if (this.authCheckDone) {
-            console.log('[Calls iframe] Authentication already confirmed, skipping...');
             return;
         }
         
@@ -2245,23 +2659,27 @@ export class CallAPIIntegration {
         }
         this.authCheckDone = true;
         
-        const apiStatusIndicator = document.getElementById('apiStatusIndicator');
-        const apiStatusText = document.getElementById('apiStatusText');
-        
-        if (apiStatusIndicator && apiStatusText) {
-            apiStatusIndicator.className = 'api-status-indicator connected';
+        try {
+            const apiStatusIndicator = document.getElementById('apiStatusIndicator');
+            const apiStatusText = document.getElementById('apiStatusText');
             
-            if (currentUser && currentUser.name) {
-                apiStatusText.textContent = `Authenticated as ${currentUser.name}`;
-            } else {
-                apiStatusText.textContent = 'Authenticated';
-            }
-            
-            setTimeout(() => {
-                if (apiStatusIndicator) {
-                    apiStatusIndicator.style.display = 'none';
+            if (apiStatusIndicator && apiStatusText) {
+                apiStatusIndicator.className = 'api-status-indicator connected';
+                
+                if (currentUser?.name) {
+                    apiStatusText.textContent = `Authenticated as ${currentUser.name}`;
+                } else {
+                    apiStatusText.textContent = 'Authenticated';
                 }
-            }, 2000);
+                
+                setTimeout(() => {
+                    if (apiStatusIndicator) {
+                        apiStatusIndicator.style.display = 'none';
+                    }
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('[Calls iframe] Error updating auth status:', error);
         }
         
         if (!this.backgroundJobsStarted) {
@@ -2273,7 +2691,7 @@ export class CallAPIIntegration {
     startBackgroundJobs() {
         if (window.AppState && !window.AppState.isOnline) return;
         
-        console.log('[Calls iframe] Starting background jobs...');
+        console.info('[Calls iframe] Starting background jobs...');
         
         this.initializeBackgroundSync();
         
@@ -2286,8 +2704,6 @@ export class CallAPIIntegration {
         if ((window.AppState && !window.AppState.isAuthenticated) || (window.AppState && !window.AppState.isOnline)) return;
         
         try {
-            console.log('[Calls iframe] Starting background data load...');
-            
             const syncIndicator = document.getElementById('syncIndicator');
             if (syncIndicator) {
                 syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
@@ -2302,7 +2718,6 @@ export class CallAPIIntegration {
                 this.checkPremiumStatus()
             ]);
             
-            console.log('[Calls iframe] Background data loading complete');
             this.initialDataLoaded = true;
             
             if (syncIndicator) {
@@ -2318,7 +2733,7 @@ export class CallAPIIntegration {
                 });
             }
         } catch (error) {
-            console.log('[Calls iframe] Background data loading failed:', error.message);
+            console.error('[Calls iframe] Background data loading failed:', error.message);
             if (window.AppState) {
                 window.AppState.syncPending = true;
             }
@@ -2337,8 +2752,6 @@ export class CallAPIIntegration {
         }
         
         if (window.AppState && window.AppState.isAuthenticated && window.AppState.isOnline) {
-            console.log('[Calls iframe] Starting background sync');
-            
             this.backgroundSyncInterval = setInterval(() => {
                 this.performBackgroundSync();
             }, 30000);
@@ -2371,7 +2784,7 @@ export class CallAPIIntegration {
                 window.AppState.syncPending = false;
             }
         } catch (error) {
-            console.log('[Calls iframe] Background sync failed:', error.message);
+            console.error('[Calls iframe] Background sync failed:', error.message);
             if (window.AppState) {
                 window.AppState.syncPending = true;
             }
@@ -2380,7 +2793,7 @@ export class CallAPIIntegration {
     
     async fetchUserData() {
         try {
-            if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
+            if (this.parentCoordinator?.sessionValidated) {
                 const userData = await this.parentCoordinator.routeApiCall('/api/user/me', 'GET');
                 if (userData) {
                     this.updateUserState(userData);
@@ -2395,8 +2808,6 @@ export class CallAPIIntegration {
                 return userData;
             }
         } catch (error) {
-            console.log('[Calls iframe] Failed to fetch user data:', error.message);
-            
             const cachedUser = localStorage.getItem('authUser') || 
                               localStorage.getItem('currentUser');
             
@@ -2406,7 +2817,7 @@ export class CallAPIIntegration {
                     this.updateUserState(userData);
                     return userData;
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached user data');
+                    console.error('[Calls iframe] Failed to parse cached user data');
                 }
             }
         }
@@ -2415,7 +2826,7 @@ export class CallAPIIntegration {
     }
     
     getApiBaseUrl() {
-        if (this.parentCoordinator && this.parentCoordinator.sessionData?.apiConfig?.baseUrl) {
+        if (this.parentCoordinator?.sessionData?.apiConfig?.baseUrl) {
             return this.parentCoordinator.sessionData.apiConfig.baseUrl;
         }
         
@@ -2425,7 +2836,7 @@ export class CallAPIIntegration {
                 return baseUrl;
             }
         } catch (error) {
-            console.log('[Calls iframe] Error getting API base URL from api.core.js:', error);
+            console.error('[Calls iframe] Error getting API base URL from api.core.js:', error);
         }
         
         return '/api';
@@ -2443,13 +2854,13 @@ export class CallAPIIntegration {
             localStorage.setItem('authUser', JSON.stringify(userData));
             localStorage.setItem('currentUser', JSON.stringify(userData));
         } catch (error) {
-            console.log('[Calls iframe] Error caching user data:', error);
+            console.error('[Calls iframe] Error caching user data:', error);
         }
     }
     
     async fetchContacts(forceRefresh = false) {
         try {
-            if (!forceRefresh && window.AppState && window.AppState.contacts.length > 0) {
+            if (!forceRefresh && window.AppState && window.AppState.contacts?.length > 0) {
                 return window.AppState.contacts;
             }
             
@@ -2463,16 +2874,15 @@ export class CallAPIIntegration {
                     this.renderContacts(contacts);
                     return contacts;
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached contacts');
+                    console.error('[Calls iframe] Failed to parse cached contacts');
                 }
             }
             
             if (!window.AppState || !window.AppState.isAuthenticated) {
-                console.log('[Calls iframe] Not authenticated, skipping contacts fetch');
                 return window.AppState ? window.AppState.contacts : [];
             }
             
-            if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
+            if (this.parentCoordinator?.sessionValidated) {
                 const contacts = await this.parentCoordinator.routeApiCall('/api/contacts', 'GET');
                 if (contacts) {
                     if (window.AppState) {
@@ -2500,7 +2910,7 @@ export class CallAPIIntegration {
             
             return contacts;
         } catch (error) {
-            console.log('[Calls iframe] Failed to fetch contacts:', error.message);
+            console.error('[Calls iframe] Failed to fetch contacts:', error.message);
             
             const cachedContacts = localStorage.getItem('cachedContacts');
             if (cachedContacts) {
@@ -2512,7 +2922,7 @@ export class CallAPIIntegration {
                     this.renderContacts(contacts);
                     return contacts;
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached contacts on error');
+                    console.error('[Calls iframe] Failed to parse cached contacts on error');
                 }
             }
             
@@ -2525,13 +2935,13 @@ export class CallAPIIntegration {
             localStorage.setItem('cachedContacts', JSON.stringify(contacts));
             localStorage.setItem('cachedContactsTimestamp', Date.now().toString());
         } catch (error) {
-            console.log('[Calls iframe] Failed to cache contacts:', error);
+            console.error('[Calls iframe] Failed to cache contacts:', error);
         }
     }
     
     async fetchCallHistory(forceRefresh = false) {
         try {
-            if (!forceRefresh && window.AppState && window.AppState.callHistory.length > 0) {
+            if (!forceRefresh && window.AppState && window.AppState.callHistory?.length > 0) {
                 return window.AppState.callHistory;
             }
             
@@ -2545,16 +2955,15 @@ export class CallAPIIntegration {
                     renderCallHistory();
                     return history;
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached call history');
+                    console.error('[Calls iframe] Failed to parse cached call history');
                 }
             }
             
             if (!window.AppState || !window.AppState.isAuthenticated) {
-                console.log('[Calls iframe] Not authenticated, skipping call history fetch');
                 return window.AppState ? window.AppState.callHistory : [];
             }
             
-            if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
+            if (this.parentCoordinator?.sessionValidated) {
                 const history = await this.parentCoordinator.routeApiCall('/api/calls/history', 'GET');
                 if (history) {
                     if (window.AppState) {
@@ -2579,7 +2988,7 @@ export class CallAPIIntegration {
             
             return history;
         } catch (error) {
-            console.log('[Calls iframe] Failed to fetch call history:', error.message);
+            console.error('[Calls iframe] Failed to fetch call history:', error.message);
             
             const cachedHistory = localStorage.getItem('cachedCallHistory');
             if (cachedHistory) {
@@ -2591,7 +3000,7 @@ export class CallAPIIntegration {
                     renderCallHistory();
                     return history;
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached call history on error');
+                    console.error('[Calls iframe] Failed to parse cached call history on error');
                 }
             }
             
@@ -2604,7 +3013,7 @@ export class CallAPIIntegration {
             localStorage.setItem('cachedCallHistory', JSON.stringify(history));
             localStorage.setItem('cachedCallHistoryTimestamp', Date.now().toString());
         } catch (error) {
-            console.log('[Calls iframe] Failed to cache call history:', error);
+            console.error('[Calls iframe] Failed to cache call history:', error);
         }
     }
     
@@ -2618,7 +3027,7 @@ export class CallAPIIntegration {
                 }
                 renderCallHistory();
             } catch (e) {
-                console.log('[Calls iframe] Failed to parse cached call history for UI');
+                console.error('[Calls iframe] Failed to parse cached call history for UI');
             }
         }
     }
@@ -2634,11 +3043,10 @@ export class CallAPIIntegration {
             }
             
             if (!window.AppState || !window.AppState.isAuthenticated) {
-                console.log('[Calls iframe] Not authenticated, using cached settings');
                 return window.AppState ? window.AppState.settings : {};
             }
             
-            if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
+            if (this.parentCoordinator?.sessionValidated) {
                 const settings = await this.parentCoordinator.routeApiCall('/api/user/settings', 'GET');
                 if (settings && window.AppState) {
                     window.AppState.settings = { ...window.AppState.settings, ...settings };
@@ -2659,7 +3067,7 @@ export class CallAPIIntegration {
             
             return window.AppState ? window.AppState.settings : {};
         } catch (error) {
-            console.log('[Calls iframe] Failed to fetch settings:', error.message);
+            console.error('[Calls iframe] Failed to fetch settings:', error.message);
             
             const cachedSettings = localStorage.getItem('callSettings');
             if (cachedSettings && window.AppState) {
@@ -2668,7 +3076,7 @@ export class CallAPIIntegration {
                     window.AppState.settings = { ...window.AppState.settings, ...settings };
                     applySettingsToUI();
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached settings');
+                    console.error('[Calls iframe] Failed to parse cached settings');
                 }
             }
             
@@ -2688,12 +3096,11 @@ export class CallAPIIntegration {
             }
             
             if (!window.AppState || !window.AppState.isAuthenticated) {
-                console.log('[Calls iframe] Not authenticated, using cached premium status');
                 updatePremiumUI();
                 return window.AppState ? window.AppState.isPremium : false;
             }
             
-            if (this.parentCoordinator && this.parentCoordinator.sessionValidated) {
+            if (this.parentCoordinator?.sessionValidated) {
                 const premiumData = await this.parentCoordinator.routeApiCall('/api/user/premium', 'GET');
                 if (premiumData && window.AppState) {
                     window.AppState.isPremium = premiumData.isPremium || false;
@@ -2719,7 +3126,7 @@ export class CallAPIIntegration {
             }
             return window.AppState ? window.AppState.isPremium : false;
         } catch (error) {
-            console.log('[Calls iframe] Failed to check premium status:', error.message);
+            console.error('[Calls iframe] Failed to check premium status:', error.message);
             
             const cachedPremium = localStorage.getItem('premiumStatus');
             if (cachedPremium && window.AppState) {
@@ -2729,7 +3136,7 @@ export class CallAPIIntegration {
                     window.AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
                     window.AppState.premiumFeatures = premiumData.features || window.AppState.premiumFeatures;
                 } catch (e) {
-                    console.log('[Calls iframe] Failed to parse cached premium status');
+                    console.error('[Calls iframe] Failed to parse cached premium status');
                 }
             }
             
@@ -2746,62 +3153,60 @@ export class CallAPIIntegration {
                 features: window.AppState ? window.AppState.premiumFeatures : {}
             }));
         } catch (error) {
-            console.log('[Calls iframe] Error caching premium status:', error);
+            console.error('[Calls iframe] Error caching premium status:', error);
         }
     }
     
     loadCachedDataToUI() {
-        console.log('[Calls iframe] Loading cached data to UI...');
-        
-        loadSettings();
-        
-        const cachedContacts = localStorage.getItem('cachedContacts');
-        if (cachedContacts) {
-            try {
-                const contacts = JSON.parse(cachedContacts);
-                if (window.AppState) {
-                    window.AppState.contacts = contacts;
+        try {
+            loadSettings();
+            
+            const cachedContacts = localStorage.getItem('cachedContacts');
+            if (cachedContacts) {
+                try {
+                    const contacts = JSON.parse(cachedContacts);
+                    if (window.AppState) {
+                        window.AppState.contacts = contacts;
+                    }
+                    this.renderContacts(contacts);
+                } catch (e) {
+                    console.error('[Calls iframe] Failed to parse cached contacts');
                 }
-                this.renderContacts(contacts);
-            } catch (e) {
-                console.log('[Calls iframe] Failed to parse cached contacts');
             }
-        }
-        
-        const cachedCalls = localStorage.getItem('cachedCallHistory');
-        if (cachedCalls) {
-            try {
-                const calls = JSON.parse(cachedCalls);
-                if (window.AppState) {
-                    window.AppState.callHistory = calls;
+            
+            const cachedCalls = localStorage.getItem('cachedCallHistory');
+            if (cachedCalls) {
+                try {
+                    const calls = JSON.parse(cachedCalls);
+                    if (window.AppState) {
+                        window.AppState.callHistory = calls;
+                    }
+                    renderCallHistory();
+                } catch (e) {
+                    console.error('[Calls iframe] Failed to parse cached call history');
                 }
-                renderCallHistory();
-            } catch (e) {
-                console.log('[Calls iframe] Failed to parse cached call history');
             }
-        }
-        
-        const cachedPremium = localStorage.getItem('premiumStatus');
-        if (cachedPremium) {
-            try {
-                const premiumData = JSON.parse(cachedPremium);
-                if (window.AppState) {
-                    window.AppState.isPremium = premiumData.isPremium || false;
-                    window.AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
-                    window.AppState.premiumFeatures = premiumData.features || (window.AppState ? window.AppState.premiumFeatures : {});
+            
+            const cachedPremium = localStorage.getItem('premiumStatus');
+            if (cachedPremium) {
+                try {
+                    const premiumData = JSON.parse(cachedPremium);
+                    if (window.AppState) {
+                        window.AppState.isPremium = premiumData.isPremium || false;
+                        window.AppState.trialDaysLeft = premiumData.trialDaysLeft || 30;
+                        window.AppState.premiumFeatures = premiumData.features || (window.AppState ? window.AppState.premiumFeatures : {});
+                    }
+                    updatePremiumUI();
+                } catch (e) {
+                    console.error('[Calls iframe] Failed to parse cached premium status');
                 }
-                updatePremiumUI();
-            } catch (e) {
-                console.log('[Calls iframe] Failed to parse cached premium status');
             }
+        } catch (error) {
+            console.error('[Calls iframe] Error loading cached data to UI:', error);
         }
-        
-        console.log('[Calls iframe] Cached data loaded to UI');
     }
     
     handleLogout() {
-        console.log('[Calls iframe] Logout handled by API integration');
-        
         this.authCheckDone = false;
         this.backgroundJobsStarted = false;
         this.initialDataLoaded = false;
@@ -3018,16 +3423,11 @@ export const elements = {};
 
 // ==================== INCOMING CALL SIMULATION FUNCTION ====================
 export function simulateIncomingCall(callerId, metadata = {}) {
-    console.log('[Calls iframe] Simulating incoming call for:', callerId, metadata);
-    
-    // Don't simulate if already in a call
     if (AppState.isInCall) {
-        console.log('[Calls iframe] Already in a call, ignoring simulation');
         showNotification('Already in a call', 'warning');
         return false;
     }
     
-    // Find contact by ID or create a mock contact
     let callerContact = null;
     
     if (AppState.contacts && AppState.contacts.length > 0) {
@@ -3035,7 +3435,6 @@ export function simulateIncomingCall(callerId, metadata = {}) {
     }
     
     if (!callerContact) {
-        // Create mock contact for simulation
         callerContact = {
             id: callerId,
             name: metadata.name || 'Test Caller',
@@ -3044,7 +3443,6 @@ export function simulateIncomingCall(callerId, metadata = {}) {
         };
     }
     
-    // Prepare call metadata
     const callMetadata = {
         callType: metadata.callType || 'voice',
         mood: metadata.mood || 'neutral',
@@ -3055,17 +3453,13 @@ export function simulateIncomingCall(callerId, metadata = {}) {
         ...metadata
     };
     
-    // Update UI elements for incoming call
     if (elements.incomingCallModal && elements.incomingCallAvatar && elements.incomingCallName) {
-        // Set caller info
         elements.incomingCallName.textContent = callerContact.name;
         
-        // Set avatar
         if (callerContact.avatar) {
             elements.incomingCallAvatar.src = callerContact.avatar;
             elements.incomingCallAvatar.alt = callerContact.name;
         } else {
-            // Generate avatar color and initials
             const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
             const bgColor = stringToColor(callerContact.name);
             elements.incomingCallAvatar.style.backgroundColor = bgColor;
@@ -3073,13 +3467,11 @@ export function simulateIncomingCall(callerId, metadata = {}) {
             elements.incomingCallAvatar.src = '';
         }
         
-        // Set call type
         if (elements.incomingCallType) {
             elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
             elements.incomingCallType.className = `call-type-badge ${callMetadata.callType}`;
         }
         
-        // Set mood if available
         if (elements.incomingCallMood && callMetadata.mood) {
             elements.incomingCallMood.innerHTML = `
                 <div class="mood-indicator mood-${callMetadata.mood}">
@@ -3092,7 +3484,6 @@ export function simulateIncomingCall(callerId, metadata = {}) {
             elements.incomingCallMood.style.display = 'none';
         }
         
-        // Set intention if available
         if (elements.incomingCallIntention && callMetadata.intention) {
             elements.incomingCallIntention.innerHTML = `
                 <div class="intention-indicator intention-${callMetadata.intention}">
@@ -3105,10 +3496,8 @@ export function simulateIncomingCall(callerId, metadata = {}) {
             elements.incomingCallIntention.style.display = 'none';
         }
         
-        // Show the incoming call modal
         elements.incomingCallModal.classList.add('active');
         
-        // Set up auto-decline timer (30 seconds)
         let timeLeft = 30;
         if (elements.autoDeclineTimer) {
             elements.autoDeclineTimer.textContent = timeLeft;
@@ -3126,15 +3515,12 @@ export function simulateIncomingCall(callerId, metadata = {}) {
             }
         }, 1000);
         
-        // Store timer reference
         window._simulatedCallTimer = declineTimer;
         window._simulatedCallMetadata = callMetadata;
         window._simulatedCallerContact = callerContact;
         
-        // Play incoming call sound (if available)
         playIncomingCallSound();
         
-        // Emit call event
         emitCallEvent('incoming_call_simulated', {
             callerId: callerId,
             callerContact: callerContact,
@@ -3142,7 +3528,6 @@ export function simulateIncomingCall(callerId, metadata = {}) {
             timestamp: Date.now()
         });
         
-        // Notify parent window if in iframe
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({
                 type: 'INCOMING_CALL_SIMULATED',
@@ -3153,7 +3538,6 @@ export function simulateIncomingCall(callerId, metadata = {}) {
             }, '*');
         }
         
-        console.log('[Calls iframe] Incoming call simulation started');
         return true;
     } else {
         console.error('[Calls iframe] Could not find required UI elements for incoming call simulation');
@@ -3162,8 +3546,6 @@ export function simulateIncomingCall(callerId, metadata = {}) {
 }
 
 function handleDeclineSimulatedCall(callId) {
-    console.log('[Calls iframe] Simulated call auto-declined:', callId);
-    
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
     }
@@ -3173,39 +3555,30 @@ function handleDeclineSimulatedCall(callId) {
         window._simulatedCallTimer = null;
     }
     
-    // Emit call declined event
     emitCallEvent('call_declined', {
         callId: callId,
         reason: 'auto_decline',
         timestamp: Date.now()
     });
     
-    // Show notification
     showNotification('Simulated call declined (auto)', 'info');
     
-    // Clean up
     window._simulatedCallMetadata = null;
     window._simulatedCallerContact = null;
     
-    // Stop incoming call sound
     stopIncomingCallSound();
 }
 
 function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false) {
-    console.log('[Calls iframe] Accepting simulated call:', callMetadata.callId);
-    
-    // Stop timer
     if (window._simulatedCallTimer) {
         clearInterval(window._simulatedCallTimer);
         window._simulatedCallTimer = null;
     }
     
-    // Hide incoming call modal
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
     }
     
-    // Set up call state
     AppState.isInCall = true;
     AppState.callType = isVideo ? 'video' : callMetadata.callType;
     AppState.activeCallId = callMetadata.callId;
@@ -3214,9 +3587,12 @@ function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false)
     AppState.currentMood = callMetadata.mood || 'neutral';
     AppState.currentIntention = callMetadata.intention || 'quick';
     
-    // Update UI for active call
     if (elements.callContainer) {
         elements.callContainer.classList.add('active');
+    }
+    
+    if (elements.appContainer) {
+        elements.appContainer.classList.add('in-call');
     }
     
     if (elements.callWithName) {
@@ -3232,22 +3608,17 @@ function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false)
         elements.callStatusText.textContent = 'Connected (Simulated)';
     }
     
-    // Update mood and intention indicators
     updateMoodIndicator(AppState.currentMood);
     updateIntentionIndicator(AppState.currentIntention);
     
-    // Start call timer
     startCallTimer();
     
-    // Initialize call features
     initializeCallFeatures();
     
-    // Show video if this is a video call
     if (isVideo || callMetadata.callType === 'video') {
         showSimulatedVideo(callerContact);
     }
     
-    // Emit call accepted event
     emitCallEvent('call_accepted', {
         callId: callMetadata.callId,
         callType: AppState.callType,
@@ -3256,7 +3627,6 @@ function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false)
         timestamp: Date.now()
     });
     
-    // Notify parent window
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({
             type: 'CALL_ACCEPTED_SIMULATED',
@@ -3268,23 +3638,18 @@ function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false)
         }, '*');
     }
     
-    // Show notification
     showNotification(`Simulated ${AppState.callType} call started`, 'success');
     
-    // Clean up
     window._simulatedCallMetadata = null;
     window._simulatedCallerContact = null;
     
-    // Stop incoming call sound
     stopIncomingCallSound();
 }
 
 function showSimulatedVideo(callerContact) {
     if (elements.videoGrid) {
-        // Clear existing video containers
         elements.videoGrid.innerHTML = '';
         
-        // Create local video container (simulated)
         const localVideoContainer = document.createElement('div');
         localVideoContainer.className = 'video-container local';
         localVideoContainer.innerHTML = `
@@ -3296,7 +3661,6 @@ function showSimulatedVideo(callerContact) {
         `;
         elements.videoGrid.appendChild(localVideoContainer);
         
-        // Create remote video container (simulated)
         const remoteVideoContainer = document.createElement('div');
         remoteVideoContainer.className = 'video-container remote';
         remoteVideoContainer.innerHTML = `
@@ -3310,22 +3674,11 @@ function showSimulatedVideo(callerContact) {
         `;
         elements.videoGrid.appendChild(remoteVideoContainer);
         
-        // Update video layout
         updateVideoLayout();
-        
-        // For testing, we could simulate video stream with a test pattern
-        simulateTestVideoPattern();
     }
 }
 
-function simulateTestVideoPattern() {
-    // This is a placeholder for actual video simulation
-    // In a real implementation, you might use a test pattern or mock stream
-    console.log('[Calls iframe] Video simulation placeholder - would initialize WebRTC in real implementation');
-}
-
 function playIncomingCallSound() {
-    // Create and play a simple incoming call sound
     try {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioContext.createOscillator();
@@ -3339,7 +3692,6 @@ function playIncomingCallSound() {
         
         gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
         
-        // Pulse pattern
         const pulseTime = 0.5;
         const silenceTime = 1.5;
         
@@ -3356,7 +3708,7 @@ function playIncomingCallSound() {
         window._oscillator = oscillator;
         
     } catch (error) {
-        console.log('[Calls iframe] Could not play audio:', error);
+        console.error('[Calls iframe] Could not play audio:', error);
     }
 }
 
@@ -3371,7 +3723,7 @@ function stopIncomingCallSound() {
             window._oscillator.stop();
             window._oscillator = null;
         } catch (error) {
-            console.log('[Calls iframe] Error stopping oscillator:', error);
+            console.error('[Calls iframe] Error stopping oscillator:', error);
         }
     }
     
@@ -3380,178 +3732,178 @@ function stopIncomingCallSound() {
             window._audioContext.close();
             window._audioContext = null;
         } catch (error) {
-            console.log('[Calls iframe] Error closing audio context:', error);
+            console.error('[Calls iframe] Error closing audio context:', error);
         }
     }
 }
 
 function emitCallEvent(eventType, data) {
-    // Emit event for internal listeners
     const event = new CustomEvent(`call:${eventType}`, { detail: data });
     window.dispatchEvent(event);
     
-    // Also emit to global event bus if available
     if (window.EventBus) {
         window.EventBus.emit(`call.${eventType}`, data);
     }
-    
-    console.log(`[Calls iframe] Call event emitted: ${eventType}`, data);
 }
 
 // ==================== EXPORTED FUNCTIONS ====================
 export function cacheElements() {
-    elements.menuDotsBtn = document.getElementById('menuDotsBtn');
-    elements.menuDotsDropdown = document.getElementById('menuDotsDropdown');
-    elements.menuParticipants = document.getElementById('menuParticipants');
-    elements.menuChat = document.getElementById('menuChat');
-    elements.menuWhiteboard = document.getElementById('menuWhiteboard');
-    elements.menuNotes = document.getElementById('menuNotes');
-    elements.menuPolls = document.getElementById('menuPolls');
-    elements.menuRelationship = document.getElementById('menuRelationship');
-    elements.participantBadge = document.getElementById('participantBadge');
-    elements.chatBadge = document.getElementById('chatBadge');
-    
-    elements.offlineBanner = document.getElementById('offlineBanner');
-    elements.apiStatusIndicator = document.getElementById('apiStatusIndicator');
-    elements.apiStatusText = document.getElementById('apiStatusText');
-    
-    elements.urlParamOverlay = document.getElementById('urlParamOverlay');
-    elements.urlParamText = document.getElementById('urlParamText');
-    elements.urlParamCancelBtn = document.getElementById('urlParamCancelBtn');
-    elements.urlParamJoinBtn = document.getElementById('urlParamJoinBtn');
-    
-    elements.incomingCallModal = document.getElementById('incomingCallModal');
-    elements.incomingCallAvatar = document.getElementById('incomingCallAvatar');
-    elements.incomingCallName = document.getElementById('incomingCallName');
-    elements.incomingCallType = document.getElementById('incomingCallType');
-    elements.incomingCallMood = document.getElementById('incomingCallMood');
-    elements.incomingCallIntention = document.getElementById('incomingCallIntention');
-    elements.declineCallBtn = document.getElementById('declineCallBtn');
-    elements.acceptCallBtn = document.getElementById('acceptCallBtn');
-    elements.acceptVideoCallBtn = document.getElementById('acceptVideoCallBtn');
-    elements.autoDeclineTimer = document.getElementById('autoDeclineTimer');
-    elements.declineTimer = document.getElementById('declineTimer');
-    
-    elements.newCallModal = document.getElementById('newCallModal');
-    elements.newCallBtn = document.getElementById('newCallBtn');
-    elements.closeNewCallModal = document.getElementById('closeNewCallModal');
-    
-    elements.contactSearch = document.getElementById('contactSearch');
-    elements.contactsList = document.getElementById('contactsList');
-    elements.offlineContactsMessage = document.getElementById('offlineContactsMessage');
-    elements.contactsLoading = document.getElementById('contactsLoading');
-    elements.startVoiceCallBtn = document.getElementById('startVoiceCallBtn');
-    elements.startVideoCallBtn = document.getElementById('startVideoCallBtn');
-    
-    elements.groupContactSearch = document.getElementById('groupContactSearch');
-    elements.groupContactsList = document.getElementById('groupContactsList');
-    elements.instantGroupOption = document.getElementById('instantGroupOption');
-    elements.scheduledGroupOption = document.getElementById('scheduledGroupOption');
-    elements.startGroupCallBtn = document.getElementById('startGroupCallBtn');
-    
-    elements.callLinkInput = document.getElementById('callLinkInput');
-    elements.copyLinkBtn = document.getElementById('copyLinkBtn');
-    elements.shareLinkBtn = document.getElementById('shareLinkBtn');
-    elements.generateVoiceLinkBtn = document.getElementById('generateVoiceLinkBtn');
-    elements.generateVideoLinkBtn = document.getElementById('generateVideoLinkBtn');
-    
-    elements.paymentModal = document.getElementById('paymentModal');
-    elements.mpesaOption = document.getElementById('mpesaOption');
-    elements.mpesaForm = document.getElementById('mpesaForm');
-    elements.phoneNumber = document.getElementById('phoneNumber');
-    elements.paymentAmount = document.getElementById('paymentAmount');
-    elements.cancelPaymentBtn = document.getElementById('cancelPaymentBtn');
-    elements.processPaymentBtn = document.getElementById('processPaymentBtn');
-    
-    elements.premiumLimitOverlay = document.getElementById('premiumLimitOverlay');
-    elements.premiumLimitText = document.getElementById('premiumLimitText');
-    elements.cancelUpgradeBtn = document.getElementById('cancelUpgradeBtn');
-    elements.upgradeNowBtn = document.getElementById('upgradeNowBtn');
-    
-    elements.moodSelectionModal = document.getElementById('moodSelectionModal');
-    elements.cancelMoodBtn = document.getElementById('cancelMoodBtn');
-    elements.setMoodBtn = document.getElementById('setMoodBtn');
-    
-    elements.intentionSelectionModal = document.getElementById('intentionSelectionModal');
-    elements.cancelIntentionBtn = document.getElementById('cancelIntentionBtn');
-    elements.setIntentionBtn = document.getElementById('setIntentionBtn');
-    
-    elements.privateNotesModal = document.getElementById('privateNotesModal');
-    elements.privateNotesTitle = document.getElementById('privateNotesTitle');
-    elements.privateNotesSubtitle = document.getElementById('privateNotesSubtitle');
-    elements.privateNotesTextarea = document.getElementById('privateNotesTextarea');
-    elements.skipNotesBtn = document.getElementById('skipNotesBtn');
-    elements.saveNotesBtn = document.getElementById('saveNotesBtn');
-    
-    elements.callSummaryModal = document.getElementById('callSummaryModal');
-    elements.summaryDuration = document.getElementById('summaryDuration');
-    elements.summaryTime = document.getElementById('summaryTime');
-    elements.summaryType = document.getElementById('summaryType');
-    elements.summaryMood = document.getElementById('summaryMood');
-    elements.summaryIntention = document.getElementById('summaryIntention');
-    elements.summaryParticipants = document.getElementById('summaryParticipants');
-    elements.summaryDoneBtn = document.getElementById('summaryDoneBtn');
-    
-    elements.appContainer = document.getElementById('appContainer');
-    elements.sidebar = document.getElementById('sidebar');
-    elements.quickVoiceBtn = document.getElementById('quickVoiceBtn');
-    elements.quickVideoBtn = document.getElementById('quickVideoBtn');
-    elements.quickGroupBtn = document.getElementById('quickGroupBtn');
-    
-    elements.settingsToggle = document.getElementById('settingsToggle');
-    elements.settingsToggleIcon = document.getElementById('settingsToggleIcon');
-    elements.settingsPanel = document.getElementById('settingsPanel');
-    elements.emotionalContextToggle = document.getElementById('emotionalContextToggle');
-    elements.callIntentionToggle = document.getElementById('callIntentionToggle');
-    elements.inCallChatToggle = document.getElementById('inCallChatToggle');
-    elements.whiteboardToggle = document.getElementById('whiteboardToggle');
-    elements.pollsToggle = document.getElementById('pollsToggle');
-    elements.notesToggle = document.getElementById('notesToggle');
-    elements.focusModeToggle = document.getElementById('focusModeToggle');
-    elements.liveReactionsToggle = document.getElementById('liveReactionsToggle');
-    elements.resetSettingsBtn = document.getElementById('resetSettingsBtn');
-    
-    elements.syncIndicator = document.getElementById('syncIndicator');
-    elements.allCallsSection = document.getElementById('allCallsSection');
-    elements.missedCallsSection = document.getElementById('missedCallsSection');
-    elements.groupCallsSection = document.getElementById('groupCallsSection');
-    elements.allCallsList = document.getElementById('allCallsList');
-    elements.missedCallsList = document.getElementById('missedCallsList');
-    elements.groupCallsList = document.getElementById('groupCallsList');
-    elements.offlineCallsState = document.getElementById('offlineCallsState');
-    elements.callsLoading = document.getElementById('callsLoading');
-    
-    elements.callContainer = document.getElementById('callContainer');
-    elements.focusModeBtn = document.getElementById('focusModeBtn');
-    elements.callHeader = document.getElementById('callHeader');
-    elements.callTypeIcon = document.getElementById('callTypeIcon');
-    elements.callWithName = document.getElementById('callWithName');
-    elements.callStatusText = document.getElementById('callStatusText');
-    elements.callMoodIndicator = document.getElementById('callMoodIndicator');
-    elements.callIntentionIndicator = document.getElementById('callIntentionIndicator');
-    elements.callDuration = document.getElementById('callDuration');
-    
-    elements.videoGrid = document.getElementById('videoGrid');
-    elements.offlineCallPlaceholder = document.getElementById('offlineCallPlaceholder');
-    
-    elements.reactionsContainer = document.getElementById('reactionsContainer');
-    
-    elements.callControls = document.getElementById('callControls');
-    elements.muteBtn = document.getElementById('muteBtn');
-    elements.videoBtn = document.getElementById('videoBtn');
-    elements.screenShareBtn = document.getElementById('screenShareBtn');
-    elements.speakerBtn = document.getElementById('speakerBtn');
-    elements.moodBtn = document.getElementById('moodBtn');
-    elements.intentionBtn = document.getElementById('intentionBtn');
-    elements.endCallBtn = document.getElementById('endCallBtn');
-    
-    elements.pipContainer = document.getElementById('pipContainer');
-    elements.pipVideo = document.getElementById('pipVideo');
-    elements.pipCloseBtn = document.getElementById('pipCloseBtn');
-    
-    elements.notificationArea = document.getElementById('notificationArea');
-    elements.notificationToast = document.getElementById('notificationToast');
-    elements.notificationMessage = document.getElementById('notificationMessage');
+    try {
+        elements.menuDotsBtn = document.getElementById('menuDotsBtn');
+        elements.menuDotsDropdown = document.getElementById('menuDotsDropdown');
+        elements.menuParticipants = document.getElementById('menuParticipants');
+        elements.menuChat = document.getElementById('menuChat');
+        elements.menuWhiteboard = document.getElementById('menuWhiteboard');
+        elements.menuNotes = document.getElementById('menuNotes');
+        elements.menuPolls = document.getElementById('menuPolls');
+        elements.menuRelationship = document.getElementById('menuRelationship');
+        elements.participantBadge = document.getElementById('participantBadge');
+        elements.chatBadge = document.getElementById('chatBadge');
+        
+        elements.offlineBanner = document.getElementById('offlineBanner');
+        elements.apiStatusIndicator = document.getElementById('apiStatusIndicator');
+        elements.apiStatusText = document.getElementById('apiStatusText');
+        
+        elements.urlParamOverlay = document.getElementById('urlParamOverlay');
+        elements.urlParamText = document.getElementById('urlParamText');
+        elements.urlParamCancelBtn = document.getElementById('urlParamCancelBtn');
+        elements.urlParamJoinBtn = document.getElementById('urlParamJoinBtn');
+        
+        elements.incomingCallModal = document.getElementById('incomingCallModal');
+        elements.incomingCallAvatar = document.getElementById('incomingCallAvatar');
+        elements.incomingCallName = document.getElementById('incomingCallName');
+        elements.incomingCallType = document.getElementById('incomingCallType');
+        elements.incomingCallMood = document.getElementById('incomingCallMood');
+        elements.incomingCallIntention = document.getElementById('incomingCallIntention');
+        elements.declineCallBtn = document.getElementById('declineCallBtn');
+        elements.acceptCallBtn = document.getElementById('acceptCallBtn');
+        elements.acceptVideoCallBtn = document.getElementById('acceptVideoCallBtn');
+        elements.autoDeclineTimer = document.getElementById('autoDeclineTimer');
+        elements.declineTimer = document.getElementById('declineTimer');
+        
+        elements.newCallModal = document.getElementById('newCallModal');
+        elements.newCallBtn = document.getElementById('newCallBtn');
+        elements.closeNewCallModal = document.getElementById('closeNewCallModal');
+        
+        elements.contactSearch = document.getElementById('contactSearch');
+        elements.contactsList = document.getElementById('contactsList');
+        elements.offlineContactsMessage = document.getElementById('offlineContactsMessage');
+        elements.contactsLoading = document.getElementById('contactsLoading');
+        elements.startVoiceCallBtn = document.getElementById('startVoiceCallBtn');
+        elements.startVideoCallBtn = document.getElementById('startVideoCallBtn');
+        
+        elements.groupContactSearch = document.getElementById('groupContactSearch');
+        elements.groupContactsList = document.getElementById('groupContactsList');
+        elements.instantGroupOption = document.getElementById('instantGroupOption');
+        elements.scheduledGroupOption = document.getElementById('scheduledGroupOption');
+        elements.startGroupCallBtn = document.getElementById('startGroupCallBtn');
+        
+        elements.callLinkInput = document.getElementById('callLinkInput');
+        elements.copyLinkBtn = document.getElementById('copyLinkBtn');
+        elements.shareLinkBtn = document.getElementById('shareLinkBtn');
+        elements.generateVoiceLinkBtn = document.getElementById('generateVoiceLinkBtn');
+        elements.generateVideoLinkBtn = document.getElementById('generateVideoLinkBtn');
+        
+        elements.paymentModal = document.getElementById('paymentModal');
+        elements.mpesaOption = document.getElementById('mpesaOption');
+        elements.mpesaForm = document.getElementById('mpesaForm');
+        elements.phoneNumber = document.getElementById('phoneNumber');
+        elements.paymentAmount = document.getElementById('paymentAmount');
+        elements.cancelPaymentBtn = document.getElementById('cancelPaymentBtn');
+        elements.processPaymentBtn = document.getElementById('processPaymentBtn');
+        
+        elements.premiumLimitOverlay = document.getElementById('premiumLimitOverlay');
+        elements.premiumLimitText = document.getElementById('premiumLimitText');
+        elements.cancelUpgradeBtn = document.getElementById('cancelUpgradeBtn');
+        elements.upgradeNowBtn = document.getElementById('upgradeNowBtn');
+        
+        elements.moodSelectionModal = document.getElementById('moodSelectionModal');
+        elements.cancelMoodBtn = document.getElementById('cancelMoodBtn');
+        elements.setMoodBtn = document.getElementById('setMoodBtn');
+        
+        elements.intentionSelectionModal = document.getElementById('intentionSelectionModal');
+        elements.cancelIntentionBtn = document.getElementById('cancelIntentionBtn');
+        elements.setIntentionBtn = document.getElementById('setIntentionBtn');
+        
+        elements.privateNotesModal = document.getElementById('privateNotesModal');
+        elements.privateNotesTitle = document.getElementById('privateNotesTitle');
+        elements.privateNotesSubtitle = document.getElementById('privateNotesSubtitle');
+        elements.privateNotesTextarea = document.getElementById('privateNotesTextarea');
+        elements.skipNotesBtn = document.getElementById('skipNotesBtn');
+        elements.saveNotesBtn = document.getElementById('saveNotesBtn');
+        
+        elements.callSummaryModal = document.getElementById('callSummaryModal');
+        elements.summaryDuration = document.getElementById('summaryDuration');
+        elements.summaryTime = document.getElementById('summaryTime');
+        elements.summaryType = document.getElementById('summaryType');
+        elements.summaryMood = document.getElementById('summaryMood');
+        elements.summaryIntention = document.getElementById('summaryIntention');
+        elements.summaryParticipants = document.getElementById('summaryParticipants');
+        elements.summaryDoneBtn = document.getElementById('summaryDoneBtn');
+        
+        elements.appContainer = document.getElementById('appContainer');
+        elements.sidebar = document.getElementById('sidebar');
+        elements.quickVoiceBtn = document.getElementById('quickVoiceBtn');
+        elements.quickVideoBtn = document.getElementById('quickVideoBtn');
+        elements.quickGroupBtn = document.getElementById('quickGroupBtn');
+        
+        elements.settingsToggle = document.getElementById('settingsToggle');
+        elements.settingsToggleIcon = document.getElementById('settingsToggleIcon');
+        elements.settingsPanel = document.getElementById('settingsPanel');
+        elements.emotionalContextToggle = document.getElementById('emotionalContextToggle');
+        elements.callIntentionToggle = document.getElementById('callIntentionToggle');
+        elements.inCallChatToggle = document.getElementById('inCallChatToggle');
+        elements.whiteboardToggle = document.getElementById('whiteboardToggle');
+        elements.pollsToggle = document.getElementById('pollsToggle');
+        elements.notesToggle = document.getElementById('notesToggle');
+        elements.focusModeToggle = document.getElementById('focusModeToggle');
+        elements.liveReactionsToggle = document.getElementById('liveReactionsToggle');
+        elements.resetSettingsBtn = document.getElementById('resetSettingsBtn');
+        
+        elements.syncIndicator = document.getElementById('syncIndicator');
+        elements.allCallsSection = document.getElementById('allCallsSection');
+        elements.missedCallsSection = document.getElementById('missedCallsSection');
+        elements.groupCallsSection = document.getElementById('groupCallsSection');
+        elements.allCallsList = document.getElementById('allCallsList');
+        elements.missedCallsList = document.getElementById('missedCallsList');
+        elements.groupCallsList = document.getElementById('groupCallsList');
+        elements.offlineCallsState = document.getElementById('offlineCallsState');
+        elements.callsLoading = document.getElementById('callsLoading');
+        
+        elements.callContainer = document.getElementById('callContainer');
+        elements.focusModeBtn = document.getElementById('focusModeBtn');
+        elements.callHeader = document.getElementById('callHeader');
+        elements.callTypeIcon = document.getElementById('callTypeIcon');
+        elements.callWithName = document.getElementById('callWithName');
+        elements.callStatusText = document.getElementById('callStatusText');
+        elements.callMoodIndicator = document.getElementById('callMoodIndicator');
+        elements.callIntentionIndicator = document.getElementById('callIntentionIndicator');
+        elements.callDuration = document.getElementById('callDuration');
+        
+        elements.videoGrid = document.getElementById('videoGrid');
+        elements.offlineCallPlaceholder = document.getElementById('offlineCallPlaceholder');
+        
+        elements.reactionsContainer = document.getElementById('reactionsContainer');
+        
+        elements.callControls = document.getElementById('callControls');
+        elements.muteBtn = document.getElementById('muteBtn');
+        elements.videoBtn = document.getElementById('videoBtn');
+        elements.screenShareBtn = document.getElementById('screenShareBtn');
+        elements.speakerBtn = document.getElementById('speakerBtn');
+        elements.moodBtn = document.getElementById('moodBtn');
+        elements.intentionBtn = document.getElementById('intentionBtn');
+        elements.endCallBtn = document.getElementById('endCallBtn');
+        
+        elements.pipContainer = document.getElementById('pipContainer');
+        elements.pipVideo = document.getElementById('pipVideo');
+        elements.pipCloseBtn = document.getElementById('pipCloseBtn');
+        
+        elements.notificationArea = document.getElementById('notificationArea');
+        elements.notificationToast = document.getElementById('notificationToast');
+        elements.notificationMessage = document.getElementById('notificationMessage');
+    } catch (error) {
+        console.error('[Calls iframe] Error caching elements:', error);
+    }
 }
 
 export function initializeOfflineDetection() {
@@ -3563,177 +3915,240 @@ export function initializeOfflineDetection() {
 }
 
 export function handleOnline() {
-    console.log('[Calls iframe] App is online');
     AppState.isOnline = true;
     
-    elements.offlineBanner.classList.remove('active');
-    
-    elements.appContainer.classList.remove('offline-ui');
-    
-    elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
-    elements.syncIndicator.classList.add('syncing');
-    
-    if (window.callAPI && AppState.isAuthenticated) {
-        window.callAPI.initializeBackgroundSync();
+    try {
+        elements.offlineBanner.classList.remove('active');
+        
+        elements.appContainer.classList.remove('offline-ui');
+        
+        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
+        elements.syncIndicator.classList.add('syncing');
+        
+        if (window.callAPI && AppState.isAuthenticated) {
+            window.callAPI.initializeBackgroundSync();
+        }
+        
+        enableUI();
+    } catch (error) {
+        console.error('[Calls iframe] Error handling online state:', error);
     }
-    
-    enableUI();
 }
 
 export function handleOffline() {
-    console.log('[Calls iframe] App is offline');
     AppState.isOnline = false;
     
-    elements.offlineBanner.classList.add('active');
-    
-    elements.appContainer.classList.add('offline-ui');
-    
-    elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-    elements.syncIndicator.classList.remove('syncing');
-    
-    showOfflineUI();
+    try {
+        elements.offlineBanner.classList.add('active');
+        
+        elements.appContainer.classList.add('offline-ui');
+        
+        elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+        elements.syncIndicator.classList.remove('syncing');
+        
+        showOfflineUI();
+    } catch (error) {
+        console.error('[Calls iframe] Error handling offline state:', error);
+    }
 }
 
 export function showOfflineUI() {
-    if (elements.callContainer && elements.callContainer.classList.contains('active')) {
-        elements.offlineCallPlaceholder.style.display = 'flex';
-        elements.videoGrid.style.display = 'none';
-    }
-    
-    if (elements.offlineContactsMessage) {
-        elements.offlineContactsMessage.style.display = 'block';
-    }
-    
-    if (elements.offlineCallsState) {
-        elements.offlineCallsState.style.display = 'flex';
-    }
-    
-    if (elements.callsLoading) {
-        elements.callsLoading.style.display = 'none';
-    }
-    
-    if (window.callAPI) {
-        window.callAPI.loadCachedDataToUI();
+    try {
+        if (elements.callContainer && elements.callContainer.classList.contains('active')) {
+            elements.offlineCallPlaceholder.style.display = 'flex';
+            elements.videoGrid.style.display = 'none';
+        }
+        
+        if (elements.offlineContactsMessage) {
+            elements.offlineContactsMessage.style.display = 'block';
+        }
+        
+        if (elements.offlineCallsState) {
+            elements.offlineCallsState.style.display = 'flex';
+        }
+        
+        if (elements.callsLoading) {
+            elements.callsLoading.style.display = 'none';
+        }
+        
+        if (window.callAPI) {
+            window.callAPI.loadCachedDataToUI();
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error showing offline UI:', error);
     }
 }
 
 export function enableUI() {
-    console.log('[Calls iframe] Enabling UI elements...');
-    
     const isAuthenticated = parentCoordinator ? 
         parentCoordinator.sessionValidated : 
         AppState.isAuthenticated;
     
-    elements.newCallBtn.disabled = !isAuthenticated;
-    
-    elements.quickVoiceBtn.disabled = !isAuthenticated;
-    elements.quickVideoBtn.disabled = !isAuthenticated;
-    
-    if (isAuthenticated && AppState.premiumFeatures.groupCalls) {
-        elements.quickGroupBtn.disabled = false;
-    } else {
-        elements.quickGroupBtn.disabled = true;
-    }
-    
-    if (AppState.isOnline) {
-        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
-        
-        elements.offlineCallsState.style.display = 'none';
-        elements.offlineContactsMessage.style.display = 'none';
-        
-        if (AppState.syncPending && window.callAPI) {
-            window.callAPI.performBackgroundSync();
+    try {
+        if (elements.newCallBtn) {
+            elements.newCallBtn.disabled = !isAuthenticated;
         }
-    } else {
-        elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-        showOfflineUI();
+        
+        if (elements.quickVoiceBtn) {
+            elements.quickVoiceBtn.disabled = !isAuthenticated;
+        }
+        if (elements.quickVideoBtn) {
+            elements.quickVideoBtn.disabled = !isAuthenticated;
+        }
+        
+        if (elements.quickGroupBtn) {
+            if (isAuthenticated && AppState.premiumFeatures.groupCalls) {
+                elements.quickGroupBtn.disabled = false;
+            } else {
+                elements.quickGroupBtn.disabled = true;
+            }
+        }
+        
+        if (AppState.isOnline) {
+            if (elements.syncIndicator) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
+            }
+            
+            if (elements.offlineCallsState) {
+                elements.offlineCallsState.style.display = 'none';
+            }
+            if (elements.offlineContactsMessage) {
+                elements.offlineContactsMessage.style.display = 'none';
+            }
+            
+            if (AppState.syncPending && window.callAPI) {
+                window.callAPI.performBackgroundSync();
+            }
+        } else {
+            if (elements.syncIndicator) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+            }
+            showOfflineUI();
+        }
+        
+        applySettingsToUI();
+    } catch (error) {
+        console.error('[Calls iframe] Error enabling UI:', error);
     }
-    
-    applySettingsToUI();
 }
 
 export function initializeUI() {
-    if (elements.callsLoading) elements.callsLoading.style.display = 'none';
-    if (elements.contactsLoading) elements.contactsLoading.style.display = 'none';
-    
-    updateMoodIndicator('neutral');
-    updateIntentionIndicator('quick');
-    
-    initializeNotifications();
+    try {
+        if (elements.callsLoading) elements.callsLoading.style.display = 'none';
+        if (elements.contactsLoading) elements.contactsLoading.style.display = 'none';
+        
+        updateMoodIndicator('neutral');
+        updateIntentionIndicator('quick');
+        
+        initializeNotifications();
+    } catch (error) {
+        console.error('[Calls iframe] Error initializing UI:', error);
+    }
 }
 
 export function initializeNotifications() {
-    elements.notificationToast.style.display = 'none';
+    try {
+        if (elements.notificationToast) {
+            elements.notificationToast.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error initializing notifications:', error);
+    }
 }
 
 export function showNotification(message, type = 'success') {
-    const notification = document.createElement('div');
-    notification.className = `call-notification ${type}`;
-    
-    notification.innerHTML = `
-        <div class="call-notification-content">
-            <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-            <div class="call-notification-message">${message}</div>
-        </div>
-        <button class="call-notification-close">
-            <i class="fas fa-times"></i>
-        </button>
-    `;
-    
-    elements.notificationArea.appendChild(notification);
-    
-    notification.querySelector('.call-notification-close').addEventListener('click', () => {
-        notification.remove();
-    });
-    
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.remove();
+    try {
+        const notification = document.createElement('div');
+        notification.className = `call-notification ${type}`;
+        
+        notification.innerHTML = `
+            <div class="call-notification-content">
+                <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                <div class="call-notification-message">${message}</div>
+            </div>
+            <button class="call-notification-close">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        if (elements.notificationArea) {
+            elements.notificationArea.appendChild(notification);
+        } else {
+            const notificationArea = document.createElement('div');
+            notificationArea.id = 'notificationArea';
+            notificationArea.className = 'notification-area';
+            document.body.appendChild(notificationArea);
+            notificationArea.appendChild(notification);
         }
-    }, 3000);
+        
+        const closeBtn = notification.querySelector('.call-notification-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                notification.remove();
+            });
+        }
+        
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 3000);
+    } catch (error) {
+        console.error('[Calls iframe] Error showing notification:', error);
+    }
 }
 
 export function makeDraggable(element) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
     
-    if (element.querySelector('.pip-controls')) {
-        element.querySelector('.pip-controls').onmousedown = dragMouseDown;
-    } else {
-        element.onmousedown = dragMouseDown;
-    }
-    
-    function dragMouseDown(e) {
-        e = e || window.event;
-        e.preventDefault();
+    try {
+        if (element.querySelector('.pip-controls')) {
+            element.querySelector('.pip-controls').onmousedown = dragMouseDown;
+        } else {
+            element.onmousedown = dragMouseDown;
+        }
         
-        pos3 = e.clientX;
-        pos4 = e.clientY;
+        function dragMouseDown(e) {
+            e = e || window.event;
+            e.preventDefault();
+            
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }
         
-        document.onmouseup = closeDragElement;
-        document.onmousemove = elementDrag;
-    }
-    
-    function elementDrag(e) {
-        e = e || window.event;
-        e.preventDefault();
+        function elementDrag(e) {
+            e = e || window.event;
+            e.preventDefault();
+            
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            
+            element.style.top = (element.offsetTop - pos2) + "px";
+            element.style.left = (element.offsetLeft - pos1) + "px";
+        }
         
-        pos1 = pos3 - e.clientX;
-        pos2 = pos4 - e.clientY;
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        
-        element.style.top = (element.offsetTop - pos2) + "px";
-        element.style.left = (element.offsetLeft - pos1) + "px";
-    }
-    
-    function closeDragElement() {
-        document.onmouseup = null;
-        document.onmousemove = null;
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error making element draggable:', error);
     }
 }
 
 export function closePip() {
-    elements.pipContainer.style.display = 'none';
+    try {
+        if (elements.pipContainer) {
+            elements.pipContainer.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error closing PiP:', error);
+    }
 }
 
 export function checkPremiumFeature(feature) {
@@ -3762,8 +4177,16 @@ export function checkPremiumFeature(feature) {
             message = 'This is a premium feature. Upgrade to access all advanced features.';
     }
     
-    elements.premiumLimitText.textContent = message;
-    elements.premiumLimitOverlay.classList.add('active');
+    try {
+        if (elements.premiumLimitText) {
+            elements.premiumLimitText.textContent = message;
+        }
+        if (elements.premiumLimitOverlay) {
+            elements.premiumLimitOverlay.classList.add('active');
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error checking premium feature:', error);
+    }
     
     return false;
 }
@@ -3771,20 +4194,24 @@ export function checkPremiumFeature(feature) {
 export function updatePremiumUI() {
     if (!elements.quickGroupBtn || !elements.screenShareBtn) return;
     
-    if (AppState.isPremium) {
-        document.querySelectorAll('.premium-badge-small').forEach(badge => {
-            badge.style.display = 'none';
-        });
-        
-        elements.quickGroupBtn.disabled = false;
-        elements.screenShareBtn.disabled = false;
-    } else {
-        document.querySelectorAll('.premium-badge-small').forEach(badge => {
-            badge.style.display = 'block';
-        });
-        
-        elements.quickGroupBtn.disabled = true;
-        elements.screenShareBtn.disabled = true;
+    try {
+        if (AppState.isPremium) {
+            document.querySelectorAll('.premium-badge-small').forEach(badge => {
+                badge.style.display = 'none';
+            });
+            
+            elements.quickGroupBtn.disabled = false;
+            elements.screenShareBtn.disabled = false;
+        } else {
+            document.querySelectorAll('.premium-badge-small').forEach(badge => {
+                badge.style.display = 'block';
+            });
+            
+            elements.quickGroupBtn.disabled = true;
+            elements.screenShareBtn.disabled = true;
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error updating premium UI:', error);
     }
 }
 
@@ -3796,7 +4223,7 @@ export function loadSettings() {
                 AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
                 applySettingsToUI();
             } catch (error) {
-                console.log('[Calls iframe] Error loading settings:', error);
+                console.error('[Calls iframe] Error loading settings:', error);
             }
         }
         resolve();
@@ -3807,19 +4234,23 @@ export function saveSettings() {
     try {
         localStorage.setItem('callSettings', JSON.stringify(AppState.settings));
     } catch (error) {
-        console.log('[Calls iframe] Error saving settings:', error);
+        console.error('[Calls iframe] Error saving settings:', error);
     }
 }
 
 export function applySettingsToUI() {
-    if (elements.emotionalContextToggle) elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
-    if (elements.callIntentionToggle) elements.callIntentionToggle.checked = AppState.settings.callIntention;
-    if (elements.inCallChatToggle) elements.inCallChatToggle.checked = AppState.settings.inCallChat;
-    if (elements.whiteboardToggle) elements.whiteboardToggle.checked = AppState.settings.whiteboard;
-    if (elements.pollsToggle) elements.pollsToggle.checked = AppState.settings.polls;
-    if (elements.notesToggle) elements.notesToggle.checked = AppState.settings.notes;
-    if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
-    if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
+    try {
+        if (elements.emotionalContextToggle) elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
+        if (elements.callIntentionToggle) elements.callIntentionToggle.checked = AppState.settings.callIntention;
+        if (elements.inCallChatToggle) elements.inCallChatToggle.checked = AppState.settings.inCallChat;
+        if (elements.whiteboardToggle) elements.whiteboardToggle.checked = AppState.settings.whiteboard;
+        if (elements.pollsToggle) elements.pollsToggle.checked = AppState.settings.polls;
+        if (elements.notesToggle) elements.notesToggle.checked = AppState.settings.notes;
+        if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
+        if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
+    } catch (error) {
+        console.error('[Calls iframe] Error applying settings to UI:', error);
+    }
 }
 
 export function updateSetting(event) {
@@ -3831,34 +4262,40 @@ export function updateSetting(event) {
 }
 
 export function applySettingChange(setting, value) {
-    switch (setting) {
-        case 'emotionalContext':
-            if (!value) {
-                elements.callMoodIndicator.style.display = 'none';
-                elements.callIntentionIndicator.style.display = 'none';
-            }
-            break;
-        case 'focusMode':
-            if (AppState.isInCall) {
-                if (value) {
-                    enableFocusMode();
-                } else {
-                    disableFocusMode();
+    try {
+        switch (setting) {
+            case 'emotionalContext':
+                if (!value) {
+                    if (elements.callMoodIndicator) {
+                        elements.callMoodIndicator.style.display = 'none';
+                    }
+                    if (elements.callIntentionIndicator) {
+                        elements.callIntentionIndicator.style.display = 'none';
+                    }
                 }
-            }
-            break;
-        case 'liveReactions':
-            if (value) {
-                elements.reactionsContainer.style.display = 'flex';
-            } else {
-                elements.reactionsContainer.style.display = 'none';
-            }
-            break;
-        case 'inCallChat':
-            if (!value && AppState.isInCall) {
-                showNotification('Chat disabled', 'info');
-            }
-            break;
+                break;
+            case 'focusMode':
+                if (AppState.isInCall) {
+                    if (value) {
+                        enableFocusMode();
+                    } else {
+                        disableFocusMode();
+                    }
+                }
+                break;
+            case 'liveReactions':
+                if (elements.reactionsContainer) {
+                    elements.reactionsContainer.style.display = value ? 'flex' : 'none';
+                }
+                break;
+            case 'inCallChat':
+                if (!value && AppState.isInCall) {
+                    showNotification('Chat disabled', 'info');
+                }
+                break;
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error applying setting change:', error);
     }
 }
 
@@ -3890,33 +4327,34 @@ export function handleParentMessage(event) {
     
     const allowedOrigins = [window.location.origin, 'http://localhost:*', 'https://yourdomain.com'];
     if (!allowedOrigins.some(origin => event.origin.match(new RegExp(origin.replace('*', '.*'))))) {
-        console.log('[Calls iframe] Message from unauthorized origin:', event.origin);
         return;
     }
     
     const data = event.data;
     
-    switch (data.type) {
-        case 'USER_DATA':
-            handleParentUserData(data.payload);
-            break;
-        case 'AUTH_UPDATE':
-            handleAuthUpdate(data.payload);
-            break;
-        case 'DATA_REFRESH':
-            handleDataRefresh(data.payload);
-            break;
-        case 'START_CALL':
-            handleStartCallRequest(data.payload);
-            break;
-        case 'SYNC_REQUEST':
-            handleSyncRequest();
-            break;
-        case 'API_READY':
-            handleApiReady();
-            break;
-        case 'TOKEN_UPDATE':
-            break;
+    try {
+        switch (data.type) {
+            case 'USER_DATA':
+                handleParentUserData(data.payload);
+                break;
+            case 'AUTH_UPDATE':
+                handleAuthUpdate(data.payload);
+                break;
+            case 'DATA_REFRESH':
+                handleDataRefresh(data.payload);
+                break;
+            case 'START_CALL':
+                handleStartCallRequest(data.payload);
+                break;
+            case 'SYNC_REQUEST':
+                handleSyncRequest();
+                break;
+            case 'API_READY':
+                handleApiReady();
+                break;
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error handling parent message:', error);
     }
 }
 
@@ -3933,7 +4371,6 @@ export function handleAuthUpdate(payload) {
 }
 
 export function handleApiReady() {
-    console.log('[Calls iframe] Parent API ready signal received');
     AppState.apiReady = true;
     
     if (window.callAPI && window.callAPI.tokenManager) {
@@ -3965,44 +4402,44 @@ export function handleSyncRequest() {
 }
 
 export function handleStorageEvent(event) {
-    if (event.key === 'callSettings') {
-        try {
+    try {
+        if (event.key === 'callSettings') {
             const newSettings = JSON.parse(event.newValue);
             AppState.settings = { ...AppState.settings, ...newSettings };
             applySettingsToUI();
-        } catch (error) {
-            console.error('[Calls iframe] Error parsing updated settings:', error);
         }
-    }
-    
-    if (event.key === 'authUser' || event.key === 'currentUser') {
-        try {
+        
+        if (event.key === 'authUser' || event.key === 'currentUser') {
             const userData = JSON.parse(event.newValue);
             if (userData) {
                 if (!AppState.isAuthenticated) {
                     AppState.user = userData;
                     AppState.currentUser = userData;
                     
-                    elements.apiStatusIndicator.className = 'api-status-indicator connected';
-                    elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
-                    
-                    setTimeout(() => {
-                        elements.apiStatusIndicator.style.display = 'none';
-                    }, 2000);
+                    if (elements.apiStatusIndicator && elements.apiStatusText) {
+                        elements.apiStatusIndicator.className = 'api-status-indicator connected';
+                        elements.apiStatusText.textContent = `Authenticated as ${userData.name || userData.username || 'User'}`;
+                        
+                        setTimeout(() => {
+                            if (elements.apiStatusIndicator) {
+                                elements.apiStatusIndicator.style.display = 'none';
+                            }
+                        }, 2000);
+                    }
                 }
             }
-        } catch (error) {
-            console.log('[Calls iframe] Error parsing user data update:', error);
         }
-    }
-    
-    if (event.key === 'USER_TOKEN') {
-        if (window.callAPI && window.callAPI.tokenManager) {
-            const newToken = event.newValue;
-            if (newToken && window.callAPI.tokenManager.validateToken(newToken)) {
-                window.callAPI.tokenManager.setToken(newToken);
+        
+        if (event.key === 'USER_TOKEN') {
+            if (window.callAPI && window.callAPI.tokenManager) {
+                const newToken = event.newValue;
+                if (newToken && window.callAPI.tokenManager.validateToken(newToken)) {
+                    window.callAPI.tokenManager.setToken(newToken);
+                }
             }
         }
+    } catch (error) {
+        console.error('[Calls iframe] Error handling storage event:', error);
     }
 }
 
@@ -4060,14 +4497,16 @@ export function checkUrlParameters() {
     const callId = urlParams.get('call');
     const callType = urlParams.get('type');
     
-    if (callId) {
+    if (callId && elements.urlParamText && elements.urlParamOverlay) {
         elements.urlParamText.textContent = `You've been invited to join a ${callType || 'voice'} call. Would you like to join now?`;
         elements.urlParamOverlay.classList.add('active');
     }
 }
 
 export function closeUrlParamOverlay() {
-    elements.urlParamOverlay.classList.remove('active');
+    if (elements.urlParamOverlay) {
+        elements.urlParamOverlay.classList.remove('active');
+    }
     
     const url = new URL(window.location);
     url.searchParams.delete('call');
@@ -4103,7 +4542,7 @@ export function joinUrlParamCall() {
 }
 
 export function updateMoodIndicator(mood) {
-    if (!AppState.settings.emotionalContext) return;
+    if (!AppState.settings.emotionalContext || !elements.callMoodIndicator) return;
     
     const moodNames = {
         happy: 'Happy',
@@ -4124,7 +4563,7 @@ export function updateMoodIndicator(mood) {
 }
 
 export function updateIntentionIndicator(intention) {
-    if (!AppState.settings.callIntention) return;
+    if (!AppState.settings.callIntention || !elements.callIntentionIndicator) return;
     
     const intentionNames = {
         quick: 'Quick Chat',
@@ -4144,11 +4583,15 @@ export function updateIntentionIndicator(intention) {
 }
 
 export function updateParticipantBadge() {
+    if (!elements.participantBadge) return;
+    
     const count = AppState.callParticipants.length + 1;
     elements.participantBadge.textContent = count;
 }
 
 export function updateChatBadge() {
+    if (!elements.chatBadge) return;
+    
     elements.chatBadge.textContent = AppState.unreadChatCount;
     if (AppState.unreadChatCount > 0) {
         elements.chatBadge.style.display = 'block';
@@ -4158,6 +4601,8 @@ export function updateChatBadge() {
 }
 
 export function updateGroupCallButton() {
+    if (!elements.startGroupCallBtn) return;
+    
     const selectedContacts = document.querySelectorAll('.group-contact:checked').length;
     const hasGroupOption = document.querySelector('.option-item.selected') !== null;
     
@@ -4165,6 +4610,8 @@ export function updateGroupCallButton() {
 }
 
 export function updateVideoLayout() {
+    if (!elements.videoGrid) return;
+    
     const videoContainers = elements.videoGrid.querySelectorAll('.video-container');
     const count = videoContainers.length;
     
@@ -4185,86 +4632,90 @@ export function updateVideoLayout() {
 }
 
 export function initializeWhiteboard(canvas) {
-    const ctx = canvas.getContext('2d');
-    let drawing = false;
-    let currentTool = 'pen';
-    let currentColor = '#ff3b30';
-    let currentSize = 3;
-    
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    
-    function startDrawing(e) {
-        drawing = true;
-        draw(e);
-    }
-    
-    function stopDrawing() {
-        drawing = false;
-        ctx.beginPath();
-    }
-    
-    function draw(e) {
-        if (!drawing) return;
+    try {
+        const ctx = canvas.getContext('2d');
+        let drawing = false;
+        let currentTool = 'pen';
+        let currentColor = '#ff3b30';
+        let currentSize = 3;
         
-        ctx.lineWidth = currentSize;
-        ctx.strokeStyle = currentColor;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        
-        ctx.lineTo(x, y);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-    }
-    
-    canvas.addEventListener('mousedown', startDrawing);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', stopDrawing);
-    canvas.addEventListener('mouseout', stopDrawing);
-    
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        startDrawing(touch);
-    });
-    
-    canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        draw(touch);
-    });
-    
-    canvas.addEventListener('touchend', stopDrawing);
-    
-    const panel = canvas.closest('.whiteboard-panel');
-    if (panel) {
-        panel.querySelectorAll('.tool-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                panel.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                currentTool = this.dataset.tool;
-            });
-        });
-        
-        panel.querySelectorAll('.tool-color').forEach(colorBtn => {
-            colorBtn.addEventListener('click', function() {
-                panel.querySelectorAll('.tool-color').forEach(c => c.classList.remove('selected'));
-                this.classList.add('selected');
-                currentColor = this.dataset.color;
-            });
-        });
-        
-        const sizeSlider = panel.querySelector('.tool-size-slider');
-        if (sizeSlider) {
-            sizeSlider.addEventListener('input', function() {
-                currentSize = parseInt(this.value);
-            });
+        function startDrawing(e) {
+            drawing = true;
+            draw(e);
         }
+        
+        function stopDrawing() {
+            drawing = false;
+            ctx.beginPath();
+        }
+        
+        function draw(e) {
+            if (!drawing) return;
+            
+            ctx.lineWidth = currentSize;
+            ctx.strokeStyle = currentColor;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+        
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            startDrawing(touch);
+        });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            draw(touch);
+        });
+        
+        canvas.addEventListener('touchend', stopDrawing);
+        
+        const panel = canvas.closest('.whiteboard-panel');
+        if (panel) {
+            panel.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    panel.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    currentTool = this.dataset.tool;
+                });
+            });
+            
+            panel.querySelectorAll('.tool-color').forEach(colorBtn => {
+                colorBtn.addEventListener('click', function() {
+                    panel.querySelectorAll('.tool-color').forEach(c => c.classList.remove('selected'));
+                    this.classList.add('selected');
+                    currentColor = this.dataset.color;
+                });
+            });
+            
+            const sizeSlider = panel.querySelector('.tool-size-slider');
+            if (sizeSlider) {
+                sizeSlider.addEventListener('input', function() {
+                    currentSize = parseInt(this.value);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error initializing whiteboard:', error);
     }
 }
 
@@ -4329,6 +4780,8 @@ export function saveSharedNotes(notes) {
 }
 
 export function renderCallHistory() {
+    if (!elements.callsLoading || !elements.allCallsList || !elements.missedCallsList || !elements.groupCallsList) return;
+    
     elements.callsLoading.style.display = 'none';
     
     if (AppState.callHistory.length === 0) {
@@ -4419,86 +4872,100 @@ export function createCallHistoryItem(call) {
 }
 
 export function showUI() {
-    const appContainer = document.getElementById('appContainer');
-    if (appContainer) {
-        appContainer.style.visibility = 'visible';
-        appContainer.style.opacity = '1';
+    try {
+        const appContainer = document.getElementById('appContainer');
+        if (appContainer) {
+            appContainer.style.visibility = 'visible';
+            appContainer.style.opacity = '1';
+        }
+        
+        const loadingIndicators = document.querySelectorAll('.loading-indicator, .initializing-overlay');
+        loadingIndicators.forEach(indicator => {
+            indicator.style.display = 'none';
+        });
+    } catch (error) {
+        console.error('[Calls iframe] Error showing UI:', error);
     }
-    
-    const loadingIndicators = document.querySelectorAll('.loading-indicator, .initializing-overlay');
-    loadingIndicators.forEach(indicator => {
-        indicator.style.display = 'none';
-    });
-    
-    console.log('[Calls iframe] UI displayed immediately');
 }
 
 export function bootstrapIframe() {
-    console.log('[Calls iframe] Bootstrapping with enhanced parent coordination...');
-    
     if (sessionInitialized) {
-        console.log('[Calls iframe] Already initialized, skipping bootstrap');
+        console.info('[Calls iframe] Session already initialized, skipping bootstrap');
         return;
     }
     
-    cacheElements();
+    console.info('[Calls iframe] Bootstrapping iframe...');
     
-    setupEventListeners();
-    
-    initializeOfflineDetection();
-    
-    initializeUI();
-    
-    showUI();
-    
-    window.callAPI = new CallAPIIntegration();
-    
-    setTimeout(() => {
-        window.callAPI.initialize().then(() => {
-            console.log('[Calls iframe] API integration with parent coordination initialized in background');
-        }).catch(error => {
-            console.error('[Calls iframe] API integration failed:', error);
+    try {
+        cacheElements();
+        
+        setupEventListeners();
+        
+        initializeOfflineDetection();
+        
+        initializeUI();
+        
+        showUI();
+        
+        window.callAPI = new CallAPIIntegration();
+        
+        setTimeout(() => {
+            window.callAPI.initialize().then(() => {
+                console.info('[Calls iframe] API integration initialized successfully');
+            }).catch(error => {
+                console.error('[Calls iframe] API integration failed:', error);
+                enableUI();
+            });
+        }, 100);
+        
+        checkUrlParameters();
+        
+        window.addEventListener('beforeunload', () => {
+            if (window.callAPI) {
+                window.callAPI.cleanup();
+            }
         });
-    }, 100);
-    
-    enableUI();
-    
-    checkUrlParameters();
-    
-    window.addEventListener('beforeunload', () => {
-        if (window.callAPI) {
-            window.callAPI.cleanup();
+        
+        console.info('[Calls iframe] Bootstrap completed');
+    } catch (error) {
+        console.error('[Calls iframe] Bootstrap failed:', error);
+        try {
+            showUI();
+            enableUI();
+        } catch (e) {
+            console.error('[Calls iframe] Critical error during fallback:', e);
         }
-    });
-    
-    console.log('[Calls iframe] Bootstrap complete - UI ready with enhanced parent coordination');
+    }
 }
 
 // ==================== SETUP EVENT LISTENERS FOR SIMULATED CALLS ====================
 function setupEventListeners() {
-    // Set up incoming call button handlers
-    if (elements.declineCallBtn) {
-        elements.declineCallBtn.addEventListener('click', () => {
-            if (window._simulatedCallMetadata) {
-                handleDeclineSimulatedCall(window._simulatedCallMetadata.callId);
-            }
-        });
-    }
-    
-    if (elements.acceptCallBtn) {
-        elements.acceptCallBtn.addEventListener('click', () => {
-            if (window._simulatedCallMetadata && window._simulatedCallerContact) {
-                handleAcceptSimulatedCall(window._simulatedCallMetadata, window._simulatedCallerContact, false);
-            }
-        });
-    }
-    
-    if (elements.acceptVideoCallBtn) {
-        elements.acceptVideoCallBtn.addEventListener('click', () => {
-            if (window._simulatedCallMetadata && window._simulatedCallerContact) {
-                handleAcceptSimulatedCall(window._simulatedCallMetadata, window._simulatedCallerContact, true);
-            }
-        });
+    try {
+        if (elements.declineCallBtn) {
+            elements.declineCallBtn.addEventListener('click', () => {
+                if (window._simulatedCallMetadata) {
+                    handleDeclineSimulatedCall(window._simulatedCallMetadata.callId);
+                }
+            });
+        }
+        
+        if (elements.acceptCallBtn) {
+            elements.acceptCallBtn.addEventListener('click', () => {
+                if (window._simulatedCallMetadata && window._simulatedCallerContact) {
+                    handleAcceptSimulatedCall(window._simulatedCallMetadata, window._simulatedCallerContact, false);
+                }
+            });
+        }
+        
+        if (elements.acceptVideoCallBtn) {
+            elements.acceptVideoCallBtn.addEventListener('click', () => {
+                if (window._simulatedCallMetadata && window._simulatedCallerContact) {
+                    handleAcceptSimulatedCall(window._simulatedCallMetadata, window._simulatedCallerContact, true);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('[Calls iframe] Error setting up event listeners:', error);
     }
 }
 
@@ -4517,8 +4984,7 @@ function startCallTimer() {
 }
 
 function initializeCallFeatures() {
-    // Initialize call controls and features
-    console.log('[Calls iframe] Initializing call features for simulated call');
+    console.info('[Calls iframe] Initializing call features...');
 }
 
 function showCallUI() {
@@ -4532,11 +4998,11 @@ function showCallUI() {
 }
 
 function enableFocusMode() {
-    console.log('[Calls iframe] Focus mode enabled for simulated call');
+    console.info('[Calls iframe] Enabling focus mode...');
 }
 
 function disableFocusMode() {
-    console.log('[Calls iframe] Focus mode disabled for simulated call');
+    console.info('[Calls iframe] Disabling focus mode...');
 }
 
 // ==================== GLOBAL EXPORTS ====================
@@ -4546,7 +5012,7 @@ window.CallApp = {
         if (AppState.contacts.length > 0) {
             startCall('video', [AppState.contacts[0]]);
         } else {
-            console.log('[Calls iframe] Cannot start test call - no contacts available');
+            console.error('[Calls iframe] Cannot start test call - no contacts available');
         }
     },
     getState: () => AppState,
@@ -4556,7 +5022,9 @@ window.CallApp = {
             apiReady: AppState.apiReady,
             user: AppState.user,
             tokenReady: window.callAPI ? window.callAPI.tokenManager.isTokenReady() : false,
-            parentCoordinator: parentCoordinator ? parentCoordinator.getStatus() : null
+            parentCoordinator: parentCoordinator ? parentCoordinator.getStatus() : null,
+            secureHandshakeInProgress: secureHandshakeInProgress,
+            secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false
         };
     },
     notifyParent: (type, data) => {
@@ -4568,6 +5036,22 @@ window.CallApp = {
                 timestamp: Date.now()
             }, '*');
         }
+    },
+    // New secure handshake functions
+    requestSecureSession: () => {
+        if (parentCoordinator) {
+            parentCoordinator.startSecureHandshake();
+        } else {
+            console.warn('[Calls iframe] Parent coordinator not available for secure handshake');
+        }
+    },
+    getHandshakeStatus: () => {
+        return {
+            secureHandshakeInProgress: secureHandshakeInProgress,
+            secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false,
+            secureHandshakeAttempts: secureHandshakeAttempts,
+            maxHandshakeAttempts: maxHandshakeAttempts
+        };
     }
 };
 

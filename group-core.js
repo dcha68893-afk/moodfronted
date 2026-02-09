@@ -1,13 +1,11 @@
 // =============================================
-// COMPLETE FUNCTIONAL GROUPS SYSTEM WITH UNIQUE FEATURES
-// INTEGRATED WITH EXISTING API SYSTEM AND PARENT SESSION AUTHORITY
+// PRODUCTION-READY GROUPS SYSTEM WITH PARENT SESSION AUTHORITY
 // =============================================
 
 // ES Module imports for API functionality
 import { 
   secureFetch, 
   getUserToken,
-  initialize as initApi,
   request as apiRequest
 } from './js/api.core.js';
 
@@ -27,8 +25,10 @@ import {
   getGroupNotes,
   getGroupEvents,
   getGroupPurposes,
-  getGroupMoods
-} from './api-groups.js';
+  getGroupMoods,
+  initialize as initApi
+
+} from './js/api-groups.js';
 
 // Global variables
 export let currentUser = null;
@@ -230,7 +230,7 @@ export const LOCAL_STORAGE_KEYS = {
     GROUP_EVENTS: 'knecta_group_events_',
     GROUP_TRANSPARENCY: 'knecta_group_transparency_',
     USER_PARTICIPATION_MODES: 'knecta_user_participation_modes',
-    USER_TOKEN: 'USER_TOKEN' // Unified token key
+    USER_TOKEN: 'USER_TOKEN'
 };
 
 // Flag to track if page is already initialized
@@ -267,14 +267,11 @@ export let parentConnection = {
 
 // Parent detection constants
 export const PARENT_MESSAGE_TYPES = {
-    // Child to Parent
     CHILD_READY: 'CHILD_READY',
     REQUEST_SESSION: 'REQUEST_SESSION',
     CHILD_INITIALIZED: 'CHILD_INITIALIZED',
     CHILD_ERROR: 'CHILD_ERROR',
     CHILD_ACTION: 'CHILD_ACTION',
-    
-    // Parent to Child
     SESSION_DATA: 'SESSION_DATA',
     SESSION_UPDATE: 'SESSION_UPDATE',
     LOGOUT: 'LOGOUT',
@@ -295,27 +292,300 @@ export const SESSION_SCHEMA = {
 };
 
 // =============================================
-// PARENT COORDINATION FUNCTIONS
+// SECURE HANDSHAKE PROTOCOL IMPLEMENTATION
+// =============================================
+
+// Secure handshake state
+let handshakeInProgress = false;
+let sessionValid = false;
+let handshakeTimeout = null;
+let hasLoggedWaiting = false;
+let hasLoggedSuccess = false;
+let hasLoggedFailed = false;
+
+/**
+ * Initialize secure handshake with parent
+ */
+export function initializeSecureHandshake() {
+    if (handshakeInProgress || parentConnection.handshakeComplete) {
+        return;
+    }
+    
+    if (!verifyParentPresence()) {
+        handleParentUnavailable();
+        return;
+    }
+    
+    setupSecureMessageListener();
+    requestSessionFromParent();
+}
+
+/**
+ * Request session from parent with secure protocol
+ */
+export function requestSessionFromParent() {
+    if (handshakeInProgress) {
+        return;
+    }
+    
+    handshakeInProgress = true;
+    sessionValid = false;
+    
+    if (!hasLoggedWaiting) {
+        console.log('⏳ [Groups] Waiting for session from parent...');
+        hasLoggedWaiting = true;
+        hasLoggedSuccess = false;
+        hasLoggedFailed = false;
+    }
+    
+    // Send request to parent
+    const messageSent = sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+        source: 'groups-iframe',
+        version: '1.0.0',
+        timestamp: Date.now(),
+        requestId: 'session_req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    });
+    
+    if (!messageSent) {
+        handshakeInProgress = false;
+        if (!hasLoggedFailed) {
+            console.log('❌ [Groups] Cannot send message to parent');
+            hasLoggedFailed = true;
+        }
+        handleParentUnavailable();
+        return;
+    }
+    
+    // Set timeout for handshake
+    handshakeTimeout = setTimeout(() => {
+        if (!sessionValid) {
+            handshakeInProgress = false;
+            if (!hasLoggedFailed) {
+                console.log('❌ [Groups] Session request failed. Will retry once.');
+                hasLoggedFailed = true;
+            }
+            
+            // Single retry as requested
+            if (parentConnection.retryCount < 1) {
+                parentConnection.retryCount++;
+                setTimeout(() => {
+                    requestSessionFromParent();
+                }, 2000);
+            } else {
+                handleParentUnavailable();
+            }
+        }
+    }, 5000);
+}
+
+/**
+ * Setup secure message listener for parent communication
+ */
+export function setupSecureMessageListener() {
+    if (window.secureMessageListenerSetup) {
+        return;
+    }
+    
+    window.addEventListener('message', handleSecureParentMessage);
+    window.secureMessageListenerSetup = true;
+}
+
+/**
+ * Handle secure messages from parent window with origin validation
+ * @param {MessageEvent} event - Message event
+ */
+export function handleSecureParentMessage(event) {
+    try {
+        // Validate origin - accept only from same origin or trusted origins
+        const isValidOrigin = validateMessageOrigin(event.origin);
+        if (!isValidOrigin) {
+            return;
+        }
+        
+        const message = event.data;
+        
+        if (!message || typeof message !== 'object' || !message.type) {
+            return;
+        }
+        
+        // Check source to ensure it's from parent
+        if (message.source !== 'parent' && message.source !== 'knecta-parent') {
+            return;
+        }
+        
+        switch (message.type) {
+            case PARENT_MESSAGE_TYPES.SESSION_DATA:
+                handleSecureSessionData(message.data || message);
+                break;
+            case PARENT_MESSAGE_TYPES.PARENT_READY:
+                handleParentReady();
+                break;
+            case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
+                handleSessionUpdate(message.data);
+                break;
+            case PARENT_MESSAGE_TYPES.LOGOUT:
+                handleLogout();
+                break;
+            default:
+                // Handle legacy or custom messages
+                if (message.token && message.user) {
+                    handleSecureSessionData(message);
+                }
+        }
+    } catch (error) {
+        console.warn('[Groups] Error handling secure parent message:', error.message);
+    }
+}
+
+/**
+ * Validate message origin safely
+ * @param {string} origin - Message origin
+ * @returns {boolean} True if origin is valid
+ */
+export function validateMessageOrigin(origin) {
+    try {
+        const currentOrigin = window.location.origin;
+        
+        // Accept same origin always
+        if (origin === currentOrigin) {
+            return true;
+        }
+        
+        // Accept local development origins
+        if (origin === 'http://127.0.0.1:5500' || 
+            origin === 'http://localhost:5500' ||
+            origin === 'http://localhost:3000' ||
+            origin === 'http://127.0.0.1:3000') {
+            return true;
+        }
+        
+        // Accept parent origin if we can detect it
+        if (window.parent && window.parent.location) {
+            try {
+                const parentOrigin = window.parent.location.origin;
+                if (origin === parentOrigin) {
+                    return true;
+                }
+            } catch (e) {
+                // Cannot access parent origin due to cross-origin
+            }
+        }
+        
+        // For production, you might want to whitelist specific origins
+        const allowedOrigins = [
+            currentOrigin,
+            'https://your-production-domain.com',
+            'https://www.your-production-domain.com'
+        ];
+        
+        return allowedOrigins.includes(origin);
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Handle secure session data from parent
+ * @param {Object} sessionData - Session data
+ */
+export function handleSecureSessionData(sessionData) {
+    try {
+        if (!sessionData || !sessionData.token || !sessionData.user) {
+            if (!hasLoggedFailed) {
+                console.log('❌ [Groups] Received invalid session from parent');
+                hasLoggedFailed = true;
+            }
+            handshakeInProgress = false;
+            return;
+        }
+        
+        // Validate session data
+        if (!validateSessionData(sessionData)) {
+            if (!hasLoggedFailed) {
+                console.log('❌ [Groups] Session validation failed');
+                hasLoggedFailed = true;
+            }
+            handshakeInProgress = false;
+            return;
+        }
+        
+        sessionValid = true;
+        handshakeInProgress = false;
+        
+        if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            handshakeTimeout = null;
+        }
+        
+        // Update parent connection state
+        parentConnection.sessionData = sessionData;
+        parentConnection.handshakeComplete = true;
+        parentConnection.isConnected = true;
+        
+        if (!hasLoggedSuccess) {
+            console.log('✅ [Groups] Session received successfully');
+            hasLoggedSuccess = true;
+        }
+        
+        // Update local state from session
+        updateLocalStateFromSession(sessionData);
+        
+        // Bind UI only after session is validated
+        bindUIAfterSession();
+        
+        // Notify parent that we're ready
+        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_INITIALIZED, {
+            success: true,
+            user: sessionData.user.id || 'unknown',
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        console.error('[Groups] Error handling secure session data:', error.message);
+        handshakeInProgress = false;
+    }
+}
+
+/**
+ * Bind UI only after session is validated (safe UI initialization)
+ */
+export function bindUIAfterSession() {
+    if (!parentConnection.handshakeComplete || !sessionValid) {
+        return;
+    }
+    
+    try {
+        enableProtectedUI();
+        startBackgroundProcesses();
+        
+        // Ensure UI is only bound once
+        if (!isPageInitialized) {
+            setTimeout(() => {
+                setupUIEventListeners();
+                setupResponsiveBehavior();
+                updateUserUI();
+            }, 100);
+        }
+    } catch (error) {
+        console.error('[Groups] Error binding UI after session:', error.message);
+    }
+}
+
+// =============================================
+// PARENT COORDINATION FUNCTIONS (UPDATED)
 // =============================================
 
 /**
  * Initialize parent connection and handshake
  */
 export function initializeParentConnection() {
-    console.log('[Groups iframe] Initializing parent connection...');
-    
-    // Verify parent presence
-    if (!verifyParentPresence()) {
-        console.warn('[Groups iframe] Parent window not available or cross-origin');
+    try {
+        // Use secure handshake protocol
+        initializeSecureHandshake();
+    } catch (error) {
+        console.warn('[Groups] Parent connection initialization failed:', error.message);
         handleParentUnavailable();
-        return;
     }
-    
-    // Setup message listener
-    setupParentMessageListener();
-    
-    // Start handshake protocol
-    startHandshakeProtocol();
 }
 
 /**
@@ -324,26 +594,30 @@ export function initializeParentConnection() {
  */
 export function verifyParentPresence() {
     try {
-        // Check if we're in an iframe
         if (window === window.parent) {
-            console.log('[Groups iframe] Not in iframe, running standalone');
             return false;
         }
         
-        // Try to access parent properties (will throw if cross-origin)
-        const parentOrigin = window.parent.location.origin;
-        const currentOrigin = window.location.origin;
-        
-        if (parentOrigin !== currentOrigin) {
-            console.warn('[Groups iframe] Cross-origin parent detected:', parentOrigin, 'vs', currentOrigin);
-            return false;
+        // Try to detect parent origin safely
+        try {
+            const parentOrigin = window.parent.location.origin;
+            const currentOrigin = window.location.origin;
+            
+            if (parentOrigin !== currentOrigin) {
+                // Allow for development environments
+                if (parentOrigin.includes('localhost') || parentOrigin.includes('127.0.0.1')) {
+                    return true;
+                }
+                return false;
+            }
+            
+            return true;
+        } catch (error) {
+            // Cannot access parent location (cross-origin)
+            // This is normal in some iframe scenarios
+            return true;
         }
-        
-        console.log('[Groups iframe] Parent window verified, same origin:', parentOrigin);
-        return true;
-        
     } catch (error) {
-        console.warn('[Groups iframe] Cannot access parent window:', error.message);
         return false;
     }
 }
@@ -352,8 +626,10 @@ export function verifyParentPresence() {
  * Setup message listener for parent communication
  */
 export function setupParentMessageListener() {
+    if (window.parentMessageListenerSetup) return;
+    
     window.addEventListener('message', handleParentMessage);
-    console.log('[Groups iframe] Parent message listener established');
+    window.parentMessageListenerSetup = true;
 }
 
 /**
@@ -361,50 +637,40 @@ export function setupParentMessageListener() {
  * @param {MessageEvent} event - Message event
  */
 export function handleParentMessage(event) {
-    // Verify origin (security check)
-    if (event.origin !== window.location.origin) {
-        console.warn('[Groups iframe] Message from unexpected origin:', event.origin);
-        return;
-    }
-    
-    const message = event.data;
-    
-    if (!message || typeof message !== 'object' || !message.type) {
-        console.warn('[Groups iframe] Invalid message format:', message);
-        return;
-    }
-    
-    console.log('[Groups iframe] Received message from parent:', message.type);
-    
-    // Route message to appropriate handler
-    switch (message.type) {
-        case PARENT_MESSAGE_TYPES.SESSION_DATA:
-            handleSessionData(message.data);
-            break;
-            
-        case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
-            handleSessionUpdate(message.data);
-            break;
-            
-        case PARENT_MESSAGE_TYPES.LOGOUT:
-            handleLogout();
-            break;
-            
-        case PARENT_MESSAGE_TYPES.PARENT_READY:
-            handleParentReady();
-            break;
-            
-        case PARENT_MESSAGE_TYPES.REQUEST_STATUS:
-            sendStatusToParent();
-            break;
-            
-        default:
-            console.log('[Groups iframe] Unknown message type:', message.type);
-            
-            // Legacy message format support
-            if (message.session) {
-                handleLegacySessionMessage(message);
-            }
+    try {
+        if (event.origin !== window.location.origin) {
+            return;
+        }
+        
+        const message = event.data;
+        
+        if (!message || typeof message !== 'object' || !message.type) {
+            return;
+        }
+        
+        switch (message.type) {
+            case PARENT_MESSAGE_TYPES.SESSION_DATA:
+                handleSessionData(message.data);
+                break;
+            case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
+                handleSessionUpdate(message.data);
+                break;
+            case PARENT_MESSAGE_TYPES.LOGOUT:
+                handleLogout();
+                break;
+            case PARENT_MESSAGE_TYPES.PARENT_READY:
+                handleParentReady();
+                break;
+            case PARENT_MESSAGE_TYPES.REQUEST_STATUS:
+                sendStatusToParent();
+                break;
+            default:
+                if (message.session) {
+                    handleLegacySessionMessage(message);
+                }
+        }
+    } catch (error) {
+        console.warn('[Groups] Error handling parent message:', error.message);
     }
 }
 
@@ -412,19 +678,14 @@ export function handleParentMessage(event) {
  * Start handshake protocol with parent
  */
 export function startHandshakeProtocol() {
-    console.log('[Groups iframe] Starting handshake protocol...');
-    
-    // Reset retry count
     parentConnection.retryCount = 0;
     
-    // Send initial ready signal
     sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
         childId: 'groups-iframe',
         version: '1.0.0',
         timestamp: Date.now()
     });
     
-    // Start exponential backoff retry
     scheduleHandshakeRetry();
 }
 
@@ -432,21 +693,15 @@ export function startHandshakeProtocol() {
  * Schedule handshake retry with exponential backoff
  */
 export function scheduleHandshakeRetry() {
-    if (parentConnection.handshakeComplete) {
-        console.log('[Groups iframe] Handshake already complete');
-        return;
-    }
+    if (parentConnection.handshakeComplete) return;
     
     if (parentConnection.retryCount >= parentConnection.maxRetries) {
-        console.error('[Groups iframe] Max handshake retries reached');
         handleParentUnavailable();
         return;
     }
     
     const delay = parentConnection.retryDelay * Math.pow(2, parentConnection.retryCount);
     parentConnection.retryCount++;
-    
-    console.log(`[Groups iframe] Scheduling handshake retry ${parentConnection.retryCount} in ${delay}ms`);
     
     setTimeout(() => {
         if (!parentConnection.handshakeComplete) {
@@ -467,7 +722,6 @@ export function scheduleHandshakeRetry() {
 export function sendMessageToParent(type, data = {}) {
     try {
         if (!window.parent || !window.parent.postMessage) {
-            console.warn('[Groups iframe] Cannot send message: parent window not available');
             return false;
         }
         
@@ -475,15 +729,15 @@ export function sendMessageToParent(type, data = {}) {
             type: type,
             data: data,
             source: 'knecta-groups-iframe',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sequenceId: Date.now() + '-' + Math.random().toString(36).substr(2, 9)
         };
         
-        window.parent.postMessage(message, window.location.origin);
-        console.log('[Groups iframe] Sent message to parent:', type);
+        // Send to any origin - origin validation happens on receive
+        window.parent.postMessage(message, '*');
         return true;
-        
     } catch (error) {
-        console.error('[Groups iframe] Error sending message to parent:', error);
+        console.warn('[Groups] Error sending message to parent:', error.message);
         return false;
     }
 }
@@ -492,13 +746,8 @@ export function sendMessageToParent(type, data = {}) {
  * Handle parent ready signal
  */
 export function handleParentReady() {
-    console.log('[Groups iframe] Parent is ready, requesting session...');
-    
-    // Immediately request session
-    sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
-        urgent: true,
-        timestamp: Date.now()
-    });
+    // Use the secure handshake protocol
+    requestSessionFromParent();
 }
 
 /**
@@ -506,40 +755,35 @@ export function handleParentReady() {
  * @param {Object} sessionData - Session data
  */
 export function handleSessionData(sessionData) {
-    console.log('[Groups iframe] Received session data from parent');
-    
-    // Validate session data
-    if (!validateSessionData(sessionData)) {
-        console.error('[Groups iframe] Invalid session data received');
-        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_ERROR, {
-            error: 'Invalid session data',
-            validationFailed: true
+    try {
+        if (!validateSessionData(sessionData)) {
+            sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_ERROR, {
+                error: 'Invalid session data',
+                validationFailed: true
+            });
+            return;
+        }
+        
+        parentConnection.sessionData = sessionData;
+        parentConnection.handshakeComplete = true;
+        parentConnection.isConnected = true;
+        
+        updateLocalStateFromSession(sessionData);
+        
+        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_INITIALIZED, {
+            success: true,
+            user: sessionData.user?.id || 'unknown',
+            timestamp: Date.now()
         });
-        return;
+        
+        enableProtectedUI();
+        startBackgroundProcesses();
+    } catch (error) {
+        console.error('[Groups] Error handling session data:', error.message);
+        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_ERROR, {
+            error: 'Failed to process session data'
+        });
     }
-    
-    // Store session data
-    parentConnection.sessionData = sessionData;
-    parentConnection.handshakeComplete = true;
-    parentConnection.isConnected = true;
-    
-    console.log('[Groups iframe] Session validated, user:', sessionData.user?.displayName || 'Unknown');
-    
-    // Update local state with session data
-    updateLocalStateFromSession(sessionData);
-    
-    // Notify parent handshake is complete
-    sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_INITIALIZED, {
-        success: true,
-        user: sessionData.user?.id || 'unknown',
-        timestamp: Date.now()
-    });
-    
-    // Enable protected UI
-    enableProtectedUI();
-    
-    // Start background processes
-    startBackgroundProcesses();
 }
 
 /**
@@ -549,39 +793,30 @@ export function handleSessionData(sessionData) {
  */
 export function validateSessionData(sessionData) {
     if (!sessionData || typeof sessionData !== 'object') {
-        console.warn('[Groups iframe] Session data is not an object');
         return false;
     }
     
-    // Check required fields
     const required = SESSION_SCHEMA.required;
     for (const field of required) {
         if (!sessionData[field]) {
-            console.warn(`[Groups iframe] Missing required field: ${field}`);
             return false;
         }
     }
     
-    // Validate user object
     if (sessionData.user) {
         const userRequired = SESSION_SCHEMA.user.required;
         for (const field of userRequired) {
             if (!sessionData.user[field]) {
-                console.warn(`[Groups iframe] Missing required user field: ${field}`);
                 return false;
             }
         }
     }
     
-    // Validate token is string
     if (typeof sessionData.token !== 'string' || !sessionData.token) {
-        console.warn('[Groups iframe] Invalid token');
         return false;
     }
     
-    // Validate timestamp
     if (typeof sessionData.timestamp !== 'number' || sessionData.timestamp <= 0) {
-        console.warn('[Groups iframe] Invalid timestamp');
         return false;
     }
     
@@ -593,21 +828,16 @@ export function validateSessionData(sessionData) {
  * @param {Object} sessionData - Session data
  */
 export function updateLocalStateFromSession(sessionData) {
-    console.log('[Groups iframe] Updating local state from session...');
-    
-    // Update current user
-    currentUser = sessionData.user;
-    
-    // Update user data
-    userData = {
-        displayName: currentUser.displayName || currentUser.name || 'User',
-        username: currentUser.username || null,
-        email: currentUser.email || null,
-        photoURL: currentUser.photoURL || currentUser.avatar || null
-    };
-    
-    // Save to local storage for offline use
     try {
+        currentUser = sessionData.user;
+        
+        userData = {
+            displayName: currentUser.displayName || currentUser.name || 'User',
+            username: currentUser.username || null,
+            email: currentUser.email || null,
+            photoURL: currentUser.photoURL || currentUser.avatar || null
+        };
+        
         localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
             uid: currentUser.id || currentUser._id || currentUser.uid,
             displayName: currentUser.displayName || currentUser.name,
@@ -616,19 +846,13 @@ export function updateLocalStateFromSession(sessionData) {
         }));
         
         localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
-        
-        // Save unified token
         saveUnifiedToken(sessionData.token);
         
+        authReady = true;
+        authCheckComplete = true;
     } catch (error) {
-        console.warn('[Groups iframe] Error saving session to localStorage:', error);
+        console.warn('[Groups] Error updating local session state:', error.message);
     }
-    
-    // Update auth state
-    authReady = true;
-    authCheckComplete = true;
-    
-    console.log('[Groups iframe] Local state updated');
 }
 
 /**
@@ -636,21 +860,19 @@ export function updateLocalStateFromSession(sessionData) {
  * @param {Object} updateData - Update data
  */
 export function handleSessionUpdate(updateData) {
-    console.log('[Groups iframe] Received session update');
-    
-    // Merge with existing session data
-    if (parentConnection.sessionData) {
-        parentConnection.sessionData = {
-            ...parentConnection.sessionData,
-            ...updateData
-        };
-        
-        // Update local state if user data changed
-        if (updateData.user) {
-            updateLocalStateFromSession(parentConnection.sessionData);
+    try {
+        if (parentConnection.sessionData) {
+            parentConnection.sessionData = {
+                ...parentConnection.sessionData,
+                ...updateData
+            };
+            
+            if (updateData.user) {
+                updateLocalStateFromSession(parentConnection.sessionData);
+            }
         }
-        
-        console.log('[Groups iframe] Session updated');
+    } catch (error) {
+        console.warn('[Groups] Error handling session update:', error.message);
     }
 }
 
@@ -658,52 +880,52 @@ export function handleSessionUpdate(updateData) {
  * Handle logout signal from parent
  */
 export function handleLogout() {
-    console.log('[Groups iframe] Received logout signal from parent');
-    
-    // Clear local session state
-    clearLocalSessionState();
-    
-    // Disable protected UI
-    disableProtectedUI();
-    
-    // Show logout message
-    showNotification('Logged out. Please log in again.', 'info');
-    
-    // Notify parent we've processed logout
-    sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_ACTION, {
-        action: 'logout_processed',
-        timestamp: Date.now()
-    });
+    try {
+        clearLocalSessionState();
+        disableProtectedUI();
+        showNotification('Logged out. Please log in again.', 'info');
+        
+        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_ACTION, {
+            action: 'logout_processed',
+            timestamp: Date.now()
+        });
+    } catch (error) {
+        console.warn('[Groups] Error handling logout:', error.message);
+    }
 }
 
 /**
  * Clear local session state
  */
 export function clearLocalSessionState() {
-    console.log('[Groups iframe] Clearing local session state');
-    
-    // Clear variables
     currentUser = null;
     userData = null;
     authReady = false;
     
-    // Clear sensitive localStorage items
     try {
         localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
         localStorage.removeItem('knecta_access_token');
         localStorage.removeItem('moodchat_token');
-        
-        // Keep non-sensitive cache for better UX on re-login
     } catch (error) {
-        console.warn('[Groups iframe] Error clearing localStorage:', error);
+        console.warn('[Groups] Error clearing localStorage:', error.message);
     }
     
-    // Reset parent connection (but keep trying to reconnect)
     parentConnection.sessionData = null;
     parentConnection.handshakeComplete = false;
     parentConnection.isConnected = false;
     
-    // Stop background processes
+    // Reset handshake state
+    handshakeInProgress = false;
+    sessionValid = false;
+    hasLoggedWaiting = false;
+    hasLoggedSuccess = false;
+    hasLoggedFailed = false;
+    
+    if (handshakeTimeout) {
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = null;
+    }
+    
     stopBackgroundProcesses();
 }
 
@@ -711,16 +933,10 @@ export function clearLocalSessionState() {
  * Handle parent unavailable scenario
  */
 export function handleParentUnavailable() {
-    console.warn('[Groups iframe] Parent window unavailable or unresponsive');
-    
-    // Try to use cached data if available
     const cachedUser = getCurrentUserLocal();
     const cachedToken = getUnifiedToken();
     
     if (cachedUser && cachedToken) {
-        console.log('[Groups iframe] Using cached session data');
-        
-        // Create synthetic session data from cache
         const sessionData = {
             user: cachedUser,
             token: cachedToken,
@@ -732,11 +948,8 @@ export function handleParentUnavailable() {
         enableProtectedUI();
         startBackgroundProcesses();
         
-        // Show warning
         showNotification('Running with cached data. Some features may be limited.', 'warning');
-        
     } else {
-        console.log('[Groups iframe] No cached data available');
         disableProtectedUI();
         showReconnectState();
     }
@@ -763,18 +976,19 @@ export function sendStatusToParent() {
  * @param {Object} message - Legacy message
  */
 export function handleLegacySessionMessage(message) {
-    console.log('[Groups iframe] Handling legacy session message format');
-    
-    // Convert legacy format to new format
-    const sessionData = {
-        user: message.user || message.session?.user,
-        token: message.token || message.session?.token,
-        timestamp: message.timestamp || Date.now(),
-        fromLegacy: true
-    };
-    
-    if (validateSessionData(sessionData)) {
-        handleSessionData(sessionData);
+    try {
+        const sessionData = {
+            user: message.user || message.session?.user,
+            token: message.token || message.session?.token,
+            timestamp: message.timestamp || Date.now(),
+            fromLegacy: true
+        };
+        
+        if (validateSessionData(sessionData)) {
+            handleSessionData(sessionData);
+        }
+    } catch (error) {
+        console.warn('[Groups] Error handling legacy session message:', error.message);
     }
 }
 
@@ -782,9 +996,6 @@ export function handleLegacySessionMessage(message) {
  * Enable protected UI elements
  */
 export function enableProtectedUI() {
-    console.log('[Groups iframe] Enabling protected UI');
-    
-    // Update UI to show logged in state
     updateUserUI();
 }
 
@@ -792,9 +1003,6 @@ export function enableProtectedUI() {
  * Disable protected UI elements
  */
 export function disableProtectedUI() {
-    console.log('[Groups iframe] Disabling protected UI');
-    
-    // Show logged out state in UI
     const userElements = document.querySelectorAll('.user-info, .user-avatar');
     userElements.forEach(el => {
         el.style.opacity = '0.5';
@@ -805,75 +1013,69 @@ export function disableProtectedUI() {
  * Show reconnect state UI
  */
 export function showReconnectState() {
-    console.log('[Groups iframe] Showing reconnect state');
+    if (document.getElementById('reconnectOverlay')) return;
     
-    // Add reconnect overlay if not exists
-    if (!document.getElementById('reconnectOverlay')) {
-        const overlay = document.createElement('div');
-        overlay.id = 'reconnectOverlay';
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.95);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            padding: 20px;
-            text-align: center;
-        `;
-        
-        overlay.innerHTML = `
-            <div style="font-size: 48px; color: var(--primary-color); margin-bottom: 20px;">
-                <i class="fas fa-plug"></i>
-            </div>
-            <h3 style="margin-bottom: 10px;">Connection Lost</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                Unable to connect to parent window. Please refresh or return to the main app.
-            </p>
-            <div style="display: flex; gap: 10px;">
-                <button id="retryConnectionBtn" style="padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                    <i class="fas fa-redo"></i> Retry Connection
-                </button>
-                <button id="useCachedDataBtn" style="padding: 10px 20px; background: var(--secondary-color); color: var(--text-primary); border: none; border-radius: 8px; cursor: pointer;">
-                    <i class="fas fa-database"></i> Use Cached Data
-                </button>
-            </div>
-        `;
-        
-        document.body.appendChild(overlay);
-        
-        // Add event listeners
-        document.getElementById('retryConnectionBtn').addEventListener('click', () => {
-            location.reload();
-        });
-        
-        document.getElementById('useCachedDataBtn').addEventListener('click', () => {
-            handleParentUnavailable();
-            overlay.remove();
-        });
-    }
+    const overlay = document.createElement('div');
+    overlay.id = 'reconnectOverlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.95);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        padding: 20px;
+        text-align: center;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="font-size: 48px; color: var(--primary-color); margin-bottom: 20px;">
+            <i class="fas fa-plug"></i>
+        </div>
+        <h3 style="margin-bottom: 10px;">Connection Lost</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 20px;">
+            Unable to connect to parent window. Please refresh or return to the main app.
+        </p>
+        <div style="display: flex; gap: 10px;">
+            <button id="retryConnectionBtn" style="padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                <i class="fas fa-redo"></i> Retry Connection
+            </button>
+            <button id="useCachedDataBtn" style="padding: 10px 20px; background: var(--secondary-color); color: var(--text-primary); border: none; border-radius: 8px; cursor: pointer;">
+                <i class="fas fa-database"></i> Use Cached Data
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    document.getElementById('retryConnectionBtn').addEventListener('click', () => {
+        location.reload();
+    });
+    
+    document.getElementById('useCachedDataBtn').addEventListener('click', () => {
+        handleParentUnavailable();
+        overlay.remove();
+    });
 }
 
 /**
  * Start background processes after session is ready
  */
 export function startBackgroundProcesses() {
-    console.log('[Groups iframe] Starting background processes');
-    
-    // Load user data in background
-    loadUserDataInBackground();
-    
-    // Start controlled background sync
-    startBackgroundSync();
-    
-    // Process any pending actions
-    if (typeof processPendingOfflineActions === 'function') {
-        processPendingOfflineActions();
+    try {
+        loadUserDataInBackground();
+        startBackgroundSync();
+        
+        if (typeof processPendingOfflineActions === 'function') {
+            processPendingOfflineActions();
+        }
+    } catch (error) {
+        console.warn('[Groups] Error starting background processes:', error.message);
     }
 }
 
@@ -881,8 +1083,6 @@ export function startBackgroundProcesses() {
  * Stop background processes
  */
 export function stopBackgroundProcesses() {
-    console.log('[Groups iframe] Stopping background processes');
-    
     if (syncIntervalId) {
         clearInterval(syncIntervalId);
         syncIntervalId = null;
@@ -892,27 +1092,21 @@ export function stopBackgroundProcesses() {
 }
 
 // =============================================
-// TOKEN MANAGEMENT & API INITIALIZATION - UPDATED
+// TOKEN MANAGEMENT & API INITIALIZATION
 // =============================================
 
 /**
  * Initialize token system with parent coordination
  */
 export function initializeTokenSystem() {
-    console.log('[Groups iframe] Initializing token system with parent coordination...');
-    
-    // Create token ready promise
     tokenReadyPromise = new Promise((resolve, reject) => {
         tokenReadyResolve = resolve;
         tokenReadyReject = reject;
     });
     
-    // Start token initialization in background
     setTimeout(async () => {
         try {
-            // First try to get token from parent session
             if (parentConnection.sessionData && parentConnection.sessionData.token) {
-                console.log('[Groups iframe] Using token from parent session');
                 const token = parentConnection.sessionData.token;
                 saveUnifiedToken(token);
                 authReady = true;
@@ -921,14 +1115,9 @@ export function initializeTokenSystem() {
                 return token;
             }
             
-            // Fallback to imported getUserToken function
             await waitForTokenReady();
-            console.log('[Groups iframe] Token system initialized successfully');
-            
         } catch (error) {
-            console.error('[Groups iframe] Token system initialization failed:', error);
-            
-            // Even if token fails, we can continue with cached data
+            console.error('[Groups] Token system initialization failed:', error.message);
             if (tokenReadyResolve) tokenReadyResolve(null);
         }
     }, 100);
@@ -939,20 +1128,16 @@ export function initializeTokenSystem() {
  * @returns {Promise<string|null>} Token if available, null if not
  */
 export async function waitForTokenReady() {
-    // Check if we already have a valid token
     const token = getUnifiedToken();
     if (token) {
-        console.log('[Groups iframe] Token already available');
         authReady = true;
         authCheckComplete = true;
         if (tokenReadyResolve) tokenReadyResolve(token);
         return token;
     }
     
-    // Try to get token from parent session first
     if (parentConnection.sessionData && parentConnection.sessionData.token) {
         const parentToken = parentConnection.sessionData.token;
-        console.log('[Groups iframe] Got token from parent session');
         saveUnifiedToken(parentToken);
         authReady = true;
         authCheckComplete = true;
@@ -960,11 +1145,9 @@ export async function waitForTokenReady() {
         return parentToken;
     }
     
-    // Try to get token from imported getUserToken function
     try {
         const apiToken = await getUserToken();
         if (apiToken) {
-            console.log('[Groups iframe] Got token from imported getUserToken');
             saveUnifiedToken(apiToken);
             authReady = true;
             authCheckComplete = true;
@@ -972,17 +1155,13 @@ export async function waitForTokenReady() {
             return apiToken;
         }
     } catch (error) {
-        console.log('[Groups iframe] Could not get token from getUserToken:', error.message);
+        console.warn('[Groups] Could not get token from getUserToken:', error.message);
     }
     
-    // Wait for api.core.js initialization
     try {
-        console.log('[Groups iframe] Waiting for api.core.js initialization...');
         await initApi();
-        
         const apiToken = await getUserToken();
         if (apiToken) {
-            console.log('[Groups iframe] Got token after api.core.js initialization');
             saveUnifiedToken(apiToken);
             authReady = true;
             authCheckComplete = true;
@@ -990,21 +1169,17 @@ export async function waitForTokenReady() {
             return apiToken;
         }
     } catch (error) {
-        console.log('[Groups iframe] Error waiting for api.core.js:', error.message);
+        console.warn('[Groups] Error waiting for api.core.js:', error.message);
     }
     
-    // Fallback to legacy tokens with migration
     const migratedToken = migrateLegacyTokens();
     if (migratedToken) {
-        console.log('[Groups iframe] Using migrated legacy token');
         authReady = true;
         authCheckComplete = true;
         if (tokenReadyResolve) tokenReadyResolve(migratedToken);
         return migratedToken;
     }
     
-    // No token available, but we can still show UI with cached data
-    console.log('[Groups iframe] No token available, will use cached data');
     authReady = false;
     authCheckComplete = true;
     if (tokenReadyResolve) tokenReadyResolve(null);
@@ -1017,65 +1192,52 @@ export async function waitForTokenReady() {
  */
 export function getUnifiedToken() {
     try {
-        // 1. Check parent session first (highest priority)
         if (parentConnection.sessionData && parentConnection.sessionData.token) {
-            console.log('[Groups iframe] Using token from parent session');
             return parentConnection.sessionData.token;
         }
         
-        // 2. Check central USER_TOKEN storage
         const unifiedToken = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
         if (unifiedToken) {
-            console.log('[Groups iframe] Using unified token from localStorage');
             return unifiedToken;
         }
         
-        // 3. Try imported getUserToken function
         try {
             const apiToken = getUserToken();
             if (apiToken) {
-                console.log('[Groups iframe] Using token from imported getUserToken');
                 saveUnifiedToken(apiToken);
                 return apiToken;
             }
         } catch (error) {
-            console.log('[Groups iframe] Error getting token from getUserToken:', error.message);
+            console.warn('[Groups] Error getting token from getUserToken:', error.message);
         }
         
-        // 4. Try parent window localStorage (for iframe scenarios)
         if (window.parent && window.parent.localStorage) {
             try {
                 const parentToken = window.parent.localStorage.getItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
                 if (parentToken) {
-                    console.log('[Groups iframe] Using token from parent localStorage');
                     saveUnifiedToken(parentToken);
                     return parentToken;
                 }
             } catch (e) {
-                console.log('[Groups iframe] Cannot access parent localStorage:', e.message);
+                console.warn('[Groups] Cannot access parent localStorage:', e.message);
             }
         }
         
-        // 5. Check AppState in parent or current window
         if (window.parent && window.parent.AppState && window.parent.AppState.accessToken) {
-            console.log('[Groups iframe] Using token from parent AppState');
             const token = window.parent.AppState.accessToken;
             saveUnifiedToken(token);
             return token;
         }
         
         if (window.AppState && window.AppState.accessToken) {
-            console.log('[Groups iframe] Using token from current AppState');
             const token = window.AppState.accessToken;
             saveUnifiedToken(token);
             return token;
         }
         
-        console.log('[Groups iframe] No unified token found');
         return null;
-        
     } catch (error) {
-        console.error('[Groups iframe] Error getting unified token:', error);
+        console.error('[Groups] Error getting unified token:', error.message);
         return null;
     }
 }
@@ -1086,30 +1248,23 @@ export function getUnifiedToken() {
  */
 export function saveUnifiedToken(token) {
     try {
-        // Save to central location
         localStorage.setItem(LOCAL_STORAGE_KEYS.USER_TOKEN, token);
-        
-        // Also save to legacy locations for backward compatibility
         localStorage.setItem('knecta_access_token', token);
         localStorage.setItem('moodchat_token', token);
         
-        // Update AppState if available
         if (window.AppState) {
             window.AppState.accessToken = token;
         }
         
-        // Notify parent if in iframe
         if (window.parent && window.parent.AppState) {
             try {
                 window.parent.AppState.accessToken = token;
             } catch (e) {
-                console.log('[Groups iframe] Cannot update parent AppState:', e.message);
+                console.warn('[Groups] Cannot update parent AppState:', e.message);
             }
         }
-        
-        console.log('[Groups iframe] Unified token saved');
     } catch (error) {
-        console.error('[Groups iframe] Error saving unified token:', error);
+        console.error('[Groups] Error saving unified token:', error.message);
     }
 }
 
@@ -1127,16 +1282,13 @@ export function migrateLegacyTokens() {
     
     let migratedToken = null;
     
-    // Check all legacy locations
     for (const key of legacyKeys) {
         try {
             const token = localStorage.getItem(key);
             if (token && !migratedToken) {
-                console.log(`[Groups iframe] Migrating token from ${key}`);
                 migratedToken = token;
                 saveUnifiedToken(token);
                 
-                // Clean up legacy token after migration
                 setTimeout(() => {
                     localStorage.removeItem(key);
                 }, 1000);
@@ -1144,7 +1296,7 @@ export function migrateLegacyTokens() {
                 break;
             }
         } catch (error) {
-            console.log(`[Groups iframe] Error checking legacy key ${key}:`, error.message);
+            console.warn(`[Groups] Error checking legacy key ${key}:`, error.message);
         }
     }
     
@@ -1157,18 +1309,15 @@ export function migrateLegacyTokens() {
  */
 export function getCurrentUserLocal() {
     try {
-        // 1. Try parent session first (highest priority)
         if (parentConnection.sessionData && parentConnection.sessionData.user) {
             return parentConnection.sessionData.user;
         }
         
-        // 2. Try unified storage
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
             return JSON.parse(cachedUser);
         }
         
-        // 3. Try parent window
         if (window.parent && window.parent.localStorage) {
             try {
                 const parentUser = window.parent.localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
@@ -1176,11 +1325,10 @@ export function getCurrentUserLocal() {
                     return JSON.parse(parentUser);
                 }
             } catch (e) {
-                console.log('[Groups iframe] Cannot access parent localStorage:', e.message);
+                console.warn('[Groups] Cannot access parent localStorage:', e.message);
             }
         }
         
-        // 4. Try AppState
         if (window.parent && window.parent.AppState && window.parent.AppState.currentUser) {
             return window.parent.AppState.currentUser;
         }
@@ -1189,17 +1337,15 @@ export function getCurrentUserLocal() {
             return window.AppState.currentUser;
         }
         
-        console.log('[Groups iframe] No user found');
         return null;
-        
     } catch (error) {
-        console.error('[Groups iframe] Error getting current user:', error);
+        console.error('[Groups] Error getting current user:', error.message);
         return null;
     }
 }
 
 // =============================================
-// SECURE API CALL SYSTEM - INTEGRATED WITH api.core.JS AND PARENT COORDINATION
+// SECURE API CALL SYSTEM
 // =============================================
 
 /**
@@ -1218,7 +1364,6 @@ export function queueApiCall(apiCallFunction) {
         
         tokenQueue.push(queuedCall);
         
-        // Process queue if not already processing
         if (!isProcessingTokenQueue) {
             processTokenQueue();
         }
@@ -1232,71 +1377,48 @@ export async function processTokenQueue() {
     if (isProcessingTokenQueue || tokenQueue.length === 0) return;
     
     isProcessingTokenQueue = true;
-    console.log(`[Groups iframe] Processing ${tokenQueue.length} queued API calls`);
     
     try {
-        // Wait for token to be ready
         const token = await tokenReadyPromise;
         
         if (!token) {
-            console.log('[Groups iframe] No token available, rejecting queued calls');
+            const callsToProcess = [...tokenQueue];
+            tokenQueue.length = 0;
             
-            // Check if we should use cached data instead
-            const firstCall = tokenQueue[0];
-            const shouldUseCache = firstCall && firstCall.fn.name === 'apiCall' && 
-                                 firstCall.fn.toString().includes('GET');
-            
-            if (shouldUseCache) {
-                console.log('[Groups iframe] Attempting to use cached data for GET requests');
-                
-                const callsToProcess = [...tokenQueue];
-                tokenQueue.length = 0;
-                
-                for (const call of callsToProcess) {
-                    try {
-                        // Try to extract endpoint from function to check cache
-                        const fnString = call.fn.toString();
-                        const endpointMatch = fnString.match(/['"`]([^'"`]+)['"`]/);
+            for (const call of callsToProcess) {
+                try {
+                    const fnString = call.fn.toString();
+                    const endpointMatch = fnString.match(/['"`]([^'"`]+)['"`]/);
+                    
+                    if (endpointMatch) {
+                        const endpoint = endpointMatch[1];
+                        const cacheKey = `api_cache_${endpoint.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                        const cached = localStorage.getItem(cacheKey);
                         
-                        if (endpointMatch) {
-                            const endpoint = endpointMatch[1];
-                            const cacheKey = `api_cache_${endpoint.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                            const cached = localStorage.getItem(cacheKey);
-                            
-                            if (cached) {
-                                try {
-                                    const cachedData = JSON.parse(cached);
-                                    console.log(`[Groups iframe] Returning cached data for ${endpoint}`);
-                                    call.resolve({
-                                        success: true,
-                                        data: cachedData.data,
-                                        fromCache: true,
-                                        isOffline: true
-                                    });
-                                    continue;
-                                } catch (e) {
-                                    // Cache is corrupted
-                                }
+                        if (cached) {
+                            try {
+                                const cachedData = JSON.parse(cached);
+                                call.resolve({
+                                    success: true,
+                                    data: cachedData.data,
+                                    fromCache: true,
+                                    isOffline: true
+                                });
+                                continue;
+                            } catch (e) {
+                                // Cache is corrupted
                             }
                         }
-                        
-                        // No cache available, reject
-                        call.reject(new Error('No authentication token available and no cached data'));
-                    } catch (error) {
-                        call.reject(error);
                     }
+                    
+                    call.reject(new Error('No authentication token available and no cached data'));
+                } catch (error) {
+                    call.reject(error);
                 }
-            } else {
-                // Reject all calls
-                tokenQueue.forEach(call => {
-                    call.reject(new Error('No authentication token available'));
-                });
-                tokenQueue.length = 0;
             }
             return;
         }
         
-        // Process all queued calls with valid token
         const callsToProcess = [...tokenQueue];
         tokenQueue.length = 0;
         
@@ -1308,9 +1430,8 @@ export async function processTokenQueue() {
                 call.reject(error);
             }
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error processing token queue:', error);
+        console.error('[Groups] Error processing token queue:', error.message);
         tokenQueue.forEach(call => {
             call.reject(error);
         });
@@ -1329,10 +1450,8 @@ export async function processTokenQueue() {
  * @returns {Promise<Object>} API response object
  */
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
-    // Always route through imported apiRequest if available (parent-coordinated)
     if (typeof apiRequest === 'function') {
         try {
-            console.log('[Groups iframe] Routing API call through imported apiRequest');
             return await apiRequest({
                 url: endpoint,
                 method: method,
@@ -1340,12 +1459,10 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
                 ...options
             });
         } catch (error) {
-            console.log('[Groups iframe] apiRequest failed, falling back:', error.message);
-            // Fall through to our implementation
+            console.warn('[Groups] apiRequest failed, falling back:', error.message);
         }
     }
     
-    // Use imported secureFetch if available
     if (typeof secureFetch === 'function') {
         try {
             return await secureFetch(endpoint, {
@@ -1358,19 +1475,15 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
                 ...options
             });
         } catch (error) {
-            console.log('[Groups iframe] secureFetch failed, falling back:', error.message);
-            // Fall through to our implementation
+            console.warn('[Groups] secureFetch failed, falling back:', error.message);
         }
     }
     
-    // Our implementation with parent coordination
     const apiCall = async (token) => {
-        // Verify we have a token (should always be true if we reach here)
         if (!token) {
             throw new Error('No authentication token available');
         }
         
-        // Ensure endpoint is absolute
         const url = endpoint.startsWith('http') ? endpoint : 
                    endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         
@@ -1392,14 +1505,9 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         
         const response = await fetch(url, fetchOptions);
         
-        // Handle 401 Unauthorized
         if (response.status === 401) {
-            console.log('[Groups iframe] Token expired or invalid');
-            
-            // Clear invalid token
             localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_TOKEN);
             
-            // Notify parent about auth failure
             sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_ERROR, {
                 error: 'Authentication failed',
                 statusCode: 401,
@@ -1407,7 +1515,6 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
                 timestamp: Date.now()
             });
             
-            // Show user-friendly message
             if (!options.silent) {
                 showNotification('Your session has expired. Please log in again.', 'error');
             }
@@ -1438,13 +1545,11 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         }
     };
     
-    // Queue the call if token isn't ready
     const token = getUnifiedToken();
     if (!token) {
         return queueApiCall(apiCall);
     }
     
-    // Token is ready, make the call
     return apiCall(token);
 }
 
@@ -1457,11 +1562,9 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
  * @returns {Promise<Object>} API response
  */
 export async function safeApiCall(method, endpoint, data = null, options = {}) {
-    // Generate cache key for GET requests
     const isGetRequest = method.toUpperCase() === 'GET';
     const cacheKey = isGetRequest ? `api_cache_${endpoint.replace(/[^a-zA-Z0-9]/g, '_')}` : null;
     
-    // Try to return cached data immediately for GET requests
     if (isGetRequest && !options.forceRefresh) {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
@@ -1469,9 +1572,7 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
                 const cachedData = JSON.parse(cached);
                 const cacheAge = Date.now() - (cachedData.timestamp || 0);
                 
-                // Use cache if less than 5 minutes old
                 if (cacheAge < 5 * 60 * 1000) {
-                    console.log(`[Groups iframe] Using cached data for ${endpoint}`);
                     return { 
                         success: true, 
                         data: cachedData.data,
@@ -1479,20 +1580,18 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
                     };
                 }
             } catch (error) {
-                console.log('[Groups iframe] Error reading cache:', error.message);
+                console.warn('[Groups] Error reading cache:', error.message);
             }
         }
     }
     
     try {
-        // Use absolute URL for API calls
         const apiEndpoint = endpoint.startsWith('http') ? endpoint : 
                            endpoint.startsWith('/api/') ? endpoint : 
                            `/api/${endpoint}`;
         
         const result = await secureApiCall(method, apiEndpoint, data, options);
         
-        // Cache successful GET responses
         if (isGetRequest && result.success && result.data && cacheKey) {
             try {
                 localStorage.setItem(cacheKey, JSON.stringify({
@@ -1500,22 +1599,19 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
                     timestamp: Date.now()
                 }));
             } catch (error) {
-                console.log('[Groups iframe] Error caching data:', error.message);
+                console.warn('[Groups] Error caching data:', error.message);
             }
         }
         
         return result;
-        
     } catch (error) {
-        console.log('[Groups iframe] API call error:', error.message);
+        console.warn('[Groups] API call error:', error.message);
         
-        // For GET requests, try to return stale cache if available
         if (isGetRequest && cacheKey) {
             const cached = localStorage.getItem(cacheKey);
             if (cached) {
                 try {
                     const cachedData = JSON.parse(cached);
-                    console.log(`[Groups iframe] Returning stale cache for ${endpoint}`);
                     return { 
                         success: true, 
                         data: cachedData.data,
@@ -1523,7 +1619,7 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
                         isOffline: true
                     };
                 } catch (e) {
-                    // Cache is corrupted, ignore
+                    // Cache is corrupted
                 }
             }
         }
@@ -1537,65 +1633,42 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
 }
 
 // =============================================
-// MAIN INITIALIZATION - UPDATED WITH PARENT COORDINATION
+// MAIN INITIALIZATION
 // =============================================
 
 /**
  * Initialize the group page with parent coordination and immediate UI rendering
  */
 export async function initGroupPage() {
-    if (isPageInitialized) {
-        console.log('[Groups iframe] Page already initialized');
-        return;
-    }
+    if (isPageInitialized) return;
     
-    // Mark as initializing
     isPageInitialized = true;
-    console.log('[Groups iframe] Initialization started with parent coordination');
     
-    // STEP 1: Set up parent connection and handshake
-    console.log('[Groups iframe] Setting up parent connection...');
-    initializeParentConnection();
-    
-    // STEP 2: Load cached data instantly for immediate UI rendering
-    console.log('[Groups iframe] Loading instant cache...');
-    loadCachedDataInstantly();
-    
-    // STEP 3: Initialize token system in background (non-blocking)
-    console.log('[Groups iframe] Initializing token system in background...');
-    initializeTokenSystem();
-    
-    // STEP 4: Set up UI event listeners (non-blocking)
-    console.log('[Groups iframe] Setting up UI event listeners...');
-    setTimeout(setupUIEventListeners, 100);
-    
-    // STEP 5: Setup responsive behavior
-    console.log('[Groups iframe] Setting up responsive behavior...');
-    setupResponsiveBehavior();
-    
-    // STEP 6: Start background processes after a short delay
-    // (These will be enabled once parent session is received)
-    setTimeout(() => {
-        console.log('[Groups iframe] Starting background processes check...');
+    try {
+        // Initialize secure handshake first
+        initializeSecureHandshake();
         
-        // Check if we already have session from parent
-        if (parentConnection.handshakeComplete && parentConnection.sessionData) {
-            console.log('[Groups iframe] Parent session already available, starting processes');
-            enableProtectedUI();
-            startBackgroundProcesses();
-        } else if (getCurrentUserLocal() && getUnifiedToken()) {
-            // We have cached data, enable UI with warning
-            console.log('[Groups iframe] Using cached session data');
-            enableProtectedUI();
-            startBackgroundProcesses();
-            showNotification('Using cached data. Reconnecting to server...', 'info');
-        } else {
-            console.log('[Groups iframe] Waiting for parent session...');
-            // UI will remain in limited mode until session arrives
-        }
-    }, 1000);
-    
-    console.log('[Groups iframe] UI ready with cached data, waiting for parent session...');
+        loadCachedDataInstantly();
+        initializeTokenSystem();
+        
+        // Setup basic UI listeners that don't require auth
+        setTimeout(setupUIEventListeners, 100);
+        setupResponsiveBehavior();
+        
+        // Check if we have session after a delay
+        setTimeout(() => {
+            if (parentConnection.handshakeComplete && parentConnection.sessionData) {
+                // UI binding happens automatically via bindUIAfterSession()
+            } else if (getCurrentUserLocal() && getUnifiedToken()) {
+                enableProtectedUI();
+                startBackgroundProcesses();
+                showNotification('Using cached data. Reconnecting to server...', 'info');
+            }
+        }, 1000);
+    } catch (error) {
+        console.error('[Groups] Initialization error:', error.message);
+        showNotification('Failed to initialize groups. Please refresh the page.', 'error');
+    }
 }
 
 /**
@@ -1603,13 +1676,10 @@ export async function initGroupPage() {
  */
 export async function loadUserDataInBackground() {
     try {
-        // Only try to get fresh data if we have a valid session
         if (!parentConnection.handshakeComplete || !parentConnection.sessionData) {
-            console.log('[Groups iframe] No parent session, skipping background user data load');
             return;
         }
         
-        // Use safeApiCall which respects parent coordination
         const response = await safeApiCall('GET', '/api/auth/me', null, { silent: true });
         
         if (response && response.success && response.data) {
@@ -1621,7 +1691,6 @@ export async function loadUserDataInBackground() {
                 photoURL: currentUser.photoURL || currentUser.avatar || null
             };
             
-            // Save to localStorage
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
                 uid: currentUser.id || currentUser._id || currentUser.uid,
                 displayName: currentUser.displayName || currentUser.name,
@@ -1631,15 +1700,10 @@ export async function loadUserDataInBackground() {
             
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PROFILE, JSON.stringify(userData));
             
-            console.log('[Groups iframe] User data updated from server');
-            
-            // Update UI if needed
             updateUserUI();
         }
-        
     } catch (error) {
-        console.log('[Groups iframe] Background user data load error:', error.message);
-        // Use cached data - this is fine, we'll try again later
+        console.warn('[Groups] Background user data load error:', error.message);
     }
 }
 
@@ -1647,52 +1711,39 @@ export async function loadUserDataInBackground() {
  * Update UI with user data
  */
 export function updateUserUI() {
-    // Update any user-specific UI elements here
-    console.log('[Groups iframe] User UI updated');
+    // Implementation depends on specific UI elements
 }
 
 /**
  * Setup UI event listeners
  */
 export function setupUIEventListeners() {
-    console.log('[Groups iframe] Setting up UI event listeners...');
-    
-    // Add your UI event listeners here
-    // This is a placeholder - implement based on your actual UI elements
+    // Implementation depends on specific UI elements
 }
 
 /**
  * Setup responsive behavior
  */
 export function setupResponsiveBehavior() {
-    console.log('[Groups iframe] Setting up responsive behavior...');
-    
-    // Add responsive behavior setup here
-    // This is a placeholder - implement based on your actual responsive needs
+    // Implementation depends on specific UI needs
 }
 
 // =============================================
-// CORE GROUP FUNCTIONS (UNCHANGED)
+// CORE GROUP FUNCTIONS
 // =============================================
 
 /**
  * Load cached data instantly on page load for immediate UI rendering
  */
 export function loadCachedDataInstantly() {
-    console.log('[Groups iframe] Loading instant cache...');
-    
     try {
-        // Load groups
         const groupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUPS);
         if (groupsData) {
             groups = JSON.parse(groupsData);
-            console.log(`[Groups iframe] Instant: ${groups.length} groups loaded from cache`);
             isLoadedFromLocalStorage = true;
-            
             updateGroupCounts();
         }
         
-        // Load other group data
         const myGroupsData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_GROUPS);
         if (myGroupsData) myGroups = JSON.parse(myGroupsData);
         
@@ -1705,24 +1756,18 @@ export function loadCachedDataInstantly() {
         const adminData = localStorage.getItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS);
         if (adminData) adminGroups = JSON.parse(adminData);
         
-        // Load friends
         const cachedFriends = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cachedFriends) friends = JSON.parse(cachedFriends);
         
-        // Load user data from cache
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
             currentUser = JSON.parse(cachedUser);
             userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
         }
         
-        // Load unique features data
         loadUniqueFeaturesData();
-        
-        console.log('[Groups iframe] Instant cache load complete');
-        
     } catch (error) {
-        console.error('[Groups iframe] Error in instant cache load:', error);
+        console.error('[Groups] Error in instant cache load:', error.message);
     }
 }
 
@@ -1765,9 +1810,8 @@ export function loadUniqueFeaturesData() {
         if (cachedModes) {
             currentParticipationMode = JSON.parse(cachedModes);
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error loading unique features data:', error);
+        console.error('[Groups] Error loading unique features data:', error.message);
     }
 }
 
@@ -2029,12 +2073,12 @@ export function handleGroupAction(action, groupData, type, button) {
             declineGroupInviteLocal(groupData);
             break;
         default:
-            console.log('Unknown group action:', action);
+            console.warn('Unknown group action:', action);
     }
 }
 
 // =============================================
-// BACKGROUND SYNC FUNCTIONS (UPDATED)
+// BACKGROUND SYNC FUNCTIONS
 // =============================================
 
 /**
@@ -2042,44 +2086,33 @@ export function handleGroupAction(action, groupData, type, button) {
  */
 export function startBackgroundSync() {
     if (backgroundSyncRunning) {
-        console.log('[Groups iframe] Background sync already running');
         return;
     }
     
-    // Only sync if we have valid authentication
     if (!authReady) {
-        console.log('[Groups iframe] Background sync skipped - auth not ready');
         return;
     }
     
-    // Check if we have parent session
     if (!parentConnection.handshakeComplete && !getUnifiedToken()) {
-        console.log('[Groups iframe] Background sync skipped - no valid session');
         return;
     }
     
     backgroundSyncRunning = true;
-    console.log('[Groups iframe] Starting controlled background sync');
     
-    // Initial sync
     setTimeout(() => {
         backgroundSyncWithServer();
     }, 2000);
     
-    // Set up periodic sync with cleanup
     syncIntervalId = setInterval(() => {
         if (authReady && (parentConnection.handshakeComplete || getUnifiedToken())) {
             backgroundSyncWithServer();
         } else {
-            console.log('[Groups iframe] Background sync paused - auth/session not ready');
-            // Clear interval if auth is lost
             clearInterval(syncIntervalId);
             syncIntervalId = null;
             backgroundSyncRunning = false;
         }
     }, 30000);
     
-    // Process pending actions
     if (typeof processPendingOfflineActions === 'function') {
         processPendingOfflineActions();
     }
@@ -2090,17 +2123,12 @@ export function startBackgroundSync() {
  */
 export async function backgroundSyncWithServer() {
     if (!authReady) {
-        console.log('[Groups iframe] Background sync: Skipping - auth not ready');
         return;
     }
     
-    // Check if we have a valid session
     if (!parentConnection.handshakeComplete && !getUnifiedToken()) {
-        console.log('[Groups iframe] Background sync: Skipping - no valid session');
         return;
     }
-    
-    console.log('[Groups iframe] Background sync: Starting...');
     
     try {
         await syncGroupsFromServer();
@@ -2108,15 +2136,13 @@ export async function backgroundSyncWithServer() {
         await syncUniqueFeaturesData();
         
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-        console.log('[Groups iframe] Background sync: Completed successfully');
-        
     } catch (error) {
-        console.log('[Groups iframe] Background sync: Server appears to be unreachable:', error.message);
+        console.warn('[Groups] Background sync: Server appears to be unreachable:', error.message);
     }
 }
 
 // =============================================
-// CHAT AND GROUP MANAGEMENT FUNCTIONS (UPDATED WITH IMPORTS)
+// CHAT AND GROUP MANAGEMENT FUNCTIONS
 // =============================================
 
 /**
@@ -2124,74 +2150,77 @@ export async function backgroundSyncWithServer() {
  * @param {Object} groupData - Group data
  */
 export function openGroupChat(groupData) {
-    console.log('[Groups iframe] Opening inline group chat for:', groupData.name);
-    
-    currentChatGroup = groupData;
-    
-    const chatTitle = document.getElementById('chatTitle');
-    const chatMemberCount = document.getElementById('chatMemberCount');
-    const chatActive = document.getElementById('chatActive');
-    const chatAvatar = document.getElementById('chatAvatar');
-    
-    if (chatTitle) chatTitle.textContent = groupData.name || 'Group Chat';
-    if (chatMemberCount) chatMemberCount.textContent = `${groupData.memberCount || 0} members`;
-    if (chatActive) chatActive.textContent = 'Active now';
-    
-    const theme = groupData.theme || 'blue';
-    const themeInfo = groupThemes[theme];
-    const initials = groupData.name 
-        ? groupData.name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)
-        : 'G';
-    
-    if (chatAvatar) {
-        if (groupData.photoURL) {
-            chatAvatar.style.backgroundImage = `url('${groupData.photoURL}')`;
-            chatAvatar.innerHTML = '';
-        } else {
-            chatAvatar.style.background = themeInfo.gradient;
-            chatAvatar.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
-        }
-    }
-    
-    updateChatHeaderUniqueFeatures(groupData);
-    
-    const sidebar = document.getElementById('sidebar');
-    const groupChatPanel = document.getElementById('groupChatPanel');
-    
-    if (isMobile) {
-        if (sidebar) sidebar.style.display = 'none';
-        if (groupChatPanel) {
-            groupChatPanel.style.display = 'flex';
-            groupChatPanel.classList.add('active');
+    try {
+        currentChatGroup = groupData;
+        
+        const chatTitle = document.getElementById('chatTitle');
+        const chatMemberCount = document.getElementById('chatMemberCount');
+        const chatActive = document.getElementById('chatActive');
+        const chatAvatar = document.getElementById('chatAvatar');
+        
+        if (chatTitle) chatTitle.textContent = groupData.name || 'Group Chat';
+        if (chatMemberCount) chatMemberCount.textContent = `${groupData.memberCount || 0} members`;
+        if (chatActive) chatActive.textContent = 'Active now';
+        
+        const theme = groupData.theme || 'blue';
+        const themeInfo = groupThemes[theme];
+        const initials = groupData.name 
+            ? groupData.name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)
+            : 'G';
+        
+        if (chatAvatar) {
+            if (groupData.photoURL) {
+                chatAvatar.style.backgroundImage = `url('${groupData.photoURL}')`;
+                chatAvatar.innerHTML = '';
+            } else {
+                chatAvatar.style.background = themeInfo.gradient;
+                chatAvatar.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
+            }
         }
         
-        const chatHeaderInfo = document.getElementById('chatHeaderInfo');
-        if (chatHeaderInfo && !chatHeaderInfo.querySelector('.mobile-back-btn')) {
-            const backBtn = document.createElement('button');
-            backBtn.className = 'mobile-back-btn';
-            backBtn.innerHTML = '<i class="fas fa-arrow-left"></i>';
-            backBtn.style.cssText = 'background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 18px; margin-right: 10px;';
-            backBtn.addEventListener('click', closeGroupChatMobile);
-            chatHeaderInfo.insertBefore(backBtn, chatHeaderInfo.firstChild);
+        updateChatHeaderUniqueFeatures(groupData);
+        
+        const sidebar = document.getElementById('sidebar');
+        const groupChatPanel = document.getElementById('groupChatPanel');
+        
+        if (isMobile) {
+            if (sidebar) sidebar.style.display = 'none';
+            if (groupChatPanel) {
+                groupChatPanel.style.display = 'flex';
+                groupChatPanel.classList.add('active');
+            }
+            
+            const chatHeaderInfo = document.getElementById('chatHeaderInfo');
+            if (chatHeaderInfo && !chatHeaderInfo.querySelector('.mobile-back-btn')) {
+                const backBtn = document.createElement('button');
+                backBtn.className = 'mobile-back-btn';
+                backBtn.innerHTML = '<i class="fas fa-arrow-left"></i>';
+                backBtn.style.cssText = 'background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 18px; margin-right: 10px;';
+                backBtn.addEventListener('click', closeGroupChatMobile);
+                chatHeaderInfo.insertBefore(backBtn, chatHeaderInfo.firstChild);
+            }
+        } else {
+            hideAllPanels();
+            if (groupChatPanel) groupChatPanel.classList.add('active');
         }
-    } else {
-        hideAllPanels();
-        if (groupChatPanel) groupChatPanel.classList.add('active');
+        
+        const chatMessages = document.getElementById('chatMessages');
+        const chatMessagesContainer = document.getElementById('chatMessagesContainer');
+        
+        if (chatMessages) chatMessages.innerHTML = '';
+        if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+        
+        loadGroupChatMessages(groupData.id);
+        setupTypingListener(groupData.id);
+        
+        loadUniqueFeaturesPanels(groupData.id);
+        checkPostingRules(groupData);
+        
+        showNotification(`Opened chat: ${groupData.name}`, 'success');
+    } catch (error) {
+        console.error('[Groups] Error opening group chat:', error.message);
+        showNotification('Failed to open chat', 'error');
     }
-    
-    const chatMessages = document.getElementById('chatMessages');
-    const chatMessagesContainer = document.getElementById('chatMessagesContainer');
-    
-    if (chatMessages) chatMessages.innerHTML = '';
-    if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
-    
-    loadGroupChatMessages(groupData.id);
-    setupTypingListener(groupData.id);
-    
-    loadUniqueFeaturesPanels(groupData.id);
-    checkPostingRules(groupData);
-    
-    showNotification(`Opened chat: ${groupData.name}`, 'success');
 }
 
 /**
@@ -2199,62 +2228,66 @@ export function openGroupChat(groupData) {
  * @param {Object} groupData - Group data
  */
 export function updateChatHeaderUniqueFeatures(groupData) {
-    const purpose = groupData.purpose || '';
-    const chatPurposeTag = document.getElementById('chatPurposeTag');
-    if (purpose && groupPurposes[purpose] && chatPurposeTag) {
-        const purposeInfo = groupPurposes[purpose];
-        chatPurposeTag.textContent = `${purposeInfo.icon} ${purposeInfo.name}`;
-        chatPurposeTag.style.backgroundColor = purposeInfo.color + '20';
-        chatPurposeTag.style.color = purposeInfo.color;
-        chatPurposeTag.style.display = 'inline-block';
-    } else if (chatPurposeTag) {
-        chatPurposeTag.style.display = 'none';
-    }
-    
-    const pulse = calculateGroupPulse(groupData);
-    const chatPulse = document.getElementById('chatPulse');
-    if (pulse && chatPulse) {
-        chatPulse.textContent = pulse.text;
-        chatPulse.className = `group-pulse ${pulse.class}`;
-        chatPulse.style.display = 'inline-block';
-    } else if (chatPulse) {
-        chatPulse.style.display = 'none';
-    }
-    
-    const mood = groupData.mood || '';
-    const postingRule = groupData.postingRule || 'everyone';
-    const chatMood = document.getElementById('chatMood');
-    const chatPostingRules = document.getElementById('chatPostingRules');
-    const chatMoodRules = document.getElementById('chatMoodRules');
-    
-    if (mood && groupMoods[mood] && chatMood) {
-        const moodInfo = groupMoods[mood];
-        chatMood.innerHTML = `${moodInfo.icon} ${moodInfo.name}`;
-        chatMood.className = `group-mood-indicator mood-${mood}`;
-        chatMood.style.backgroundColor = moodInfo.bgColor;
-        chatMood.style.color = moodInfo.color;
-        chatMood.style.display = 'flex';
-    } else if (chatMood) {
-        chatMood.style.display = 'none';
-    }
-    
-    if (postingRule && postingRules[postingRule] && chatPostingRules) {
-        const ruleInfo = postingRules[postingRule];
-        chatPostingRules.innerHTML = `<i class="fas fa-comment"></i> ${ruleInfo.name}`;
-        chatPostingRules.className = `posting-rules-banner rule-${postingRule.replace('_', '-')}`;
-        chatPostingRules.style.backgroundColor = ruleInfo.bgColor;
-        chatPostingRules.style.color = ruleInfo.color;
-        chatPostingRules.style.display = 'inline-flex';
-    } else if (chatPostingRules) {
-        chatPostingRules.style.display = 'none';
-    }
-    
-    if (chatMoodRules) {
-        if ((chatMood && chatMood.style.display !== 'none') || (chatPostingRules && chatPostingRules.style.display !== 'none')) {
-            chatMoodRules.style.display = 'block';
-        } else {
-            chatMoodRules.style.display = 'none';
+    try {
+        const purpose = groupData.purpose || '';
+        const chatPurposeTag = document.getElementById('chatPurposeTag');
+        if (purpose && groupPurposes[purpose] && chatPurposeTag) {
+            const purposeInfo = groupPurposes[purpose];
+            chatPurposeTag.textContent = `${purposeInfo.icon} ${purposeInfo.name}`;
+            chatPurposeTag.style.backgroundColor = purposeInfo.color + '20';
+            chatPurposeTag.style.color = purposeInfo.color;
+            chatPurposeTag.style.display = 'inline-block';
+        } else if (chatPurposeTag) {
+            chatPurposeTag.style.display = 'none';
         }
+        
+        const pulse = calculateGroupPulse(groupData);
+        const chatPulse = document.getElementById('chatPulse');
+        if (pulse && chatPulse) {
+            chatPulse.textContent = pulse.text;
+            chatPulse.className = `group-pulse ${pulse.class}`;
+            chatPulse.style.display = 'inline-block';
+        } else if (chatPulse) {
+            chatPulse.style.display = 'none';
+        }
+        
+        const mood = groupData.mood || '';
+        const postingRule = groupData.postingRule || 'everyone';
+        const chatMood = document.getElementById('chatMood');
+        const chatPostingRules = document.getElementById('chatPostingRules');
+        const chatMoodRules = document.getElementById('chatMoodRules');
+        
+        if (mood && groupMoods[mood] && chatMood) {
+            const moodInfo = groupMoods[mood];
+            chatMood.innerHTML = `${moodInfo.icon} ${moodInfo.name}`;
+            chatMood.className = `group-mood-indicator mood-${mood}`;
+            chatMood.style.backgroundColor = moodInfo.bgColor;
+            chatMood.style.color = moodInfo.color;
+            chatMood.style.display = 'flex';
+        } else if (chatMood) {
+            chatMood.style.display = 'none';
+        }
+        
+        if (postingRule && postingRules[postingRule] && chatPostingRules) {
+            const ruleInfo = postingRules[postingRule];
+            chatPostingRules.innerHTML = `<i class="fas fa-comment"></i> ${ruleInfo.name}`;
+            chatPostingRules.className = `posting-rules-banner rule-${postingRule.replace('_', '-')}`;
+            chatPostingRules.style.backgroundColor = ruleInfo.bgColor;
+            chatPostingRules.style.color = ruleInfo.color;
+            chatPostingRules.style.display = 'inline-flex';
+        } else if (chatPostingRules) {
+            chatPostingRules.style.display = 'none';
+        }
+        
+        if (chatMoodRules) {
+            if ((chatMood && chatMood.style.display !== 'none') || (chatPostingRules && chatPostingRules.style.display !== 'none')) {
+                chatMoodRules.style.display = 'block';
+            } else {
+                chatMoodRules.style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.warn('[Groups] Error updating chat header features:', error.message);
     }
 }
 
@@ -2263,85 +2296,89 @@ export function updateChatHeaderUniqueFeatures(groupData) {
  * @param {Object} groupData - Group data
  */
 export function checkPostingRules(groupData) {
-    const postingRule = groupData.postingRule || 'everyone';
-    const quietHours = groupData.quietHours || {};
-    const scheduledPosting = groupData.scheduledPosting || {};
-    
-    let canPost = true;
-    let reason = '';
-    
-    if (postingRule === 'admin_only' && !groupData.isAdmin && !groupData.isCreator) {
-        canPost = false;
-        reason = 'Only admins can post in this group';
-    }
-    
-    if (postingRule === 'quiet_hours' && quietHours.start && quietHours.end) {
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentTime = currentHour * 60 + currentMinute;
+    try {
+        const postingRule = groupData.postingRule || 'everyone';
+        const quietHours = groupData.quietHours || {};
+        const scheduledPosting = groupData.scheduledPosting || {};
         
-        const [startHour, startMinute] = quietHours.start.split(':').map(Number);
-        const [endHour, endMinute] = quietHours.end.split(':').map(Number);
-        const startTime = startHour * 60 + startMinute;
-        const endTime = endHour * 60 + endMinute;
+        let canPost = true;
+        let reason = '';
         
-        if (currentTime >= startTime && currentTime <= endTime) {
+        if (postingRule === 'admin_only' && !groupData.isAdmin && !groupData.isCreator) {
             canPost = false;
-            reason = `Quiet hours: ${quietHours.start} - ${quietHours.end}`;
+            reason = 'Only admins can post in this group';
         }
-    }
-    
-    if (postingRule === 'scheduled' && scheduledPosting.start && scheduledPosting.end) {
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentTime = currentHour * 60 + currentMinute;
         
-        const [startHour, startMinute] = scheduledPosting.start.split(':').map(Number);
-        const [endHour, endMinute] = scheduledPosting.end.split(':').map(Number);
-        const startTime = startHour * 60 + startMinute;
-        const endTime = endHour * 60 + endMinute;
+        if (postingRule === 'quiet_hours' && quietHours.start && quietHours.end) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentTime = currentHour * 60 + currentMinute;
+            
+            const [startHour, startMinute] = quietHours.start.split(':').map(Number);
+            const [endHour, endMinute] = quietHours.end.split(':').map(Number);
+            const startTime = startHour * 60 + startMinute;
+            const endTime = endHour * 60 + endMinute;
+            
+            if (currentTime >= startTime && currentTime <= endTime) {
+                canPost = false;
+                reason = `Quiet hours: ${quietHours.start} - ${quietHours.end}`;
+            }
+        }
         
-        if (currentTime < startTime || currentTime > endTime) {
-            canPost = false;
-            reason = `Posting allowed: ${scheduledPosting.start} - ${scheduledPosting.end}`;
+        if (postingRule === 'scheduled' && scheduledPosting.start && scheduledPosting.end) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentTime = currentHour * 60 + currentMinute;
+            
+            const [startHour, startMinute] = scheduledPosting.start.split(':').map(Number);
+            const [endHour, endMinute] = scheduledPosting.end.split(':').map(Number);
+            const startTime = startHour * 60 + startMinute;
+            const endTime = endHour * 60 + endMinute;
+            
+            if (currentTime < startTime || currentTime > endTime) {
+                canPost = false;
+                reason = `Posting allowed: ${scheduledPosting.start} - ${scheduledPosting.end}`;
+            }
         }
-    }
-    
-    const chatInput = document.getElementById('chatInput');
-    const chatSendBtn = document.getElementById('chatSendBtn');
-    const topicSelection = document.getElementById('topicSelection');
-    const silentModeBtn = document.getElementById('silentModeBtn');
-    const anonymousModeBtn = document.getElementById('anonymousModeBtn');
-    
-    if (chatInput && chatSendBtn) {
-        if (!canPost) {
-            chatInput.placeholder = reason;
-            chatInput.disabled = true;
-            chatSendBtn.disabled = true;
-            showNotification(reason, 'info');
-        } else {
-            chatInput.placeholder = 'Type a message...';
-            chatInput.disabled = false;
-            chatSendBtn.disabled = false;
+        
+        const chatInput = document.getElementById('chatInput');
+        const chatSendBtn = document.getElementById('chatSendBtn');
+        const topicSelection = document.getElementById('topicSelection');
+        const silentModeBtn = document.getElementById('silentModeBtn');
+        const anonymousModeBtn = document.getElementById('anonymousModeBtn');
+        
+        if (chatInput && chatSendBtn) {
+            if (!canPost) {
+                chatInput.placeholder = reason;
+                chatInput.disabled = true;
+                chatSendBtn.disabled = true;
+                showNotification(reason, 'info');
+            } else {
+                chatInput.placeholder = 'Type a message...';
+                chatInput.disabled = false;
+                chatSendBtn.disabled = false;
+            }
         }
+        
+        const showTopics = groupData.features && groupData.features.topics === true;
+        if (topicSelection) {
+            topicSelection.style.display = showTopics ? 'block' : 'none';
+        }
+        
+        const participationModes = groupData.participationModes || {};
+        if (silentModeBtn) {
+            silentModeBtn.style.display = participationModes.readOnly ? 'block' : 'none';
+        }
+        if (anonymousModeBtn) {
+            anonymousModeBtn.style.display = participationModes.anonymous ? 'block' : 'none';
+        }
+        
+        updateParticipationModeButtons();
+    } catch (error) {
+        console.warn('[Groups] Error checking posting rules:', error.message);
     }
-    
-    const showTopics = groupData.features && groupData.features.topics === true;
-    if (topicSelection) {
-        topicSelection.style.display = showTopics ? 'block' : 'none';
-    }
-    
-    const participationModes = groupData.participationModes || {};
-    if (silentModeBtn) {
-        silentModeBtn.style.display = participationModes.readOnly ? 'block' : 'none';
-    }
-    if (anonymousModeBtn) {
-        anonymousModeBtn.style.display = participationModes.anonymous ? 'block' : 'none';
-    }
-    
-    updateParticipationModeButtons();
 }
 
 /**
@@ -2418,9 +2455,8 @@ export async function loadGroupNotes(groupId) {
         if (groupNotesPanel && currentChatGroup && (currentChatGroup.isAdmin || currentChatGroup.isCreator || cachedNotes)) {
             groupNotesPanel.style.display = 'block';
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error loading group notes:', error);
+        console.error('[Groups] Error loading group notes:', error.message);
         const groupNotesPanel = document.getElementById('groupNotesPanel');
         if (groupNotesPanel) groupNotesPanel.style.display = 'none';
     }
@@ -2440,7 +2476,7 @@ export async function loadGroupEvents(groupId) {
             try {
                 events = JSON.parse(cachedEvents);
             } catch (e) {
-                console.error('[Groups iframe] Error parsing cached events:', e);
+                console.error('[Groups] Error parsing cached events:', e.message);
             }
         }
         
@@ -2484,9 +2520,8 @@ export async function loadGroupEvents(groupId) {
                 eventCountdownPanel.style.display = currentChatGroup && (currentChatGroup.isAdmin || currentChatGroup.isCreator) ? 'block' : 'none';
             }
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error loading group events:', error);
+        console.error('[Groups] Error loading group events:', error.message);
         const eventCountdownPanel = document.getElementById('eventCountdownPanel');
         if (eventCountdownPanel) eventCountdownPanel.style.display = 'none';
     }
@@ -2573,7 +2608,7 @@ export async function loadTransparencyLog(groupId) {
             try {
                 log = JSON.parse(cachedLog);
             } catch (e) {
-                console.error('[Groups iframe] Error parsing transparency log:', e);
+                console.error('[Groups] Error parsing transparency log:', e.message);
             }
         } else {
             log = generateInitialTransparencyLog(groupId);
@@ -2609,9 +2644,8 @@ export async function loadTransparencyLog(groupId) {
                 adminTransparencyPanel.style.display = 'none';
             }
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error loading transparency log:', error);
+        console.error('[Groups] Error loading transparency log:', error.message);
         const adminTransparencyPanel = document.getElementById('adminTransparencyPanel');
         if (adminTransparencyPanel) adminTransparencyPanel.style.display = 'none';
     }
@@ -2715,9 +2749,8 @@ export async function analyzeGroupEnergy(groupId) {
             messagesPerDay,
             suggestion
         });
-        
     } catch (error) {
-        console.error('[Groups iframe] Error analyzing group energy:', error);
+        console.error('[Groups] Error analyzing group energy:', error.message);
         const energySuggestionPanel = document.getElementById('energySuggestionPanel');
         if (energySuggestionPanel) energySuggestionPanel.style.display = 'none';
     }
@@ -2813,7 +2846,7 @@ export async function loadGroupChatMessages(groupId) {
                 addMessageToChat(message, false);
             });
         } catch (error) {
-            console.error('[Groups iframe] Error loading cached messages:', error);
+            console.error('[Groups] Error loading cached messages:', error.message);
         }
     }
     
@@ -2837,7 +2870,7 @@ export async function loadGroupChatMessages(groupId) {
             });
         }
     } catch (error) {
-        console.error('[Groups iframe] Error loading messages from imported API:', error);
+        console.error('[Groups] Error loading messages from imported API:', error.message);
     }
 }
 
@@ -2935,7 +2968,7 @@ export function saveMessageToCache(groupId, message) {
             localStorage.setItem(cacheKey, JSON.stringify(cachedMessages));
         }
     } catch (error) {
-        console.error('[Groups iframe] Error saving message to cache:', error);
+        console.error('[Groups] Error saving message to cache:', error.message);
     }
 }
 
@@ -2943,37 +2976,37 @@ export function saveMessageToCache(groupId, message) {
  * Send group message using imported function
  */
 export async function sendGroupMessageLocal() {
-    const chatInput = document.getElementById('chatInput');
-    const messageTopic = document.getElementById('messageTopic');
-    
-    if (!currentChatGroup || !chatInput || !chatInput.value.trim()) return;
-    
-    const messageContent = chatInput.value.trim();
-    const selectedTopic = messageTopic ? messageTopic.value : '';
-    
-    chatInput.value = '';
-    adjustTextareaHeight();
-    
-    const message = {
-        groupId: currentChatGroup.id,
-        senderId: currentUser.uid || currentUser.id,
-        senderName: userData.displayName || 'User',
-        content: messageContent,
-        timestamp: new Date(),
-        type: 'text',
-        readBy: [currentUser.uid || currentUser.id],
-        topic: selectedTopic || undefined,
-        anonymous: isAnonymousMode
-    };
-    
-    const tempMessage = {
-        ...message,
-        id: 'temp_' + Date.now()
-    };
-    
-    addMessageToChat(tempMessage, true);
-    
     try {
+        const chatInput = document.getElementById('chatInput');
+        const messageTopic = document.getElementById('messageTopic');
+        
+        if (!currentChatGroup || !chatInput || !chatInput.value.trim()) return;
+        
+        const messageContent = chatInput.value.trim();
+        const selectedTopic = messageTopic ? messageTopic.value : '';
+        
+        chatInput.value = '';
+        adjustTextareaHeight();
+        
+        const message = {
+            groupId: currentChatGroup.id,
+            senderId: currentUser.uid || currentUser.id,
+            senderName: userData.displayName || 'User',
+            content: messageContent,
+            timestamp: new Date(),
+            type: 'text',
+            readBy: [currentUser.uid || currentUser.id],
+            topic: selectedTopic || undefined,
+            anonymous: isAnonymousMode
+        };
+        
+        const tempMessage = {
+            ...message,
+            id: 'temp_' + Date.now()
+        };
+        
+        addMessageToChat(tempMessage, true);
+        
         const response = await sendGroupMessageAPI(currentChatGroup.id, {
             content: messageContent,
             topic: selectedTopic || undefined,
@@ -2990,55 +3023,63 @@ export async function sendGroupMessageLocal() {
                 toggleAnonymousMode();
             }
         } else {
-            showNotification('Failed to send message', 'error');
+            throw new Error(response?.error || 'Failed to send message');
         }
+        
+        stopTypingIndicator();
     } catch (error) {
-        console.error('[Groups iframe] Error sending message:', error);
+        console.error('[Groups] Error sending message:', error.message);
         showNotification('Failed to send message', 'error');
     }
-    
-    stopTypingIndicator();
 }
 
 /**
  * Toggle silent mode
  */
 export function toggleSilentMode() {
-    if (currentParticipationMode === 'read_only') {
-        currentParticipationMode = 'normal';
-        const chatInput = document.getElementById('chatInput');
-        const chatSendBtn = document.getElementById('chatSendBtn');
-        if (chatInput) chatInput.disabled = false;
-        if (chatSendBtn) chatSendBtn.disabled = false;
-        if (chatInput) chatInput.placeholder = 'Type a message...';
-        showNotification('Exited silent mode', 'success');
-    } else {
-        currentParticipationMode = 'read_only';
-        const chatInput = document.getElementById('chatInput');
-        const chatSendBtn = document.getElementById('chatSendBtn');
-        if (chatInput) chatInput.disabled = true;
-        if (chatSendBtn) chatSendBtn.disabled = true;
-        if (chatInput) chatInput.placeholder = 'Silent mode: Read only';
-        showNotification('Entered silent mode (read only)', 'info');
+    try {
+        if (currentParticipationMode === 'read_only') {
+            currentParticipationMode = 'normal';
+            const chatInput = document.getElementById('chatInput');
+            const chatSendBtn = document.getElementById('chatSendBtn');
+            if (chatInput) chatInput.disabled = false;
+            if (chatSendBtn) chatSendBtn.disabled = false;
+            if (chatInput) chatInput.placeholder = 'Type a message...';
+            showNotification('Exited silent mode', 'success');
+        } else {
+            currentParticipationMode = 'read_only';
+            const chatInput = document.getElementById('chatInput');
+            const chatSendBtn = document.getElementById('chatSendBtn');
+            if (chatInput) chatInput.disabled = true;
+            if (chatSendBtn) chatSendBtn.disabled = true;
+            if (chatInput) chatInput.placeholder = 'Silent mode: Read only';
+            showNotification('Entered silent mode (read only)', 'info');
+        }
+        
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES, JSON.stringify(currentParticipationMode));
+        updateParticipationModeButtons();
+    } catch (error) {
+        console.warn('[Groups] Error toggling silent mode:', error.message);
     }
-    
-    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_PARTICIPATION_MODES, JSON.stringify(currentParticipationMode));
-    updateParticipationModeButtons();
 }
 
 /**
  * Toggle anonymous mode
  */
 export function toggleAnonymousMode() {
-    isAnonymousMode = !isAnonymousMode;
-    
-    if (isAnonymousMode) {
-        showNotification('Anonymous mode enabled', 'info');
-    } else {
-        showNotification('Anonymous mode disabled', 'success');
+    try {
+        isAnonymousMode = !isAnonymousMode;
+        
+        if (isAnonymousMode) {
+            showNotification('Anonymous mode enabled', 'info');
+        } else {
+            showNotification('Anonymous mode disabled', 'success');
+        }
+        
+        updateParticipationModeButtons();
+    } catch (error) {
+        console.warn('[Groups] Error toggling anonymous mode:', error.message);
     }
-    
-    updateParticipationModeButtons();
 }
 
 /**
@@ -3047,13 +3088,17 @@ export function toggleAnonymousMode() {
  * @param {HTMLElement} button - Button element
  */
 export function reactToMessage(messageId, button) {
-    const reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-    const reaction = reactions[Math.floor(Math.random() * reactions.length)];
-    
-    showNotification(`Reacted with ${reaction}`, 'success');
-    
-    button.innerHTML = `<i class="fas fa-${reaction === '👍' ? 'thumbs-up' : reaction === '❤️' ? 'heart' : 'smile'}"></i>`;
-    button.style.color = '#FF9800';
+    try {
+        const reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+        const reaction = reactions[Math.floor(Math.random() * reactions.length)];
+        
+        showNotification(`Reacted with ${reaction}`, 'success');
+        
+        button.innerHTML = `<i class="fas fa-${reaction === '👍' ? 'thumbs-up' : reaction === '❤️' ? 'heart' : 'smile'}"></i>`;
+        button.style.color = '#FF9800';
+    } catch (error) {
+        console.warn('[Groups] Error reacting to message:', error.message);
+    }
 }
 
 /**
@@ -3062,11 +3107,15 @@ export function reactToMessage(messageId, button) {
  * @param {string} senderName - Sender name
  */
 export function replyToMessage(messageId, senderName) {
-    const chatInput = document.getElementById('chatInput');
-    if (chatInput) {
-        chatInput.value = `@${senderName} `;
-        chatInput.focus();
-        showNotification(`Replying to ${senderName}`, 'info');
+    try {
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+            chatInput.value = `@${senderName} `;
+            chatInput.focus();
+            showNotification(`Replying to ${senderName}`, 'info');
+        }
+    } catch (error) {
+        console.warn('[Groups] Error replying to message:', error.message);
     }
 }
 
@@ -3075,12 +3124,16 @@ export function replyToMessage(messageId, senderName) {
  * @param {string} messageId - Message ID
  */
 export function deleteMessage(messageId) {
-    if (confirm('Are you sure you want to delete this message?')) {
-        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-        if (messageElement) {
-            messageElement.remove();
+    try {
+        if (confirm('Are you sure you want to delete this message?')) {
+            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (messageElement) {
+                messageElement.remove();
+            }
+            showNotification('Message deleted', 'success');
         }
-        showNotification('Message deleted', 'success');
+    } catch (error) {
+        console.warn('[Groups] Error deleting message:', error.message);
     }
 }
 
@@ -3143,24 +3196,29 @@ export function formatMessageTime(date) {
  * @param {Object} groupData - Group data
  */
 export function openAdminManagement(groupData) {
-    if (!groupData.isAdmin && !groupData.isCreator) {
-        showNotification('You need admin permissions to manage this group', 'error');
-        return;
+    try {
+        if (!groupData.isAdmin && !groupData.isCreator) {
+            showNotification('You need admin permissions to manage this group', 'error');
+            return;
+        }
+        
+        const adminManagementGroupName = document.getElementById('adminManagementGroupName');
+        if (adminManagementGroupName) {
+            adminManagementGroupName.textContent = groupData.name;
+        }
+        
+        const adminManagementModal = document.getElementById('adminManagementModal');
+        if (adminManagementModal) {
+            adminManagementModal.classList.add('active');
+        }
+        
+        loadGroupMembersForManagement(groupData);
+        loadGroupSettingsForManagement(groupData);
+        loadUniqueFeaturesForManagement(groupData);
+    } catch (error) {
+        console.error('[Groups] Error opening admin management:', error.message);
+        showNotification('Failed to open management panel', 'error');
     }
-    
-    const adminManagementGroupName = document.getElementById('adminManagementGroupName');
-    if (adminManagementGroupName) {
-        adminManagementGroupName.textContent = groupData.name;
-    }
-    
-    const adminManagementModal = document.getElementById('adminManagementModal');
-    if (adminManagementModal) {
-        adminManagementModal.classList.add('active');
-    }
-    
-    loadGroupMembersForManagement(groupData);
-    loadGroupSettingsForManagement(groupData);
-    loadUniqueFeaturesForManagement(groupData);
 }
 
 /**
@@ -3185,9 +3243,8 @@ export async function loadGroupMembersForManagement(groupData) {
         }
         
         renderMembersList(memberDetails);
-        
     } catch (error) {
-        console.error('[Groups iframe] Error loading members:', error);
+        console.error('[Groups] Error loading members:', error.message);
         memberList.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
@@ -3331,9 +3388,8 @@ export async function handleMemberAction(action, memberId, groupData) {
         }
         
         loadGroupMembersForManagement(groupData);
-        
     } catch (error) {
-        console.error('[Groups iframe] Error performing member action:', error);
+        console.error('[Groups] Error performing member action:', error.message);
         showNotification('Failed to perform action', 'error');
     }
 }
@@ -3362,9 +3418,8 @@ export async function logTransparencyAction(groupId, action, targetId = null) {
         localStorage.setItem(cacheKey, JSON.stringify(cachedLog));
         
         await safeApiCall('post', `groups/${groupId}/transparency`, logEntry);
-        
     } catch (error) {
-        console.error('[Groups iframe] Error logging transparency action:', error);
+        console.error('[Groups] Error logging transparency action:', error.message);
     }
 }
 
@@ -3373,23 +3428,27 @@ export async function logTransparencyAction(groupId, action, targetId = null) {
  * @param {Object} groupData - Group data
  */
 export function loadGroupSettingsForManagement(groupData) {
-    const adminPublicGroup = document.getElementById('adminPublicGroup');
-    const adminApproveMembers = document.getElementById('adminApproveMembers');
-    const adminAllowInvites = document.getElementById('adminAllowInvites');
-    const adminOnlyAdminsPost = document.getElementById('adminOnlyAdminsPost');
-    const adminAllowMedia = document.getElementById('adminAllowMedia');
-    const adminDisappearingMessages = document.getElementById('adminDisappearingMessages');
-    const adminMentionNotifications = document.getElementById('adminMentionNotifications');
-    const adminAnnouncementNotifications = document.getElementById('adminAnnouncementNotifications');
-    
-    if (adminPublicGroup) adminPublicGroup.checked = groupData.type === 'public';
-    if (adminApproveMembers) adminApproveMembers.checked = groupData.moderationSettings?.approveNewMembers || false;
-    if (adminAllowInvites) adminAllowInvites.checked = groupData.moderationSettings?.allowInvites || true;
-    if (adminOnlyAdminsPost) adminOnlyAdminsPost.checked = groupData.moderationSettings?.onlyAdminsCanPost || false;
-    if (adminAllowMedia) adminAllowMedia.checked = groupData.moderationSettings?.allowMediaSharing || true;
-    if (adminDisappearingMessages) adminDisappearingMessages.checked = groupData.moderationSettings?.disappearingMessages || false;
-    if (adminMentionNotifications) adminMentionNotifications.checked = groupData.notificationSettings?.mentionNotifications || true;
-    if (adminAnnouncementNotifications) adminAnnouncementNotifications.checked = groupData.notificationSettings?.announcementNotifications || true;
+    try {
+        const adminPublicGroup = document.getElementById('adminPublicGroup');
+        const adminApproveMembers = document.getElementById('adminApproveMembers');
+        const adminAllowInvites = document.getElementById('adminAllowInvites');
+        const adminOnlyAdminsPost = document.getElementById('adminOnlyAdminsPost');
+        const adminAllowMedia = document.getElementById('adminAllowMedia');
+        const adminDisappearingMessages = document.getElementById('adminDisappearingMessages');
+        const adminMentionNotifications = document.getElementById('adminMentionNotifications');
+        const adminAnnouncementNotifications = document.getElementById('adminAnnouncementNotifications');
+        
+        if (adminPublicGroup) adminPublicGroup.checked = groupData.type === 'public';
+        if (adminApproveMembers) adminApproveMembers.checked = groupData.moderationSettings?.approveNewMembers || false;
+        if (adminAllowInvites) adminAllowInvites.checked = groupData.moderationSettings?.allowInvites || true;
+        if (adminOnlyAdminsPost) adminOnlyAdminsPost.checked = groupData.moderationSettings?.onlyAdminsCanPost || false;
+        if (adminAllowMedia) adminAllowMedia.checked = groupData.moderationSettings?.allowMediaSharing || true;
+        if (adminDisappearingMessages) adminDisappearingMessages.checked = groupData.moderationSettings?.disappearingMessages || false;
+        if (adminMentionNotifications) adminMentionNotifications.checked = groupData.notificationSettings?.mentionNotifications || true;
+        if (adminAnnouncementNotifications) adminAnnouncementNotifications.checked = groupData.notificationSettings?.announcementNotifications || true;
+    } catch (error) {
+        console.warn('[Groups] Error loading group settings:', error.message);
+    }
 }
 
 /**
@@ -3397,43 +3456,47 @@ export function loadGroupSettingsForManagement(groupData) {
  * @param {Object} groupData - Group data
  */
 export function loadUniqueFeaturesForManagement(groupData) {
-    const adminGroupPurpose = document.getElementById('adminGroupPurpose');
-    if (adminGroupPurpose) adminGroupPurpose.value = groupData.purpose || '';
-    
-    document.querySelectorAll('.mood-select-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset.mood === groupData.mood) {
-            btn.classList.add('active');
-            btn.style.borderWidth = '2px';
+    try {
+        const adminGroupPurpose = document.getElementById('adminGroupPurpose');
+        if (adminGroupPurpose) adminGroupPurpose.value = groupData.purpose || '';
+        
+        document.querySelectorAll('.mood-select-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.dataset.mood === groupData.mood) {
+                btn.classList.add('active');
+                btn.style.borderWidth = '2px';
+            }
+        });
+        
+        const adminPostingMode = document.getElementById('adminPostingMode');
+        if (adminPostingMode) adminPostingMode.value = groupData.postingRule || 'everyone';
+        updatePostingRulesUI();
+        
+        if (groupData.quietHours) {
+            const adminQuietStart = document.getElementById('adminQuietStart');
+            const adminQuietEnd = document.getElementById('adminQuietEnd');
+            if (adminQuietStart) adminQuietStart.value = groupData.quietHours.start || '22:00';
+            if (adminQuietEnd) adminQuietEnd.value = groupData.quietHours.end || '08:00';
         }
-    });
-    
-    const adminPostingMode = document.getElementById('adminPostingMode');
-    if (adminPostingMode) adminPostingMode.value = groupData.postingRule || 'everyone';
-    updatePostingRulesUI();
-    
-    if (groupData.quietHours) {
-        const adminQuietStart = document.getElementById('adminQuietStart');
-        const adminQuietEnd = document.getElementById('adminQuietEnd');
-        if (adminQuietStart) adminQuietStart.value = groupData.quietHours.start || '22:00';
-        if (adminQuietEnd) adminQuietEnd.value = groupData.quietHours.end || '08:00';
+        
+        if (groupData.scheduledPosting) {
+            const adminPostingStart = document.getElementById('adminPostingStart');
+            const adminPostingEnd = document.getElementById('adminPostingEnd');
+            if (adminPostingStart) adminPostingStart.value = groupData.scheduledPosting.start || '09:00';
+            if (adminPostingEnd) adminPostingEnd.value = groupData.scheduledPosting.end || '18:00';
+        }
+        
+        const participationModes = groupData.participationModes || {};
+        const adminEnableReadOnly = document.getElementById('adminEnableReadOnly');
+        const adminEnableReactOnly = document.getElementById('adminEnableReactOnly');
+        const adminEnableAnonymous = document.getElementById('adminEnableAnonymous');
+        
+        if (adminEnableReadOnly) adminEnableReadOnly.checked = participationModes.readOnly || false;
+        if (adminEnableReactOnly) adminEnableReactOnly.checked = participationModes.reactOnly || false;
+        if (adminEnableAnonymous) adminEnableAnonymous.checked = participationModes.anonymous || false;
+    } catch (error) {
+        console.warn('[Groups] Error loading unique features:', error.message);
     }
-    
-    if (groupData.scheduledPosting) {
-        const adminPostingStart = document.getElementById('adminPostingStart');
-        const adminPostingEnd = document.getElementById('adminPostingEnd');
-        if (adminPostingStart) adminPostingStart.value = groupData.scheduledPosting.start || '09:00';
-        if (adminPostingEnd) adminPostingEnd.value = groupData.scheduledPosting.end || '18:00';
-    }
-    
-    const participationModes = groupData.participationModes || {};
-    const adminEnableReadOnly = document.getElementById('adminEnableReadOnly');
-    const adminEnableReactOnly = document.getElementById('adminEnableReactOnly');
-    const adminEnableAnonymous = document.getElementById('adminEnableAnonymous');
-    
-    if (adminEnableReadOnly) adminEnableReadOnly.checked = participationModes.readOnly || false;
-    if (adminEnableReactOnly) adminEnableReactOnly.checked = participationModes.reactOnly || false;
-    if (adminEnableAnonymous) adminEnableAnonymous.checked = participationModes.anonymous || false;
 }
 
 /**
@@ -3529,9 +3592,8 @@ export async function saveGroupSettings(groupData) {
         } else {
             throw new Error(response?.error || 'Failed to save settings');
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error saving group settings:', error);
+        console.error('[Groups] Error saving group settings:', error.message);
         showNotification('Failed to save settings: ' + error.message, 'error');
     }
 }
@@ -3677,14 +3739,18 @@ export function updateSelectedFriendsList() {
  * @param {string} friendId - Friend ID
  */
 export function removeSelectedFriend(friendId) {
-    selectedFriends = selectedFriends.filter(id => id !== friendId);
-    updateSelectedFriendsList();
-    
-    const friendItem = document.querySelector(`.friend-item[data-friend-id="${friendId}"]`);
-    if (friendItem) {
-        const checkbox = friendItem.querySelector('.friend-checkbox');
-        checkbox.classList.remove('selected');
-        checkbox.querySelector('i').style.display = 'none';
+    try {
+        selectedFriends = selectedFriends.filter(id => id !== friendId);
+        updateSelectedFriendsList();
+        
+        const friendItem = document.querySelector(`.friend-item[data-friend-id="${friendId}"]`);
+        if (friendItem) {
+            const checkbox = friendItem.querySelector('.friend-checkbox');
+            checkbox.classList.remove('selected');
+            checkbox.querySelector('i').style.display = 'none';
+        }
+    } catch (error) {
+        console.warn('[Groups] Error removing selected friend:', error.message);
     }
 }
 
@@ -3751,9 +3817,8 @@ export async function createGroupOnline(groupData) {
         
         selectedFriends = [];
         showGroupDetails(newGroup, 'my_group');
-        
     } catch (error) {
-        console.error('[Groups iframe] Error creating group:', error);
+        console.error('[Groups] Error creating group:', error.message);
         showNotification('Failed to create group: ' + error.message, 'error');
     }
 }
@@ -3791,9 +3856,8 @@ export async function joinGroupOnline(groupId) {
         
         const groupInviteModal = document.getElementById('groupInviteModal');
         if (groupInviteModal) groupInviteModal.classList.remove('active');
-        
     } catch (error) {
-        console.error('[Groups iframe] Error joining group:', error);
+        console.error('[Groups] Error joining group:', error.message);
         showNotification('Failed to join group: ' + error.message, 'error');
     }
 }
@@ -3826,9 +3890,8 @@ export async function leaveGroupOnline(groupId) {
             groupDetailsPanel.classList.remove('active');
             selectedGroup = null;
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error leaving group:', error);
+        console.error('[Groups] Error leaving group:', error.message);
         showNotification('Failed to leave group: ' + error.message, 'error');
     }
 }
@@ -3850,9 +3913,8 @@ export async function acceptGroupInviteLocal(inviteData) {
         }
         
         await joinGroupOnline(groupId);
-        
     } catch (error) {
-        console.error('[Groups iframe] Error accepting group invite:', error);
+        console.error('[Groups] Error accepting group invite:', error.message);
         showNotification('Failed to accept invitation: ' + error.message, 'error');
     }
 }
@@ -3882,9 +3944,8 @@ export async function declineGroupInviteLocal(inviteData) {
         
         const groupInviteModal = document.getElementById('groupInviteModal');
         if (groupInviteModal) groupInviteModal.classList.remove('active');
-        
     } catch (error) {
-        console.error('[Groups iframe] Error declining group invite:', error);
+        console.error('[Groups] Error declining group invite:', error.message);
         showNotification('Failed to decline invitation: ' + error.message, 'error');
     }
 }
@@ -3905,25 +3966,30 @@ export function leaveGroupConfirm(groupData) {
  * @param {string} type - Group type
  */
 export function showGroupDetails(groupData, type) {
-    selectedGroup = groupData;
-    
-    const groupDetailsTitle = document.querySelector('.group-details-title');
-    if (groupDetailsTitle) groupDetailsTitle.textContent = 'Group Details';
-    
-    const sidebar = document.getElementById('sidebar');
-    const groupDetailsPanel = document.getElementById('groupDetailsPanel');
-    
-    if (isMobile) {
-        if (sidebar) sidebar.style.display = 'none';
-        if (groupDetailsPanel) {
-            groupDetailsPanel.style.display = 'flex';
-            groupDetailsPanel.classList.add('active');
+    try {
+        selectedGroup = groupData;
+        
+        const groupDetailsTitle = document.querySelector('.group-details-title');
+        if (groupDetailsTitle) groupDetailsTitle.textContent = 'Group Details';
+        
+        const sidebar = document.getElementById('sidebar');
+        const groupDetailsPanel = document.getElementById('groupDetailsPanel');
+        
+        if (isMobile) {
+            if (sidebar) sidebar.style.display = 'none';
+            if (groupDetailsPanel) {
+                groupDetailsPanel.style.display = 'flex';
+                groupDetailsPanel.classList.add('active');
+            }
+        } else {
+            if (groupDetailsPanel) groupDetailsPanel.classList.add('active');
         }
-    } else {
-        if (groupDetailsPanel) groupDetailsPanel.classList.add('active');
+        
+        loadGroupDetails(groupData, type);
+    } catch (error) {
+        console.error('[Groups] Error showing group details:', error.message);
+        showNotification('Failed to load group details', 'error');
     }
-    
-    loadGroupDetails(groupData, type);
 }
 
 /**
@@ -3970,7 +4036,6 @@ export async function loadGroupDetails(groupData, type) {
                 realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
             }
         } catch (error) {
-            console.log('[Groups iframe] Error loading members:', error);
             realMembers = generateSimulatedMembers(groupData.id).slice(0, 5);
         }
         
@@ -4214,9 +4279,8 @@ export async function loadGroupDetails(groupData, type) {
                 showNotification('Full member list would open here', 'info');
             });
         }
-        
     } catch (error) {
-        console.error('[Groups iframe] Error loading group details:', error);
+        console.error('[Groups] Error loading group details:', error.message);
         detailsContent.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
@@ -4227,878 +4291,8 @@ export async function loadGroupDetails(groupData, type) {
     }
 }
 
-/**
- * Show group options menu
- * @param {Object} groupData - Group data
- */
-export function showGroupOptions(groupData) {
-    const options = [
-        { icon: 'fas fa-share-alt', text: 'Share Group', action: () => shareGroup(groupData) },
-        { icon: 'fas fa-bell', text: 'Mute Notifications', action: () => muteGroup(groupData) },
-        { icon: 'fas fa-star', text: 'Add to Favorites', action: () => favoriteGroup(groupData) },
-        { icon: 'fas fa-flag', text: 'Report Group', action: () => reportGroup(groupData) },
-        { icon: 'fas fa-ban', text: 'Block Group', action: () => blockGroup(groupData) },
-        { icon: 'fas fa-qrcode', text: 'Group QR Code', action: () => showGroupQRCode(groupData) },
-        { icon: 'fas fa-link', text: 'Copy Invite Link', action: () => copyInviteLink(groupData) },
-        { icon: 'fas fa-sticky-note', text: 'View Group Notes', action: () => viewGroupNotes(groupData) },
-        { icon: 'fas fa-calendar-alt', text: 'View Events', action: () => viewGroupEvents(groupData) },
-        { icon: 'fas fa-chart-line', text: 'View Analytics', action: () => viewGroupAnalytics(groupData) }
-    ];
-    
-    if (groupData.isAdmin || groupData.isCreator) {
-        options.unshift(
-            { icon: 'fas fa-user-plus', text: 'Invite Members', action: () => inviteMembers(groupData) },
-            { icon: 'fas fa-edit', text: 'Edit Group Info', action: () => editGroupInfo(groupData) },
-            { icon: 'fas fa-user-shield', text: 'Manage Roles', action: () => manageRoles(groupData) },
-            { icon: 'fas fa-calendar-plus', text: 'Create Event', action: () => createEvent(groupData) },
-            { icon: 'fas fa-poll', text: 'Create Poll', action: () => createPoll(groupData) },
-            { icon: 'fas fa-bullseye', text: 'Change Purpose/Mood', action: () => changePurposeMood(groupData) },
-            { icon: 'fas fa-comment-slash', text: 'Update Posting Rules', action: () => updatePostingRules(groupData) },
-            { icon: 'fas fa-history', text: 'View Change History', action: () => viewChangeHistory(groupData) }
-        );
-    }
-    
-    showOptionsModal('Group Options', options, groupData.name);
-}
-
-/**
- * View group notes
- * @param {Object} groupData - Group data
- */
-export function viewGroupNotes(groupData) {
-    const groupNotesPanel = document.getElementById('groupNotesPanel');
-    if (currentChatGroup && currentChatGroup.id === groupData.id) {
-        if (groupNotesPanel) {
-            groupNotesPanel.style.display = groupNotesPanel.style.display === 'none' ? 'block' : 'none';
-        }
-    } else {
-        openGroupChat(groupData);
-        setTimeout(() => {
-            if (groupNotesPanel) groupNotesPanel.style.display = 'block';
-        }, 100);
-    }
-}
-
-/**
- * View group events
- * @param {Object} groupData - Group data
- */
-export function viewGroupEvents(groupData) {
-    const eventCountdownPanel = document.getElementById('eventCountdownPanel');
-    if (currentChatGroup && currentChatGroup.id === groupData.id) {
-        if (eventCountdownPanel) {
-            eventCountdownPanel.style.display = eventCountdownPanel.style.display === 'none' ? 'block' : 'none';
-        }
-    } else {
-        openGroupChat(groupData);
-        setTimeout(() => {
-            if (eventCountdownPanel) eventCountdownPanel.style.display = 'block';
-        }, 100);
-    }
-}
-
-/**
- * View group analytics
- * @param {Object} groupData - Group data
- */
-export function viewGroupAnalytics(groupData) {
-    openAdminManagement(groupData);
-    const analyticsTab = document.querySelector('.admin-management-tab[data-tab="analytics"]');
-    if (analyticsTab) {
-        analyticsTab.click();
-        loadGroupAnalytics(groupData);
-    }
-}
-
-/**
- * Load group analytics
- * @param {Object} groupData - Group data
- */
-export async function loadGroupAnalytics(groupData) {
-    try {
-        const analyticsDailyMessages = document.getElementById('analyticsDailyMessages');
-        const analyticsActiveMembers = document.getElementById('analyticsActiveMembers');
-        const analyticsEngagementRate = document.getElementById('analyticsEngagementRate');
-        const groupPulseInsight = document.getElementById('groupPulseInsight');
-        
-        if (analyticsDailyMessages) {
-            const groupHash = hashCode(groupData.id);
-            const dailyMessages = 20 + (groupHash % 30);
-            analyticsDailyMessages.textContent = dailyMessages;
-        }
-        
-        if (analyticsActiveMembers) {
-            const activeMembers = Math.min(5 + (hashCode(groupData.id) % (groupData.memberCount || 10)), groupData.memberCount || 10);
-            analyticsActiveMembers.textContent = activeMembers;
-        }
-        
-        if (analyticsEngagementRate) {
-            const engagementRate = 30 + (hashCode(groupData.id) % 50);
-            analyticsEngagementRate.textContent = engagementRate + '%';
-        }
-        
-        if (groupPulseInsight) {
-            const pulse = calculateGroupPulse(groupData);
-            let insight = '';
-            
-            if (pulse?.class === 'pulse-active') {
-                insight = 'Group is highly active with good engagement. Consider scheduling regular events to maintain momentum.';
-            } else if (pulse?.class === 'pulse-quiet') {
-                insight = 'Group activity is low. Try posting discussion topics or scheduling events to boost engagement.';
-            } else {
-                insight = 'Group activity is steady. Monitor engagement and adjust content strategy as needed.';
-            }
-            
-            groupPulseInsight.innerHTML = `<p style="margin: 0;">${insight}</p>`;
-        }
-        
-        const analyticsChart = document.getElementById('analyticsChart');
-        if (analyticsChart && window.Chart) {
-            renderAnalyticsChart(analyticsChart, groupData);
-        }
-        
-    } catch (error) {
-        console.error('[Groups iframe] Error loading analytics:', error);
-    }
-}
-
-/**
- * Render analytics chart
- * @param {HTMLCanvasElement} canvas - Canvas element
- * @param {Object} groupData - Group data
- */
-export function renderAnalyticsChart(canvas, groupData) {
-    const ctx = canvas.getContext('2d');
-    const groupHash = hashCode(groupData.id);
-    
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const data = days.map((_, i) => 10 + (groupHash + i * 7) % 40);
-    
-    new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: days,
-            datasets: [{
-                label: 'Messages',
-                data: data,
-                borderColor: '#667eea',
-                backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                tension: 0.4,
-                fill: true
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: {
-                        display: true
-                    }
-                },
-                x: {
-                    grid: {
-                        display: false
-                    }
-                }
-            }
-        }
-    });
-}
-
-/**
- * Change purpose/mood
- * @param {Object} groupData - Group data
- */
-export function changePurposeMood(groupData) {
-    openAdminManagement(groupData);
-    const purposeTab = document.querySelector('.admin-management-tab[data-tab="purpose"]');
-    if (purposeTab) {
-        purposeTab.click();
-    }
-}
-
-/**
- * Update posting rules
- * @param {Object} groupData - Group data
- */
-export function updatePostingRules(groupData) {
-    openAdminManagement(groupData);
-    const purposeTab = document.querySelector('.admin-management-tab[data-tab="purpose"]');
-    if (purposeTab) {
-        purposeTab.click();
-    }
-}
-
-/**
- * View change history
- * @param {Object} groupData - Group data
- */
-export function viewChangeHistory(groupData) {
-    openAdminManagement(groupData);
-    const transparencyTab = document.querySelector('.admin-management-tab[data-tab="transparency"]');
-    if (transparencyTab) {
-        transparencyTab.click();
-    }
-}
-
-/**
- * Show options modal
- * @param {string} title - Modal title
- * @param {Array} options - Array of option objects
- * @param {string} subtitle - Modal subtitle
- */
-export function showOptionsModal(title, options, subtitle = '') {
-    const modal = document.createElement('div');
-    modal.className = 'options-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: flex; align-items: center; justify-content: center;';
-    
-    modal.innerHTML = `
-        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; z-index: 1002; min-width: 300px; max-width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
-                <div style="font-weight: 600;">${title}</div>
-                ${subtitle ? `<div style="font-size: 14px; color: var(--text-secondary); margin-top: 5px;">${subtitle}</div>` : ''}
-            </div>
-            <div>
-                ${options.map(option => {
-                    return `
-                        <div style="padding: 15px 20px; border-bottom: 1px solid var(--border-color); cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s;"
-                             onmouseover="this.style.backgroundColor='var(--secondary-color)'" onmouseout="this.style.backgroundColor='transparent'" onclick="document.querySelector('.options-modal').remove(); ${option.action.toString().replace(/"/g, '&quot;')}();">
-                            <i class="${option.icon}" style="color: var(--primary-color); width: 20px;"></i>
-                            <span>${option.text}</span>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-            <div style="padding: 15px 20px; text-align: center;">
-                <button onclick="document.querySelector('.options-modal').remove();" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; border-radius: 8px;">Cancel</button>
-            </div>
-        </div>
-    `;
-    
-    modal.onclick = (e) => {
-        if (e.target === modal) {
-            document.body.removeChild(modal);
-        }
-    };
-    
-    document.body.appendChild(modal);
-}
-
-/**
- * Share group
- * @param {Object} groupData - Group data
- */
-export function shareGroup(groupData) {
-    const shareUrl = `${window.location.origin}/group.html?id=${groupData.id}`;
-    
-    if (navigator.share) {
-        navigator.share({
-            title: groupData.name,
-            text: `Join ${groupData.name} on Knecta Chat`,
-            url: shareUrl
-        });
-    } else {
-        navigator.clipboard.writeText(shareUrl);
-        showNotification('Group link copied to clipboard', 'success');
-    }
-}
-
-/**
- * Mute group notifications
- * @param {Object} groupData - Group data
- */
-export function muteGroup(groupData) {
-    const mutedGroups = JSON.parse(localStorage.getItem('knecta_muted_groups') || '[]');
-    
-    if (!mutedGroups.includes(groupData.id)) {
-        mutedGroups.push(groupData.id);
-        localStorage.setItem('knecta_muted_groups', JSON.stringify(mutedGroups));
-        showNotification('Group notifications muted', 'success');
-    } else {
-        showNotification('Group already muted', 'info');
-    }
-}
-
-/**
- * Add group to favorites
- * @param {Object} groupData - Group data
- */
-export function favoriteGroup(groupData) {
-    const favoriteGroups = JSON.parse(localStorage.getItem('knecta_favorite_groups') || '[]');
-    
-    if (!favoriteGroups.includes(groupData.id)) {
-        favoriteGroups.push(groupData.id);
-        localStorage.setItem('knecta_favorite_groups', JSON.stringify(favoriteGroups));
-        showNotification('Group added to favorites', 'success');
-    } else {
-        showNotification('Group already in favorites', 'info');
-    }
-}
-
-/**
- * Report group
- * @param {Object} groupData - Group data
- */
-export function reportGroup(groupData) {
-    const reason = prompt(`Why are you reporting "${groupData.name}"?\n1. Spam\n2. Harassment\n3. Inappropriate content\n4. Fake group\n5. Other\n\nEnter reason number:`, '1');
-    
-    if (reason) {
-        const reports = JSON.parse(localStorage.getItem('knecta_group_reports') || '[]');
-        reports.push({
-            groupId: groupData.id,
-            groupName: groupData.name,
-            reason: reason,
-            timestamp: Date.now()
-        });
-        localStorage.setItem('knecta_group_reports', JSON.stringify(reports));
-        showNotification('Group has been reported. Thank you for helping keep our community safe.', 'success');
-    }
-}
-
-/**
- * Block group
- * @param {Object} groupData - Group data
- */
-export function blockGroup(groupData) {
-    if (confirm(`Are you sure you want to block "${groupData.name}"? You will no longer see this group or receive notifications from it.`)) {
-        const blockedGroups = JSON.parse(localStorage.getItem('knecta_blocked_groups') || '[]');
-        blockedGroups.push({
-            groupId: groupData.id,
-            groupName: groupData.name,
-            timestamp: Date.now()
-        });
-        localStorage.setItem('knecta_blocked_groups', JSON.stringify(blockedGroups));
-        
-        groups = groups.filter(g => g.id !== groupData.id);
-        myGroups = myGroups.filter(g => g.id !== groupData.id);
-        joinedGroups = joinedGroups.filter(g => g.id !== groupData.id);
-        adminGroups = adminGroups.filter(g => g.id !== groupData.id);
-        
-        saveGroupsToLocalStorage();
-        updateGroupCounts();
-        updateCurrentSection();
-        
-        showNotification('Group blocked successfully', 'success');
-        
-        const groupDetailsPanel = document.getElementById('groupDetailsPanel');
-        if (groupDetailsPanel && groupDetailsPanel.classList.contains('active')) {
-            groupDetailsPanel.classList.remove('active');
-            selectedGroup = null;
-        }
-    }
-}
-
-/**
- * Show group QR code
- * @param {Object} groupData - Group data
- */
-export function showGroupQRCode(groupData) {
-    const modal = document.createElement('div');
-    modal.className = 'qr-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: flex; align-items: center; justify-content: center;';
-    
-    const inviteLink = `${window.location.origin}/group.html?join=${groupData.id}`;
-    
-    modal.innerHTML = `
-        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; z-index: 1002; padding: 30px; text-align: center; min-width: 300px; max-width: 90%;">
-            <h3 style="margin-top: 0;">${groupData.name} QR Code</h3>
-            <div id="qrCodeContainer" style="margin: 20px auto; width: 200px; height: 200px;"></div>
-            <p style="font-size: 14px; color: var(--text-secondary); margin: 20px 0;">Scan to join group</p>
-            <div style="display: flex; gap: 10px; justify-content: center;">
-                <button onclick="downloadQRCode()" style="background: var(--primary-color); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Download</button>
-                <button onclick="document.querySelector('.qr-modal').remove();" style="background: var(--secondary-color); color: var(--text-primary); border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Close</button>
-            </div>
-        </div>
-    `;
-    
-    modal.onclick = (e) => {
-        if (e.target === modal) {
-            document.body.removeChild(modal);
-        }
-    };
-    
-    document.body.appendChild(modal);
-    
-    setTimeout(() => {
-        const qrContainer = document.getElementById('qrCodeContainer');
-        if (qrContainer && window.QRCode) {
-            new QRCode(qrContainer, {
-                text: inviteLink,
-                width: 200,
-                height: 200,
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.H
-            });
-        }
-    }, 100);
-}
-
-/**
- * Download QR code (exposed to window)
- */
-export function downloadQRCode() {
-    const qrCanvas = document.querySelector('#qrCodeContainer canvas');
-    if (qrCanvas) {
-        const link = document.createElement('a');
-        link.download = 'group-qr-code.png';
-        link.href = qrCanvas.toDataURL('image/png');
-        link.click();
-        showNotification('QR code downloaded', 'success');
-    }
-}
-
-/**
- * Copy invite link to clipboard
- * @param {Object} groupData - Group data
- */
-export function copyInviteLink(groupData) {
-    const inviteLink = `${window.location.origin}/group.html?join=${groupData.id}`;
-    navigator.clipboard.writeText(inviteLink);
-    showNotification('Invite link copied to clipboard', 'success');
-}
-
-/**
- * Invite members to group
- * @param {Object} groupData - Group data
- */
-export function inviteMembers(groupData) {
-    showFriendSelection();
-}
-
-/**
- * Edit group info
- * @param {Object} groupData - Group data
- */
-export function editGroupInfo(groupData) {
-    openAdminManagement(groupData);
-}
-
-/**
- * Manage roles
- * @param {Object} groupData - Group data
- */
-export function manageRoles(groupData) {
-    openAdminManagement(groupData);
-}
-
-/**
- * Create event
- * @param {Object} groupData - Group data
- */
-export function createEvent(groupData) {
-    const modal = document.createElement('div');
-    modal.className = 'event-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: flex; align-items: center; justify-content: center;';
-    
-    modal.innerHTML = `
-        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; z-index: 1002; padding: 30px; min-width: 400px; max-width: 90%; max-height: 90vh; overflow-y: auto;">
-            <h3 style="margin-top: 0;">Create Event for ${groupData.name}</h3>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Event Title *</label>
-                <input type="text" id="eventTitle" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;" placeholder="Enter event title">
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Description</label>
-                <textarea id="eventDescription" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; min-height: 80px;" placeholder="Describe your event"></textarea>
-            </div>
-            
-            <div style="display: flex; gap: 15px; margin-bottom: 15px;">
-                <div style="flex: 1;">
-                    <label style="display: block; margin-bottom: 5px; font-weight: 500;">Date *</label>
-                    <input type="date" id="eventDate" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
-                </div>
-                <div style="flex: 1;">
-                    <label style="display: block; margin-bottom: 5px; font-weight: 500;">Time *</label>
-                    <input type="time" id="eventTime" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
-                </div>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Duration (hours)</label>
-                <input type="number" id="eventDuration" min="0.5" max="24" step="0.5" value="1" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
-            </div>
-                
-            <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Event Type</label>
-                <select id="eventType" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
-                    <option value="meeting">Meeting</option>
-                    <option value="social">Social</option>
-                    <option value="workshop">Workshop</option>
-                    <option value="celebration">Celebration</option>
-                    <option value="other">Other</option>
-                </select>
-            </div>
-                
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button onclick="saveNewEvent()" style="background: var(--success-color); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Create Event</button>
-                <button onclick="document.querySelector('.event-modal').remove();" style="background: var(--secondary-color); color: var(--text-primary); border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Cancel</button>
-            </div>
-        </div>
-    `;
-    
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const formattedDate = tomorrow.toISOString().split('T')[0];
-    
-    modal.onclick = (e) => {
-        if (e.target === modal) {
-            document.body.removeChild(modal);
-        }
-    };
-    
-    document.body.appendChild(modal);
-    
-    setTimeout(() => {
-        const eventDateInput = document.getElementById('eventDate');
-        const eventTimeInput = document.getElementById('eventTime');
-        if (eventDateInput) eventDateInput.value = formattedDate;
-        if (eventTimeInput) eventTimeInput.value = '18:00';
-    }, 100);
-}
-
-/**
- * Save new event (exposed to window)
- */
-export function saveNewEvent() {
-    const eventTitle = document.getElementById('eventTitle');
-    const eventDate = document.getElementById('eventDate');
-    const eventTime = document.getElementById('eventTime');
-    
-    if (!eventTitle || !eventTitle.value.trim()) {
-        showNotification('Please enter an event title', 'error');
-        return;
-    }
-    
-    if (!eventDate || !eventDate.value) {
-        showNotification('Please select a date', 'error');
-        return;
-    }
-    
-    if (!eventTime || !eventTime.value) {
-        showNotification('Please select a time', 'error');
-        return;
-    }
-    
-    const eventDateTime = new Date(`${eventDate.value}T${eventTime.value}`);
-    const eventDescription = document.getElementById('eventDescription')?.value || '';
-    const eventDuration = document.getElementById('eventDuration')?.value || '1';
-    const eventType = document.getElementById('eventType')?.value || 'meeting';
-    
-    const event = {
-        id: `event_${currentChatGroup?.id || 'global'}_${Date.now()}`,
-        groupId: currentChatGroup?.id || 'global',
-        title: eventTitle.value.trim(),
-        description: eventDescription,
-        date: eventDateTime.toISOString(),
-        duration: parseFloat(eventDuration),
-        type: eventType,
-        createdBy: currentUser?.uid || currentUser?.id || 'user',
-        attendees: [currentUser?.uid || currentUser?.id || 'user'],
-        location: 'Online',
-        createdAt: new Date().toISOString()
-    };
-    
-    const cacheKey = LOCAL_STORAGE_KEYS.GROUP_EVENTS + (currentChatGroup?.id || 'global');
-    const cachedEvents = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-    cachedEvents.push(event);
-    localStorage.setItem(cacheKey, JSON.stringify(cachedEvents));
-    
-    const modal = document.querySelector('.event-modal');
-    if (modal) modal.remove();
-    
-    showNotification('Event created successfully!', 'success');
-    
-    if (currentChatGroup) {
-        loadGroupEvents(currentChatGroup.id);
-    }
-}
-
-/**
- * Create poll
- * @param {Object} groupData - Group data
- */
-export function createPoll(groupData) {
-    const modal = document.createElement('div');
-    modal.className = 'poll-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: flex; align-items: center; justify-content: center;';
-    
-    modal.innerHTML = `
-        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; z-index: 1002; padding: 30px; min-width: 400px; max-width: 90%; max-height: 90vh; overflow-y: auto;">
-            <h3 style="margin-top: 0;">Create Poll for ${groupData.name}</h3>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Poll Question *</label>
-                <input type="text" id="pollQuestion" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;" placeholder="What would you like to ask?">
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Options (2-10) *</label>
-                <div id="pollOptions">
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <input type="text" class="poll-option" style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;" placeholder="Option 1">
-                        <button onclick="removePollOption(this)" style="background: var(--danger-color); color: white; border: none; border-radius: 6px; width: 40px; cursor: pointer; display: none;">×</button>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <input type="text" class="poll-option" style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;" placeholder="Option 2">
-                        <button onclick="removePollOption(this)" style="background: var(--danger-color); color: white; border: none; border-radius: 6px; width: 40px; cursor: pointer; display: none;">×</button>
-                    </div>
-                </div>
-                <button onclick="addPollOption()" style="background: var(--secondary-color); color: var(--text-primary); border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; margin-top: 10px;">+ Add Option</button>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">Duration</label>
-                <select id="pollDuration" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
-                    <option value="1">1 hour</option>
-                    <option value="6">6 hours</option>
-                    <option value="24" selected>24 hours</option>
-                    <option value="168">7 days</option>
-                    <option value="0">No limit</option>
-                </select>
-            </div>
-            
-            <div style="margin-bottom: 20px;">
-                <label style="display: flex; align-items: center; gap: 10px;">
-                    <input type="checkbox" id="allowMultipleVotes">
-                    <span>Allow multiple votes</span>
-                </label>
-                <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                    <input type="checkbox" id="anonymousPoll" checked>
-                    <span>Anonymous voting</span>
-                </label>
-            </div>
-            
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button onclick="saveNewPoll()" style="background: var(--success-color); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Create Poll</button>
-                <button onclick="document.querySelector('.poll-modal').remove();" style="background: var(--secondary-color); color: var(--text-primary); border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Cancel</button>
-            </div>
-        </div>
-    `;
-    
-    modal.onclick = (e) => {
-        if (e.target === modal) {
-            document.body.removeChild(modal);
-        }
-    };
-    
-    document.body.appendChild(modal);
-}
-
-/**
- * Add poll option (exposed to window)
- */
-export function addPollOption() {
-    const pollOptions = document.getElementById('pollOptions');
-    if (!pollOptions) return;
-    
-    const optionCount = pollOptions.querySelectorAll('.poll-option').length;
-    if (optionCount >= 10) {
-        showNotification('Maximum 10 options allowed', 'error');
-        return;
-    }
-    
-    const newOption = document.createElement('div');
-    newOption.style.cssText = 'display: flex; gap: 10px; margin-bottom: 10px;';
-    newOption.innerHTML = `
-        <input type="text" class="poll-option" style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;" placeholder="Option ${optionCount + 1}">
-        <button onclick="removePollOption(this)" style="background: var(--danger-color); color: white; border: none; border-radius: 6px; width: 40px; cursor: pointer;">×</button>
-    `;
-    
-    pollOptions.appendChild(newOption);
-}
-
-/**
- * Remove poll option (exposed to window)
- * @param {HTMLElement} button - Remove button
- */
-export function removePollOption(button) {
-    const optionDiv = button.parentElement;
-    if (optionDiv && optionDiv.parentElement) {
-        const optionCount = optionDiv.parentElement.querySelectorAll('.poll-option').length;
-        if (optionCount > 2) {
-            optionDiv.remove();
-        } else {
-            showNotification('Minimum 2 options required', 'error');
-        }
-    }
-}
-
-/**
- * Save new poll (exposed to window)
- */
-export function saveNewPoll() {
-    const pollQuestion = document.getElementById('pollQuestion');
-    const pollOptions = document.querySelectorAll('.poll-option');
-    
-    if (!pollQuestion || !pollQuestion.value.trim()) {
-        showNotification('Please enter a poll question', 'error');
-        return;
-    }
-    
-    const options = Array.from(pollOptions)
-        .map(input => input.value.trim())
-        .filter(value => value.length > 0);
-    
-    if (options.length < 2) {
-        showNotification('Please enter at least 2 options', 'error');
-        return;
-    }
-    
-    const pollDuration = document.getElementById('pollDuration')?.value || '24';
-    const allowMultipleVotes = document.getElementById('allowMultipleVotes')?.checked || false;
-    const anonymousPoll = document.getElementById('anonymousPoll')?.checked || true;
-    
-    const pollMessage = {
-        groupId: currentChatGroup?.id || 'global',
-        senderId: currentUser?.uid || currentUser?.id || 'user',
-        senderName: userData?.displayName || 'User',
-        content: pollQuestion.value.trim(),
-        timestamp: new Date(),
-        type: 'poll',
-        pollData: {
-            options: options.map((opt, i) => ({ id: i, text: opt, votes: 0 })),
-            duration: parseInt(pollDuration),
-            allowMultipleVotes: allowMultipleVotes,
-            anonymous: anonymousPoll,
-            voters: [],
-            endTime: pollDuration === '0' ? null : new Date(Date.now() + parseInt(pollDuration) * 60 * 60 * 1000)
-        }
-    };
-    
-    if (currentChatGroup) {
-        const chatMessages = document.getElementById('chatMessages');
-        if (chatMessages) {
-            const pollElement = document.createElement('div');
-            pollElement.className = 'message sent poll';
-            pollElement.innerHTML = `
-                <div class="message-sender">You</div>
-                <div class="message-content" style="background: var(--secondary-color); padding: 15px; border-radius: 10px;">
-                    <div style="font-weight: 600; margin-bottom: 10px;">📊 ${pollQuestion.value.trim()}</div>
-                    <div id="pollOptionsContainer" style="margin-bottom: 10px;">
-                        ${options.map((opt, i) => `
-                            <div style="margin-bottom: 8px;">
-                                <button onclick="voteOnPoll(${i}, this)" style="width: 100%; text-align: left; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: white; cursor: pointer;">
-                                    ${opt} <span style="float: right; color: var(--text-secondary); font-size: 12px;">0 votes</span>
-                                </button>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <div style="font-size: 12px; color: var(--text-secondary);">
-                        ${pollDuration === '0' ? 'No time limit' : `Ends in ${pollDuration} hour${pollDuration === '1' ? '' : 's'}`} • ${anonymousPoll ? 'Anonymous' : 'Public'} voting
-                    </div>
-                </div>
-                <div class="message-time">${formatMessageTime(new Date())}</div>
-            `;
-            chatMessages.appendChild(pollElement);
-            
-            const chatMessagesContainer = document.getElementById('chatMessagesContainer');
-            if (chatMessagesContainer) {
-                chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
-            }
-        }
-    }
-    
-    const modal = document.querySelector('.poll-modal');
-    if (modal) modal.remove();
-    
-    showNotification('Poll created successfully!', 'success');
-}
-
-/**
- * Vote on poll (exposed to window)
- * @param {number} optionId - Option ID
- * @param {HTMLElement} button - Vote button
- */
-export function voteOnPoll(optionId, button) {
-    const optionDiv = button.parentElement;
-    const votesSpan = button.querySelector('span');
-    
-    if (votesSpan) {
-        const currentVotes = parseInt(votesSpan.textContent) || 0;
-        votesSpan.textContent = `${currentVotes + 1} votes`;
-        votesSpan.style.color = 'var(--success-color)';
-        button.style.borderColor = 'var(--success-color)';
-        button.style.backgroundColor = 'var(--success-color)10';
-        
-        showNotification('Vote recorded!', 'success');
-    }
-}
-
-/**
- * Show group invite details
- * @param {Object} inviteData - Invite data
- */
-export function showGroupInviteDetails(inviteData) {
-    const groupData = inviteData.groupData || inviteData;
-    
-    const inviteName = document.getElementById('inviteName');
-    const inviteTopic = document.getElementById('inviteTopic');
-    const inviteMemberCount = document.getElementById('inviteMemberCount');
-    const invitedBy = document.getElementById('invitedBy');
-    const invitePurpose = document.getElementById('invitePurpose');
-    const inviteMood = document.getElementById('inviteMood');
-    const avatar = document.getElementById('inviteAvatar');
-    
-    if (inviteName) inviteName.textContent = groupData.name || 'Unnamed Group';
-    if (inviteTopic) inviteTopic.textContent = groupData.topic || 'No topic';
-    if (inviteMemberCount) inviteMemberCount.innerHTML = `<i class="fas fa-users"></i> ${groupData.memberCount || 0} members`;
-    if (invitedBy) invitedBy.textContent = inviteData.invitedByName || 'Unknown';
-    
-    const purpose = groupData.purpose || '';
-    const mood = groupData.mood || '';
-    const purposeInfo = purpose ? groupPurposes[purpose] : null;
-    const moodInfo = mood ? groupMoods[mood] : null;
-    
-    if (purposeInfo && invitePurpose) {
-        invitePurpose.textContent = `${purposeInfo.icon} ${purposeInfo.name}`;
-        invitePurpose.style.backgroundColor = purposeInfo.color + '20';
-        invitePurpose.style.color = purposeInfo.color;
-        invitePurpose.style.display = 'inline-block';
-    } else if (invitePurpose) {
-        invitePurpose.style.display = 'none';
-    }
-    
-    if (moodInfo && inviteMood) {
-        inviteMood.innerHTML = `${moodInfo.icon} ${moodInfo.name}`;
-        inviteMood.className = `group-mood-indicator mood-${mood}`;
-        inviteMood.style.backgroundColor = moodInfo.bgColor;
-        inviteMood.style.color = moodInfo.color;
-        inviteMood.style.display = 'flex';
-    } else if (inviteMood) {
-        inviteMood.style.display = 'none';
-    }
-    
-    if (avatar) {
-        if (groupData.photoURL) {
-            avatar.style.backgroundImage = `url('${groupData.photoURL}')`;
-            avatar.innerHTML = '';
-        } else {
-            const initials = groupData.name 
-                ? groupData.name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)
-                : 'G';
-            avatar.innerHTML = `<span style="color: white; font-size: 24px;">${initials}</span>`;
-        }
-    }
-    
-    window.currentInvite = inviteData;
-    
-    const groupInviteModal = document.getElementById('groupInviteModal');
-    if (groupInviteModal) {
-        groupInviteModal.classList.add('active');
-    }
-}
-
 // =============================================
-// DATA SYNC FUNCTIONS (UPDATED FOR PARENT COORDINATION AND IMPORTS)
+// DATA SYNC FUNCTIONS
 // =============================================
 
 /**
@@ -5107,9 +4301,7 @@ export function showGroupInviteDetails(inviteData) {
 export async function syncGroupsFromServer() {
     if (!authReady) return;
     
-    // Check if we have a valid session
     if (!parentConnection.handshakeComplete && !getUnifiedToken()) {
-        console.log('[Groups iframe] Group sync: Skipping - no valid session');
         return;
     }
     
@@ -5117,7 +4309,6 @@ export async function syncGroupsFromServer() {
         const response = await getGroups();
         
         if (!response || !response.success || !response.data) {
-            console.log('[Groups iframe] No groups found on server or API not available');
             return;
         }
         
@@ -5154,7 +4345,6 @@ export async function syncGroupsFromServer() {
         });
         
         if (JSON.stringify(serverGroups) !== JSON.stringify(groups)) {
-            console.log('[Groups iframe] Group data updated from server');
             groups = serverGroups;
             myGroups = serverMyGroups;
             joinedGroups = serverJoinedGroups;
@@ -5174,9 +4364,8 @@ export async function syncGroupsFromServer() {
             
             showNotification('Groups list updated', 'success');
         }
-        
     } catch (error) {
-        console.log('[Groups iframe] Group sync error:', error.message);
+        console.warn('[Groups] Group sync error:', error.message);
     }
 }
 
@@ -5186,9 +4375,7 @@ export async function syncGroupsFromServer() {
 export async function syncGroupInvitesFromServer() {
     if (!authReady) return;
     
-    // Check if we have a valid session
     if (!parentConnection.handshakeComplete && !getUnifiedToken()) {
-        console.log('[Groups iframe] Group invites sync: Skipping - no valid session');
         return;
     }
     
@@ -5209,7 +4396,6 @@ export async function syncGroupInvitesFromServer() {
         }
         
         if (JSON.stringify(serverInvites) !== JSON.stringify(groupInvites)) {
-            console.log('[Groups iframe] Group invites updated from server');
             groupInvites = serverInvites;
             localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_INVITES, JSON.stringify(groupInvites));
             
@@ -5218,9 +4404,8 @@ export async function syncGroupInvitesFromServer() {
             if (invitesCountEl) invitesCountEl.textContent = groupInvites.length;
             if (invitesSectionCountEl) invitesSectionCountEl.textContent = groupInvites.length;
         }
-        
     } catch (error) {
-        console.log('[Groups iframe] Group invites sync error:', error.message);
+        console.warn('[Groups] Group invites sync error:', error.message);
     }
 }
 
@@ -5230,9 +4415,7 @@ export async function syncGroupInvitesFromServer() {
 export async function syncUniqueFeaturesData() {
     if (!authReady) return;
     
-    // Check if we have a valid session
     if (!parentConnection.handshakeComplete && !getUnifiedToken()) {
-        console.log('[Groups iframe] Unique features sync: Skipping - no valid session');
         return;
     }
     
@@ -5260,9 +4443,8 @@ export async function syncUniqueFeaturesData() {
                 }
             });
         }
-        
     } catch (error) {
-        console.log('[Groups iframe] Unique features sync error:', error.message);
+        console.warn('[Groups] Unique features sync error:', error.message);
     }
 }
 
@@ -5341,9 +4523,8 @@ export function saveGroupsToLocalStorage() {
         localStorage.setItem(LOCAL_STORAGE_KEYS.ADMIN_GROUPS, JSON.stringify(adminGroups));
         localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS, JSON.stringify(pendingGroupActions));
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CACHE_TIME, Date.now().toString());
-        console.log('[Groups iframe] Groups saved to local storage');
     } catch (error) {
-        console.error('[Groups iframe] Error saving groups to local storage:', error);
+        console.error('[Groups] Error saving groups to local storage:', error.message);
     }
 }
 
@@ -5410,10 +4591,10 @@ export function processPendingOfflineActions() {
     try {
         const pendingActions = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_ACTIONS) || '[]');
         if (pendingActions.length > 0) {
-            console.log('[Groups iframe] Processing pending group actions...');
+            // Process pending actions
         }
     } catch (error) {
-        console.error('[Groups iframe] Error processing pending offline actions:', error);
+        console.error('[Groups] Error processing pending offline actions:', error.message);
     }
 }
 

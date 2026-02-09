@@ -1,8 +1,8 @@
 // api.core.js - Core API infrastructure with Token Normalization, Environment Detection
-// Version: 20.5.2 - Part 1 of 3: Core Infrastructure
+// Version: 20.5.6 - Part 1 of 3: Core Infrastructure
 // Date: 2024-01-02
-// 🔧 CRITICAL FIX: Public vs Protected endpoint separation, Auth-Availability decoupling
-// 🔧 SURGICAL FIX: Remove /api duplication - api.core.js MUST NOT add /api to endpoints
+// UPDATED: Added ALL missing exports based on console errors
+// PATCHED: All API calls now use dynamically determined backend origin
 
 // ============================================================================
 // MODULE-LEVEL FUNCTION DECLARATIONS (EXPORTED FUNCTIONS MUST BE AT MODULE LEVEL)
@@ -29,6 +29,24 @@ let getAuthHeaders = null;
 let isPublicEndpoint = null;
 let isAuthEndpoint = null;
 let isStatusEndpoint = null;
+let getTrustScoreDescription = null;
+let navigateToCall = null;
+let getUserFriends = null;
+let navigateToChat = null;
+let getUserGroups = null;
+let showNotification = null;
+let inviteTeamMember = null;
+let acceptGroupInvite = null;
+let getMessageTypes = null;
+
+// NEW EXPORTS TO FIX MISSING ERRORS
+let simulateContactSync = null;
+let trackEvent = null;
+let generateSampleMoodData = null;
+let request = null; // ADDED for group-core.js error
+let apiCallWithRetry = null; // ADDED for friend-ui.js error
+let updateTeamMemberRole = null; // ADDED for Tool-core.js error
+
 let validateAuth = null;
 let updateGlobalAccessToken = null;
 let handleUnauthorizedAccess = null;
@@ -48,7 +66,8 @@ let getToken = null;
 let setToken = null;
 let login = null;
 let logout = null;
-let apiCallWithRetry = null;
+let getTeamMembers = null;
+let getTrustScoreClass = null;
 let getSession = null;
 let api = null;
 let register = null;
@@ -64,7 +83,7 @@ let deleteAccount = null;
 let getOnlineUsers = null;
 let searchUsers = null;
 let sendFriendRequest = null;
-let acceptFriendRequest = null;  // 🔧 FIXED: Now declared at module level
+let acceptFriendRequest = null;
 let rejectFriendRequest = null;
 let removeFriend = null;
 let getFriends = null;
@@ -118,6 +137,9 @@ let simulateIncomingCall = null;
 
 // ES6 Exports - ALL FUNCTIONS NOW PROPERLY DECLARED
 export {
+    getTeamMembers,
+    getTrustScoreClass,
+    getTrustScoreDescription,
     requestSession,
     getAnalyticsData,
     markChatAsRead,
@@ -137,6 +159,21 @@ export {
     isPublicEndpoint,
     isAuthEndpoint,
     isStatusEndpoint,
+    navigateToCall,
+    getUserFriends,
+    navigateToChat,
+    getUserGroups,
+    showNotification,
+    inviteTeamMember,
+    acceptGroupInvite,
+    getMessageTypes,
+    // NEW EXPORTS TO FIX ERRORS
+    simulateContactSync,
+    trackEvent,
+    generateSampleMoodData,
+    request,
+    apiCallWithRetry,
+    updateTeamMemberRole,
     validateAuth,
     updateGlobalAccessToken,
     handleUnauthorizedAccess,
@@ -154,10 +191,10 @@ export {
     setSessionData,
     getToken,
     setToken,
+     
     // ADDED MISSING EXPORTS BASED ON CONSOLE ERRORS
     login,
     logout,
-    apiCallWithRetry,
     getSession,
     // ADDITIONAL COMMON EXPORTS
     api,
@@ -174,7 +211,7 @@ export {
     getOnlineUsers,
     searchUsers,
     sendFriendRequest,
-    acceptFriendRequest,      // 🔧 FIXED: Now properly declared and exported
+    acceptFriendRequest,
     rejectFriendRequest,
     removeFriend,
     getFriends,
@@ -233,20 +270,12 @@ export {
     apiCall
 };
 
-console.log("✅ api.core.js loaded");
-
 // ============================================================================
 // CRITICAL: DUPLICATE LOADING PREVENTION
 // ============================================================================
-// Check if we're already loaded using a more robust method
 if (window.__API_CORE_LOADED_V2) {
-    console.warn('⚠️ [api.core] api.core.js already loaded, skipping duplicate initialization');
     // Exit early without throwing to prevent script loading errors
-    // Don't execute any more code - we'll just wrap the rest in an IIFE
-    // Instead of return, we'll wrap the entire code in a conditional block
-    // The rest of the code below will not execute if already loaded
 } else {
-    // Mark that we're loading
     window.__API_JS_LOADING = true;
     let API_INITIALIZATION_IN_PROGRESS = false;
     let API_INITIALIZATION_COMPLETE = false;
@@ -268,23 +297,22 @@ if (window.__API_CORE_LOADED_V2) {
     // ENVIRONMENT DETECTION & BACKEND URL CONFIGURATION
     // ============================================================================
 
-    // Function to determine the appropriate backend URL based on current environment
-
     let _cachedBackendUrl = null;
     determineBackendUrl = function() {
-        // Return cached value if already determined
         if (_cachedBackendUrl !== null) {
+            return _cachedBackendUrl;
+        }
+        
+        // First, check if window.BACKEND_ORIGIN is set (manual override)
+        if (window.BACKEND_ORIGIN) {
+            _cachedBackendUrl = window.BACKEND_ORIGIN;
+            console.log('[ENV] Using manually configured BACKEND_ORIGIN:', _cachedBackendUrl);
             return _cachedBackendUrl;
         }
         
         const currentHostname = window.location.hostname;
         const currentProtocol = window.location.protocol;
         const currentPort = window.location.port;
-        
-        console.log(`🔧 [ENV] Current environment detection:`);
-        console.log(`🔧 [ENV] Hostname: ${currentHostname}`);
-        console.log(`🔧 [ENV] Protocol: ${currentProtocol}`);
-        console.log(`🔧 [ENV] Port: ${currentPort}`);
         
         // Check if we're running locally
         const isLocalhost = currentHostname === 'localhost' || 
@@ -313,20 +341,19 @@ if (window.__API_CORE_LOADED_V2) {
         let backendUrl;
         
         if (isLocalhost || isLocalDevelopment) {
-            // Use localhost for local development
-            backendUrl = "http://localhost:4000";
-            console.log(`🔧 [ENV] Detected LOCAL development environment`);
-            console.log(`🔧 [ENV] Using LOCAL backend: ${backendUrl}`);
+            backendUrl = `${currentProtocol}//${currentHostname}${currentPort ? ':' + currentPort : ''}`.replace(/:\d+$/, ':4000');
+            // Ensure we use the correct protocol and port
+            if (backendUrl.includes('5500')) {
+                backendUrl = backendUrl.replace(':5500', ':4000');
+            }
+            if (!backendUrl.includes(':4000') && !backendUrl.includes('://localhost:') && !backendUrl.includes('://127.0.0.1:')) {
+                backendUrl = backendUrl.replace(/(:\d+)?$/, ':4000');
+            }
         } else if (isRenderDeployment) {
-            // Use Render backend for production
             backendUrl = "https://moodchat-fy56.onrender.com";
-            console.log(`🔧 [ENV] Detected RENDER deployment environment`);
-            console.log(`🔧 [ENV] Using RENDER backend: ${backendUrl}`);
         } else {
-            // Default to Render backend for unknown environments
-            backendUrl = "https://moodchat-fy56.onrender.com";
-            console.log(`🔧 [ENV] Detected UNKNOWN environment, defaulting to RENDER backend`);
-            console.log(`🔧 [ENV] Using RENDER backend: ${backendUrl}`);
+            // For VPS deployment, use same hostname with port 4000
+            backendUrl = `${currentProtocol}//${currentHostname}:4000`;
         }
         
         // Store the detected environment for reference
@@ -340,20 +367,12 @@ if (window.__API_CORE_LOADED_V2) {
             timestamp: new Date().toISOString()
         };
         
-        console.log(`🔧 [ENV] Environment detection complete: ${isLocalhost ? 'LOCALHOST' : isRenderDeployment ? 'RENDER' : 'UNKNOWN'}`);
-        console.log(`🔧 [ENV] Final backend URL: ${backendUrl}`);
-        
         _cachedBackendUrl = backendUrl;
         return backendUrl;
     };
 
     // Determine backend URL dynamically
     const BACKEND_BASE_URL = determineBackendUrl();
-    // 🔧 SURGICAL FIX: BASE_API_URL is removed - api.core.js must NOT add /api to endpoints
-    // All endpoints come pre-built from api.request.js
-    console.log(`🔧 [api.core] Backend base URL: ${BACKEND_BASE_URL}`);
-    console.log(`🔧 [api.core] CRITICAL: api.core.js will NOT add /api to endpoints`);
-    console.log(`🔧 [api.core] All endpoints must come pre-built from api.request.js`);
 
     // ============================================================================
     // CRITICAL FIX: PUBLIC VS PROTECTED ENDPOINT CLASSIFICATION
@@ -362,45 +381,42 @@ if (window.__API_CORE_LOADED_V2) {
     /**
      * PUBLIC ENDPOINTS - NEVER require tokens
      * These endpoints MUST work without any Authorization header
-     * CRITICAL FIX: /api/status is PUBLIC - 401 does NOT clear tokens
-     * 🔧 FIXED: All auth endpoints are explicitly marked as PUBLIC
      */
     const PUBLIC_ENDPOINTS = [
-        '/api/status',               // 🔧 CRITICAL: Status is PUBLIC health endpoint
-        '/api/auth/login',           // 🔧 FIXED: Login is PUBLIC
-        '/api/auth/register',        // 🔧 FIXED: Register is PUBLIC
-        '/api/auth/forgot',          // 🔧 FIXED: Forgot password is PUBLIC
-        '/api/auth/reset',           // 🔧 FIXED: Reset password is PUBLIC
-        '/api/auth/refresh',         // 🔧 FIXED: Refresh token is PUBLIC
-        '/api/auth/forgot-password', // Legacy support
-        '/api/auth/reset-password',  // Legacy support
-        '/auth/login',               // Backward compatibility
-        '/auth/register',            // Backward compatibility
-        '/auth/forgot-password',     // Legacy support
-        '/auth/reset-password',      // Legacy support
-        '/auth/refresh',             // Legacy support
-        '/auth/health',              // Legacy support
-        '/health'                    // Legacy support
+        '/api/status',
+        '/api/auth/login',
+        '/api/auth/register',
+        '/api/auth/forgot',
+        '/api/auth/reset',
+        '/api/auth/refresh',
+        '/api/auth/forgot-password',
+        '/api/auth/reset-password',
+        '/auth/login',
+        '/auth/register',
+        '/auth/forgot-password',
+        '/auth/reset-password',
+        '/auth/refresh',
+        '/auth/health',
+        '/health'
     ];
 
     /**
      * AUTH ENDPOINTS - Special handling for authentication flows
      * These are PUBLIC but have special timing considerations
-     * 🔧 FIXED: All auth endpoints are explicitly included
      */
     const AUTH_ENDPOINTS = [
-        '/api/auth/login',           // 🔧 FIXED: Login endpoint
-        '/api/auth/register',        // 🔧 FIXED: Register endpoint
-        '/api/auth/forgot',          // 🔧 FIXED: Forgot password endpoint
-        '/api/auth/reset',           // 🔧 FIXED: Reset password endpoint
-        '/api/auth/refresh',         // 🔧 FIXED: Refresh token endpoint
-        '/api/auth/forgot-password', // Legacy support
-        '/api/auth/reset-password',  // Legacy support
-        '/auth/login',               // Backward compatibility
-        '/auth/register',            // Backward compatibility
-        '/auth/forgot-password',     // Legacy support
-        '/auth/reset-password',      // Legacy support
-        '/auth/refresh'              // Legacy support
+        '/api/auth/login',
+        '/api/auth/register',
+        '/api/auth/forgot',
+        '/api/auth/reset',
+        '/api/auth/refresh',
+        '/api/auth/forgot-password',
+        '/api/auth/reset-password',
+        '/auth/login',
+        '/auth/register',
+        '/auth/forgot-password',
+        '/auth/reset-password',
+        '/auth/refresh'
     ];
 
     /**
@@ -411,42 +427,27 @@ if (window.__API_CORE_LOADED_V2) {
     isPublicEndpoint = function(endpoint) {
         if (!endpoint || typeof endpoint !== 'string') return false;
         
-        // Normalize the endpoint
         const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
         
-        // Check against public endpoints list
         const isPublic = PUBLIC_ENDPOINTS.some(publicEndpoint => {
-            // Exact match
             if (normalizedEndpoint === publicEndpoint) return true;
             
-            // Starts with match for nested endpoints
             if (normalizedEndpoint.startsWith(publicEndpoint + '/')) return true;
             
-            // For /api/status, also match /status for backward compatibility
             if (publicEndpoint === '/api/status' && normalizedEndpoint === '/status') return true;
             if (publicEndpoint === '/api/status' && normalizedEndpoint.startsWith('/status/')) return true;
             if (publicEndpoint === '/api/status' && normalizedEndpoint.startsWith('/status?')) return true;
             
-            // For auth endpoints, also match legacy paths
             if (publicEndpoint === '/api/auth/login' && normalizedEndpoint === '/auth/login') return true;
             if (publicEndpoint === '/api/auth/register' && normalizedEndpoint === '/auth/register') return true;
             if (publicEndpoint === '/api/auth/forgot' && normalizedEndpoint === '/auth/forgot-password') return true;
             if (publicEndpoint === '/api/auth/reset' && normalizedEndpoint === '/auth/reset-password') return true;
             if (publicEndpoint === '/api/auth/refresh' && normalizedEndpoint === '/auth/refresh') return true;
             
-            // For /api/auth/*, also match /auth/* for backward compatibility
             if (publicEndpoint.startsWith('/api/auth/') && normalizedEndpoint === publicEndpoint.replace('/api', '')) return true;
             
             return false;
         });
-        
-        // Debug logging for auth endpoints
-        if (normalizedEndpoint.includes('/auth/')) {
-            console.log(`🔐 [AUTH] Endpoint "${normalizedEndpoint}" classified as ${isPublic ? 'PUBLIC' : 'PROTECTED'}`);
-            if (!isPublic) {
-                console.warn(`⚠️ [AUTH] Auth endpoint "${normalizedEndpoint}" is NOT in PUBLIC_ENDPOINTS list!`);
-            }
-        }
         
         return isPublic;
     };
@@ -466,11 +467,6 @@ if (window.__API_CORE_LOADED_V2) {
             normalizedEndpoint.startsWith(authEndpoint + '/')
         );
         
-        // Debug logging
-        if (normalizedEndpoint.includes('/auth/')) {
-            console.log(`🔐 [AUTH] Endpoint "${normalizedEndpoint}" is auth endpoint: ${isAuth ? 'YES' : 'NO'}`);
-        }
-        
         return isAuth;
     };
 
@@ -484,13 +480,357 @@ if (window.__API_CORE_LOADED_V2) {
         
         const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
         
-        // Status endpoint variations
         return normalizedEndpoint === '/api/status' || 
                normalizedEndpoint.startsWith('/api/status?') ||
                normalizedEndpoint.startsWith('/api/status/') ||
                normalizedEndpoint === '/status' || 
                normalizedEndpoint.startsWith('/status?') ||
                normalizedEndpoint.startsWith('/status/');
+    };
+
+    // ============================================================================
+    // NEW FUNCTIONS TO FIX CONSOLE ERRORS
+    // ============================================================================
+
+    /**
+     * Request function - missing export for group-core.js
+     * @param {string} endpoint - The API endpoint
+     * @param {object} options - Request options
+     * @returns {Promise} Promise with response
+     */
+    request = async function(endpoint, options = {}) {
+        return globalApiFunction(endpoint, options);
+    };
+
+    /**
+     * API call with retry function - missing export for friend-ui.js
+     * @param {string} endpoint - The API endpoint
+     * @param {object} options - Request options
+     * @param {number} maxRetries - Maximum number of retries
+     * @returns {Promise} Promise with response
+     */
+    apiCallWithRetry = async function(endpoint, options = {}, maxRetries = 3) {
+        let lastError;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const result = await secureApiFetch(endpoint, options);
+                
+                if (result.success || attempt === maxRetries) {
+                    return result;
+                }
+                
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                
+            } catch (error) {
+                lastError = error;
+                console.error(`[RETRY] Attempt ${attempt} failed:`, error);
+                
+                if (attempt === maxRetries) {
+                    break;
+                }
+                
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        
+        throw lastError || new Error(`API call failed after ${maxRetries} attempts`);
+    };
+
+    /**
+     * Update team member role function - missing export for Tool-core.js
+     * @param {string} teamId - Team ID
+     * @param {string} memberId - Member ID
+     * @param {string} role - New role
+     * @returns {Promise} Promise with response
+     */
+    updateTeamMemberRole = async function(teamId, memberId, role) {
+        try {
+            return await secureApiFetch(`/api/teams/${teamId}/members/${memberId}/role`, {
+                method: 'PUT',
+                body: { role }
+            });
+        } catch (error) {
+            console.error('[TEAM] Error updating team member role:', error);
+            return { 
+                success: false, 
+                message: 'Failed to update team member role',
+                error: error.message 
+            };
+        }
+    };
+
+    /**
+     * Simulate contact sync - missing export for friend-core.js
+     * @returns {object} Simulated contact sync result
+     */
+    simulateContactSync = function() {
+        console.log('[FRIENDS] Simulating contact sync');
+        return {
+            success: true,
+            message: 'Contact sync simulated',
+            syncedContacts: 0,
+            newContacts: 0
+        };
+    };
+
+    /**
+     * Track event - missing export for Tool-core.js
+     * @param {string} eventName - Event name
+     * @param {object} eventData - Event data
+     * @returns {object} Tracking result
+     */
+    trackEvent = function(eventName, eventData = {}) {
+        console.log(`[ANALYTICS] Tracking event: ${eventName}`, eventData);
+        return {
+            success: true,
+            eventName,
+            timestamp: new Date().toISOString(),
+            data: eventData
+        };
+    };
+
+    /**
+     * Generate sample mood data - missing export for status-ui.js
+     * @returns {Array} Sample mood data
+     */
+    generateSampleMoodData = function() {
+        const moods = ['happy', 'sad', 'excited', 'calm', 'anxious', 'tired'];
+        const data = [];
+        const now = new Date();
+        
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(now);
+            date.setDate(date.getDate() - i);
+            
+            data.push({
+                date: date.toISOString().split('T')[0],
+                mood: moods[Math.floor(Math.random() * moods.length)],
+                intensity: Math.floor(Math.random() * 100),
+                activities: ['work', 'social', 'exercise'].slice(0, Math.floor(Math.random() * 3) + 1)
+            });
+        }
+        
+        return data;
+    };
+
+    // ============================================================================
+    // MISSING FUNCTIONS - ADDED FOR ERRORS
+    // ============================================================================
+
+    /**
+     * Navigate to call function - missing export
+     */
+    navigateToCall = function(callId) {
+        try {
+            if (window.location.pathname.includes('chat.html')) {
+                // If in chat page, navigate to call
+                window.location.href = `/call.html?callId=${callId}`;
+            } else {
+                // Open in new tab
+                window.open(`/call.html?callId=${callId}`, '_blank');
+            }
+            return { success: true, callId: callId };
+        } catch (error) {
+            console.error('[CALL] Error navigating to call:', error);
+            return { success: false, message: 'Failed to navigate to call' };
+        }
+    };
+
+    /**
+     * Get user friends - missing export
+     */
+    getUserFriends = async function() {
+        try {
+            return await secureApiFetch('/api/friends', {
+                method: 'GET'
+            });
+        } catch (error) {
+            console.error('[FRIENDS] Error getting user friends:', error);
+            return { 
+                success: false, 
+                message: 'Failed to get friends',
+                data: [] 
+            };
+        }
+    };
+
+    // ============================================================================
+    // ADDED ALL MISSING FUNCTIONS BASED ON CONSOLE ERRORS
+    // ============================================================================
+
+    /**
+     * Navigate to chat function - missing export for friend-core.js
+     * @param {string} chatId - The chat ID to navigate to
+     * @param {string} userId - The user ID for the chat
+     * @returns {object} Navigation result
+     */
+    navigateToChat = function(chatId, userId = null) {
+        try {
+            let url = `/message.html`;
+            if (chatId) {
+                url += `?chatId=${chatId}`;
+            } else if (userId) {
+                url += `?userId=${userId}`;
+            }
+            
+            if (window.location.pathname.includes('message.html')) {
+                // If already in message page, update URL without reload
+                window.history.pushState({}, '', url);
+                window.dispatchEvent(new CustomEvent('chat-navigation', {
+                    detail: { chatId, userId }
+                }));
+            } else {
+                // Navigate to message page
+                window.location.href = url;
+            }
+            
+            return { success: true, chatId, userId };
+        } catch (error) {
+            console.error('[CHAT] Error navigating to chat:', error);
+            return { success: false, message: 'Failed to navigate to chat' };
+        }
+    };
+
+    /**
+     * Get user groups function - missing export for Tool-core.js
+     * @returns {Promise} Promise with user groups
+     */
+    getUserGroups = async function() {
+        try {
+            return await secureApiFetch('/api/group/user', {
+                method: 'GET'
+            });
+        } catch (error) {
+            console.error('[GROUPS] Error getting user group:', error);
+            return { 
+                success: false, 
+                message: 'Failed to get user group',
+                data: [] 
+            };
+        }
+    };
+
+    /**
+     * Show notification function - missing export for friend-core.js
+     * @param {string} message - Notification message
+     * @param {string} type - Notification type (info, success, warning, error)
+     * @param {number} duration - Duration in milliseconds
+     * @returns {object} Notification result
+     */
+    showNotification = function(message, type = 'info', duration = 3000) {
+        try {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            notification.innerHTML = `
+                <div class="notification-content">
+                    <span class="notification-message">${escapeHtml(message)}</span>
+                </div>
+            `;
+            
+            // Style the notification
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 12px 16px;
+                background: ${type === 'success' ? '#4CAF50' : 
+                           type === 'warning' ? '#FF9800' : 
+                           type === 'error' ? '#F44336' : '#2196F3'};
+                color: white;
+                border-radius: 4px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                z-index: 9999;
+                max-width: 300px;
+                animation: slideIn 0.3s ease;
+            `;
+            
+            // Add to body
+            document.body.appendChild(notification);
+            
+            // Remove after duration
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, duration);
+            
+            return { success: true, message: 'Notification shown' };
+        } catch (error) {
+            console.error('[NOTIFICATION] Error showing notification:', error);
+            return { success: false, message: 'Failed to show notification' };
+        }
+    };
+
+    /**
+     * Invite team member function - missing export for Tool-core.js
+     * @param {string} email - Email to invite
+     * @param {string} role - Team role
+     * @returns {Promise} Promise with invitation result
+     */
+    inviteTeamMember = async function(email, role = 'member') {
+        try {
+            return await secureApiFetch('/api/teams/invite', {
+                method: 'POST',
+                body: { email, role }
+            });
+        } catch (error) {
+            console.error('[TEAM] Error inviting team member:', error);
+            return { 
+                success: false, 
+                message: 'Failed to invite team member',
+                error: error.message 
+            };
+        }
+    };
+
+    /**
+     * Accept group invite function - missing export for group-core.js
+     * @param {string} inviteId - Invitation ID
+     * @returns {Promise} Promise with acceptance result
+     */
+    acceptGroupInvite = async function(inviteId) {
+        try {
+            return await secureApiFetch(`/api/group/invites/${inviteId}/accept`, {
+                method: 'POST'
+            });
+        } catch (error) {
+            console.error('[GROUP] Error accepting group invite:', error);
+            return { 
+                success: false, 
+                message: 'Failed to accept group invitation',
+                error: error.message 
+            };
+        }
+    };
+
+    /**
+     * Get message types constant - missing export for status-core.js
+     * @returns {object} Message types object
+     */
+    getMessageTypes = function() {
+        return {
+            TEXT: 'text',
+            IMAGE: 'image',
+            VIDEO: 'video',
+            AUDIO: 'audio',
+            FILE: 'file',
+            LOCATION: 'location',
+            SYSTEM: 'system',
+            CALL: 'call',
+            GROUP_CREATE: 'group_create',
+            GROUP_JOIN: 'group_join',
+            GROUP_LEAVE: 'group_leave',
+            FRIEND_REQUEST: 'friend_request',
+            FRIEND_ACCEPT: 'friend_accept',
+            FRIEND_REJECT: 'friend_reject'
+        };
     };
 
     // ============================================================================
@@ -502,15 +842,12 @@ if (window.__API_CORE_LOADED_V2) {
      */
     function migrateOldTokens() {
         try {
-            // Check if migration already completed
             if (localStorage.getItem(TOKEN_MIGRATION_KEY) === 'true') {
-                console.log('🔐 [TOKEN] Token migration already completed');
                 return true;
             }
             
-            console.log('🔐 [TOKEN] Starting token migration...');
+            let migratedToken = null;
             
-            // Check for tokens in old locations
             const oldTokenLocations = [
                 'accessToken',
                 'moodchat_token',
@@ -519,40 +856,32 @@ if (window.__API_CORE_LOADED_V2) {
                 'authToken'
             ];
             
-            let migratedToken = null;
-            
-            // Check each old location for tokens
             for (const location of oldTokenLocations) {
                 const oldToken = localStorage.getItem(location);
                 if (oldToken && oldToken.trim() !== '' && 
                     oldToken !== 'null' && oldToken !== 'undefined' && 
                     oldToken.length > 10) {
-                    console.log(`🔐 [TOKEN] Found token in old location: ${location}`);
                     migratedToken = oldToken;
                     break;
                 }
             }
             
-            // Check authUser object for tokens
             try {
                 const authUserStr = localStorage.getItem('authUser');
                 if (authUserStr) {
                     const authUser = JSON.parse(authUserStr);
                     if (authUser.accessToken && authUser.accessToken.trim() !== '' && 
                         authUser.accessToken !== 'null' && authUser.accessToken !== 'undefined') {
-                        console.log('🔐 [TOKEN] Found token in authUser.accessToken');
                         migratedToken = authUser.accessToken;
                     } else if (authUser.token && authUser.token.trim() !== '' && 
                               authUser.token !== 'null' && authUser.token !== 'undefined') {
-                        console.log('🔐 [TOKEN] Found token in authUser.token');
                         migratedToken = authUser.token;
                     }
                 }
             } catch (error) {
-                console.log('🔐 [TOKEN] Error reading authUser:', error.message);
+                console.error('[TOKEN] Error reading authUser:', error);
             }
             
-            // Migrate user data
             let migratedUserData = null;
             try {
                 const oldUserLocations = [
@@ -567,51 +896,40 @@ if (window.__API_CORE_LOADED_V2) {
                     if (userDataStr) {
                         const userData = JSON.parse(userDataStr);
                         if (userData && (userData.id || userData.email || userData.username)) {
-                            console.log(`🔐 [TOKEN] Found user data in old location: ${location}`);
                             migratedUserData = userData;
                             break;
                         }
                     }
                 }
                 
-                // Check authUser for user data
                 const authUserStr = localStorage.getItem('authUser');
                 if (authUserStr && !migratedUserData) {
                     const authUser = JSON.parse(authUserStr);
                     if (authUser.user && (authUser.user.id || authUser.user.email || authUser.user.username)) {
-                        console.log('🔐 [TOKEN] Found user data in authUser.user');
                         migratedUserData = authUser.user;
                     } else if (authUser.id || authUser.email || authUser.username) {
-                        console.log('🔐 [TOKEN] Found user data in authUser object');
                         migratedUserData = authUser;
                     }
                 }
             } catch (error) {
-                console.log('🔐 [TOKEN] Error migrating user data:', error.message);
+                console.error('[TOKEN] Error migrating user data:', error);
             }
             
-            // Store migrated token if found
             if (migratedToken) {
-                console.log('🔐 [TOKEN] Storing migrated token in centralized location');
                 localStorage.setItem(USER_TOKEN_KEY, migratedToken);
                 
-                // Store user data if found
                 if (migratedUserData) {
                     localStorage.setItem(USER_DATA_KEY, JSON.stringify(migratedUserData));
                 }
                 
-                // Mark migration as complete
                 localStorage.setItem(TOKEN_MIGRATION_KEY, 'true');
-                
-                console.log('✅ [TOKEN] Token migration completed successfully');
                 return true;
             } else {
-                console.log('🔐 [TOKEN] No old tokens found to migrate');
                 localStorage.setItem(TOKEN_MIGRATION_KEY, 'true');
                 return false;
             }
         } catch (error) {
-            console.error('❌ [TOKEN] Token migration error:', error);
+            console.error('[TOKEN] Token migration error:', error);
             return false;
         }
     }
@@ -622,7 +940,6 @@ if (window.__API_CORE_LOADED_V2) {
      */
     getUserToken = function() {
         try {
-            // First check centralized storage
             const token = localStorage.getItem(USER_TOKEN_KEY);
             
             if (token && token.trim() !== '' && 
@@ -631,7 +948,6 @@ if (window.__API_CORE_LOADED_V2) {
                 return token;
             }
             
-            // If not found, check legacy locations
             const legacyTokens = [
                 localStorage.getItem('accessToken'),
                 localStorage.getItem('moodchat_token'),
@@ -644,14 +960,11 @@ if (window.__API_CORE_LOADED_V2) {
                 if (legacyToken && legacyToken.trim() !== '' && 
                     legacyToken !== 'null' && legacyToken !== 'undefined' && 
                     legacyToken.length > 10) {
-                    console.log('🔐 [TOKEN] Found token in legacy location, migrating...');
-                    // Migrate immediately
                     localStorage.setItem(USER_TOKEN_KEY, legacyToken);
                     return legacyToken;
                 }
             }
             
-            // Check authUser object
             try {
                 const authUserStr = localStorage.getItem('authUser');
                 if (authUserStr) {
@@ -660,18 +973,17 @@ if (window.__API_CORE_LOADED_V2) {
                     if (tokenFromAuthUser && tokenFromAuthUser.trim() !== '' && 
                         tokenFromAuthUser !== 'null' && tokenFromAuthUser !== 'undefined' && 
                         tokenFromAuthUser.length > 10) {
-                        console.log('🔐 [TOKEN] Found token in authUser, migrating...');
                         localStorage.setItem(USER_TOKEN_KEY, tokenFromAuthUser);
                         return tokenFromAuthUser;
                     }
                 }
             } catch (error) {
-                console.log('🔐 [TOKEN] Error reading authUser:', error.message);
+                console.error('[TOKEN] Error reading authUser:', error);
             }
             
             return null;
         } catch (error) {
-            console.error('❌ [TOKEN] Error getting user token:', error);
+            console.error('[TOKEN] Error getting user token:', error);
             return null;
         }
     };
@@ -686,21 +998,16 @@ if (window.__API_CORE_LOADED_V2) {
             if (!token || token.trim() === '' || 
                 token === 'null' || token === 'undefined' || 
                 token.length < 10) {
-                console.error('❌ [TOKEN] Invalid token provided');
+                console.error('[TOKEN] Invalid token provided');
                 return false;
             }
             
-            // Store in centralized location
             localStorage.setItem(USER_TOKEN_KEY, token);
-            
-            // Also store in legacy location for backward compatibility
             localStorage.setItem('accessToken', token);
             localStorage.setItem('moodchat_token', token);
-            
-            console.log('✅ [TOKEN] Token stored in centralized storage');
             return true;
         } catch (error) {
-            console.error('❌ [TOKEN] Error setting user token:', error);
+            console.error('[TOKEN] Error setting user token:', error);
             return false;
         }
     };
@@ -714,16 +1021,15 @@ if (window.__API_CORE_LOADED_V2) {
             localStorage.removeItem(USER_TOKEN_KEY);
             localStorage.removeItem('accessToken');
             localStorage.removeItem('moodchat_token');
-            console.log('✅ [TOKEN] User token cleared');
             return true;
         } catch (error) {
-            console.error('❌ [TOKEN] Error clearing user token:', error);
+            console.error('[TOKEN] Error clearing user token:', error);
             return false;
         }
     };
 
     /**
-     * Set user data in centralized storage - FIXED to prevent infinite recursion
+     * Set user data in centralized storage
      * @param {object} userData - The user data to store
      * @param {boolean} skipLegacy - Skip legacy storage (prevents loops)
      * @returns {boolean} True if successful
@@ -731,24 +1037,19 @@ if (window.__API_CORE_LOADED_V2) {
     setUserData = function(userData, skipLegacy = false) {
         try {
             if (!userData || typeof userData !== 'object') {
-                console.error('❌ [TOKEN] Invalid user data provided');
+                console.error('[TOKEN] Invalid user data provided');
                 return false;
             }
             
-            // Prevent storing circular references
             const safeUserData = JSON.parse(JSON.stringify(userData));
             
-            // Store in centralized location
             localStorage.setItem(USER_DATA_KEY, JSON.stringify(safeUserData));
             
-            // Set global user
             window.currentUser = safeUserData;
             
             if (!skipLegacy) {
-                // Also store in legacy location for backward compatibility
                 localStorage.setItem('moodchat_auth_user', JSON.stringify(safeUserData));
                 
-                // Update authUser object if it exists
                 try {
                     const authUserStr = localStorage.getItem('authUser');
                     if (authUserStr) {
@@ -757,14 +1058,13 @@ if (window.__API_CORE_LOADED_V2) {
                         localStorage.setItem('authUser', JSON.stringify(authUser));
                     }
                 } catch (error) {
-                    console.log('🔐 [TOKEN] Error updating authUser:', error.message);
+                    console.error('[TOKEN] Error updating authUser:', error);
                 }
             }
             
-            console.log('✅ [TOKEN] User data stored in centralized storage');
             return true;
         } catch (error) {
-            console.error('❌ [TOKEN] Error setting user data:', error);
+            console.error('[TOKEN] Error setting user data:', error);
             return false;
         }
     };
@@ -774,12 +1074,10 @@ if (window.__API_CORE_LOADED_V2) {
      */
     clearAllAuthData = function() {
         try {
-            // Clear centralized storage
             localStorage.removeItem(USER_TOKEN_KEY);
             localStorage.removeItem(USER_DATA_KEY);
             localStorage.removeItem(SESSION_DATA_KEY);
             
-            // Clear legacy storage for safety
             localStorage.removeItem('accessToken');
             localStorage.removeItem('moodchat_token');
             localStorage.removeItem('token');
@@ -790,10 +1088,8 @@ if (window.__API_CORE_LOADED_V2) {
             localStorage.removeItem('userData');
             localStorage.removeItem('currentUser');
             localStorage.removeItem('user');
-            
-            console.log('✅ [TOKEN] All authentication data cleared');
         } catch (error) {
-            console.error('❌ [TOKEN] Error clearing auth data:', error);
+            console.error('[TOKEN] Error clearing auth data:', error);
         }
     };
 
@@ -824,12 +1120,8 @@ if (window.__API_CORE_LOADED_V2) {
      * Initialize token system
      */
     initializeTokenSystem = function() {
-        console.log('🔐 [TOKEN] Initializing centralized token system...');
-        
-        // Perform token migration
         migrateOldTokens();
         
-        // Check if we have a token
         const token = getUserToken();
         const userDataStr = localStorage.getItem(USER_DATA_KEY);
         let userData = null;
@@ -839,18 +1131,15 @@ if (window.__API_CORE_LOADED_V2) {
                 userData = JSON.parse(userDataStr);
             }
         } catch (error) {
-            console.log('🔐 [TOKEN] Error parsing user data:', error.message);
+            console.error('[TOKEN] Error parsing user data:', error);
         }
         
-        // Set token ready state
         if (token || userData) {
-            console.log('🔐 [TOKEN] Token system initialized with stored data');
             _tokenReady = true;
             if (_tokenReadyResolve) {
                 _tokenReadyResolve(true);
             }
         } else {
-            console.log('🔐 [TOKEN] Token system initialized (no stored data)');
             _tokenReady = true;
             if (_tokenReadyResolve) {
                 _tokenReadyResolve(false);
@@ -859,6 +1148,41 @@ if (window.__API_CORE_LOADED_V2) {
         
         return { token, userData };
     };
+
+    // ============================================================================
+    // CENTRAL SESSION STORE
+    // ============================================================================
+
+    const _SESSION_ = {
+        token: null,
+        user: null,
+        expires: null,
+        validated: false,
+        lastUpdated: null
+    };
+
+    function _initSessionFromStorage() {
+        try {
+            _SESSION_.token = getUserToken();
+            
+            const userDataStr = localStorage.getItem(USER_DATA_KEY);
+            if (userDataStr) {
+                _SESSION_.user = JSON.parse(userDataStr);
+            }
+            
+            const sessionStr = localStorage.getItem(SESSION_DATA_KEY);
+            if (sessionStr) {
+                const sessionData = JSON.parse(sessionStr);
+                _SESSION_.expires = sessionData.expires;
+                _SESSION_.validated = sessionData.validated || false;
+                _SESSION_.lastUpdated = sessionData.lastUpdated;
+            }
+        } catch (error) {
+            console.error('[SESSION] Error initializing session from storage:', error);
+        }
+    }
+
+    _initSessionFromStorage();
 
     // ============================================================================
     // RESTORED MISSING FUNCTIONS
@@ -870,21 +1194,17 @@ if (window.__API_CORE_LOADED_V2) {
      */
     getCurrentUser = function() {
         try {
-            // First check window.currentUser
             if (window.currentUser && typeof window.currentUser === 'object') {
                 return window.currentUser;
             }
             
-            // Then check centralized storage
             const userDataStr = localStorage.getItem(USER_DATA_KEY);
             if (userDataStr) {
                 const user = JSON.parse(userDataStr);
-                // Update global reference
                 window.currentUser = user;
                 return user;
             }
             
-            // Check legacy storage
             const authUserStr = localStorage.getItem('authUser');
             if (authUserStr) {
                 try {
@@ -898,13 +1218,13 @@ if (window.__API_CORE_LOADED_V2) {
                         return authUser;
                     }
                 } catch (error) {
-                    console.error('❌ [USER] Error parsing authUser:', error);
+                    console.error('[USER] Error parsing authUser:', error);
                 }
             }
             
             return null;
         } catch (error) {
-            console.error('❌ [USER] Error getting current user:', error);
+            console.error('[USER] Error getting current user:', error);
             return null;
         }
     };
@@ -944,10 +1264,9 @@ if (window.__API_CORE_LOADED_V2) {
                 return false;
             }
             
-            // Use validateAuth which calls /api/auth/me
             return await validateAuth();
         } catch (error) {
-            console.error('❌ [SESSION] Error validating session:', error);
+            console.error('[SESSION] Error validating session:', error);
             return false;
         }
     };
@@ -960,11 +1279,10 @@ if (window.__API_CORE_LOADED_V2) {
     updateSession = function(sessionData) {
         try {
             if (!sessionData || typeof sessionData !== 'object') {
-                console.error('❌ [SESSION] Invalid session data provided');
+                console.error('[SESSION] Invalid session data provided');
                 return false;
             }
             
-            // Get existing session data
             let existingSession = {};
             try {
                 const sessionStr = localStorage.getItem(SESSION_DATA_KEY);
@@ -972,17 +1290,19 @@ if (window.__API_CORE_LOADED_V2) {
                     existingSession = JSON.parse(sessionStr);
                 }
             } catch (error) {
-                console.log('🔐 [SESSION] Error reading existing session:', error.message);
+                console.error('[SESSION] Error reading existing session:', error);
             }
             
-            // Merge and store
             const updatedSession = { ...existingSession, ...sessionData, lastUpdated: Date.now() };
             localStorage.setItem(SESSION_DATA_KEY, JSON.stringify(updatedSession));
             
-            console.log('✅ [SESSION] Session updated successfully');
+            if (sessionData.expires) _SESSION_.expires = sessionData.expires;
+            if (sessionData.validated !== undefined) _SESSION_.validated = sessionData.validated;
+            _SESSION_.lastUpdated = Date.now();
+            
             return true;
         } catch (error) {
-            console.error('❌ [SESSION] Error updating session:', error);
+            console.error('[SESSION] Error updating session:', error);
             return false;
         }
     };
@@ -1018,9 +1338,17 @@ if (window.__API_CORE_LOADED_V2) {
             }
             return null;
         } catch (error) {
-            console.error('❌ [SESSION] Error getting session data:', error);
+            console.error('[SESSION] Error getting session data:', error);
             return null;
         }
+    };
+
+    /**
+     * Get session (alias for getSessionData)
+     * @returns {object|null} Session data or null
+     */
+    getSession = function() {
+        return getSessionData();
     };
 
     /**
@@ -1030,16 +1358,20 @@ if (window.__API_CORE_LOADED_V2) {
     clearSession = function() {
         try {
             localStorage.removeItem(SESSION_DATA_KEY);
-            console.log('✅ [SESSION] Session data cleared');
+            
+            _SESSION_.expires = null;
+            _SESSION_.validated = false;
+            _SESSION_.lastUpdated = null;
+            
             return true;
         } catch (error) {
-            console.error('❌ [SESSION] Error clearing session:', error);
+            console.error('[SESSION] Error clearing session:', error);
             return false;
         }
     };
 
     /**
-     * Set session data
+     * Set session data (alias for updateSession)
      * @param {object} sessionData - Session data
      * @returns {boolean} True if successful
      */
@@ -1069,7 +1401,7 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
 
     /**
-     * Login function - missing export
+     * Login function
      */
     login = async function(credentials) {
         try {
@@ -1079,7 +1411,6 @@ if (window.__API_CORE_LOADED_V2) {
             });
             
             if (response.success && response.token) {
-                // Store token and user data
                 setUserToken(response.token);
                 if (response.user) {
                     setUserData(response.user);
@@ -1088,13 +1419,13 @@ if (window.__API_CORE_LOADED_V2) {
             }
             return response;
         } catch (error) {
-            console.error('❌ [AUTH] Login error:', error);
+            console.error('[AUTH] Login error:', error);
             return { success: false, message: 'Login failed' };
         }
     };
 
     /**
-     * Logout function - missing export
+     * Logout function
      */
     logout = async function() {
         try {
@@ -1102,75 +1433,89 @@ if (window.__API_CORE_LOADED_V2) {
                 method: 'POST'
             });
             
-            // Clear auth data regardless of response
             clearAllAuthData();
             
             return response;
         } catch (error) {
-            console.error('❌ [AUTH] Logout error:', error);
-            // Still clear auth data on error
+            console.error('[AUTH] Logout error:', error);
             clearAllAuthData();
             return { success: false, message: 'Logout failed' };
         }
     };
 
     /**
-     * Get session function - missing export (alias for getSessionData)
+     * Clear chat history function
      */
-    getSession = function() {
-        return getSessionData();
-    };
-
-    /**
-     * API call with retry function - missing export
-     */
-    apiCallWithRetry = async function(endpoint, options = {}, maxRetries = 3) {
-        let lastError;
-        
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                console.log(`🔧 [RETRY] Attempt ${attempt}/${maxRetries} for ${endpoint}`);
-                const result = await secureApiFetch(endpoint, options);
-                
-                if (result.success || attempt === maxRetries) {
-                    return result;
-                }
-                
-                // Wait before retry (exponential backoff)
-                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                
-            } catch (error) {
-                lastError = error;
-                console.error(`❌ [RETRY] Attempt ${attempt} failed:`, error);
-                
-                if (attempt === maxRetries) {
-                    break;
-                }
-                
-                // Wait before retry
-                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
-        
-        throw lastError || new Error(`API call failed after ${maxRetries} attempts`);
-    };
-
-    /**
-     * Clear chat history function - missing export
-     */
-    async function clearChatHistory(chatId) {
+    clearChatHistory = async function(chatId) {
         try {
             const response = await secureApiFetch(`/api/chats/${chatId}/history`, {
                 method: 'DELETE'
             });
             return response;
         } catch (error) {
-            console.error('❌ [CHAT] Clear history error:', error);
+            console.error('[CHAT] Clear history error:', error);
             return { success: false, message: 'Failed to clear chat history' };
         }
-    }
+    };
+
+    // ============================================================================
+    // NEW FUNCTIONS TO FIX MISSING EXPORTS
+    // ============================================================================
+
+    /**
+     * Get team members function
+     * @returns {Promise} Promise with team members
+     */
+    getTeamMembers = async function(teamId) {
+        try {
+            let url = '/api/teams/members';
+            if (teamId) {
+                url = `/api/teams/${teamId}/members`;
+            }
+            return await secureApiFetch(url, {
+                method: 'GET'
+            });
+        } catch (error) {
+            console.error('[TEAM] Get team members error:', error);
+            return { 
+                success: false, 
+                message: 'Failed to get team members',
+                data: [] 
+            };
+        }
+    };
+
+    /**
+     * Get trust score class function
+     * @param {number} score - Trust score (0-100)
+     * @returns {string} CSS class for trust score
+     */
+    getTrustScoreClass = function(score) {
+        if (!score && score !== 0) return 'trust-unknown';
+        
+        if (score >= 90) return 'trust-excellent';
+        if (score >= 75) return 'trust-very-high';
+        if (score >= 60) return 'trust-high';
+        if (score >= 40) return 'trust-medium';
+        if (score >= 25) return 'trust-low';
+        return 'trust-very-low';
+    };
+
+    /**
+     * Trust score description function
+     * @param {number} score - Trust score (0-100)
+     * @returns {string} Human-readable description
+     */
+    getTrustScoreDescription = function(score) {
+        if (!score && score !== 0) return 'Unknown';
+        
+        if (score >= 90) return 'Excellent';
+        if (score >= 75) return 'Very High';
+        if (score >= 60) return 'High';
+        if (score >= 40) return 'Medium';
+        if (score >= 25) return 'Low';
+        return 'Very Low';
+    };
 
     // ============================================================================
     // ADDITIONAL COMMON API FUNCTIONS
@@ -1305,7 +1650,7 @@ if (window.__API_CORE_LOADED_V2) {
     };
 
     /**
-     * Accept friend request function - 🔧 FIXED: Added missing function
+     * Accept friend request function
      * @param {string} requestId - The friend request ID to accept
      * @returns {Promise<object>} API response
      */
@@ -1402,7 +1747,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Create group function
      */
     createGroup = async function(groupData) {
-        return secureApiFetch('/api/groups', {
+        return secureApiFetch('/api/group', {
             method: 'POST',
             body: groupData
         });
@@ -1412,7 +1757,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Get groups function
      */
     getGroups = async function() {
-        return secureApiFetch('/api/groups', {
+        return secureApiFetch('/api/group', {
             method: 'GET'
         });
     };
@@ -1421,7 +1766,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Get group details function
      */
     getGroupDetails = async function(groupId) {
-        return secureApiFetch(`/api/groups/${groupId}`, {
+        return secureApiFetch(`/api/group/${groupId}`, {
             method: 'GET'
         });
     };
@@ -1430,7 +1775,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Update group function
      */
     updateGroup = async function(groupId, groupData) {
-        return secureApiFetch(`/api/groups/${groupId}`, {
+        return secureApiFetch(`/api/group/${groupId}`, {
             method: 'PUT',
             body: groupData
         });
@@ -1440,7 +1785,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Delete group function
      */
     deleteGroup = async function(groupId) {
-        return secureApiFetch(`/api/groups/${groupId}`, {
+        return secureApiFetch(`/api/group/${groupId}`, {
             method: 'DELETE'
         });
     };
@@ -1449,7 +1794,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Add group member function
      */
     addGroupMember = async function(groupId, userId) {
-        return secureApiFetch(`/api/groups/${groupId}/members`, {
+        return secureApiFetch(`/api/group/${groupId}/members`, {
             method: 'POST',
             body: { userId }
         });
@@ -1459,7 +1804,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Remove group member function
      */
     removeGroupMember = async function(groupId, userId) {
-        return secureApiFetch(`/api/groups/${groupId}/members/${userId}`, {
+        return secureApiFetch(`/api/group/${groupId}/members/${userId}`, {
             method: 'DELETE'
         });
     };
@@ -1468,7 +1813,7 @@ if (window.__API_CORE_LOADED_V2) {
      * Leave group function
      */
     leaveGroup = async function(groupId) {
-        return secureApiFetch(`/api/groups/${groupId}/leave`, {
+        return secureApiFetch(`/api/group/${groupId}/leave`, {
             method: 'POST'
         });
     };
@@ -1567,7 +1912,7 @@ if (window.__API_CORE_LOADED_V2) {
         return secureApiFetch('/api/files/upload', {
             method: 'POST',
             body: formData,
-            headers: {} // Let browser set Content-Type for FormData
+            headers: {}
         });
     };
 
@@ -1590,7 +1935,7 @@ if (window.__API_CORE_LOADED_V2) {
     };
 
     // ============================================================================
-    // NETWORK STATUS FUNCTIONS - FIXED DUPLICATE DECLARATION
+    // NETWORK STATUS FUNCTIONS
     // ============================================================================
 
     /**
@@ -1604,12 +1949,19 @@ if (window.__API_CORE_LOADED_V2) {
                 signal: AbortSignal.timeout(5000)
             });
             
-            // Update the AppNetwork object
             if (window.AppNetwork) {
                 window.AppNetwork.updateBackendStatus(response.ok);
             }
-            return response.ok;
+            
+            if (!response.ok) {
+                console.error(`❌ Backend check failed: ${response.status} ${response.statusText}`);
+                return false;
+            }
+            
+            return true;
         } catch (error) {
+            console.error(`❌ Network status check failed: ${error.message}`);
+            
             if (window.AppNetwork) {
                 window.AppNetwork.updateBackendStatus(false);
             }
@@ -1746,107 +2098,91 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
 
     /**
-     * Secure fetch function - automatically adds Authorization header ONLY for protected endpoints
-     * 🔧 CRITICAL FIX: Public endpoints (/api/status, /auth/*) NEVER get Authorization header
-     * 🔧 CRITICAL FIX: 401 on public endpoints does NOT clear tokens or trigger logout
-     * 🔧 SURGICAL FIX: Accepts fully-built URLs - does NOT add /api
+     * Secure fetch function
      * @param {string} url - The FULLY BUILT URL to fetch
      * @param {object} options - Fetch options
      * @returns {Promise} Promise with response
      */
     secureFetch = async function(url, options = {}) {
-        // Extract endpoint from URL for classification
+        // FIX: Handle HTTP method passed as URL (error in settings-core.js)
+        // This fixes the "GET http://127.0.0.1:5500/GET 404 (Not Found)" error
+        if (url === 'GET' || url === 'POST' || url === 'PUT' || 
+            url === 'DELETE' || url === 'PATCH') {
+            console.error('[SECURE-FETCH] ERROR: HTTP method passed as URL:', url);
+            console.error('[SECURE-FETCH] This indicates a bug in the calling code');
+            console.error('[SECURE-FETCH] Stack trace:', new Error().stack);
+            
+            // Return a proper error response instead of making a failed request
+            return {
+                ok: false,
+                success: false,
+                status: 0,
+                statusText: 'Invalid Request',
+                data: { 
+                    message: 'HTTP method cannot be used as URL',
+                    error: 'URL cannot be HTTP method',
+                    details: `Called with: "${url}"`
+                },
+                headers: {},
+                url: '',
+                invalidRequest: true,
+                methodPassedAsUrl: true
+            };
+        }
+        
+        // Also check if url contains just a method (like "GET/api/settings")
+        if (url.includes('/GET') || url.includes('/POST') || url.includes('/PUT') || 
+            url.includes('/DELETE') || url.includes('/PATCH')) {
+            console.error('[SECURE-FETCH] WARNING: URL contains HTTP method:', url);
+        }
+        
         const endpoint = url.replace(BACKEND_BASE_URL, '');
         
-        // 🔧 CRITICAL FIX: Check if this is a public endpoint
         const isPublic = isPublicEndpoint(endpoint);
         const isStatus = isStatusEndpoint(endpoint);
         const isAuth = isAuthEndpoint(endpoint);
         
-        console.log(`🔐 [SECURE-FETCH] Request to: ${url}`);
-        console.log(`🔐 [SECURE-FETCH] Endpoint extracted: ${endpoint}`);
-        console.log(`🔐 [SECURE-FETCH] Endpoint classification: ${isPublic ? 'PUBLIC' : 'PROTECTED'}`);
-        console.log(`🔐 [SECURE-FETCH] Is status endpoint: ${isStatus ? 'YES' : 'NO'}`);
-        console.log(`🔐 [SECURE-FETCH] Is auth endpoint: ${isAuth ? 'YES' : 'NO'}`);
-        
-        // 🔧 CRITICAL FIX: PUBLIC endpoints bypass token system
-        if (isPublic) {
-            console.log(`🔐 [SECURE-FETCH] PUBLIC endpoint detected - NO token system checks`);
-            // For public endpoints, skip token checks entirely
-        } else {
-            // Wait for token system to be ready ONLY for protected endpoints
+        if (!isPublic) {
             if (!_tokenReady) {
-                console.log('🔐 [SECURE-FETCH] Waiting for token system initialization...');
                 await tokenReady();
             }
         }
         
-        // Get token - but ONLY use it for protected endpoints
         const token = getUserToken();
         
-        // Prepare headers
         const headers = {
             'Content-Type': 'application/json',
             ...options.headers
         };
         
-        // 🔧 CRITICAL FIX: Add Authorization header ONLY if:
-        // 1. Token exists
-        // 2. Endpoint is NOT public
-        // 3. Endpoint is NOT auth endpoint
-        // 4. Endpoint is NOT status endpoint
-        // 5. Authorization header not already present
         if (token && !isPublic && !isAuth && !isStatus && 
             !headers['Authorization'] && !headers['authorization']) {
             headers['Authorization'] = `Bearer ${token}`;
-            console.log(`🔐 [SECURE-FETCH] Authorization header added for PROTECTED endpoint`);
-        } else if (isPublic || isAuth || isStatus) {
-            console.log(`🔐 [SECURE-FETCH] PUBLIC/AUTH/STATUS endpoint - NO Authorization header added`);
-        } else if (!token) {
-            console.log(`🔐 [SECURE-FETCH] No token available for PROTECTED endpoint`);
         }
         
-        // Prepare fetch options
         const fetchOptions = {
             ...options,
             headers,
-            credentials: 'include' // Include credentials for session cookies
+            credentials: 'include'
         };
-        
-        console.log(`🔐 [SECURE-FETCH] Token present: ${token ? 'YES' : 'NO'}`);
-        console.log(`🔐 [SECURE-FETCH] Authorization header: ${headers['Authorization'] ? 'ADDED' : 'NOT ADDED'}`);
         
         try {
             const response = await fetch(url, fetchOptions);
             
-            // 🔧 CRITICAL FIX: Handle 401 Unauthorized DIFFERENTLY for public vs protected
             if (response.status === 401) {
-                console.log(`🔐 [SECURE-FETCH] 401 Unauthorized response received`);
-                
-                // 🔧 CRITICAL FIX: Public endpoints - IGNORE 401, DO NOT clear tokens
                 if (isPublic || isStatus || isAuth) {
-                    console.log(`🔐 [SECURE-FETCH] PUBLIC/AUTH/STATUS endpoint 401 - IGNORING, tokens NOT cleared`);
-                    console.log(`🔐 [SECURE-FETCH] /api/status or /auth/* 401 is NORMAL for unauthenticated access`);
-                    
-                    // Dispatch public 401 event for monitoring (optional)
                     window.dispatchEvent(new CustomEvent('public-endpoint-401', {
                         detail: { url, endpoint, timestamp: new Date().toISOString() }
                     }));
                 } else {
-                    // 🔧 CRITICAL FIX: Protected endpoints - normal logout flow
-                    console.log('🔐 [SECURE-FETCH] PROTECTED endpoint 401 - token may be invalid');
-                    
-                    // Clear authentication data
                     clearAllAuthData();
                     
-                    // Dispatch unauthorized event
                     window.dispatchEvent(new CustomEvent('unauthorized', {
                         detail: { url, timestamp: new Date().toISOString() }
                     }));
                 }
             }
             
-            // Parse response ONCE only
             const contentType = response.headers.get('content-type');
             let data;
             
@@ -1854,7 +2190,7 @@ if (window.__API_CORE_LOADED_V2) {
                 try {
                     data = await response.json();
                 } catch (jsonError) {
-                    console.error(`❌ [SECURE-FETCH] JSON parsing error for ${url}:`, jsonError);
+                    console.error(`[SECURE-FETCH] JSON parsing error for ${url}:`, jsonError);
                     data = { 
                         message: 'Invalid JSON response from server',
                         error: jsonError.message 
@@ -1864,7 +2200,7 @@ if (window.__API_CORE_LOADED_V2) {
                 try {
                     data = await response.text();
                 } catch (textError) {
-                    console.error(`❌ [SECURE-FETCH] Text parsing error for ${url}:`, textError);
+                    console.error(`[SECURE-FETCH] Text parsing error for ${url}:`, textError);
                     data = { 
                         message: 'Failed to parse response',
                         error: textError.message 
@@ -1872,11 +2208,8 @@ if (window.__API_CORE_LOADED_V2) {
                 }
             }
             
-            // 🔧 CRITICAL FIX: MODERN API FORMAT SUPPORT
-            // Normalize response for modern and legacy API formats
             const normalizedResponse = _normalizeApiResponse(data, response);
             
-            // Return consistent response format
             return {
                 ok: normalizedResponse.ok,
                 success: normalizedResponse.success,
@@ -1891,9 +2224,8 @@ if (window.__API_CORE_LOADED_V2) {
             };
             
         } catch (error) {
-            console.error(`❌ [SECURE-FETCH] Network error for ${url}:`, error);
+            console.error(`❌ Network error for ${url}: ${error.message}`);
             
-            // Check for specific network errors
             const isNetworkError = error.message && (
                 error.message.includes('Failed to fetch') ||
                 error.message.includes('NetworkError') ||
@@ -1911,17 +2243,14 @@ if (window.__API_CORE_LOADED_V2) {
                 error.message.includes('net::ERR_NAME_NOT_RESOLVED')
             );
             
-            // Determine error type
             let errorMessage = 'Network Error';
             if (isTimeoutError) errorMessage = 'Request Timeout';
             if (isDNSError) errorMessage = 'DNS Resolution Failed';
             
-            // Update network state for network errors
             if (window.AppNetwork && (isNetworkError || isTimeoutError || isDNSError)) {
                 window.AppNetwork.updateBackendStatus(false);
             }
             
-            // Return error in consistent format
             return {
                 ok: false,
                 success: false,
@@ -1942,10 +2271,8 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * Normalize API response for modern and legacy formats
-     * 🔧 CRITICAL FIX: Supports both modern (accessToken, success) and legacy (token, ok) formats
      */
     function _normalizeApiResponse(data, response) {
-        // Extract token from ANY backend response format
         const token = 
             data?.accessToken ||
             data?.token ||
@@ -1956,15 +2283,11 @@ if (window.__API_CORE_LOADED_V2) {
             data?.data?.token ||
             null;
         
-        // Determine success based on modern AND legacy formats
-        // Modern: data.success === true
-        // Legacy: response.ok === true OR token exists
         const success = 
             data?.success === true ||
             response?.ok === true ||
             !!token;
         
-        // Extract user from ANY backend response format
         const user = 
             data?.user ||
             data?.data?.user ||
@@ -1972,22 +2295,11 @@ if (window.__API_CORE_LOADED_V2) {
             (data?.success === true && data?.data) ||
             null;
         
-        // Extract message from ANY backend response format
         const message = 
             data?.message ||
             data?.msg ||
             (success ? "Request successful" : "Request failed");
         
-        // Debug logging
-        console.debug("[API] Normalized response:", {
-            success,
-            token: !!token,
-            hasUser: !!user,
-            responseOk: response?.ok,
-            dataSuccess: data?.success
-        });
-        
-        // Return normalized response
         return {
             ok: success,
             success,
@@ -2001,23 +2313,43 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * Secure API fetch - accepts fully-built endpoint from api.request.js
-     * 🔧 SURGICAL FIX: Does NOT add /api - endpoint comes pre-built
      * @param {string} endpoint - FULLY BUILT endpoint (e.g., '/api/auth/login')
      * @param {object} options - Fetch options
      * @returns {Promise} Promise with response
      */
     secureApiFetch = async function(endpoint, options = {}) {
-        // 🔧 SURGICAL FIX: Build URL using BACKEND_BASE_URL + endpoint
-        // Endpoint already includes /api from api.request.js
+        // FIX: Handle HTTP method passed as endpoint (error in settings-core.js)
+        if (endpoint === 'GET' || endpoint === 'POST' || endpoint === 'PUT' || 
+            endpoint === 'DELETE' || endpoint === 'PATCH') {
+            console.error('[SECURE-API-FETCH] ERROR: HTTP method passed as endpoint:', endpoint);
+            console.error('[SECURE-API-FETCH] This indicates a bug in the calling code');
+            console.error('[SECURE-API-FETCH] Stack trace:', new Error().stack);
+            
+            // Return error without making request
+            return {
+                ok: false,
+                success: false,
+                status: 0,
+                statusText: 'Invalid Request',
+                data: { 
+                    message: 'HTTP method cannot be used as endpoint',
+                    error: 'Endpoint cannot be HTTP method',
+                    details: `Called with: "${endpoint}"`
+                },
+                headers: {},
+                url: '',
+                invalidRequest: true,
+                methodPassedAsEndpoint: true
+            };
+        }
+        
         let fullUrl;
         if (endpoint.startsWith('http')) {
             fullUrl = endpoint;
         } else {
-            // 🔧 SURGICAL FIX: Use BACKEND_BASE_URL directly, endpoint is already complete
             const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
             const cleanBase = BACKEND_BASE_URL.endsWith('/') ? BACKEND_BASE_URL.slice(0, -1) : BACKEND_BASE_URL;
             fullUrl = cleanBase + cleanEndpoint;
-            console.log(`🔧 [SECURE-API-FETCH] Built URL: ${fullUrl} (endpoint: ${endpoint})`);
         }
         return secureFetch(fullUrl, options);
     };
@@ -2027,46 +2359,25 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
     /**
      * getValidToken() - Authoritative token retrieval helper
-     * STRICT REQUIREMENTS:
-     * 1. Read token ONLY from localStorage (never cache in variables)
-     * 2. Try centralized USER_TOKEN_KEY first
-     * 3. Fallback to legacy locations
-     * 4. Return null if no token found
-     * 5. NEVER cache token outside request scope
      */
     getValidToken = function() {
-        // Use centralized token system
         return getUserToken();
     };
 
     // ============================================================================
     // SINGLE SOURCE OF TRUTH - NETWORK STATE (COMPLETELY SEPARATE FROM AUTH)
     // ============================================================================
-    /**
-     * GLOBAL NETWORK STATE - Declared ONLY ONCE here
-     * Network state is COMPLETELY SEPARATE from authentication state
-     * Backend reachability is determined ONLY by:
-     * 1. Successful fetch (any HTTP status means backend is reachable)
-     * 2. Network errors (Failed to fetch, timeout, DNS failure)
-     * 3. Server unreachable errors
-     * NEVER by authentication status (401, 403, etc.)
-     */
 
-    // Initialize global network state - FIXED: Check if already exists
     if (!window.AppNetwork) {
-        // Use locally scoped variables to avoid global conflicts
         const networkState = {
             isOnline: navigator.onLine,
             isBackendReachable: null,
             lastChecked: new Date().toISOString(),
             
-            // Update methods
             updateOnlineStatus: function(status) {
                 this.isOnline = status;
                 this.lastChecked = new Date().toISOString();
-                console.log(`🔧 [NETWORK] Online status changed to: ${status}`);
                 
-                // Dispatch network change event
                 try {
                     window.dispatchEvent(new CustomEvent('network-state-changed', {
                         detail: { 
@@ -2075,31 +2386,26 @@ if (window.__API_CORE_LOADED_V2) {
                         }
                     }));
                 } catch (e) {
-                    console.log('🔧 [NETWORK] Could not dispatch event:', e.message);
+                    console.error('[NETWORK] Could not dispatch event:', e);
                 }
             },
             
             updateBackendStatus: function(status) {
-                // CRITICAL FIX: Only update if status is explicitly true or false
-                // Don't update on null or undefined
                 if (status === true || status === false) {
                     this.isBackendReachable = status;
                     this.lastChecked = new Date().toISOString();
-                    console.log(`🔧 [NETWORK] Backend reachable changed to: ${status}`);
                 }
             }
         };
         
         window.AppNetwork = networkState;
         
-        // Listen for online/offline events
         window.addEventListener('online', () => {
             window.AppNetwork.updateOnlineStatus(true);
         });
         
         window.addEventListener('offline', () => {
             window.AppNetwork.updateOnlineStatus(false);
-            // CRITICAL: When offline, backend cannot be reachable
             window.AppNetwork.updateBackendStatus(false);
         });
     }
@@ -2109,38 +2415,27 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
     /**
      * getAuthHeaders() - Helper function to get authentication headers
-     * Uses getValidToken() for authoritative token retrieval
-     * 🔧 CRITICAL FIX: Public endpoints get NO headers
      * @param {string} endpoint - The API endpoint to determine if auth is needed
      * @returns {object} Headers object with Authorization if token exists and endpoint requires it
      */
     getAuthHeaders = function(endpoint) {
-        // 🔧 CRITICAL FIX: Check if this is a public endpoint
         if (isPublicEndpoint(endpoint)) {
-            console.log(`🔐 [AUTH] Public endpoint "${endpoint}" - NO Authorization header needed`);
             return {};
         }
         
-        // 🔧 CRITICAL FIX: Check if this is a status endpoint (special case)
         if (isStatusEndpoint(endpoint)) {
-            console.log(`🔐 [AUTH] Status endpoint "${endpoint}" - NO Authorization header needed`);
             return {};
         }
         
-        // Check if this is an auth endpoint
         if (isAuthEndpoint(endpoint)) {
-            console.log(`🔐 [AUTH] Auth endpoint "${endpoint}" - NO Authorization header needed`);
             return {};
         }
         
-        // For protected endpoints, get the token
         const token = getValidToken();
         if (token) {
-            console.log(`🔐 [AUTH] Protected endpoint "${endpoint}" - Authorization header created with token`);
             return { 'Authorization': `Bearer ${token}` };
         }
         
-        console.log(`🔐 [AUTH] Protected endpoint "${endpoint}" - No token available`);
         return {};
     };
 
@@ -2149,33 +2444,25 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
     /**
      * Global access token variable with enhanced persistence
-     * Automatically initialized from localStorage on page load
-     * Persists across page refreshes, browser reloads, and navigation
      */
     let accessToken = null;
 
     // Function to initialize and update the global access token
     updateGlobalAccessToken = function() {
-        // Use getValidToken() for authoritative token retrieval
         accessToken = getValidToken();
         
         if (accessToken) {
-            console.log(`🔐 [TOKEN] Global accessToken initialized: ${accessToken.substring(0, 20)}...`);
-            
-            // Dispatch token loaded event
             window.dispatchEvent(new CustomEvent('token-loaded', {
                 detail: { token: accessToken, source: 'authoritative' }
             }));
         } else {
-            console.log('🔐 [TOKEN] No access token found in localStorage');
             accessToken = null;
             
-            // Dispatch token not found event
             window.dispatchEvent(new CustomEvent('token-not-found'));
         }
     };
 
-    // Initialize global token on script load - CRITICAL FOR PERSISTENCE
+    // Initialize global token on script load
     updateGlobalAccessToken();
 
     // Listen for storage events to sync token across tabs
@@ -2183,12 +2470,9 @@ if (window.__API_CORE_LOADED_V2) {
         if (event.key === USER_TOKEN_KEY || event.key === 'accessToken' || event.key === 'moodchat_token' || 
             event.key === 'token' || event.key === 'moodchat_auth_token' || 
             event.key === 'authUser' || event.key === USER_DATA_KEY) {
-            console.log(`🔐 [TOKEN] Storage event detected for ${event.key}, updating global token`);
             updateGlobalAccessToken();
             
-            // If token changed, validate it
             if (accessToken) {
-                console.log('🔐 [TOKEN] Token updated from storage event, re-validating...');
                 setTimeout(() => {
                     window.api.checkAuthMe().catch(() => {});
                 }, 100);
@@ -2196,23 +2480,9 @@ if (window.__API_CORE_LOADED_V2) {
         }
     });
 
-    // Environment logging for debugging
-    console.log(`🔧 [API] Centralized Token System Implementation with Environment Detection:`);
-    console.log(`🔧 [API] Detected Backend Base URL: ${BACKEND_BASE_URL}`);
-    console.log(`🔧 [API] 🔧 SURGICAL FIX: api.core.js does NOT add /api to endpoints`);
-    console.log(`🔧 [API] Network State: Online=${window.AppNetwork.isOnline}, BackendReachable=${window.AppNetwork.isBackendReachable}`);
-    console.log(`🔧 [API] Centralized Token: ${getUserToken() ? `Present (${getUserToken().substring(0, 20)}...)` : 'Not found'}`);
-    console.log(`🔧 [API] 🔧 CRITICAL FIX: Public/Protected endpoint separation ACTIVE`);
-    console.log(`🔧 [API] 🔧 CRITICAL FIX: /api/status is PUBLIC - 401 does NOT clear tokens`);
-    console.log(`🔧 [API] 🔧 CRITICAL FIX: Auth endpoints (/api/auth/*) are PUBLIC`);
-
     // ============================================================================
     // TOKEN MANAGEMENT - SINGLE SOURCE OF TRUTH
     // ============================================================================
-    /**
-     * TOKEN NORMALIZATION - Ensure consistent token format
-     * Centralized token handling to prevent inconsistencies
-     */
     const TOKEN_STORAGE_KEY = 'authUser';
     const ACCESS_TOKEN_KEY = 'accessToken';
     const MOODCHAT_TOKEN_KEY = 'moodchat_token';
@@ -2220,43 +2490,31 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
     // AUTHENTICATION STATE TIMING FIX
     // ============================================================================
-    /**
-     * Authentication state timing fix variables
-     * These ensure authentication state is only determined by explicit /auth/me response
-     * NEVER by timing or network delays
-     */
     let _authValidationInProgress = false;
     let _authValidated = false;
     let _authValidationPromise = null;
     let _authLastChecked = 0;
-    const AUTH_VALIDATION_TIMEOUT = 10000; // 10 seconds
-    const AUTH_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const AUTH_VALIDATION_TIMEOUT = 10000;
+    const AUTH_CACHE_DURATION = 5 * 60 * 1000;
 
     /**
      * Store token in ALL locations for reliability
-     * @param {string} token - The token to store
-     * @param {object} user - User data
-     * @param {string} refreshToken - Refresh token (optional)
-     * @returns {boolean} True if successful
      */
     function _storeTokenInAllLocations(token, user, refreshToken = null) {
         if (!token || token.trim() === "" || token === "null" || token === "undefined") {
-            console.error('❌ [AUTH] Cannot store invalid token');
+            console.error('[AUTH] Cannot store invalid token');
             return false;
         }
         
         try {
-            // 1. Store in centralized USER_TOKEN_KEY
             setUserToken(token);
             
-            // 2. Store in legacy locations for backward compatibility
             localStorage.setItem(ACCESS_TOKEN_KEY, token);
             localStorage.setItem(MOODCHAT_TOKEN_KEY, token);
             
-            // 3. Store in authUser object
             let authData = {
                 accessToken: token,
-                token: token, // Legacy support
+                token: token,
                 user: user || {},
                 tokenTimestamp: Date.now(),
                 authValidated: false
@@ -2268,33 +2526,26 @@ if (window.__API_CORE_LOADED_V2) {
             
             localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(authData));
             
-            // 4. Store legacy keys for compatibility
             localStorage.setItem('token', token);
             localStorage.setItem('moodchat_auth_token', token);
             
-            // 5. Store user data using centralized function
             if (user) {
                 setUserData(user, true);
             }
             
-            console.log('✅ [AUTH] Token stored in ALL locations for reliability');
-            console.log(`✅ [AUTH] Centralized: ${USER_TOKEN_KEY}, Legacy: ${ACCESS_TOKEN_KEY}, ${MOODCHAT_TOKEN_KEY}`);
-            
             return true;
         } catch (error) {
-            console.error('❌ [AUTH] Error storing token in all locations:', error);
+            console.error('[AUTH] Error storing token in all locations:', error);
             return false;
         }
     }
 
     /**
      * Extracts token from ANY backend response format
-     * 🔧 UPDATED: Now includes accessToken field for modern API format
      */
     function _extractTokenFromResponse(responseData) {
         if (!responseData) return null;
         
-        // 🔧 UPDATED: Modern API format support - priority: accessToken > tokens.accessToken > token
         if (responseData.accessToken) {
             return responseData.accessToken;
         }
@@ -2305,7 +2556,6 @@ if (window.__API_CORE_LOADED_V2) {
             return responseData.token;
         }
         
-        // Check nested data property
         if (responseData.data && responseData.data.accessToken) {
             return responseData.data.accessToken;
         }
@@ -2325,7 +2575,6 @@ if (window.__API_CORE_LOADED_V2) {
     function _extractUserFromResponse(responseData) {
         if (!responseData) return null;
         
-        // Priority: user > data.user > data
         if (responseData.user) {
             return responseData.user;
         }
@@ -2344,31 +2593,22 @@ if (window.__API_CORE_LOADED_V2) {
      */
     function _storeAuthData(token, user, refreshToken = null) {
         if (!token || token.trim() === "" || token === "null" || token === "undefined") {
-            console.error('❌ [AUTH] Cannot store auth data without valid token');
+            console.error('[AUTH] Cannot store auth data without valid token');
             return false;
         }
         
-        // Store token in ALL locations for reliability
         const storageSuccess = _storeTokenInAllLocations(token, user, refreshToken);
         if (!storageSuccess) {
             return false;
         }
         
-        // Update global access token
         accessToken = token;
         
-        // Set global user
         window.currentUser = user || {};
         
-        // Reset auth validation state since we have new token
         _authValidated = false;
         _authValidationPromise = null;
         
-        console.log(`✅ [AUTH] Auth data stored successfully in ALL locations`);
-        console.log(`✅ [AUTH] Token: ${token.substring(0, 20)}...`);
-        console.log(`✅ [AUTH] Global accessToken updated`);
-        
-        // Dispatch storage event
         window.dispatchEvent(new CustomEvent('auth-data-stored', {
             detail: { token: token, user: user, timestamp: new Date().toISOString() }
         }));
@@ -2380,31 +2620,20 @@ if (window.__API_CORE_LOADED_V2) {
      * Clears ALL auth data from ALL locations
      */
     function _clearAllAuthData() {
-        // Keep window.currentUser intact as requested
         const currentUserBeforeClear = window.currentUser;
         
-        // Clear ALL token locations using centralized function
         clearAllAuthData();
         
-        // Clear global token variable
         accessToken = null;
         
-        // Clear auth validation state
         _authValidated = false;
         _authValidationPromise = null;
         _authValidationInProgress = false;
         
-        // Restore window.currentUser as requested
         window.currentUser = currentUserBeforeClear;
         
-        console.log('✅ [AUTH] All auth data cleared from ALL locations');
-        console.log('✅ [AUTH] Auth validation state reset');
-        console.log('✅ [AUTH] window.currentUser preserved:', window.currentUser ? 'Still set' : 'Not set');
-        
-        // Dispatch cleared event
         window.dispatchEvent(new CustomEvent('auth-data-cleared'));
         
-        // Handle unauthorized access - redirect to login
         handleUnauthorizedAccess();
     }
 
@@ -2413,27 +2642,23 @@ if (window.__API_CORE_LOADED_V2) {
      */
     function _getCurrentUserFromStorage() {
         try {
-            // First check if window.currentUser is already set
             if (window.currentUser) {
                 return window.currentUser;
             }
             
-            // Check centralized storage first
             const userDataStr = localStorage.getItem(USER_DATA_KEY);
             if (userDataStr) {
                 const user = JSON.parse(userDataStr);
-                window.currentUser = user; // Set global for future access
+                window.currentUser = user;
                 return user;
             }
             
-            // Check legacy storage
             const authDataStr = localStorage.getItem(TOKEN_STORAGE_KEY);
             if (!authDataStr) {
-                // Check legacy user storage
                 const legacyUser = localStorage.getItem('moodchat_auth_user');
                 if (legacyUser) {
                     const user = JSON.parse(legacyUser);
-                    window.currentUser = user; // Set global for future access
+                    window.currentUser = user;
                     return user;
                 }
                 
@@ -2443,11 +2668,11 @@ if (window.__API_CORE_LOADED_V2) {
             const authData = JSON.parse(authDataStr);
             const user = authData.user || null;
             if (user) {
-                window.currentUser = user; // Set global for future access
+                window.currentUser = user;
             }
             return user;
         } catch (error) {
-            console.error('❌ [AUTH] Error reading user from storage:', error);
+            console.error('[AUTH] Error reading user from storage:', error);
             return null;
         }
     }
@@ -2457,55 +2682,42 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
     let _unauthorizedAccessInProgress = false;
     let _lastUnauthorizedAccessTime = 0;
-    const UNAUTHORIZED_ACCESS_COOLDOWN = 1000; // 1 second
+    const UNAUTHORIZED_ACCESS_COOLDOWN = 1000;
 
     handleUnauthorizedAccess = function() {
         const now = Date.now();
         
-        // Prevent infinite loops - check if we're already handling this or if it was recently handled
         if (_unauthorizedAccessInProgress || (now - _lastUnauthorizedAccessTime < UNAUTHORIZED_ACCESS_COOLDOWN)) {
-            console.log('🔐 [AUTH] Unauthorized access handling already in progress or too recent, skipping');
             return;
         }
         
         _unauthorizedAccessInProgress = true;
         _lastUnauthorizedAccessTime = now;
         
-        console.log('🔐 [AUTH] Handling unauthorized access - redirecting to login');
-        
-        // Clear all localStorage items related to authentication
         try {
-            // Set a flag to prevent recursive clearing
             localStorage.setItem('_auth_clearing_in_progress', 'true');
             
             _clearAllAuthData();
             
             localStorage.removeItem('_auth_clearing_in_progress');
         } catch (error) {
-            console.error('🔐 [AUTH] Error clearing auth data:', error);
+            console.error('[AUTH] Error clearing auth data:', error);
         }
         
-        // Redirect to login page with cooldown
         setTimeout(() => {
             try {
-                // Only redirect if we're not already on the login page
                 if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('index.html')) {
                     window.location.href = "/login";
-                    console.log('🔐 [AUTH] Redirected to login page');
-                } else {
-                    console.log('🔐 [AUTH] Already on login page, skipping redirect');
                 }
             } catch (redirectError) {
-                console.error('🔐 [AUTH] Error redirecting to login:', redirectError);
+                console.error('[AUTH] Error redirecting to login:', redirectError);
                 
-                // Fallback: Try to reload the current page which should show login
                 try {
                     window.location.reload();
                 } catch (reloadError) {
-                    console.error('🔐 [AUTH] Error reloading page:', reloadError);
+                    console.error('[AUTH] Error reloading page:', reloadError);
                 }
             } finally {
-                // Always release the lock
                 setTimeout(() => {
                     _unauthorizedAccessInProgress = false;
                 }, 100);
@@ -2519,78 +2731,43 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * validateAuth() - SINGLE ASYNCHRONOUS FUNCTION that permanently fixes authentication state timing issues
-     * CRITICAL: This is the ONLY function that should determine authentication state
-     * STRICT RULES:
-     * 1. Calls /api/auth/me and waits for response using await
-     * 2. If response is 200: Set window.currentUser, set _authValidated = true, resolve true
-     * 3. If response is 401/403: Clear tokens, set _authValidated = false, resolve false
-     * 4. If request is still pending or network delay: DO NOT mark user as logged out, DO NOT clear tokens
-     * 5. NEVER returns false before validateAuth() completes
-     * 6. MUST wait for validateAuth() if authValidated is unknown
-     * 7. NEVER auto-fails due to timing
      */
     validateAuth = async function() {
-        console.log('🔐 [AUTH-TIMING-FIX] validateAuth() called - CRITICAL TIMING FIX');
-        
-        // Check if we already have a pending validation
         if (_authValidationInProgress && _authValidationPromise) {
-            console.log('🔐 [AUTH-TIMING-FIX] Auth validation already in progress, returning existing promise');
             return _authValidationPromise;
         }
         
-        // Check if auth was recently validated (within cache duration)
         const now = Date.now();
         if (_authValidated && _authLastChecked > 0 && (now - _authLastChecked) < AUTH_CACHE_DURATION) {
-            console.log('🔐 [AUTH-TIMING-FIX] Using recently cached auth validation (within 5 minutes)');
             return Promise.resolve(true);
         }
         
-        // Get token from storage - use centralized token retrieval
         const token = getUserToken();
         if (!token) {
-            console.log('🔐 [AUTH-TIMING-FIX] No token available, auth cannot be validated');
             _authValidated = false;
             _authValidationPromise = null;
             _authValidationInProgress = false;
             return false;
         }
         
-        // CRITICAL FIX: If we have a token, we should consider API as available
-        // This prevents indefinite waiting for API readiness
-        if (token && !_authValidated) {
-            console.log('🔐 [AUTH-TIMING-FIX] Token exists, API should be considered available');
-        }
-        
-        // Mark validation as in progress
         _authValidationInProgress = true;
         
-        // Create a new promise for this validation
         _authValidationPromise = new Promise(async (resolve) => {
             try {
-                // 🔧 SURGICAL FIX: Build URL using BACKEND_BASE_URL + '/api/auth/me'
-                // Endpoint already includes /api
                 const fullUrl = BACKEND_BASE_URL + '/api/auth/me';
-                console.log(`🔐 [AUTH-TIMING-FIX] Calling ${fullUrl} to validate auth`);
-                console.log(`🔐 [AUTH-TIMING-FIX] Token present: ${token ? 'YES' : 'NO'}`);
-                console.log(`🔐 [AUTH-TIMING-FIX] Token length: ${token ? token.length : 0} characters`);
                 
-                // Create headers with proper Authorization header
                 const headers = {
                     'Authorization': 'Bearer ' + token,
                     'Content-Type': 'application/json'
                 };
                 
-                console.log(`🔐 [AUTH-TIMING-FIX] Authorization header included: ${headers['Authorization'].substring(0, 30)}...`);
-                
-                // Use AbortController for timeout
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), AUTH_VALIDATION_TIMEOUT);
                 
-                // MOBILE SESSION FIX: Include credentials for authenticated requests
                 const response = await fetch(fullUrl, {
                     method: 'GET',
                     headers: headers,
-                    credentials: 'include', // FIX: Include session cookies for mobile browsers
+                    credentials: 'include',
                     mode: 'cors',
                     signal: controller.signal
                 });
@@ -2599,7 +2776,6 @@ if (window.__API_CORE_LOADED_V2) {
                 
                 const status = response.status;
                 
-                // Parse response
                 const contentType = response.headers.get('content-type');
                 let data;
                 
@@ -2607,7 +2783,7 @@ if (window.__API_CORE_LOADED_V2) {
                     try {
                         data = await response.json();
                     } catch (jsonError) {
-                        console.error(`❌ [AUTH-TIMING-FIX] JSON parsing error for ${fullUrl}:`, jsonError);
+                        console.error(`[AUTH] JSON parsing error for ${fullUrl}:`, jsonError);
                         data = { 
                             message: 'Invalid JSON response from server',
                             error: jsonError.message 
@@ -2617,7 +2793,7 @@ if (window.__API_CORE_LOADED_V2) {
                     try {
                         data = await response.text();
                     } catch (textError) {
-                        console.error(`❌ [AUTH-TIMING-FIX] Text parsing error for ${fullUrl}:`, textError);
+                        console.error(`[AUTH] Text parsing error for ${fullUrl}:`, textError);
                         data = { 
                             message: 'Failed to parse response',
                             error: textError.message 
@@ -2625,45 +2801,31 @@ if (window.__API_CORE_LOADED_V2) {
                     }
                 }
                 
-                // 🔧 FIX 2 & 3: Unified response normalization
                 const normalizedResponse = _normalizeApiResponse(data, response);
                 const isSuccess = normalizedResponse.success;
                 
-                console.log(`🔐 [AUTH-TIMING-FIX] /auth/me response: HTTP ${status}, Success: ${isSuccess}`);
-                
                 if (isSuccess) {
-                    // SUCCESS - Modern or legacy format success
                     const user = normalizedResponse.user || _extractUserFromResponse(data);
                     
                     if (!user) {
-                        console.error('❌ [AUTH-TIMING-FIX] /auth/me succeeded but no user data returned');
+                        console.error('[AUTH] /auth/me succeeded but no user data returned');
                         _authValidated = false;
                         _authLastChecked = now;
                         resolve(false);
                         return;
                     }
                     
-                    console.log('✅ [AUTH-TIMING-FIX] /auth/me validation successful');
-                    console.log(`🔐 [AUTH-TIMING-FIX] User retrieved: ${user.username || user.email || 'User ID: ' + (user.id || 'Unknown')}`);
-                    
-                    // Update stored user data
                     try {
-                        // Store in centralized location
                         setUserData(user, true);
                         
-                        // Update global user state
                         window.currentUser = user;
-                        
-                        console.log('✅ [AUTH-TIMING-FIX] User data updated and marked as validated');
                     } catch (storageError) {
-                        console.error('❌ [AUTH-TIMING-FIX] Error updating user data after /auth/me:', storageError);
+                        console.error('[AUTH] Error updating user data after /auth/me:', storageError);
                     }
                     
-                    // Set auth state
                     _authValidated = true;
                     _authLastChecked = now;
                     
-                    // Dispatch user loaded event
                     window.dispatchEvent(new CustomEvent('user-loaded', {
                         detail: { user: user, timestamp: new Date().toISOString() }
                     }));
@@ -2671,10 +2833,6 @@ if (window.__API_CORE_LOADED_V2) {
                     resolve(true);
                     
                 } else if (status === 401 || status === 403) {
-                    // AUTH ERROR - 401 Unauthorized or 403 Forbidden
-                    console.log(`🔐 [AUTH-TIMING-FIX] Auth error ${status} - token is invalid`);
-                    
-                    // Clear tokens from ALL locations
                     _clearAllAuthData();
                     
                     _authValidated = false;
@@ -2682,23 +2840,14 @@ if (window.__API_CORE_LOADED_V2) {
                     resolve(false);
                     
                 } else {
-                    // OTHER HTTP ERROR (not 401/403)
-                    console.log(`🔐 [AUTH-TIMING-FIX] HTTP ${status} error - NOT an auth error, keeping tokens`);
-                    
-                    // For non-auth HTTP errors, we don't clear tokens
-                    // This could be a server error, network issue, etc.
-                    // We preserve the existing auth state
                     _authLastChecked = now;
                     
-                    // Don't change _authValidated state for non-auth errors
-                    // Resolve with current auth state
                     resolve(_authValidated);
                 }
                 
             } catch (error) {
-                console.error('❌ [AUTH-TIMING-FIX] validateAuth() error:', error);
+                console.error('[AUTH] validateAuth() error:', error);
                 
-                // Check error type
                 const isNetworkError = error.message && (
                     error.message.includes('Failed to fetch') ||
                     error.message.includes('NetworkError') ||
@@ -2713,50 +2862,28 @@ if (window.__API_CORE_LOADED_V2) {
                                       error.message.includes('timeout') ||
                                       error.message.includes('Timeout');
                 
-                // ABORT ERROR - CRITICAL FIX: Do NOT treat abort as auth failure
                 if (isAbortError) {
-                    console.log('🔐 [AUTH-TIMING-FIX] AbortError detected - NOT an auth failure, preserving auth state');
-                    console.log('🔐 [AUTH-TIMING-FIX] Token exists: ' + (token ? 'YES' : 'NO'));
-                    
-                    // CRITICAL FIX: If token exists, we should consider auth as validated
-                    // This prevents API readiness from being blocked
-                    if (token) {
-                        console.log('🔐 [AUTH-TIMING-FIX] Token exists, marking API as available despite abort');
-                    }
+                    const tokenExists = getUserToken();
                     
                     _authLastChecked = now;
-                    // Preserve existing auth state - do NOT set to false
-                    resolve(_authValidated || !!token); // Return true if we have a token
+                    resolve(_authValidated || !!tokenExists);
                     return;
                 }
                 
-                // NETWORK ERROR OR TIMEOUT
                 if (isNetworkError || isTimeoutError) {
-                    console.log('🔐 [AUTH-TIMING-FIX] Network/timeout error - DO NOT clear tokens, DO NOT mark as logged out');
-                    console.log('🔐 [AUTH-TIMING-FIX] Preserving existing auth state during network issues');
-                    
-                    // For network errors, we preserve the existing auth state
-                    // DO NOT clear tokens, DO NOT mark as logged out
                     _authLastChecked = now;
                     
-                    // Resolve with current auth state (preserve it)
                     resolve(_authValidated);
                     
                 } else {
-                    // OTHER ERRORS
-                    console.log('🔐 [AUTH-TIMING-FIX] Other error - preserving auth state');
                     _authLastChecked = now;
                     resolve(_authValidated);
                 }
             } finally {
-                // Always mark validation as complete
                 _authValidationInProgress = false;
                 
-                // CRITICAL FIX: If we have a token, ensure API readiness is resolved
-                // This prevents indefinite waiting for API readiness
                 const tokenExists = getUserToken();
                 if (tokenExists && !_authValidated) {
-                    console.log('🔐 [AUTH-TIMING-FIX] Token exists, ensuring API readiness is not blocked');
                 }
             }
         });
@@ -2770,89 +2897,68 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * Normalizes ANY HTTP method input to valid fetch method
-     * CRITICAL: Prevents "not a valid HTTP method" errors forever
-     * STRICT RULE: Method MUST ONLY come from options.method
      */
     function _normalizeHttpMethod(method) {
         if (!method) return 'GET';
         
         const methodStr = String(method).toUpperCase().trim();
         
-        // Direct match for valid methods
         const validMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
         if (validMethods.includes(methodStr)) {
             return methodStr;
         }
         
-        // Common frontend mistakes and their corrections
         const methodCorrections = {
             'GET': 'GET',
             'POST': 'POST', 
             'PUT': 'PUT',
             'PATCH': 'PATCH',
             'DELETE': 'DELETE',
-            'HEAD': 'GET', // Map HEAD to GET as safe fallback
-            'OPTIONS': 'GET', // Map OPTIONS to GET
-            '': 'GET', // Empty method
+            'HEAD': 'GET',
+            'OPTIONS': 'GET',
+            '': 'GET',
             'UNDEFINED': 'GET',
             'NULL': 'GET',
-            'GET/API/': 'GET', // Common typo
+            'GET/API/': 'GET',
             'POST/API/': 'POST',
-            '/API/': 'GET', // Endpoint mistakenly passed as method
+            '/API/': 'GET',
             'API': 'GET'
         };
         
-        // CRITICAL FIX: If method looks like an endpoint, it's a SERIOUS ERROR
         if (methodStr.includes('/API/') || methodStr.includes('/api/') || methodStr.startsWith('/')) {
-            console.error(`❌ [API] CRITICAL ERROR: HTTP method "${method}" contains endpoint pattern!`);
-            console.error(`❌ [API] This indicates the API is being called incorrectly`);
-            console.error(`❌ [API] FIRST argument MUST be endpoint, SECOND argument MUST be options with method`);
-            return 'GET'; // Safe default
+            console.error(`[API] CRITICAL ERROR: HTTP method "${method}" contains endpoint pattern!`);
+            return 'GET';
         }
         
-        // Return corrected method or default to GET
         return methodCorrections[methodStr] || 'GET';
     }
 
     /**
      * SANITIZE ENDPOINT - DEFENSIVE NORMALIZATION WITHOUT ADDING /api
-     * 🔧 SURGICAL FIX: Removes duplicate /api segments but NEVER adds /api
-     * STRICT RULE: Endpoint comes pre-built from api.request.js
      */
     function _sanitizeEndpoint(endpoint) {
         if (!endpoint) return '/';
         
         const endpointStr = String(endpoint).trim();
         
-        // CRITICAL FIX: If endpoint is actually an HTTP method, this is a SERIOUS ERROR
         const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
         if (httpMethods.includes(endpointStr.toUpperCase())) {
-            console.error(`❌ [API] CRITICAL ERROR: Endpoint "${endpoint}" is an HTTP method!`);
-            console.error(`❌ [API] This means the API is being called with swapped arguments`);
-            console.error(`❌ [API] Correct usage: api('/auth/login', { method: 'POST', body: {...} })`);
-            console.error(`❌ [API] NOT: api('POST', '/auth/login') or api({ method: 'POST' }, '/auth/login')`);
-            return '/'; // Return root to prevent complete failure
+            console.error(`[API] CRITICAL ERROR: Endpoint "${endpoint}" is an HTTP method!`);
+            return '/';
         }
         
-        // Remove any leading/trailing slashes for consistent processing
         let cleanEndpoint = endpointStr.replace(/^\/+|\/+$/g, '');
         
-        // 🔧 SURGICAL FIX: Detect and remove accidental /api/api duplication
-        // But NEVER add /api if missing - trust api.request.js
         if (cleanEndpoint.toUpperCase().startsWith('API/API/')) {
-            console.warn(`⚠️ [API] Detected /api/api duplication in endpoint: ${cleanEndpoint}`);
-            console.warn(`⚠️ [API] Removing duplicate /api segment`);
-            cleanEndpoint = cleanEndpoint.substring(4); // Remove first "api/"
+            console.warn(`[API] Detected /api/api duplication in endpoint: ${cleanEndpoint}`);
+            cleanEndpoint = cleanEndpoint.substring(4);
         }
         
-        // Also check for lowercase
         if (cleanEndpoint.startsWith('api/api/')) {
-            console.warn(`⚠️ [API] Detected /api/api duplication in endpoint: ${cleanEndpoint}`);
-            console.warn(`⚠️ [API] Removing duplicate /api segment`);
-            cleanEndpoint = cleanEndpoint.substring(4); // Remove first "api/"
+            console.warn(`[API] Detected /api/api duplication in endpoint: ${cleanEndpoint}`);
+            cleanEndpoint = cleanEndpoint.substring(4);
         }
         
-        // Ensure it starts with "/" but doesn't end with "/" (unless it's just "/")
         if (!cleanEndpoint) return '/';
         if (!cleanEndpoint.startsWith('/')) {
             cleanEndpoint = '/' + cleanEndpoint;
@@ -2863,30 +2969,21 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * BUILD SAFE URL - WITHOUT ADDING /api
-     * 🔧 SURGICAL FIX: Uses BACKEND_BASE_URL directly, endpoint is already complete
-     * STRICT RULE: NEVER add /api in this function
      */
     function _buildSafeUrl(endpoint) {
         const sanitizedEndpoint = _sanitizeEndpoint(endpoint);
         
-        // Handle empty or root endpoint
         if (sanitizedEndpoint === '/') {
             return BACKEND_BASE_URL;
         }
         
-        // Construct URL ensuring no double slashes
         const base = BACKEND_BASE_URL.endsWith('/') ? BACKEND_BASE_URL.slice(0, -1) : BACKEND_BASE_URL;
         const endpointPath = sanitizedEndpoint.startsWith('/') ? sanitizedEndpoint : '/' + sanitizedEndpoint;
         
         const fullUrl = base + endpointPath;
-        console.log(`🔧 [BUILD-URL] Built: ${fullUrl} (endpoint: ${sanitizedEndpoint})`);
         
-        // 🔧 ENDPOINT INTEGRITY GUARD: Detect /api/api patterns
         if (fullUrl.includes('/api/api/')) {
-            console.warn(`⚠️ [API] ENDPOINT INTEGRITY VIOLATION: /api/api detected in URL: ${fullUrl}`);
-            console.warn(`⚠️ [API] This indicates api.request.js is not working correctly`);
-            console.warn(`⚠️ [API] Expected: ${BACKEND_BASE_URL}/api/...`);
-            console.warn(`⚠️ [API] Got: ${fullUrl}`);
+            console.warn(`[API] ENDPOINT INTEGRITY VIOLATION: /api/api detected in URL: ${fullUrl}`);
         }
         
         return fullUrl;
@@ -2897,135 +2994,74 @@ if (window.__API_CORE_LOADED_V2) {
     // ============================================================================
 
     /**
-     * CORE FETCH FUNCTION - STRICT REQUIREMENTS:
-     * 1. Treat ANY HTTP status ≥400 as a HARD failure
-     * 2. NEVER return success if response.ok === false
-     * 3. Do NOT mark backend offline on ANY HTTP status errors (400, 401, 500, etc.)
-     * 4. Only mark backend offline on actual network connection failures
-     * 5. 🔧 SURGICAL FIX: Use BACKEND_BASE_URL directly, endpoint is already complete
-     * 6. STRICT CONTRACT: endpoint is string, method is in options
-     * 7. AUTO-ATTACH Authorization header using getAuthHeaders() which uses getValidToken()
-     * 8. 🔧 CRITICAL FIX: Network state COMPLETELY SEPARATE from authentication state
-     * 9. 🔧 CRITICAL FIX: Token ALWAYS read from localStorage using getValidToken()
-     * 10. 🔧 CRITICAL FIX: 401 on public endpoints IGNORED, 401 on protected triggers logout
-     * 11. 🔧 CRITICAL FIX: Mobile session fix - ALWAYS include credentials: "include" for authenticated requests
+     * CORE FETCH FUNCTION
      */
     function _safeFetch(fullUrl, options = {}) {
-        // Validate URL
         if (!fullUrl || typeof fullUrl !== 'string') {
-            console.error('❌ [API] Invalid URL for fetch:', fullUrl);
+            console.error('[API] Invalid URL for fetch:', fullUrl);
             return Promise.reject(new Error('Invalid request URL'));
         }
         
-        // Normalize method - ABSOLUTELY CRITICAL
         const normalizedMethod = _normalizeHttpMethod(options.method || 'GET');
         
-        // Extract endpoint from full URL for public endpoint check
         const endpoint = fullUrl.replace(BACKEND_BASE_URL, '');
         
-        // 🔧 CRITICAL FIX: PUBLIC VS PROTECTED ENDPOINT HANDLING
         const isPublic = isPublicEndpoint(endpoint);
         const isStatus = isStatusEndpoint(endpoint);
         const isAuth = isAuthEndpoint(endpoint);
         
-        console.log(`🔐 [AUTH] Endpoint analysis: "${endpoint}"`);
-        console.log(`🔐 [AUTH] Is public endpoint: ${isPublic}`);
-        console.log(`🔐 [AUTH] Is status endpoint: ${isStatus}`);
-        console.log(`🔐 [AUTH] Is auth endpoint: ${isAuth}`);
-        console.log(`🔐 [AUTH] Endpoint classification: ${isPublic ? 'PUBLIC' : 'PROTECTED'}`);
-        
-        // AUTHORIZATION HEADER ENFORCEMENT - USING getAuthHeaders() HELPER
-        // This always reads token directly from localStorage using getValidToken()
         const authHeaders = getAuthHeaders(endpoint);
         
-        // Build headers - SPECIAL HANDLING FOR PUBLIC ENDPOINTS AND STATUS
         let headers = {
             'Content-Type': 'application/json'
         };
         
-        // 🔧 CRITICAL FIX: Only add Authorization header if NOT public endpoint and NOT status endpoint
         if (!isPublic && !isStatus && !isAuth) {
             headers = {
                 ...headers,
-                ...authHeaders, // Add Authorization header if token exists and endpoint is protected
+                ...authHeaders,
                 ...options.headers
             };
             
-            // Explicitly add Authorization header if token exists and not already present
-            // Always read token directly from localStorage using getValidToken()
             const token = getValidToken();
             
             if (token && !headers['Authorization'] && !headers['authorization']) {
                 headers['Authorization'] = `Bearer ${token}`;
-                console.log(`🔐 [AUTH] Token from getValidToken() injected into headers for ${normalizedMethod} ${fullUrl}`);
             }
         } else {
-            // For public endpoints, status endpoints, and auth endpoints - use only provided headers (never add auth)
             headers = {
                 ...headers,
                 ...options.headers
             };
-            if (isPublic) {
-                console.log(`🔧 [NETWORK] Public endpoint detected, NO Authorization header will be added`);
-            } else if (isStatus) {
-                console.log(`🔧 [NETWORK] Status endpoint detected, NO Authorization header will be added`);
-            } else if (isAuth) {
-                console.log(`🔧 [NETWORK] Auth endpoint detected, NO Authorization header will be added`);
-            }
         }
         
-        // Auto-attach Authorization header for authenticated requests
-        // Skip only if explicitly disabled (auth: false) or for public/auth endpoints
         const skipAuth = options.auth === false || isPublic || isStatus || isAuth;
         
-        if (!skipAuth && (headers['Authorization'] || headers['authorization'])) {
-            console.log(`🔐 [AUTH] Authorization header attached to ${normalizedMethod} ${fullUrl}`);
-        } else if (!skipAuth && !headers['Authorization'] && !headers['authorization']) {
-            console.log(`⚠️ [AUTH] No token available for ${normalizedMethod} ${fullUrl}`);
-        }
-        
-        // MOBILE SESSION FIX: Determine if credentials should be included
-        // Always include credentials for authenticated requests to ensure session cookies are sent
         const requiresCredentials = !isPublic && !isStatus && !isAuth && !skipAuth;
         
-        // Prepare safe options
         const safeOptions = {
             method: normalizedMethod,
             mode: 'cors',
-            credentials: requiresCredentials ? 'include' : 'omit', // MOBILE FIX: Include credentials for authenticated requests
+            credentials: requiresCredentials ? 'include' : 'omit',
             headers: headers
         };
         
-        // Handle body safely - DO NOT MUTATE OR RENAME FIELDS
         if (options.body && normalizedMethod !== 'GET') {
             if (typeof options.body === 'string') {
                 safeOptions.body = options.body;
             } else {
                 try {
-                    // Pass body exactly as provided
                     safeOptions.body = JSON.stringify(options.body);
                 } catch (e) {
-                    console.warn('⚠️ [API] Could not stringify body, sending empty');
+                    console.warn('[API] Could not stringify body, sending empty');
                     safeOptions.body = '{}';
                 }
             }
         }
         
-        console.log(`🔧 [API] Safe fetch: ${normalizedMethod} ${fullUrl}`);
-        console.log(`🔧 [API] Headers:`, Object.keys(headers));
-        console.log(`🔧 [API] Authorization Header: ${headers['Authorization'] ? 'Present' : 'Not present'}`);
-        console.log(`🔧 [API] Is Public Endpoint: ${isPublic ? 'YES (no auth)' : 'NO'}`);
-        console.log(`🔧 [API] Is Status Endpoint: ${isStatus ? 'YES (no auth)' : 'NO'}`);
-        console.log(`🔧 [API] Is Auth Endpoint: ${isAuth ? 'YES (no auth)' : 'NO'}`);
-        console.log(`🔧 [API] Requires Credentials: ${requiresCredentials ? 'YES (mobile session fix)' : 'NO (public endpoint)'}`);
-        console.log(`🔧 [API] Credentials setting: ${safeOptions.credentials}`);
-        console.log(`🔧 [API] Token source: localStorage via getValidToken()`);
-        
-        // PERFORM THE FETCH
         return fetch(fullUrl, safeOptions)
             .then(async response => {
                 try {
-                    // Parse response ONCE only
                     const contentType = response.headers.get('content-type');
                     let data;
                     
@@ -3033,7 +3069,7 @@ if (window.__API_CORE_LOADED_V2) {
                         try {
                             data = await response.json();
                         } catch (jsonError) {
-                            console.error(`❌ [API] JSON parsing error for ${fullUrl}:`, jsonError);
+                            console.error(`[API] JSON parsing error for ${fullUrl}:`, jsonError);
                             data = { 
                                 message: 'Invalid JSON response from server',
                                 error: jsonError.message 
@@ -3043,7 +3079,7 @@ if (window.__API_CORE_LOADED_V2) {
                         try {
                             data = await response.text();
                         } catch (textError) {
-                            console.error(`❌ [API] Text parsing error for ${fullUrl}:`, textError);
+                            console.error(`[API] Text parsing error for ${fullUrl}:`, textError);
                             data = { 
                                 message: 'Failed to parse response',
                                 error: textError.message 
@@ -3051,19 +3087,15 @@ if (window.__API_CORE_LOADED_V2) {
                         }
                     }
                     
-                    // 🔧 FIX 2 & 3: Unified response normalization
                     const normalizedResponse = _normalizeApiResponse(data, response);
                     
                     const success = normalizedResponse.success;
                     const status = response.status;
                     
-                    // 🔧 CRITICAL FIX: Backend is reachable if we got ANY response
-                    // HTTP errors (400, 401, 403, 500, etc.) mean backend IS reachable
                     if (window.AppNetwork) {
                         window.AppNetwork.updateBackendStatus(true);
                     }
                     
-                    // Create normalized response format
                     const result = {
                         ok: success,
                         success: success,
@@ -3077,7 +3109,6 @@ if (window.__API_CORE_LOADED_V2) {
                         message: normalizedResponse.message
                     };
                     
-                    // Enhanced error handling for specific status codes
                     if (!success) {
                         let errorMessage = normalizedResponse.message || response.statusText || 'Request failed';
                         
@@ -3089,21 +3120,11 @@ if (window.__API_CORE_LOADED_V2) {
                             errorMessage = 'Server error. Please try again later.';
                             result.isServerError = true;
                         } else if (status === 401 || status === 403) {
-                            // 🔧 CRITICAL FIX: Handle unauthorized access DIFFERENTLY for public vs protected
                             errorMessage = normalizedResponse.message || 'Invalid credentials';
                             result.isAuthError = true;
                             
-                            console.log(`🔐 [AUTH] ${status} Unauthorized/Forbidden - AUTH ISSUE, NOT NETWORK`);
-                            console.log(`🔐 [AUTH] Backend IS reachable (got response), this is an authentication issue`);
-                            
-                            // 🔧 CRITICAL FIX: PUBLIC endpoints - IGNORE 401, DO NOT clear tokens
                             if (isPublic || isStatus || isAuth) {
-                                console.log(`🔐 [AUTH] PUBLIC/AUTH/STATUS endpoint ${status} - IGNORING, tokens NOT cleared`);
-                                console.log(`🔐 [AUTH] /api/status or /auth/* 401 is NORMAL for unauthenticated access`);
                             } else {
-                                // 🔧 CRITICAL FIX: PROTECTED endpoints - normal logout flow
-                                console.log(`🔐 [AUTH] PROTECTED endpoint ${status} - handling unauthorized access`);
-                                // Use centralized handler with loop prevention
                                 if (!localStorage.getItem('_auth_clearing_in_progress')) {
                                     setTimeout(() => {
                                         handleUnauthorizedAccess();
@@ -3125,14 +3146,12 @@ if (window.__API_CORE_LOADED_V2) {
                     
                     return result;
                 } catch (processingError) {
-                    console.error(`❌ [API] Response processing error for ${fullUrl}:`, processingError);
+                    console.error(`[API] Response processing error for ${fullUrl}:`, processingError);
                     
-                    // Even if we can't process the response, backend IS reachable
                     if (window.AppNetwork) {
                         window.AppNetwork.updateBackendStatus(true);
                     }
                     
-                    // Return error in consistent format
                     return {
                         ok: false,
                         success: false,
@@ -3149,7 +3168,7 @@ if (window.__API_CORE_LOADED_V2) {
                 }
             })
             .catch(error => {
-                console.error(`🔧 [API] Fetch error for ${fullUrl}:`, error);
+                console.error(`❌ Fetch error for ${fullUrl}: ${error.message}`);
                 
                 const isNetworkError = error.message && (
                     error.message.includes('Failed to fetch') ||
@@ -3158,36 +3177,26 @@ if (window.__API_CORE_LOADED_V2) {
                     error.message.includes('Load failed')
                 );
                 
-                // Check for AbortError - don't mark as network error
                 const isAbortError = error.name === 'AbortError' || 
                                     error.message.includes('aborted') ||
                                     error.message.includes('The user aborted');
                 
-                // Check for timeout errors
                 const isTimeoutError = error.name === 'TimeoutError' ||
                                       error.message.includes('timeout') ||
                                       error.message.includes('Timeout');
                 
-                // Check for DNS errors
                 const isDNSError = error.message.includes('ERR_NAME_NOT_RESOLVED') ||
                                   error.message.includes('net::ERR_NAME_NOT_RESOLVED');
                 
-                // CRITICAL FIX: Only update backend reachability for actual network errors
-                // This is where we separate network state from auth state
                 const shouldMarkBackendUnreachable = (isNetworkError || isTimeoutError || isDNSError) && !isAbortError;
                 
                 if (shouldMarkBackendUnreachable) {
-                    console.warn(`⚠️ [API] Network error detected, marking backend as unreachable: ${error.message}`);
-                    console.warn(`⚠️ [API] This is a REAL NETWORK issue, not an auth issue`);
+                    console.warn(`[API] Network error detected, marking backend as unreachable: ${error.message}`);
                     if (window.AppNetwork) {
                         window.AppNetwork.updateBackendStatus(false);
                     }
-                } else {
-                    // For non-network errors or abort errors, backend might still be reachable
-                    console.warn(`⚠️ [API] Non-network error (${error.name || 'unknown'}), not changing backend status: ${error.message}`);
                 }
                 
-                // Determine error message
                 let errorMessage = 'Network Error';
                 if (isAbortError) errorMessage = 'Request Aborted';
                 if (isTimeoutError) errorMessage = 'Request Timeout';
@@ -3216,23 +3225,13 @@ if (window.__API_CORE_LOADED_V2) {
     // API REQUEST QUEUE SYSTEM FOR DELAYED PROTECTED CALLS
     // ============================================================================
 
-    /**
-     * API Request Queue - delays protected API calls until login is complete
-     * 🔧 CRITICAL FIX: Public endpoints NEVER queued
-     */
     const _apiRequestQueue = {
         _queue: [],
         _isProcessing: false,
         _isLoginComplete: false,
         
-        /**
-         * Add request to queue - ONLY for protected endpoints
-         */
         addRequest: function(requestFn, description, endpoint) {
-            // 🔧 CRITICAL FIX: Check if this is a public endpoint
             if (endpoint && isPublicEndpoint(endpoint)) {
-                console.log(`🔐 [QUEUE] PUBLIC endpoint "${endpoint}" - NOT queued, executing immediately`);
-                // Execute immediately without queueing
                 return requestFn();
             }
             
@@ -3244,18 +3243,12 @@ if (window.__API_CORE_LOADED_V2) {
                     reject
                 });
                 
-                console.log(`🔐 [QUEUE] Request queued: ${description} (queue size: ${this._queue.length})`);
-                
-                // Process queue if not already processing
                 if (!this._isProcessing) {
                     this._processQueue();
                 }
             });
         },
         
-        /**
-         * Process the queue
-         */
         _processQueue: async function() {
             if (this._isProcessing || this._queue.length === 0) {
                 return;
@@ -3267,12 +3260,10 @@ if (window.__API_CORE_LOADED_V2) {
                 const request = this._queue.shift();
                 
                 try {
-                    console.log(`🔐 [QUEUE] Processing: ${request.description}`);
                     const result = await request.fn();
                     request.resolve(result);
-                    console.log(`✅ [QUEUE] Completed: ${request.description}`);
                 } catch (error) {
-                    console.error(`❌ [QUEUE] Failed: ${request.description}`, error);
+                    console.error(`[QUEUE] Failed: ${request.description}`, error);
                     request.reject(error);
                 }
             }
@@ -3280,28 +3271,17 @@ if (window.__API_CORE_LOADED_V2) {
             this._isProcessing = false;
         },
         
-        /**
-         * Mark login as complete
-         */
         markLoginComplete: function() {
             this._isLoginComplete = true;
-            console.log('🔐 [QUEUE] Login marked as complete');
             this._processQueue();
         },
         
-        /**
-         * Check if login is complete
-         */
         isLoginComplete: function() {
             return this._isLoginComplete;
         },
         
-        /**
-         * Clear the queue
-         */
         clearQueue: function() {
             this._queue = [];
-            console.log('🔐 [QUEUE] Queue cleared');
         }
     };
 
@@ -3309,21 +3289,14 @@ if (window.__API_CORE_LOADED_V2) {
     // CACHING SYSTEM FOR INSTANT RENDERING
     // ============================================================================
 
-    /**
-     * Caching system for API responses
-     */
     const _apiCache = {
         _cache: new Map(),
-        _defaultTTL: 5 * 60 * 1000, // 5 minutes
+        _defaultTTL: 5 * 60 * 1000,
         
-        /**
-         * Get cached data
-         */
         get: function(key) {
             const cached = this._cache.get(key);
             if (!cached) return null;
             
-            // Check if cache has expired
             if (Date.now() > cached.expiresAt) {
                 this._cache.delete(key);
                 return null;
@@ -3332,9 +3305,6 @@ if (window.__API_CORE_LOADED_V2) {
             return cached.data;
         },
         
-        /**
-         * Set cache data
-         */
         set: function(key, data, ttl = this._defaultTTL) {
             this._cache.set(key, {
                 data,
@@ -3342,7 +3312,6 @@ if (window.__API_CORE_LOADED_V2) {
                 timestamp: Date.now()
             });
             
-            // Also store in localStorage for persistence
             try {
                 localStorage.setItem(`cache_${key}`, JSON.stringify({
                     data,
@@ -3350,28 +3319,20 @@ if (window.__API_CORE_LOADED_V2) {
                     timestamp: Date.now()
                 }));
             } catch (error) {
-                console.log(`🔧 [CACHE] Could not store in localStorage: ${error.message}`);
+                console.error(`[CACHE] Could not store in localStorage: ${error.message}`);
             }
         },
         
-        /**
-         * Delete cache entry
-         */
         delete: function(key) {
             this._cache.delete(key);
             try {
                 localStorage.removeItem(`cache_${key}`);
             } catch (error) {
-                // Ignore
             }
         },
         
-        /**
-         * Clear all cache
-         */
         clear: function() {
             this._cache.clear();
-            // Clear localStorage cache items
             Object.keys(localStorage).forEach(key => {
                 if (key.startsWith('cache_')) {
                     localStorage.removeItem(key);
@@ -3379,9 +3340,6 @@ if (window.__API_CORE_LOADED_V2) {
             });
         },
         
-        /**
-         * Load from localStorage on initialization
-         */
         loadFromStorage: function() {
             try {
                 Object.keys(localStorage).forEach(key => {
@@ -3390,7 +3348,6 @@ if (window.__API_CORE_LOADED_V2) {
                             const cachedStr = localStorage.getItem(key);
                             if (cachedStr) {
                                 const cached = JSON.parse(cachedStr);
-                                // Check if still valid
                                 if (Date.now() < cached.expiresAt) {
                                     this._cache.set(key.replace('cache_', ''), cached);
                                 } else {
@@ -3398,49 +3355,51 @@ if (window.__API_CORE_LOADED_V2) {
                                 }
                             }
                         } catch (error) {
-                            // Remove invalid cache entry
                             localStorage.removeItem(key);
                         }
                     }
                 });
-                console.log(`🔧 [CACHE] Loaded ${this._cache.size} items from localStorage`);
             } catch (error) {
-                console.log(`🔧 [CACHE] Error loading from storage: ${error.message}`);
+                console.error(`[CACHE] Error loading from storage: ${error.message}`);
             }
         }
     };
 
-    // Initialize cache from localStorage
     _apiCache.loadFromStorage();
 
     // ============================================================================
     // GLOBAL API FUNCTION - ULTRA-DEFENSIVE WRAPPER WITH AUTHORITATIVE AUTH
     // ============================================================================
 
-    /**
-     * GLOBAL API FUNCTION - STRICT CONTRACT:
-     * 1. First argument MUST ALWAYS be endpoint string (e.g., '/api/auth/login')
-     * 2. Second argument MUST ALWAYS be options object (e.g., { method: 'POST' })
-     * 3. NEVER accept HTTP methods as first argument
-     * 4. NEVER swap arguments
-     * 5. 🔧 SURGICAL FIX: Use BACKEND_BASE_URL + endpoint (endpoint already includes /api)
-     * 6. MOBILE FIX: Always include credentials: "include" for authenticated requests
-     * 7. Uses centralized secureFetch for all requests
-     * 8. 🔧 CRITICAL FIX: Public endpoints bypass token checks entirely
-     */
     const globalApiFunction = function(endpoint, options = {}) {
-        // 🔧 CRITICAL FIX: PUBLIC endpoints bypass ALL network and token checks
+        // FIX: Handle HTTP method passed as endpoint (error in settings-core.js)
+        if (endpoint === 'GET' || endpoint === 'POST' || endpoint === 'PUT' || 
+            endpoint === 'DELETE' || endpoint === 'PATCH') {
+            console.error('[GLOBAL-API] ERROR: HTTP method passed as endpoint:', endpoint);
+            console.error('[GLOBAL-API] This indicates a bug in the calling code');
+            console.error('[GLOBAL-API] Stack trace:', new Error().stack);
+            
+            return Promise.resolve({
+                ok: false,
+                success: false,
+                status: 0,
+                statusText: 'Invalid Request',
+                data: { 
+                    message: 'HTTP method cannot be used as endpoint',
+                    error: 'Endpoint cannot be HTTP method',
+                    details: `Called with: "${endpoint}"`
+                },
+                headers: {},
+                invalidRequest: true,
+                methodPassedAsEndpoint: true
+            });
+        }
+        
         const isPublic = isPublicEndpoint(endpoint);
         const isStatus = isStatusEndpoint(endpoint);
         const isAuth = isAuthEndpoint(endpoint);
         
-        console.log(`🔧 [API] Global API call: ${endpoint}`);
-        console.log(`🔧 [API] Classification: ${isPublic ? 'PUBLIC' : 'PROTECTED'}`);
-        console.log(`🔧 [API] Is status: ${isStatus}, Is auth: ${isAuth}`);
-        
-        // Use global network state for protected endpoints only
         if (window.AppNetwork && !window.AppNetwork.isOnline && !isPublic && !isStatus && !isAuth) {
-            console.log('🔧 [API] Offline detected for PROTECTED endpoint, returning offline response');
             return Promise.resolve({
                 ok: false,
                 success: false,
@@ -3453,49 +3412,28 @@ if (window.__API_CORE_LOADED_V2) {
             });
         }
         
-        // 🔧 CRITICAL FIX: PUBLIC endpoints work even when offline (for cached data)
-        if (isPublic && window.AppNetwork && !window.AppNetwork.isOnline) {
-            console.log('🔧 [API] Offline but PUBLIC endpoint - attempting with cache');
-            // Continue anyway for public endpoints, they might have cached data
-        }
-        
-        // STRICT VALIDATION: First argument MUST be string
         if (!endpoint || typeof endpoint !== 'string') {
-            console.error(`❌ [API] CRITICAL: First argument must be endpoint string, got:`, typeof endpoint);
-            console.error(`❌ [API] Correct: api('/auth/login', { method: 'POST' })`);
-            console.error(`❌ [API] Wrong: api('POST', '/auth/login') or api({ method: 'POST' }, '/auth/login')`);
-            endpoint = '/'; // Safe fallback
+            console.error(`[GLOBAL-API] CRITICAL: First argument must be endpoint string, got:`, typeof endpoint);
+            endpoint = '/';
         }
         
-        // STRICT VALIDATION: Second argument MUST be object (or undefined)
         if (options && typeof options !== 'object') {
-            console.error(`❌ [API] CRITICAL: Second argument must be options object, got:`, typeof options);
-            console.error(`❌ [API] Correct: api('/auth/login', { method: 'POST' })`);
+            console.error(`[GLOBAL-API] CRITICAL: Second argument must be options object, got:`, typeof options);
             options = {};
         }
         
-        // SANITIZE endpoint to prevent ANY malformed URLs
         const safeEndpoint = _sanitizeEndpoint(endpoint);
-        // 🔧 SURGICAL FIX: _buildSafeUrl uses BACKEND_BASE_URL directly
         const fullUrl = _buildSafeUrl(safeEndpoint);
         
-        // Check if this is a protected endpoint that requires login
         const requiresAuth = !isPublic && !isStatus && !isAuth && options.auth !== false;
         
-        // Get token from centralized storage
         const token = getUserToken();
         
-        // 🔧 CRITICAL FIX: PUBLIC/AUTH endpoints bypass queue entirely
         if (isPublic || isStatus || isAuth) {
-            console.log(`🔧 [API] PUBLIC/AUTH/STATUS endpoint - executing immediately without queue`);
             return secureApiFetch(safeEndpoint, options);
         }
         
-        // If this is a protected endpoint and we don't have a token, 
-        // and login is not complete, queue the request
         if (requiresAuth && !token && !_apiRequestQueue.isLoginComplete()) {
-            console.log(`🔐 [QUEUE] Delaying protected endpoint until login complete: ${safeEndpoint}`);
-            
             return _apiRequestQueue.addRequest(
                 () => secureApiFetch(safeEndpoint, options),
                 `Protected endpoint: ${safeEndpoint}`,
@@ -3503,7 +3441,6 @@ if (window.__API_CORE_LOADED_V2) {
             );
         }
         
-        // Otherwise, use secure fetch immediately
         return secureApiFetch(safeEndpoint, options);
     };
 
@@ -3513,9 +3450,6 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * Generic API request function
-     * @param {string} endpoint - API endpoint
-     * @param {object} options - Fetch options
-     * @returns {Promise} API response
      */
     apiRequest = async function(endpoint, options = {}) {
         return globalApiFunction(endpoint, options);
@@ -3523,9 +3457,6 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * API GET request
-     * @param {string} endpoint - API endpoint
-     * @param {object} params - Query parameters
-     * @returns {Promise} API response
      */
     apiGet = async function(endpoint, params = {}) {
         let url = endpoint;
@@ -3538,10 +3469,6 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * API POST request
-     * @param {string} endpoint - API endpoint
-     * @param {object} data - Request body
-     * @param {object} options - Additional options
-     * @returns {Promise} API response
      */
     apiPost = async function(endpoint, data = {}, options = {}) {
         return globalApiFunction(endpoint, {
@@ -3553,10 +3480,6 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * API PUT request
-     * @param {string} endpoint - API endpoint
-     * @param {object} data - Request body
-     * @param {object} options - Additional options
-     * @returns {Promise} API response
      */
     apiPut = async function(endpoint, data = {}, options = {}) {
         return globalApiFunction(endpoint, {
@@ -3568,10 +3491,6 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * API DELETE request
-     * @param {string} endpoint - API endpoint
-     * @param {object} data - Request body (optional)
-     * @param {object} options - Additional options
-     * @returns {Promise} API response
      */
     apiDelete = async function(endpoint, data = {}, options = {}) {
         return globalApiFunction(endpoint, {
@@ -3583,9 +3502,6 @@ if (window.__API_CORE_LOADED_V2) {
 
     /**
      * Legacy API call function
-     * @param {string} endpoint - API endpoint
-     * @param {object} options - Fetch options
-     * @returns {Promise} API response
      */
     apiCall = async function(endpoint, options = {}) {
         return globalApiFunction(endpoint, options);
@@ -3595,25 +3511,16 @@ if (window.__API_CORE_LOADED_V2) {
     // GLOBAL OBJECT INITIALIZATION
     // ============================================================================
 
-    /**
-     * Initialize global API object
-     */
     function initializeGlobalApi() {
-        console.log('🔧 [API] Initializing global API objects...');
-        
-        // Create main API object
         if (!window.api) {
             window.api = {};
         }
         
-        // Create core API object
         if (!window.api.core) {
             window.api.core = {};
         }
         
-        // Assign all functions to window.api.core
         window.api.core = {
-            // Token management
             getUserToken,
             setUserToken,
             clearUserToken,
@@ -3626,17 +3533,34 @@ if (window.__API_CORE_LOADED_V2) {
             isAuthenticated,
             getToken,
             setToken,
-             initSession,
+            initSession,
+            getTrustScoreClass,
+            getTrustScoreDescription,
+            getTeamMembers,
+            navigateToCall,
+            getUserFriends,
+            navigateToChat,
+            getUserGroups,
+            showNotification,
+            inviteTeamMember,
+            acceptGroupInvite,
+            getMessageTypes,
             callApi,
             escapeHtml,
             markChatAsRead,
             simulateIncomingCall,
             isSessionValid,
-        formatTimeAgo,
-        exportAnalytics,
-        simulateIncomingCall,
+            formatTimeAgo,
+            exportAnalytics,
             
-            // API functions
+            // NEW FUNCTIONS
+            request,
+            apiCallWithRetry,
+            updateTeamMemberRole,
+            simulateContactSync,
+            trackEvent,
+            generateSampleMoodData,
+            
             api: globalApiFunction,
             apiRequest,
             apiGet,
@@ -3648,12 +3572,10 @@ if (window.__API_CORE_LOADED_V2) {
             apiCallWithRetry,
             apiCall,
             
-            // Endpoint classification
             isPublicEndpoint,
             isAuthEndpoint,
             isStatusEndpoint,
             
-            // Auth functions
             login,
             logout,
             register,
@@ -3665,14 +3587,12 @@ if (window.__API_CORE_LOADED_V2) {
             validateAuth,
             validateSession,
             
-            // Session management
             getSession,
             getSessionData,
             setSessionData,
             updateSession,
             clearSession,
             
-            // User profile
             getProfile,
             updateProfile,
             changePassword,
@@ -3680,7 +3600,6 @@ if (window.__API_CORE_LOADED_V2) {
             updateCurrentUser,
             getUserData,
             
-            // Friends
             getFriends,
             getFriendRequests,
             sendFriendRequest,
@@ -3688,7 +3607,6 @@ if (window.__API_CORE_LOADED_V2) {
             rejectFriendRequest,
             removeFriend,
             
-            // Chat
             getConversations,
             getMessages,
             sendMessage,
@@ -3696,7 +3614,6 @@ if (window.__API_CORE_LOADED_V2) {
             deleteMessage,
             clearChatHistory,
             
-            // Groups
             createGroup,
             getGroups,
             getGroupDetails,
@@ -3706,176 +3623,159 @@ if (window.__API_CORE_LOADED_V2) {
             removeGroupMember,
             leaveGroup,
             
-            // Notifications
             getNotifications,
             markNotificationAsRead,
             deleteNotification,
             clearAllNotifications,
             
-            // Calls
             getCallHistory,
             startCall,
             endCall,
             
-            // Settings
             getSettings,
             updateSettings,
             
-            // Files
             uploadFile,
             deleteFile,
             getFile,
             
-            // Users
             getOnlineUsers,
             searchUsers,
             
-            // Network
             checkNetworkStatus,
             getApiBaseUrl,
             getBackendBaseUrl,
             determineBackendUrl,
             
-            // Utils
             debounce,
             throttle,
             generateId,
             formatDate,
             formatTime,
             
-            // Events
             emit,
             on,
             off,
             once,
             
-            // System
             initializeTokenSystem,
             updateGlobalAccessToken,
             handleUnauthorizedAccess,
             
-            // Ready flag
             ready: true
         };
         
-        // Create legacy apiCore object for backward compatibility
         window.apiCore = window.api.core;
         
-        // Create __API_CORE global object
         window.__API_CORE = {
             ...window.api.core,
+            getTeamMembers,
+            getTrustScoreClass,
+            getTrustScoreDescription,
+            navigateToCall,
+            getUserFriends,
+            navigateToChat,
+            getUserGroups,
+            showNotification,
+            inviteTeamMember,
+            acceptGroupInvite,
+            getMessageTypes,
+            // NEW FUNCTIONS
+            request,
+            apiCallWithRetry,
+            updateTeamMemberRole,
+            simulateContactSync,
+            trackEvent,
+            generateSampleMoodData,
             ready: true,
-            version: '20.5.2',
+            version: '20.5.6',
             initialized: true,
             timestamp: new Date().toISOString()
         };
         
-        console.log('✅ [API-CORE] Initialized successfully');
-        console.log('✅ [API-CORE] Global objects created: window.api.core, window.apiCore, window.__API_CORE');
-        console.log('✅ [API-CORE] Ready flag: true');
-        
-        // Dispatch initialization event
         window.dispatchEvent(new CustomEvent('api-core-initialized', {
             detail: { timestamp: new Date().toISOString() }
         }));
     }
 
     // ============================================================================
-// MISSING FUNCTION IMPLEMENTATIONS
-// ============================================================================
+    // MISSING FUNCTION IMPLEMENTATIONS
+    // ============================================================================
 
-/**
- * Initialize session - missing export
- */
-initSession = function() {
-    console.log('🔧 [SESSION] Initializing session...');
-    return initializeTokenSystem();
-};
+    /**
+     * Initialize session
+     */
+    initSession = function() {
+        return initializeTokenSystem();
+    };
 
-/**
- * Call API - missing export (alias for api or secureApiFetch)
- */
-callApi = function(endpoint, options = {}) {
-    return secureApiFetch(endpoint, options);
-};
+    /**
+     * Call API (alias for api or secureApiFetch)
+     */
+    callApi = function(endpoint, options = {}) {
+        return secureApiFetch(endpoint, options);
+    };
 
-/**
- * Escape HTML - missing export
- */
-escapeHtml = function(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-};
+    /**
+     * Escape HTML
+     */
+    escapeHtml = function(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
 
-/**
- * Mark chat as read - missing export
- */
-markChatAsRead = async function(chatId) {
-    return secureApiFetch(`/api/chats/${chatId}/read`, {
-        method: 'POST'
-    });
-};
+    /**
+     * Mark chat as read
+     */
+    markChatAsRead = async function(chatId) {
+        return secureApiFetch(`/api/chats/${chatId}/read`, {
+            method: 'POST'
+        });
+    };
 
-/**
- * Simulate incoming call - missing export
- */
-simulateIncomingCall = function(callData) {
-    console.log('📞 [CALL] Simulating incoming call:', callData);
-    
-    // Dispatch call event
-    window.dispatchEvent(new CustomEvent('incoming-call', {
-        detail: callData
-    }));
-    
-    return { success: true, message: 'Call simulation triggered' };
-};
+    /**
+     * Simulate incoming call
+     */
+    simulateIncomingCall = function(callData) {
+        window.dispatchEvent(new CustomEvent('incoming-call', {
+            detail: callData
+        }));
+        
+        return { success: true, message: 'Call simulation triggered' };
+    };
 
     // ============================================================================
     // FINAL INITIALIZATION
     // ============================================================================
 
-    // Mark as loaded with a unique identifier to prevent duplicate loading
     window.__API_CORE_LOADED_V2 = true;
-    window.__API_CORE_LOADED = true; // Legacy support
+    window.__API_CORE_LOADED = true;
 
-    // Initialize token system
     initializeTokenSystem();
 
-    // Initialize global API objects
     initializeGlobalApi();
 
-    // Dispatch ready event
     window.dispatchEvent(new CustomEvent('api.core-ready'));
-    console.log('✅ [api.core] api.core-ready event dispatched');
-
-    // Mark initialization as complete
     API_INITIALIZATION_COMPLETE = true;
     window.__API_JS_LOADING = false;
 
-    console.log('✅ [api.core] Surgical fix applied: api.core.js no longer adds /api to endpoints');
-    console.log('✅ [api.core] All endpoints must come pre-built from api.request.js');
-        // ============================================================================
-    // IMPLEMENT MISSING FUNCTIONS
-    // ============================================================================
-
     /**
-     * Check if session is valid (alias for validateSession)
+     * Check if session is valid
      * @returns {boolean} True if session is valid
      */
     isSessionValid = function() {
-        // For synchronous usage, check if token exists
         const token = getUserToken();
         const user = getCurrentUser();
         return !!(token && user);
     };
 
     /**
-     * Format time ago (e.g., "5 minutes ago")
+     * Format time ago
      * @param {Date|string} date - The date to format
      * @returns {string} Formatted time ago string
      */
@@ -3897,8 +3797,6 @@ simulateIncomingCall = function(callData) {
 
     /**
      * Export analytics data
-     * @param {object} analyticsData - Analytics data to export
-     * @returns {Promise} Promise with export result
      */
     exportAnalytics = async function(analyticsData) {
         try {
@@ -3907,17 +3805,12 @@ simulateIncomingCall = function(callData) {
                 body: analyticsData
             });
         } catch (error) {
-            console.error('❌ [ANALYTICS] Export error:', error);
+            console.error('[ANALYTICS] Export error:', error);
             return { success: false, message: 'Analytics export failed' };
         }
     };
 
-    // Make sure simulateIncomingCall is already defined (it appears to be)
-    // If not, ensure this line exists:
     simulateIncomingCall = function(callData) {
-        console.log('📞 [CALL] Simulating incoming call:', callData);
-        
-        // Dispatch call event
         window.dispatchEvent(new CustomEvent('incoming-call', {
             detail: callData
         }));
@@ -3925,63 +3818,58 @@ simulateIncomingCall = function(callData) {
         return { success: true, message: 'Call simulation triggered' };
     };
 
-  requestSession = async function() {
-    try {
-        return await secureApiFetch('/api/auth/session', {
-            method: 'GET'
-        });
-    } catch (error) {
-        console.error('❌ [SESSION] Request session error:', error);
-        return { success: false, message: 'Failed to get session' };
-    }
-};
-
-/**
- * Get analytics data - missing export
- */
-getAnalyticsData = async function(params = {}) {
-    try {
-        let url = '/api/analytics';
-        if (params && Object.keys(params).length > 0) {
-            const queryString = new URLSearchParams(params).toString();
-            url += (url.includes('?') ? '&' : '?') + queryString;
+    requestSession = async function() {
+        try {
+            return await secureApiFetch('/api/auth/session', {
+                method: 'GET'
+            });
+        } catch (error) {
+            console.error('[SESSION] Request session error:', error);
+            return { success: false, message: 'Failed to get session' };
         }
-        return await secureApiFetch(url, {
-            method: 'GET'
-        });
-    } catch (error) {
-        console.error('❌ [ANALYTICS] Get analytics error:', error);
-        return { success: false, message: 'Failed to get analytics data' };
-    }
-};
+    };
 
-/**
- * Mark chat as read - missing implementation
- */
-markChatAsRead = async function(chatId) {
-    try {
-        return await secureApiFetch(`/api/chats/${chatId}/read`, {
-            method: 'POST'
-        });
-    } catch (error) {
-        console.error('❌ [CHAT] Mark chat as read error:', error);
-        return { success: false, message: 'Failed to mark chat as read' };
-    }
-};
+    /**
+     * Get analytics data
+     */
+    getAnalyticsData = async function(params = {}) {
+        try {
+            let url = '/api/analytics';
+            if (params && Object.keys(params).length > 0) {
+                const queryString = new URLSearchParams(params).toString();
+                url += (url.includes('?') ? '&' : '?') + queryString;
+            }
+            return await secureApiFetch(url, {
+                method: 'GET'
+            });
+        } catch (error) {
+            console.error('[ANALYTICS] Get analytics error:', error);
+            return { success: false, message: 'Failed to get analytics data' };
+        }
+    };
 
-/**
- * Simulate incoming call - already defined but ensure it's properly exported
- * This function should already exist based on your code
- */
-simulateIncomingCall = function(callData) {
-    console.log('📞 [CALL] Simulating incoming call:', callData);
-    
-    // Dispatch call event
-    window.dispatchEvent(new CustomEvent('incoming-call', {
-        detail: callData
-    }));
-    
-    return { success: true, message: 'Call simulation triggered' };
-};  
-    
+    /**
+     * Mark chat as read
+     */
+    markChatAsRead = async function(chatId) {
+        try {
+            return await secureApiFetch(`/api/chats/${chatId}/read`, {
+                method: 'POST'
+            });
+        } catch (error) {
+            console.error('[CHAT] Mark chat as read error:', error);
+            return { success: false, message: 'Failed to mark chat as read' };
+        }
+    };
+
+    /**
+     * Simulate incoming call
+     */
+    simulateIncomingCall = function(callData) {
+        window.dispatchEvent(new CustomEvent('incoming-call', {
+            detail: callData
+        }));
+        
+        return { success: true, message: 'Call simulation triggered' };
+    };
 }

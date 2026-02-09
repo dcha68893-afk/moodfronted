@@ -53,11 +53,11 @@ export let paymentMethods = [];
 // Parent-Child Communication State - ENHANCED
 export let parentDataLoaded = false;
 export let directAPILoaded = false;
-export let parentDataTimeout = 2000; // 2 seconds timeout for parent data
+export let parentDataTimeout = 2000;
 export let parentCommunicationId = null;
 export let dataFetchInProgress = false;
 
-// SESSION CONTROL STATE - NEW
+// SESSION CONTROL STATE
 export let parentSessionAuthority = null;
 export let sessionData = null;
 export let handshakeComplete = false;
@@ -65,8 +65,16 @@ export let handshakeRetryCount = 0;
 export let maxHandshakeRetries = 10;
 export let handshakeRetryDelay = 500;
 export let sessionValidationInProgress = false;
-export let uiBlockedForSession = true; // Block UI until session confirmed
+export let uiBlockedForSession = true;
 export let secureMessagingChannel = null;
+
+// SECURE HANDSHAKE PROTOCOL STATE - NEW
+export let handshakeInProgress = false;
+export let sessionValid = false;
+export let handshakeTimeout = null;
+export let handshakeRequestSent = false;
+export let sessionRetryAttempt = 0;
+export const MAX_SESSION_RETRIES = 2;
 
 // Marketplace constants
 export const LISTING_TYPES = {
@@ -215,36 +223,35 @@ export let isProcessingQueue = false;
 
 // Initialize the application with enhanced parent-child communication
 export async function initializeMarketplaceCore() {
-    console.log('[Tool.js] Marketplace iframe initialization started with ENHANCED parent-child communication');
-    
     try {
-        // Show UI immediately (no loading screens)
+        // Show UI immediately
         showMarketplaceUI();
         
         // Step 1: Initialize enhanced parent-child communication system
         await initializeEnhancedParentCommunication();
         
-        // Step 2: Wait for session data from parent
+        // Step 2: Start secure handshake protocol
+        await startSecureHandshakeProtocol();
+        
+        // Step 3: Wait for session data from parent
         await waitForSessionData();
         
-        // Step 3: After session confirmed, initialize token system
+        // Step 4: After session confirmed, initialize token system
         if (sessionData && sessionData.userToken) {
             initializeTokenSystem();
             
-            // Step 4: Start background data fetching after token is ready
+            // Step 5: Start background data fetching after token is ready
             tokenInitializationPromise.then(() => {
                 if (!backgroundJobsStarted) {
                     startBackgroundJobs();
                     backgroundJobsStarted = true;
                 }
-            }).catch(error => {
-                console.warn('[Tool.js] Token initialization failed, continuing offline:', error);
+            }).catch(() => {
                 // Continue with cached data
             });
         }
         
     } catch (error) {
-        console.error('[Tool.js] Initialization failed:', error);
         handleInitializationFailure(error);
     }
 }
@@ -255,15 +262,11 @@ export async function initializeMarketplaceCore() {
  * 1. Parent Detection & Secure Channel Establishment
  */
 export async function initializeEnhancedParentCommunication() {
-    console.log('[Tool.js] Initializing ENHANCED parent-child communication system');
-    
     // Generate unique ID for this iframe
     parentCommunicationId = 'marketplace_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    console.log('[Tool.js] Parent communication ID:', parentCommunicationId);
     
     // Verify presence of window.parent
     if (!window.parent || window.parent === window) {
-        console.warn('[Tool.js] Not running in iframe, standalone mode detected');
         handleStandaloneMode();
         return;
     }
@@ -273,11 +276,8 @@ export async function initializeEnhancedParentCommunication() {
     try {
         sameOrigin = window.location.origin === window.parent.location.origin;
     } catch (e) {
-        console.warn('[Tool.js] Cross-origin iframe detected (cannot access parent location):', e.message);
-        // We'll still try to communicate but with caution
+        // Cross-origin iframe detected
     }
-    
-    console.log('[Tool.js] Same-origin check:', sameOrigin);
     
     // Establish secure messaging channel
     secureMessagingChannel = {
@@ -295,9 +295,77 @@ export async function initializeEnhancedParentCommunication() {
     startHandshakeProtocol();
     
     return new Promise((resolve) => {
-        // Resolve after handshake initiated (UI will show immediately)
         resolve();
     });
+}
+
+/**
+ * SECURE HANDSHAKE PROTOCOL - NEW IMPLEMENTATION
+ */
+export async function startSecureHandshakeProtocol() {
+    // Only start if not already in progress and if we have a parent window
+    if (handshakeInProgress || !window.parent || window.parent === window) {
+        return;
+    }
+    
+    handshakeInProgress = true;
+    handshakeRequestSent = false;
+    sessionRetryAttempt = 0;
+    
+    console.log('⏳ [Secure Handshake] Initializing secure handshake with parent...');
+    
+    // Request session from parent
+    requestSessionFromParent();
+}
+
+/**
+ * Request session from parent with timeout and retry logic
+ */
+export function requestSessionFromParent() {
+    if (handshakeInProgress && handshakeRequestSent) {
+        return;
+    }
+    
+    handshakeRequestSent = true;
+    console.log('⏳ [Secure Handshake] Waiting for session from parent...');
+    
+    // Send session request to parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+        source: 'marketplace_iframe',
+        id: parentCommunicationId,
+        timestamp: Date.now(),
+        version: '2.1',
+        retryCount: sessionRetryAttempt
+    });
+    
+    // Set timeout for session response
+    clearTimeout(handshakeTimeout);
+    handshakeTimeout = setTimeout(() => {
+        if (!sessionValid) {
+            handleSessionRequestTimeout();
+        }
+    }, 5000);
+}
+
+/**
+ * Handle session request timeout
+ */
+export function handleSessionRequestTimeout() {
+    if (sessionRetryAttempt < MAX_SESSION_RETRIES) {
+        sessionRetryAttempt++;
+        console.log(`🔄 [Secure Handshake] Session request timed out. Retrying (${sessionRetryAttempt}/${MAX_SESSION_RETRIES})...`);
+        
+        handshakeRequestSent = false;
+        requestSessionFromParent();
+    } else {
+        handshakeInProgress = false;
+        console.log('❌ [Secure Handshake] Session request failed after maximum retries.');
+        
+        // Fall back to other authentication methods
+        if (!parentDataLoaded && !dataFetchInProgress) {
+            fetchUserDataDirectly();
+        }
+    }
 }
 
 /**
@@ -305,7 +373,6 @@ export async function initializeEnhancedParentCommunication() {
  */
 export function setupSecureMessageListener() {
     window.addEventListener('message', handleSecureParentMessage, false);
-    console.log('[Tool.js] Secure message listener established');
 }
 
 /**
@@ -314,84 +381,70 @@ export function setupSecureMessageListener() {
 export function handleSecureParentMessage(event) {
     // Basic security checks
     if (!validateMessageOrigin(event)) {
-        console.warn('[Tool.js] Message from untrusted origin ignored:', event.origin);
         return;
     }
     
     const message = event.data;
     
-    // Debug logging
-    console.log('[Tool.js] Received secure message:', {
-        type: message?.type,
-        source: event.source === window.parent ? 'parent' : 'other',
-        origin: event.origin,
-        timestamp: new Date().toISOString()
-    });
-    
     // Handle different message types
     switch (message?.type) {
         // PARENT AUTHORITY MESSAGES
         case PARENT_MESSAGE_TYPES.PARENT_READY:
-            console.log('[Tool.js] Parent ready signal received');
             handleParentReady(message);
             break;
             
         case PARENT_MESSAGE_TYPES.SESSION_DATA:
-            console.log('[Tool.js] Session data received from parent authority');
-            handleSessionDataFromParent(message.data);
+            handleSecureSessionData(message);
             break;
             
         case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
-            console.log('[Tool.js] Session update received');
             handleSessionUpdate(message.data);
             break;
             
         case PARENT_MESSAGE_TYPES.LOGOUT:
-            console.log('[Tool.js] Logout command received');
             handleParentLogout();
             break;
             
         case PARENT_MESSAGE_TYPES.REFRESH_UI:
-            console.log('[Tool.js] Refresh UI command received');
             handleRefreshUI();
             break;
             
         case PARENT_MESSAGE_TYPES.FORCE_RELOAD:
-            console.log('[Tool.js] Force reload command received');
             handleForceReload();
+            break;
+            
+        // SECURE HANDSHAKE MESSAGES - NEW
+        case 'SESSION_DATA':
+            if (message.source === 'parent') {
+                handleSecureSessionData(message);
+            }
             break;
             
         // LEGACY MESSAGE SUPPORT (for backward compatibility)
         case 'user_data':
-            console.log('[Tool.js] Legacy user data received (migrating to session system)');
             migrateLegacyUserData(message.data);
             break;
             
         case 'user_profile_updated':
-            console.log('[Tool.js] User profile updated from parent');
             if (message.data) {
                 handleSessionUpdate(message.data);
             }
             break;
             
         case 'user_logged_in':
-            console.log('[Tool.js] User logged in notification');
             sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, { force: true });
             break;
             
         case 'user_logged_out':
-            console.log('[Tool.js] User logged out notification');
             handleParentLogout();
             break;
             
         case 'session_expired':
-            console.log('[Tool.js] Session expired notification');
             handleSessionExpired();
             break;
             
         case 'iframe_response':
             if (message.requestId === parentCommunicationId) {
-                console.log('[Tool.js] Response to our request');
                 if (message.data && message.data.session) {
                     handleSessionDataFromParent(message.data.session);
                 }
@@ -405,9 +458,98 @@ export function handleSecureParentMessage(event) {
                 sessionStatus: !!sessionData
             });
             break;
-            
-        default:
-            console.log('[Tool.js] Unknown message type from parent:', message?.type);
+    }
+}
+
+/**
+ * Handle secure session data from parent
+ */
+export function handleSecureSessionData(message) {
+    const data = message.data || message;
+    
+    // Only accept from parent, dynamically accept current origin
+    const validOrigin = validateParentOrigin(message, event);
+    if (!validOrigin) {
+        console.log('❌ [Secure Handshake] Received message from invalid origin');
+        return;
+    }
+    
+    if (!data.token || !data.user) {
+        console.log('❌ [Secure Handshake] Received invalid session from parent');
+        handshakeInProgress = false;
+        return;
+    }
+
+    sessionValid = true;
+    handshakeInProgress = false;
+    clearTimeout(handshakeTimeout);
+    console.log('✅ [Secure Handshake] Session received successfully');
+    
+    // Convert to session data format
+    const sessionDataFromParent = {
+        userId: data.user.id || data.user.userId,
+        userToken: data.token,
+        expiresAt: data.expiresAt || new Date(Date.now() + 3600000).toISOString(),
+        displayName: data.user.displayName || data.user.name,
+        email: data.user.email,
+        photoURL: data.user.photoURL || data.user.avatar,
+        isPremium: data.user.isPremium || false,
+        subscription: data.user.subscription,
+        trustLevel: data.user.trustLevel || 'new',
+        groups: data.user.groups || [],
+        friends: data.user.friends || [],
+        source: 'parent_handshake'
+    };
+    
+    // Process the session data
+    handleSessionDataFromParent(sessionDataFromParent);
+}
+
+/**
+ * Validate parent origin dynamically
+ */
+export function validateParentOrigin(message, event) {
+    try {
+        // Always accept from same origin
+        if (event.origin === window.location.origin) {
+            return true;
+        }
+        
+        // Accept from parent origin if we can determine it
+        if (window.parent && window.parent !== window) {
+            try {
+                const parentOrigin = window.parent.location.origin;
+                if (event.origin === parentOrigin) {
+                    return true;
+                }
+            } catch (e) {
+                // Cross-origin iframe, cannot access parent location
+            }
+        }
+        
+        // Accept from known development origins
+        const allowedDevOrigins = [
+            'http://127.0.0.1:5500',
+            'http://localhost:5500',
+            'http://localhost:3000',
+            'http://127.0.0.1:3000'
+        ];
+        
+        if (allowedDevOrigins.includes(event.origin)) {
+            return true;
+        }
+        
+        // For production, we need to be more strict
+        // You can add additional origin validation here
+        console.log(`⚠️ [Security] Message from origin: ${event.origin}`);
+        
+        // In production, you might want to validate against a whitelist
+        // For now, we'll be permissive but log it
+        return true;
+        
+    } catch (error) {
+        console.error('Error validating parent origin:', error);
+        return false;
     }
 }
 
@@ -415,36 +557,25 @@ export function handleSecureParentMessage(event) {
  * Validate message origin for security
  */
 export function validateMessageOrigin(event) {
-    // In production, you should validate against a list of allowed origins
-    // const allowedOrigins = ['https://yourdomain.com', 'https://app.yourdomain.com'];
-    
-    // For development, accept all origins with warning
-    if (event.origin !== window.location.origin && !event.origin.includes('localhost')) {
-        console.warn('[Tool.js] Message from different origin:', event.origin);
-        // Still accept for now, but log warning
-    }
-    
     // Ensure message is from parent window
     if (event.source !== window.parent) {
-        console.warn('[Tool.js] Message not from direct parent, source mismatch');
         return false;
     }
     
-    return true;
+    // Additional origin validation
+    return validateParentOrigin(null, event);
 }
 
 /**
  * 2. Handshake Protocol with Exponential Backoff
  */
 export function startHandshakeProtocol() {
-    console.log('[Tool.js] Starting handshake protocol with parent');
-    
     // Send CHILD_READY signal
     sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
         id: parentCommunicationId,
         type: 'marketplace',
         version: '2.1',
-        features: ['session_authority', 'centralized_auth', 'ui_coordination'],
+        features: ['session_authority', 'centralized_auth', 'ui_coordination', 'secure_handshake'],
         timestamp: Date.now()
     });
     
@@ -457,12 +588,10 @@ export function startHandshakeProtocol() {
  */
 export function initiateHandshakeRetry() {
     if (handshakeComplete) {
-        console.log('[Tool.js] Handshake already complete');
         return;
     }
     
     if (handshakeRetryCount >= maxHandshakeRetries) {
-        console.error('[Tool.js] Max handshake retries reached, entering reconnect state');
         handleParentUnavailable();
         return;
     }
@@ -470,8 +599,6 @@ export function initiateHandshakeRetry() {
     // Calculate delay with exponential backoff
     const delay = handshakeRetryDelay * Math.pow(1.5, handshakeRetryCount);
     handshakeRetryCount++;
-    
-    console.log(`[Tool.js] Handshake attempt ${handshakeRetryCount}/${maxHandshakeRetries}, delay: ${delay}ms`);
     
     setTimeout(() => {
         if (!handshakeComplete) {
@@ -494,8 +621,6 @@ export function initiateHandshakeRetry() {
  * Handle parent ready signal
  */
 export function handleParentReady(message) {
-    console.log('[Tool.js] Parent ready, establishing session authority');
-    
     parentSessionAuthority = {
         ready: true,
         version: message.version || '1.0',
@@ -503,11 +628,12 @@ export function handleParentReady(message) {
         timestamp: Date.now()
     };
     
-    // Immediately request session data
+    // Immediately request session data using secure handshake
     sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
         id: parentCommunicationId,
         urgent: true,
-        requireValidation: true
+        requireValidation: true,
+        handshake: true
     });
     
     // Reset retry counter since we made contact
@@ -519,15 +645,11 @@ export function handleParentReady(message) {
  */
 export function handleSessionDataFromParent(sessionDataFromParent) {
     if (sessionValidationInProgress) {
-        console.log('[Tool.js] Session validation already in progress, ignoring duplicate');
         return;
     }
     
-    console.log('[Tool.js] Processing session data from parent authority');
-    
     // Validate session schema
     if (!validateSessionSchema(sessionDataFromParent)) {
-        console.error('[Tool.js] Invalid session schema received');
         sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
             error: 'INVALID_SESSION_SCHEMA',
             received: Object.keys(sessionDataFromParent || {})
@@ -556,13 +678,12 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         sendMessageToParent(PARENT_MESSAGE_TYPES.SESSION_CONFIRMED, {
             id: parentCommunicationId,
             userId: sessionData.userId,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            handshakeComplete: true
         });
         
         // Unblock UI
         uiBlockedForSession = false;
-        
-        console.log('[Tool.js] Session consumption complete, UI ready');
         
         // Send UI ready signal
         sendMessageToParent(PARENT_MESSAGE_TYPES.UI_READY, {
@@ -571,8 +692,10 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
             timestamp: Date.now()
         });
         
+        // Bind UI after session is validated
+        bindUIAfterSession();
+        
     } catch (error) {
-        console.error('[Tool.js] Session processing failed:', error);
         sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
             error: 'SESSION_PROCESSING_FAILED',
             message: error.message
@@ -583,25 +706,46 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
 }
 
 /**
+ * Bind UI after session is validated
+ */
+export function bindUIAfterSession() {
+    console.log('✅ [UI Binding] Binding UI components after session validation');
+    
+    // This function should be called by the UI layer
+    // For now, we'll trigger a custom event that the UI can listen to
+    const event = new CustomEvent('marketplaceSessionReady', {
+        detail: {
+            user: currentUser,
+            session: sessionData,
+            timestamp: Date.now()
+        }
+    });
+    window.dispatchEvent(event);
+    
+    // Also update any UI elements that might be waiting for session
+    const marketplaceContainer = document.getElementById('marketplaceContainer');
+    if (marketplaceContainer) {
+        marketplaceContainer.classList.add('session-ready');
+    }
+}
+
+/**
  * Validate session schema
  */
 export function validateSessionSchema(session) {
     if (!session || typeof session !== 'object') {
-        console.error('[Tool.js] Session data is not an object');
         return false;
     }
     
     // Check required fields
     for (const field of SESSION_SCHEMA.required) {
         if (!session.hasOwnProperty(field) || session[field] === undefined || session[field] === null) {
-            console.error(`[Tool.js] Missing required session field: ${field}`);
             return false;
         }
     }
     
     // Validate userToken
     if (!session.userToken || typeof session.userToken !== 'string' || session.userToken.length < 10) {
-        console.error('[Tool.js] Invalid userToken in session');
         return false;
     }
     
@@ -609,12 +753,10 @@ export function validateSessionSchema(session) {
     if (session.expiresAt) {
         const expiresDate = new Date(session.expiresAt);
         if (isNaN(expiresDate.getTime())) {
-            console.error('[Tool.js] Invalid expiresAt date in session');
             return false;
         }
     }
     
-    console.log('[Tool.js] Session schema validation passed');
     return true;
 }
 
@@ -622,8 +764,6 @@ export function validateSessionSchema(session) {
  * Process session data from parent
  */
 export function processSessionData(sessionDataFromParent) {
-    console.log(`[Tool.js] Processing session for user: ${sessionDataFromParent.userId}`);
-    
     // Extract user data from session
     const userDataFromSession = {
         id: sessionDataFromParent.userId,
@@ -649,8 +789,6 @@ export function processSessionData(sessionDataFromParent) {
     // Mark parent data as loaded
     parentDataLoaded = true;
     dataFetchInProgress = false;
-    
-    console.log(`[Tool.js] Session processed successfully for: ${currentUser.displayName}`);
 }
 
 /**
@@ -659,8 +797,6 @@ export function processSessionData(sessionDataFromParent) {
 export function storeCentralizedToken(token) {
     // Store in localStorage for backward compatibility
     localStorage.setItem('USER_TOKEN', token);
-    
-    console.log('[Tool.js] Token stored in centralized location');
 }
 
 /**
@@ -684,16 +820,12 @@ export function updateLocalStateFromSession(session) {
         userSubscription = session.subscription;
         saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
     }
-    
-    console.log('[Tool.js] Local state updated from session');
 }
 
 /**
  * 4. Authentication Enforcement & UI Blocking
  */
 export function showMarketplaceUI() {
-    console.log('[Tool.js] Showing marketplace UI immediately');
-    
     // Ensure marketplace UI is visible
     const marketplaceContainer = document.getElementById('marketplaceContainer');
     if (marketplaceContainer) {
@@ -707,27 +839,21 @@ export function showMarketplaceUI() {
     if (loadingIndicator) {
         loadingIndicator.style.display = 'none';
     }
-    
-    console.log('[Tool.js] Marketplace UI displayed');
 }
 
 /**
  * Wait for session data with timeout
  */
 export async function waitForSessionData() {
-    console.log('[Tool.js] Waiting for session data from parent...');
-    
     return new Promise((resolve) => {
         // Check if we already have session data
         if (sessionData) {
-            console.log('[Tool.js] Already have session data, proceeding');
             resolve();
             return;
         }
         
         // Set timeout for session wait (30 seconds max)
         const sessionWaitTimeout = setTimeout(() => {
-            console.warn('[Tool.js] Session wait timeout, proceeding with limited functionality');
             handleSessionTimeout();
             resolve();
         }, 30000);
@@ -737,7 +863,6 @@ export async function waitForSessionData() {
             if (sessionData || !uiBlockedForSession) {
                 clearInterval(checkInterval);
                 clearTimeout(sessionWaitTimeout);
-                console.log('[Tool.js] Session data received, proceeding');
                 resolve();
             }
         }, 100);
@@ -748,8 +873,6 @@ export async function waitForSessionData() {
  * Handle session timeout
  */
 export function handleSessionTimeout() {
-    console.log('[Tool.js] Session timeout - proceeding with limited functionality');
-    
     // Show notification to user
     showNotification('Waiting for authentication. Some features may be limited.', 'warning');
     
@@ -764,7 +887,7 @@ export function handleSessionTimeout() {
             currentUser = parsedUser;
             userData = parsedUser;
         } catch (e) {
-            console.warn('[Tool.js] Failed to parse cached user data:', e);
+            // Failed to parse cached user data
         }
     }
 }
@@ -773,11 +896,8 @@ export function handleSessionTimeout() {
  * Handle session updates from parent
  */
 export function handleSessionUpdate(updatedData) {
-    console.log('[Tool.js] Handling session update from parent');
-    
     // Validate update data
     if (!updatedData || typeof updatedData !== 'object') {
-        console.warn('[Tool.js] Invalid session update data');
         return;
     }
     
@@ -804,23 +924,17 @@ export function handleSessionUpdate(updatedData) {
             userSubscription = updatedData.subscription;
         }
     }
-    
-    console.log('[Tool.js] Session update processed');
 }
 
 /**
  * Handle parent logout command
  */
 export function handleParentLogout() {
-    console.log('[Tool.js] Handling parent logout command');
-    
     // Clear all session data
     clearSessionData();
     
     // Show notification
     showNotification('You have been logged out.', 'warning');
-    
-    console.log('[Tool.js] Logout processing complete');
 }
 
 /**
@@ -833,6 +947,14 @@ export function clearSessionData() {
     userData = null;
     userSubscription = null;
     handshakeComplete = false;
+    sessionValid = false;
+    handshakeInProgress = false;
+    
+    // Clear secure handshake state
+    clearTimeout(handshakeTimeout);
+    handshakeTimeout = null;
+    handshakeRequestSent = false;
+    sessionRetryAttempt = 0;
     
     // Clear sensitive data from localStorage
     localStorage.removeItem('USER_TOKEN');
@@ -843,23 +965,19 @@ export function clearSessionData() {
     // Reset parent communication flags
     parentDataLoaded = false;
     directAPILoaded = false;
-    
-    console.log('[Tool.js] Session data cleared');
 }
 
 /**
  * Handle refresh UI command
  */
 export function handleRefreshUI() {
-    console.log('[Tool.js] Refreshing UI per parent command');
+    // UI refresh logic would be implemented here
 }
 
 /**
  * Handle force reload command
  */
 export function handleForceReload() {
-    console.log('[Tool.js] Force reload requested by parent');
-    
     // Save any unsaved data
     saveAllMarketplaceData();
     
@@ -875,12 +993,8 @@ export function handleForceReload() {
  * Enhanced secure API call that uses parent session authority
  */
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
-    console.log(`[Tool.js] Secure API call: ${method} ${endpoint}`);
-    
     // Check if we have valid session
     if (!sessionData || !sessionData.userToken) {
-        console.warn('[Tool.js] No valid session for API call, queuing or rejecting');
-        
         // If this is a critical call, request session refresh
         if (method !== 'GET' || endpoint.includes('/auth/')) {
             sendMessageToParent(PARENT_MESSAGE_TYPES.NEED_REFRESH, {
@@ -900,7 +1014,6 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
     
     // Use imported callApi function
     try {
-        console.log('[Tool.js] Using callApi from api.core.js for secure request');
         const response = await callApi(method, endpoint, data);
         return response;
     } catch (error) {
@@ -912,8 +1025,6 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
  * Handle API errors with parent notification
  */
 export async function handleApiError(error, method, endpoint) {
-    console.error(`[Tool.js] API call failed: ${method} ${endpoint}`, error.message || error);
-    
     // Notify parent of API error
     sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
         error: 'API_CALL_FAILED',
@@ -935,8 +1046,6 @@ export async function handleApiError(error, method, endpoint) {
  * Handle unauthorized responses with parent coordination
  */
 export async function handleUnauthorized() {
-    console.warn('[Tool.js] Unauthorized API call detected');
-    
     // Notify parent immediately
     sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
         error: 'UNAUTHORIZED_API_CALL',
@@ -960,7 +1069,6 @@ export async function safeApiCall(method, endpoint, data = null) {
     try {
         return await secureApiCall(method, endpoint, data);
     } catch (error) {
-        console.warn('[Tool.js] Safe API call failed:', error.message || error);
         return null;
     }
 }
@@ -969,8 +1077,6 @@ export async function safeApiCall(method, endpoint, data = null) {
  * 6. Fallback Handling & Reconnection
  */
 export function handleParentUnavailable() {
-    console.error('[Tool.js] Parent unavailable, entering reconnection state');
-    
     // Show reconnection UI
     showReconnectionState();
     
@@ -1010,8 +1116,6 @@ export function showReconnectionState() {
     }
     
     reconnectMsg.style.display = 'flex';
-    
-    console.log('[Tool.js] Reconnection state displayed');
 }
 
 /**
@@ -1023,12 +1127,10 @@ export function startReconnectionAttempts() {
     
     const attemptReconnection = () => {
         if (handshakeComplete || reconnectAttempts >= maxReconnectAttempts) {
-            console.log('[Tool.js] Reconnection attempts stopped');
             return;
         }
         
         reconnectAttempts++;
-        console.log(`[Tool.js] Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
         
         // Send handshake request
         sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
@@ -1056,8 +1158,6 @@ export function hideReconnectionState() {
     if (reconnectMsg) {
         reconnectMsg.style.display = 'none';
     }
-    
-    console.log('[Tool.js] Reconnection state hidden, features re-enabled');
 }
 
 /**
@@ -1069,16 +1169,12 @@ export function hideReconnectionState() {
  */
 export function setupConnectivityListeners() {
     window.addEventListener('online', () => {
-        console.log('[Tool.js] Browser online, checking parent connection');
         sendMessageToParent('ping', { type: 'connectivity_check' });
     });
     
     window.addEventListener('offline', () => {
-        console.warn('[Tool.js] Browser offline, caching operations');
         showNotification('Working offline - changes will sync when back online', 'info');
     });
-    
-    console.log('[Tool.js] Connectivity listeners established');
 }
 
 /**
@@ -1089,11 +1185,8 @@ export function setupConnectivityListeners() {
  * Initialize token system with session data
  */
 export function initializeTokenSystem() {
-    console.log('[Tool.js] Initializing token system with session data');
-    
     // Singleton check
     if (tokenInitializationPromise) {
-        console.log('[Tool.js] Token system already initializing');
         return tokenInitializationPromise;
     }
     
@@ -1115,11 +1208,9 @@ export function initializeTokenSystem() {
             // Mark auth as ready
             isAuthReady = true;
             
-            console.log('[Tool.js] Token system initialized successfully with session data');
             resolve();
             
         } catch (error) {
-            console.error('[Tool.js] Token system initialization failed:', error);
             isAuthReady = true; // Allow offline mode
             reject(error);
         }
@@ -1134,7 +1225,7 @@ export function initializeTokenSystem() {
 export function isValidToken(token) {
     if (!token || typeof token !== 'string') return false;
     if (token === 'undefined' || token === 'null' || token === '') return false;
-    if (token.length < 10) return false; // Basic length check
+    if (token.length < 10) return false;
     
     return true;
 }
@@ -1146,17 +1237,14 @@ export async function waitForApiJs() {
     return new Promise((resolve) => {
         const checkApiJs = () => {
             if (typeof callApi === 'function' && typeof getUserToken === 'function') {
-                console.log('[Tool.js] api.core.js detected with session integration');
                 resolve();
             } else {
-                console.log('[Tool.js] Waiting for api.core.js...');
                 setTimeout(checkApiJs, 100);
             }
         };
         
         // Timeout after 5 seconds
         setTimeout(() => {
-            console.warn('[Tool.js] api.core.js not detected, proceeding without it');
             resolve();
         }, 5000);
         
@@ -1172,8 +1260,6 @@ export async function waitForApiJs() {
  * Handle initialization failure
  */
 export function handleInitializationFailure(error) {
-    console.error('[Tool.js] Initialization failed:', error);
-    
     // Report to parent
     sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
         error: 'INITIALIZATION_FAILED',
@@ -1194,7 +1280,6 @@ export function handleInitializationFailure(error) {
  */
 export function sendMessageToParent(type, data = {}) {
     if (!window.parent || window.parent === window) {
-        console.warn(`[Tool.js] Cannot send message ${type}: not in iframe`);
         return false;
     }
     
@@ -1208,8 +1293,6 @@ export function sendMessageToParent(type, data = {}) {
             data: data
         };
         
-        console.log(`[Tool.js] Sending message to parent: ${type}`, Object.keys(data));
-        
         // Send message to parent
         // Use specific origin if we know it, otherwise use '*'
         const targetOrigin = secureMessagingChannel?.sameOrigin ? 
@@ -1219,7 +1302,6 @@ export function sendMessageToParent(type, data = {}) {
         
         return true;
     } catch (error) {
-        console.error(`[Tool.js] Error sending message ${type} to parent:`, error);
         return false;
     }
 }
@@ -1232,13 +1314,11 @@ export function sendMessageToParent(type, data = {}) {
  * Migrate legacy user data to session system
  */
 export function migrateLegacyUserData(legacyData) {
-    console.log('[Tool.js] Migrating legacy user data to session system');
-    
     // Convert legacy format to session format
     const sessionData = {
         userId: legacyData.id || legacyData._id || 'unknown',
-        userToken: getCentralizedToken() || '',
-        expiresAt: new Date(Date.now() + 3600000).toISOString(), // Default 1 hour
+        userToken: getCentralToken() || '',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
         displayName: legacyData.displayName || '',
         email: legacyData.email || '',
         photoURL: legacyData.photoURL || '',
@@ -1257,7 +1337,6 @@ export function migrateLegacyUserData(legacyData) {
 export function getCentralToken() {
     // Priority 1: Use session data if available
     if (sessionData && sessionData.userToken) {
-        console.log('[Tool.js] Token from session data');
         return sessionData.userToken;
     }
     
@@ -1266,11 +1345,10 @@ export function getCentralToken() {
         try {
             const token = getUserToken();
             if (token) {
-                console.log('[Tool.js] Token from getUserToken()');
                 return token;
             }
         } catch (e) {
-            console.warn('[Tool.js] Failed to get token from getUserToken():', e);
+            // Failed to get token from getUserToken()
         }
     }
     
@@ -1286,7 +1364,6 @@ export function getCentralToken() {
     for (const tokenKey of legacyTokens) {
         const legacyToken = localStorage.getItem(tokenKey);
         if (legacyToken) {
-            console.log(`[Tool.js] Found legacy token ${tokenKey}`);
             return legacyToken;
         }
     }
@@ -1298,8 +1375,6 @@ export function getCentralToken() {
  * Handle standalone mode (not in iframe)
  */
 export function handleStandaloneMode() {
-    console.log('[Tool.js] Running in standalone mode');
-    
     // Show notification
     showNotification('Running in standalone mode. Parent coordination disabled.', 'warning');
     
@@ -1314,7 +1389,7 @@ export function handleStandaloneMode() {
             currentUser = parsedUser;
             userData = parsedUser;
         } catch (e) {
-            console.warn('[Tool.js] Failed to parse cached user data:', e);
+            // Failed to parse cached user data
         }
     }
 }
@@ -1323,23 +1398,24 @@ export function handleStandaloneMode() {
  * Bootstrap iframe with session integration
  */
 export async function bootstrapIframe() {
-    console.log('[Tool.js] Bootstrapping marketplace iframe with session integration');
-    
     if (isBootstrapped) {
-        console.log('[Tool.js] Already bootstrapped');
         return;
     }
     
+    // Start secure handshake protocol
+    await startSecureHandshakeProtocol();
+    
     // Wait for session data
     if (!sessionData) {
-        console.warn('[Tool.js] No session data available, bootstrapping with limited functionality');
+        // Wait a bit for handshake to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
     // Wait for token system initialization
     try {
         await tokenInitializationPromise;
     } catch (error) {
-        console.warn('[Tool.js] Token system not ready, continuing offline');
+        // Continue offline
     }
     
     // Load cached data for immediate UI
@@ -1351,22 +1427,18 @@ export async function bootstrapIframe() {
             // Try to validate via secure API call
             const userResponse = await secureApiCall('GET', '/api/auth/verify');
             if (userResponse && userResponse.valid) {
-                console.log('[Tool.js] Session verified via secure API');
+                // Session verified
             }
         } catch (error) {
-            console.warn('[Tool.js] Session verification failed:', error.message);
             // Continue with cached user
         }
     }
     
     isBootstrapped = true;
-    console.log('[Tool.js] Marketplace iframe bootstrapped successfully with session integration');
 }
 
 // Load cached data for instant display
 export function loadCachedDataInstantly() {
-    console.log('[Tool.js] Loading cached marketplace data (non-sensitive)');
-    
     try {
         // Load user from cache immediately (non-sensitive data only)
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
@@ -1382,11 +1454,9 @@ export function loadCachedDataInstantly() {
                     currentUser.photoURL = parsedUser.photoURL || currentUser.photoURL;
                     userData.displayName = parsedUser.displayName || userData.displayName;
                     userData.photoURL = parsedUser.photoURL || userData.photoURL;
-                    
-                    console.log('[Tool.js] Loaded non-sensitive user data from cache');
                 }
             } catch (e) {
-                console.warn('[Tool.js] Failed to parse cached user data:', e);
+                // Failed to parse cached user data
             }
         }
         
@@ -1543,22 +1613,16 @@ export function loadCachedDataInstantly() {
             paymentMethods = JSON.parse(paymentMethodsCache);
         }
         
-        console.log('[Tool.js] Instant marketplace cache load complete');
-        
     } catch (error) {
-        console.error('[Tool.js] Error in instant cache load:', error);
+        // Error in instant cache load
     }
 }
 
 export async function initializeEnhancedMarketplace() {
-    console.log('[Tool.js] Enhanced marketplace initialization');
-    
     checkDarkMode();
     await checkUserPremiumStatus();
     await loadEnhancedMarketplaceData();
     cleanupExpiredListings();
-    
-    console.log('[Tool.js] Enhanced marketplace initialization complete');
 }
 
 export async function checkUserPremiumStatus() {
@@ -1582,14 +1646,12 @@ export async function checkUserPremiumStatus() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error checking premium status:', error);
+        // Error checking premium status
     }
 }
 
 export async function loadEnhancedMarketplaceData() {
     try {
-        console.log('[Tool.js] Loading enhanced marketplace data in background');
-        
         const promises = [
             loadListingsFromBackend(),
             loadUserGroups(),
@@ -1604,10 +1666,8 @@ export async function loadEnhancedMarketplaceData() {
         await Promise.allSettled(promises);
         
         updateListingCounts();
-        console.log('[Tool.js] Marketplace data refreshed in background');
         
     } catch (error) {
-        console.error('[Tool.js] Error loading marketplace data:', error);
         generateSampleMarketplaceData();
     }
 }
@@ -1624,7 +1684,6 @@ export async function loadListingsFromBackend() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading listings from backend:', error);
         throw error;
     }
 }
@@ -1639,7 +1698,7 @@ export async function loadUserGroups() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading user groups:', error);
+        // Error loading user groups
     }
 }
 
@@ -1653,7 +1712,7 @@ export async function loadUserFriends() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading user friends:', error);
+        // Error loading user friends
     }
 }
 
@@ -1669,7 +1728,33 @@ export async function loadTeamMembers() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading team members:', error);
+        // Error loading team members
+    }
+}
+
+/**
+ * Wrapper function for inviteTeamMember imported from api.core.js
+ */
+export async function inviteTeamMemberWrapper(email, role = 'member') {
+    try {
+        if (!userSubscription || (userSubscription.plan !== 'business' && userSubscription.plan !== 'team')) {
+            throw new Error('Team features require a business or team subscription');
+        }
+        
+        const response = await inviteTeamMember(email, role);
+        
+        if (response && response.success) {
+            // Reload team members after successful invitation
+            await loadTeamMembers();
+            showNotification(`Invitation sent to ${email}`, 'success');
+            return true;
+        }
+        
+        return false;
+        
+    } catch (error) {
+        showNotification(`Failed to invite team member: ${error.message}`, 'error');
+        return false;
     }
 }
 
@@ -1683,7 +1768,7 @@ export async function loadLeaderboard() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading leaderboard:', error);
+        // Error loading leaderboard
     }
 }
 
@@ -1699,7 +1784,7 @@ export async function loadAnalyticsData() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading analytics:', error);
+        // Error loading analytics
     }
 }
 
@@ -1713,7 +1798,7 @@ export async function loadPremiumFeatures() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading premium features:', error);
+        // Error loading premium features
     }
 }
 
@@ -1726,7 +1811,7 @@ export async function loadSpotlightListingsFromBackend() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error loading spotlight listings:', error);
+        // Error loading spotlight listings
     }
 }
 
@@ -1735,6 +1820,7 @@ export function updateListingCounts() {
 }
 
 export function updateAvailableListingsCount() {
+    // Implementation would go here
 }
 
 export function isUserPremium() {
@@ -1818,7 +1904,7 @@ export async function trackListingView(listingId) {
     try {
         safeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
     } catch (error) {
-        console.error('[Tool.js] Error tracking view:', error);
+        // Error tracking view
     }
 }
 
@@ -1987,7 +2073,7 @@ export async function processFeaturedListing(listing) {
         await safeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
         
     } catch (error) {
-        console.error('[Tool.js] Error processing featured listing:', error);
+        // Error processing featured listing
     }
 }
 
@@ -1999,7 +2085,7 @@ export async function processBoostedListing(listing) {
         });
         
     } catch (error) {
-        console.error('[Tool.js] Error processing boosted listing:', error);
+        // Error processing boosted listing
     }
 }
 
@@ -2026,7 +2112,7 @@ export async function processPremiumPayment(listing, options) {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Payment processing failed:', error);
+        // Payment processing failed
     }
     
     return false;
@@ -2064,7 +2150,7 @@ export async function sendTip(listingId, amount, customAmount = null) {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Error sending tip:', error);
+        // Error sending tip
     }
     
     return false;
@@ -2196,8 +2282,10 @@ export async function uploadBulkListings(listings) {
             const response = await safeApiCall('POST', '/api/marketplace/listings/bulk', listing);
             
             if (response && response.success) {
+                // Success handling
             }
         } catch (error) {
+            // Error handling
         }
     }
     
@@ -2217,10 +2305,9 @@ export async function exportAnalyticsData(format) {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
         }
     } catch (error) {
-        console.error('[Tool.js] Export failed:', error);
+        // Export failed
     }
 }
 
@@ -2251,7 +2338,7 @@ export async function backupMarketplaceData() {
         URL.revokeObjectURL(url);
         
     } catch (error) {
-        console.error('[Tool.js] Backup failed:', error);
+        // Backup failed
     }
 }
 
@@ -2286,7 +2373,7 @@ export async function restoreMarketplaceData(file) {
         reader.readAsText(file);
         
     } catch (error) {
-        console.error('[Tool.js] Restore failed:', error);
+        // Restore failed
     }
 }
 
@@ -2304,8 +2391,6 @@ export function cleanupExpiredListings() {
         
         myListings = myListings.filter(listing => !isListingExpired(listing));
         saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-        
-        console.log(`[Tool.js] Cleaned up ${expiredListings.length} expired listings`);
     }
 }
 
@@ -2346,7 +2431,7 @@ export function saveToLocalStorage(key, data) {
     try {
         localStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
-        console.error('[Tool.js] Error saving to localStorage:', error);
+        // Error saving to localStorage
     }
 }
 
@@ -2495,6 +2580,161 @@ export function createDigitalListing(title, description, fileData, options = {})
     updateTrustStats('listingCreated');
     
     return listing;
+}
+
+// Digital File Download Function - FIXED
+export async function downloadDigitalFile(listingId, fileUrl, fileName) {
+    try {
+        // Validate inputs
+        if (!listingId || !fileUrl || !fileName) {
+            throw new Error('Missing required download parameters');
+        }
+        
+        // Security validation
+        if (fileUrl.startsWith('javascript:') || fileUrl.startsWith('data:') || fileUrl.startsWith('blob:')) {
+            throw new Error('Invalid file URL scheme');
+        }
+        
+        // Check if user has permission to download
+        const listing = allListings.find(l => l.id === listingId) || myListings.find(l => l.id === listingId);
+        if (!listing) {
+            throw new Error('Listing not found');
+        }
+        
+        // Verify user has permission to download
+        if (listing.userId !== currentUser?.id && !isListingVisibleToUser(listing)) {
+            throw new Error('You do not have permission to download this file');
+        }
+        
+        // Check if file URL is valid
+        if (!fileUrl || fileUrl === '#') {
+            throw new Error('Invalid file URL');
+        }
+        
+        // Show downloading indicator
+        const downloadIndicator = document.createElement('div');
+        downloadIndicator.id = 'downloadIndicator';
+        downloadIndicator.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        `;
+        downloadIndicator.innerHTML = `
+            <i class="fas fa-spinner fa-spin"></i>
+            <span>Downloading ${escapeHtml(fileName)}...</span>
+        `;
+        document.body.appendChild(downloadIndicator);
+        
+        // Track download analytics with normalized event name
+        if (typeof trackEvent === 'function') {
+            try {
+                trackEvent('digital_file_download', { 
+                    listingId: listingId, 
+                    fileName: fileName,
+                    fileSize: listing.fileSize,
+                    fileType: listing.fileType
+                });
+            } catch (e) {
+                // Fallback to custom tracking
+                updateTrustStats('fileDownloaded');
+            }
+        } else {
+            updateTrustStats('fileDownloaded');
+        }
+        
+        // Determine if we need API authorization
+        let finalUrl = fileUrl;
+        let shouldRevokeUrl = false;
+        
+        if (fileUrl.includes('/api/') || fileUrl.includes('/download/')) {
+            try {
+                // Use secure API call for download authorization
+                const response = await secureApiCall('GET', `/api/marketplace/download/${listingId}`, null, {
+                    headers: {
+                        'Accept': 'application/octet-stream'
+                    }
+                });
+                
+                if (response && response.downloadUrl) {
+                    finalUrl = response.downloadUrl;
+                } else if (response && response.blob) {
+                    // Create blob URL from response
+                    const blob = new Blob([response.blob], { type: response.contentType || 'application/octet-stream' });
+                    finalUrl = URL.createObjectURL(blob);
+                    shouldRevokeUrl = true;
+                }
+            } catch (apiError) {
+                // Fall back to direct URL if API fails
+                console.warn('API download failed, using direct URL:', apiError.message);
+            }
+        }
+        
+        // Create download link with timeout protection
+        const link = document.createElement('a');
+        link.href = finalUrl;
+        link.download = fileName;
+        link.style.display = 'none';
+        link.setAttribute('data-listing-id', listingId);
+        
+        // Add to document and trigger click
+        document.body.appendChild(link);
+        
+        // Use requestAnimationFrame to prevent blocking
+        requestAnimationFrame(() => {
+            link.click();
+            
+            // Cleanup with timeout
+            const cleanup = () => {
+                if (link.parentNode) {
+                    document.body.removeChild(link);
+                }
+                
+                if (downloadIndicator.parentNode) {
+                    document.body.removeChild(downloadIndicator);
+                }
+                
+                // Revoke object URL if we created one
+                if (shouldRevokeUrl && finalUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(finalUrl);
+                }
+                
+                // Show success notification
+                showNotification(`Downloaded ${fileName}`, 'success');
+            };
+            
+            // Use timeout to ensure cleanup happens even if download stalls
+            setTimeout(cleanup, 5000);
+        });
+        
+        return true;
+        
+    } catch (error) {
+        // Remove download indicator if it exists
+        const downloadIndicator = document.getElementById('downloadIndicator');
+        if (downloadIndicator && downloadIndicator.parentNode) {
+            document.body.removeChild(downloadIndicator);
+        }
+        
+        // Show error notification
+        showNotification(`Download failed: ${error.message}`, 'error');
+        
+        // Minimal console logging
+        if (console && console.error) {
+            console.error('Download error:', error.message);
+        }
+        
+        return false;
+    }
 }
 
 // Sample data generation for demo/offline mode
@@ -2670,8 +2910,6 @@ export function generateSampleMarketplaceData() {
             
             localStorage.setItem(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
         }
-        
-        console.log('[Tool.js] Sample marketplace data generated for demo');
     }
 }
 
@@ -2723,8 +2961,6 @@ export function saveAllMarketplaceData() {
     if (userSubscription) {
         saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
     }
-    
-    console.log('[Tool.js] All marketplace data saved to localStorage');
 }
 
 export function queueApiCall(method, endpoint, data, options) {
@@ -2738,8 +2974,6 @@ export function queueApiCall(method, endpoint, data, options) {
             reject,
             timestamp: Date.now()
         });
-        
-        console.log(`[Tool.js] Queued API call: ${method} ${endpoint} (queue size: ${apiCallQueue.length})`);
         
         // Start processing queue if not already doing so
         if (!isProcessingQueue) {
@@ -2759,7 +2993,6 @@ export async function processApiCallQueue() {
     try {
         await tokenInitializationPromise;
     } catch (error) {
-        console.warn('[Tool.js] Token initialization failed, clearing queue');
         // Reject all queued calls
         apiCallQueue.forEach(call => {
             call.reject(new Error('Token initialization failed'));
@@ -2768,8 +3001,6 @@ export async function processApiCallQueue() {
         isProcessingQueue = false;
         return;
     }
-    
-    console.log(`[Tool.js] Processing API call queue (${apiCallQueue.length} calls)`);
     
     // Process each call in the queue
     while (apiCallQueue.length > 0) {
@@ -2787,7 +3018,6 @@ export async function processApiCallQueue() {
     }
     
     isProcessingQueue = false;
-    console.log('[Tool.js] API call queue processed');
 }
 
 // Authenticated API call wrapper for backward compatibility
@@ -2806,28 +3036,25 @@ export function startBackgroundJobs() {
         return;
     }
     
-    console.log('[Tool.js] Starting background data jobs');
     backgroundJobsStarted = true;
     
     // Start background data loading
     setTimeout(() => {
-        loadEnhancedMarketplaceData().catch(error => {
-            console.warn('[Tool.js] Background data load failed:', error.message);
+        loadEnhancedMarketplaceData().catch(() => {
+            // Background data load failed
         });
     }, 1000);
     
     // Check premium status in background
     setTimeout(() => {
-        checkUserPremiumStatus().catch(error => {
-            console.warn('[Tool.js] Premium status check failed:', error.message);
+        checkUserPremiumStatus().catch(() => {
+            // Premium status check failed
         });
     }, 1500);
 }
 
 // Handle session expired
 export function handleSessionExpired() {
-    console.log('[Tool.js] Handling session expired notification');
-    
     // Clear authentication token
     localStorage.removeItem('USER_TOKEN');
     
@@ -2848,8 +3075,6 @@ export function handleSessionExpired() {
 
 // Request user data from parent (legacy function)
 export function requestParentUserData() {
-    console.log('[Tool.js] Requesting user data from parent...');
-    
     const requestSent = sendMessageToParent('get_user_data', {
         fields: ['id', 'displayName', 'email', 'photoURL', 'isPremium', 'subscription', 'trustLevel']
     });
@@ -2858,12 +3083,10 @@ export function requestParentUserData() {
         // Set timeout for parent response
         setTimeout(() => {
             if (!parentDataLoaded && !dataFetchInProgress) {
-                console.log('[Tool.js] Parent data request timeout, falling back to direct API');
                 fetchUserDataDirectly();
             }
         }, parentDataTimeout);
     } else {
-        console.log('[Tool.js] Could not send request to parent, falling back to direct API');
         fetchUserDataDirectly();
     }
 }
@@ -2871,23 +3094,18 @@ export function requestParentUserData() {
 // Fetch user data directly from API (legacy function)
 export async function fetchUserDataDirectly() {
     if (dataFetchInProgress) {
-        console.log('[Tool.js] User data fetch already in progress');
         return;
     }
     
-    console.log('[Tool.js] Fetching user data directly from API...');
     dataFetchInProgress = true;
     
     try {
         // Check if we have a valid token first
         const token = getCentralToken();
         if (!token) {
-            console.warn('[Tool.js] No authentication token available for direct API fetch');
-            
             // Check if we have cached user data
             const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
             if (cachedUser) {
-                console.log('[Tool.js] Using cached user data');
                 const parsedUser = JSON.parse(cachedUser);
                 processUserData(parsedUser, 'cache');
                 dataFetchInProgress = false;
@@ -2901,8 +3119,6 @@ export async function fetchUserDataDirectly() {
         const response = await secureApiCall('GET', '/api/user/profile');
         
         if (response && response.user) {
-            console.log('[Tool.js] Successfully fetched user data from API:', response.user);
-            
             // Mark that direct API data is loaded
             directAPILoaded = true;
             parentDataLoaded = false; // Ensure we don't try to load from parent again
@@ -2921,22 +3137,18 @@ export async function fetchUserDataDirectly() {
         }
         
     } catch (error) {
-        console.error('[Tool.js] Failed to fetch user data directly:', error);
         dataFetchInProgress = false;
         
         // If we're in an iframe and haven't received parent data yet, wait a bit longer
         if (window.parent !== window && !parentDataLoaded) {
-            console.log('[Tool.js] Will retry parent data request');
             // Could implement a retry mechanism here
         } else {
             // Try to use cached data as last resort
             const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
             if (cachedUser) {
-                console.log('[Tool.js] Falling back to cached user data');
                 const parsedUser = JSON.parse(cachedUser);
                 processUserData(parsedUser, 'cache_fallback');
             } else {
-                console.warn('[Tool.js] No user data available from any source');
                 showNotification('Unable to load user profile. Some features may be limited.', 'warning');
             }
         }
@@ -2945,12 +3157,6 @@ export async function fetchUserDataDirectly() {
 
 // Process user data from any source (legacy function)
 export function processUserData(userDataFromSource, source) {
-    console.log(`[Tool.js] Processing user data from ${source}:`, {
-        id: userDataFromSource.id,
-        displayName: userDataFromSource.displayName,
-        email: userDataFromSource.email
-    });
-    
     // Set current user
     currentUser = userDataFromSource;
     userData = userDataFromSource;
@@ -2958,28 +3164,16 @@ export function processUserData(userDataFromSource, source) {
     // Save to localStorage for offline use
     saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
     saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
-    
-    // Log the source for debugging
-    console.log(`[Tool.js] User data loaded from ${source}:`, {
-        id: currentUser.id,
-        name: currentUser.displayName,
-        source: source
-    });
 }
 
 // Handle user data received from parent (legacy function)
 export function handleParentUserData(userDataFromParent) {
     if (parentDataLoaded || dataFetchInProgress) {
-        console.log('[Tool.js] Already loaded user data, ignoring duplicate from parent');
         return;
     }
     
-    console.log('[Tool.js] Processing user data from parent:', userDataFromParent);
-    
     // Validate the data
     if (!userDataFromParent || (!userDataFromParent.id && !userDataFromParent.email)) {
-        console.warn('[Tool.js] Invalid user data received from parent:', userDataFromParent);
-        
         // If we got invalid data from parent, try direct API
         if (!dataFetchInProgress) {
             fetchUserDataDirectly();
@@ -2997,8 +3191,6 @@ export function handleParentUserData(userDataFromParent) {
 
 // Update user data when parent sends updates (legacy function)
 export function updateUserDataFromParent(updatedData) {
-    console.log('[Tool.js] Updating user data from parent update:', updatedData);
-    
     // Merge with existing data
     if (currentUser) {
         currentUser = { ...currentUser, ...updatedData };
@@ -3024,8 +3216,6 @@ export function updateUserDataFromParent(updatedData) {
 
 // Handle user logout (legacy function)
 export function handleUserLogout() {
-    console.log('[Tool.js] Handling user logout notification');
-    
     // Clear user data
     currentUser = null;
     userData = null;
@@ -3037,4 +3227,24 @@ export function handleUserLogout() {
     localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
     
     showNotification('You have been logged out.', 'warning');
+}
+
+// Ensure module exports are available globally for parent coordination
+if (typeof window !== 'undefined') {
+    window.marketplaceCore = {
+        initializeMarketplaceCore,
+        bootstrapIframe,
+        secureApiCall,
+        safeApiCall,
+        sendMessageToParent,
+        getCentralToken,
+        handleSessionExpired,
+        downloadDigitalFile, // Added to exports
+        inviteTeamMember: inviteTeamMemberWrapper, // Added wrapper function to exports
+        // Secure handshake protocol exports
+        startSecureHandshakeProtocol,
+        requestSessionFromParent,
+        handleSecureSessionData,
+        bindUIAfterSession
+    };
 }

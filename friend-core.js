@@ -10,10 +10,9 @@ import {
     getCurrentUser as getCurrentUserFromAPI, 
     logout,
     getValidToken,
-    apiCallWithRetry,
+    apiCallWithRetry as originalApiCallWithRetry,
     escapeHtml,
     formatTimeAgo,
-    formatDate,
     getTrustScoreClass,
     showNotification,
     navigateToChat,
@@ -24,7 +23,344 @@ import {
 import { getMessages } from './js/api.messages.js';
 
 // =============================================
-// PARENT COORDINATION SYSTEM
+// ENHANCED HANDSHAKE PROTOCOL VARIABLES
+// =============================================
+
+let handshakeInProgress = false;
+let sessionValid = false;
+let handshakeTimeout = null;
+let pendingSessionRequest = false;
+
+// =============================================
+// API CALL WITH RETRY IMPLEMENTATION
+// =============================================
+
+export const apiCallWithRetry = async (url, options = {}, maxRetries = 3) => {
+    const baseDelay = 1000; // 1 second base delay
+    let lastError;
+    
+    // Validate maxRetries to prevent infinite loops
+    if (maxRetries < 0) maxRetries = 0;
+    if (maxRetries > 10) maxRetries = 10; // Safety cap
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const fetchOptions = {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            };
+            
+            // Add authorization if token exists
+            const token = getValidToken();
+            if (token && !fetchOptions.headers.Authorization) {
+                fetchOptions.headers.Authorization = `Bearer ${token}`;
+            }
+            
+            const response = await secureFetch(url, fetchOptions);
+            
+            if (!response.ok) {
+                if (response.status === 401) {
+                    const event = new CustomEvent('knectaTokenExpired');
+                    window.dispatchEvent(event);
+                    throw new Error('Session expired');
+                }
+                
+                // Normalize API failures
+                const errorMessage = await getErrorMessageFromResponse(response);
+                throw new Error(`API error: ${response.status} - ${errorMessage}`);
+            }
+            
+            const data = await response.json();
+            return data;
+            
+        } catch (error) {
+            lastError = error;
+            
+            // Don't retry on session expiration or client errors (4xx except 429)
+            if (error.message === 'Session expired' || 
+                (error.message.includes('API error: 4') && !error.message.includes('API error: 429'))) {
+                throw error;
+            }
+            
+            if (attempt === maxRetries) {
+                break;
+            }
+            
+            // Exponential backoff with jitter
+            const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 500;
+            
+            // Only show notification on first failure
+            if (attempt === 0) {
+                showNotification('Connection issue, retrying...', 'warning');
+            }
+            
+            // Non-blocking delay
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+    
+    // Throw normalized error
+    const normalizedError = new Error(
+        lastError ? `API request failed after ${maxRetries} retries: ${lastError.message}` : 
+                    'API request failed after retries'
+    );
+    normalizedError.originalError = lastError;
+    normalizedError.retries = maxRetries;
+    throw normalizedError;
+};
+
+// Helper function to extract error message from response
+async function getErrorMessageFromResponse(response) {
+    try {
+        const errorText = await response.text();
+        if (errorText) {
+            try {
+                const errorJson = JSON.parse(errorText);
+                return errorJson.message || errorJson.error || errorText.substring(0, 100);
+            } catch {
+                return errorText.substring(0, 100);
+            }
+        }
+    } catch {
+        // Fallback to status text
+    }
+    return response.statusText || 'Unknown error';
+}
+
+// =============================================
+// ENHANCED SECURE HANDSHAKE PROTOCOL
+// =============================================
+
+export function requestSessionFromParent() {
+    if (handshakeInProgress || pendingSessionRequest) {
+        return;
+    }
+    
+    handshakeInProgress = true;
+    pendingSessionRequest = true;
+    sessionValid = false;
+    
+    // Only log once
+    console.log('⏳ [Friend Page] Waiting for session from parent...');
+    
+    // Clear any existing timeout
+    if (handshakeTimeout) {
+        clearTimeout(handshakeTimeout);
+    }
+    
+    // Send secure request to parent
+    try {
+        const message = {
+            type: 'REQUEST_SESSION',
+            source: 'friend.html',
+            timestamp: Date.now(),
+            version: '2.0',
+            requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            handshake: true
+        };
+        
+        // Send to parent with dynamic origin handling
+        const parentOrigin = window.parent === window ? '*' : 
+                           (window.parent.location && window.parent.location.origin) || '*';
+        
+        window.parent.postMessage(message, parentOrigin);
+        
+        // Set timeout for handshake response
+        handshakeTimeout = setTimeout(() => {
+            if (!sessionValid) {
+                handshakeInProgress = false;
+                pendingSessionRequest = false;
+                console.log('❌ [Friend Page] Session request timeout. Will retry once.');
+                
+                // Single retry as requested
+                setTimeout(() => {
+                    if (!sessionValid) {
+                        requestSessionFromParent();
+                    }
+                }, 2000);
+            }
+        }, 5000);
+        
+    } catch (error) {
+        console.error('[Friend Page] Error sending session request:', error);
+        handshakeInProgress = false;
+        pendingSessionRequest = false;
+    }
+}
+
+// Enhanced message handler for secure handshake
+function handleEnhancedParentMessage(event) {
+    // Security: Accept messages from:
+    // 1. Current origin
+    // 2. Parent origin (if available)
+    // 3. Local development origins
+    const acceptableOrigins = [
+        window.location.origin,
+        'http://127.0.0.1:5500',
+        'http://localhost:5500',
+        'http://localhost',
+        'http://127.0.0.1'
+    ];
+    
+    // Add parent origin if available and different
+    if (window.parent !== window && window.parent.location) {
+        const parentOrigin = window.parent.location.origin;
+        if (parentOrigin && !acceptableOrigins.includes(parentOrigin)) {
+            acceptableOrigins.push(parentOrigin);
+        }
+    }
+    
+    // Check if origin is acceptable
+    if (!acceptableOrigins.includes(event.origin)) {
+        console.warn('[Friend Page] Message from unknown origin rejected:', event.origin);
+        return;
+    }
+    
+    const data = event.data;
+    if (!data || !data.type || data.source !== 'parent') {
+        return;
+    }
+    
+    // Only log once per message type
+    if (data.type === 'SESSION_DATA' && !sessionValid) {
+        console.log('✅ [Friend Page] Received SESSION_DATA from parent');
+    }
+    
+    switch (data.type) {
+        case 'SESSION_DATA':
+            handleEnhancedSessionData(data);
+            break;
+            
+        case 'HANDSHAKE_ACK':
+            console.log('✅ [Friend Page] Handshake acknowledged by parent');
+            break;
+            
+        case 'PARENT_READY':
+            console.log('✅ [Friend Page] Parent is ready');
+            if (!sessionValid && !handshakeInProgress) {
+                requestSessionFromParent();
+            }
+            break;
+    }
+}
+
+function handleEnhancedSessionData(data) {
+    // Validate session data structure
+    if (!data.token || !data.user) {
+        console.log('❌ [Friend Page] Received invalid session from parent');
+        handshakeInProgress = false;
+        pendingSessionRequest = false;
+        return;
+    }
+    
+    // Validate token format
+    if (typeof data.token !== 'string' || data.token.trim().length === 0) {
+        console.log('❌ [Friend Page] Invalid token format');
+        handshakeInProgress = false;
+        pendingSessionRequest = false;
+        return;
+    }
+    
+    // Validate user object
+    if (!data.user || typeof data.user !== 'object' || !data.user.id) {
+        console.log('❌ [Friend Page] Invalid user data');
+        handshakeInProgress = false;
+        pendingSessionRequest = false;
+        return;
+    }
+    
+    // Source verification
+    if (data.verification && data.verification !== 'knecta_secure_2024') {
+        console.warn('[Friend Page] Session source verification mismatch');
+        // Continue anyway for backward compatibility
+    }
+    
+    // Mark as valid
+    sessionValid = true;
+    handshakeInProgress = false;
+    pendingSessionRequest = false;
+    
+    // Clear timeout
+    if (handshakeTimeout) {
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = null;
+    }
+    
+    console.log('✅ [Friend Page] Session received successfully');
+    
+    // Update global state
+    updateGlobalStateFromSession(data);
+    
+    // Bind UI only after session is validated
+    bindUIAfterSession();
+}
+
+function updateGlobalStateFromSession(sessionData) {
+    // Update dataSource
+    dataSource.source = 'parent';
+    dataSource.userData = sessionData.user;
+    dataSource.token = sessionData.token;
+    dataSource.fetched = true;
+    dataSource.parentSessionReceived = true;
+    
+    // Update current user
+    currentUser = sessionData.user;
+    userData = currentUser;
+    
+    // Update UI
+    updateUIWithUserData(sessionData.user);
+    updateDataSourceIndicator('parent');
+    
+    // Initialize main functionality
+    initializeMainFunctionality();
+    
+    // Dispatch event for other components
+    const event = new CustomEvent('parentSessionReady', {
+        detail: {
+            session: {
+                token: sessionData.token,
+                user: sessionData.user,
+                expiresAt: sessionData.expiresAt,
+                issuedAt: sessionData.issuedAt
+            },
+            source: 'enhanced_handshake',
+            timestamp: Date.now()
+        }
+    });
+    window.dispatchEvent(event);
+}
+
+function bindUIAfterSession() {
+    // Only bind UI after session is validated
+    if (!sessionValid) {
+        console.log('⚠️ [Friend Page] Cannot bind UI - session not validated');
+        return;
+    }
+    
+    console.log('✅ [Friend Page] Binding UI after session validation');
+    
+    // Call existing UI binding functions
+    if (typeof initializeMainFunctionality === 'function') {
+        initializeMainFunctionality();
+    }
+    
+    // Start data loading
+    if (typeof startParallelDataLoading === 'function') {
+        setTimeout(startParallelDataLoading, 100);
+    }
+    
+    // Update UI sections
+    if (typeof updateCurrentSection === 'function') {
+        setTimeout(updateCurrentSection, 200);
+    }
+}
+
+// =============================================
+// PARENT COORDINATION SYSTEM (UPDATED)
 // =============================================
 
 export const ParentCoordinator = {
@@ -35,7 +371,7 @@ export const ParentCoordinator = {
         maxRetries: 10,
         retryBaseDelay: 100,
         sessionExpiry: 30 * 60 * 1000,
-        debug: true
+        debug: false
     },
     
     // State
@@ -67,18 +403,18 @@ export const ParentCoordinator = {
         }
         
         this.state.initializationLock = true;
-        this.log('Starting parent coordination system');
         
         try {
             await this.detectParent();
-            this.bindMessageHandlers();
-            this.initiateHandshake();
+            this.bindEnhancedMessageHandlers();
             this.setupReconnectionMonitor();
             
-            this.log('Parent coordination system initialized');
+            // Start enhanced handshake protocol
+            setTimeout(() => {
+                requestSessionFromParent();
+            }, 100);
             
         } catch (error) {
-            this.logError('Parent coordination initialization failed:', error);
             this.handleParentUnavailable();
         }
     },
@@ -86,10 +422,7 @@ export const ParentCoordinator = {
     // Detect parent window
     detectParent: function() {
         return new Promise((resolve, reject) => {
-            this.log('Detecting parent window...');
-            
             if (window.parent === window || !window.parent) {
-                this.log('No parent window detected');
                 this.state.parentDetected = false;
                 reject(new Error('Parent window not available'));
                 return;
@@ -105,11 +438,9 @@ export const ParentCoordinator = {
                 
                 this.state.parentDetected = true;
                 this.state.parentOrigin = parentOrigin;
-                this.log(`Parent detected at origin: ${parentOrigin}`);
                 resolve();
                 
             } catch (error) {
-                this.log('Cross-origin parent detected (restricted access)');
                 this.state.parentDetected = true;
                 this.state.parentOrigin = '*';
                 resolve();
@@ -117,15 +448,16 @@ export const ParentCoordinator = {
         });
     },
     
-    // Bind message handlers for secure communication
-    bindMessageHandlers: function() {
+    // Bind enhanced message handlers
+    bindEnhancedMessageHandlers: function() {
         if (this.state.messageHandlersBound) {
-            this.log('Message handlers already bound');
             return;
         }
         
-        this.log('Binding message handlers');
+        // Add enhanced message handler
+        window.addEventListener('message', handleEnhancedParentMessage, false);
         
+        // Keep existing handlers for compatibility
         window.addEventListener('message', this.handleParentMessage.bind(this), false);
         
         window.addEventListener('knectaAuthReady', this.handleAuthReady.bind(this));
@@ -133,13 +465,11 @@ export const ParentCoordinator = {
         window.addEventListener('knectaAuthError', this.handleAuthError.bind(this));
         
         this.state.messageHandlersBound = true;
-        this.log('Message handlers bound successfully');
     },
     
-    // Handle messages from parent window
+    // Handle messages from parent window (compatibility layer)
     handleParentMessage: function(event) {
         if (this.config.parentOrigin !== '*' && event.origin !== this.config.parentOrigin) {
-            this.log(`Ignoring message from unauthorized origin: ${event.origin}`);
             return;
         }
         
@@ -147,8 +477,6 @@ export const ParentCoordinator = {
         if (!data || !data.type) {
             return;
         }
-        
-        this.log(`Received message from parent: ${data.type}`, data);
         
         switch (data.type) {
             case 'SESSION_DATA':
@@ -195,17 +523,15 @@ export const ParentCoordinator = {
     // Handshake Protocol
     initiateHandshake: function() {
         if (!this.state.parentDetected) {
-            this.log('Cannot initiate handshake: parent not detected');
             return;
         }
-        
-        this.log('Initiating handshake with parent');
         
         this.sendToParent({
             type: 'CHILD_READY',
             source: 'friend.html',
             timestamp: Date.now(),
-            version: '1.0'
+            version: '1.0',
+            sequenceId: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         });
         
         this.requestSessionWithRetry();
@@ -215,7 +541,6 @@ export const ParentCoordinator = {
     requestSessionWithRetry: function() {
         if (this.state.sessionReceived || this.state.retryCount >= this.config.maxRetries) {
             if (this.state.retryCount >= this.config.maxRetries) {
-                this.log('Max retries reached for session request');
                 this.handleParentUnavailable();
             }
             return;
@@ -226,13 +551,13 @@ export const ParentCoordinator = {
         setTimeout(() => {
             if (!this.state.sessionReceived) {
                 this.state.retryCount++;
-                this.log(`Requesting session (attempt ${this.state.retryCount})`);
                 
                 this.sendToParent({
                     type: 'REQUEST_SESSION',
                     source: 'friend.html',
                     timestamp: Date.now(),
-                    retryCount: this.state.retryCount
+                    retryCount: this.state.retryCount,
+                    sequenceId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
                 });
                 
                 this.requestSessionWithRetry();
@@ -242,7 +567,6 @@ export const ParentCoordinator = {
     
     // Handle handshake acknowledgement
     handleHandshakeAck: function(data) {
-        this.log('Handshake acknowledged by parent');
         this.state.handshakeComplete = true;
         this.state.retryCount = 0;
         
@@ -250,35 +574,34 @@ export const ParentCoordinator = {
             this.sendToParent({
                 type: 'REQUEST_SESSION',
                 source: 'friend.html',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                sequenceId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
             });
         }, 500);
     },
     
     // Handle parent ready signal
     handleParentReady: function(data) {
-        this.log('Parent reported ready state');
         this.state.parentReachable = true;
         
         if (!this.state.sessionReceived) {
             this.sendToParent({
                 type: 'REQUEST_SESSION',
                 source: 'friend.html',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                sequenceId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
             });
         }
     },
     
     // Handle session data from parent
     handleSessionData: function(data) {
-        this.log('Received session data from parent');
-        
         if (!this.validateSessionData(data)) {
-            this.logError('Invalid session data schema:', data);
             this.sendToParent({
                 type: 'SESSION_ERROR',
                 source: 'friend.html',
-                error: 'Invalid session data schema'
+                error: 'Invalid session data schema',
+                sequenceId: data.sequenceId || `seq_${Date.now()}`
             });
             return;
         }
@@ -296,12 +619,11 @@ export const ParentCoordinator = {
         this.sendToParent({
             type: 'SESSION_RECEIVED',
             source: 'friend.html',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sequenceId: data.sequenceId || `seq_${Date.now()}`
         });
         
         this.dispatchSessionReady(data.session);
-        
-        this.log('Session data processed successfully');
     },
     
     // Validate session data schema
@@ -337,10 +659,7 @@ export const ParentCoordinator = {
     
     // Handle session update
     handleSessionUpdate: function(data) {
-        this.log('Received session update from parent');
-        
         if (!this.validateSessionData(data)) {
-            this.logError('Invalid session update:', data);
             return;
         }
         
@@ -350,14 +669,10 @@ export const ParentCoordinator = {
         this.updateAuthSystem(data.session);
         
         this.dispatchSessionUpdate(data.session);
-        
-        this.log('Session updated successfully');
     },
     
     // Handle logout signal
     handleLogout: function(data) {
-        this.log('Received logout signal from parent');
-        
         this.state.sessionData = null;
         this.state.sessionReceived = false;
         this.state.authReady = false;
@@ -369,14 +684,10 @@ export const ParentCoordinator = {
         this.dispatchLogout();
         
         this.showAuthError('You have been logged out');
-        
-        this.log('Logout processed successfully');
     },
     
     // Handle auth state changed
     handleAuthStateChanged: function(data) {
-        this.log('Received auth state change from parent');
-        
         if (data.authenticated && data.session) {
             this.handleSessionData({ session: data.session });
         } else {
@@ -386,8 +697,6 @@ export const ParentCoordinator = {
     
     // Handle profile updated
     handleProfileUpdated: function(data) {
-        this.log('Received profile update from parent');
-        
         if (this.state.sessionData && this.state.sessionData.user) {
             this.state.sessionData.user = {
                 ...this.state.sessionData.user,
@@ -404,8 +713,6 @@ export const ParentCoordinator = {
     
     // Legacy message handlers
     handleLegacyUserData: function(data) {
-        this.log('Received legacy user data format');
-        
         const session = {
             token: data.token || window.knectaToken || localStorage.getItem('USER_TOKEN'),
             user: data.userData,
@@ -417,8 +724,6 @@ export const ParentCoordinator = {
     },
     
     handleLegacyAuthState: function(data) {
-        this.log('Received legacy auth state format');
-        
         if (data.authenticated && data.userData) {
             const session = {
                 token: data.token || window.knectaToken || localStorage.getItem('USER_TOKEN'),
@@ -435,10 +740,7 @@ export const ParentCoordinator = {
     
     // Handle auth ready from unified system
     handleAuthReady: function(event) {
-        this.log('Auth ready from unified system');
-        
         if (this.state.sessionReceived && this.state.sessionData) {
-            this.log('Using parent session over unified auth');
             return;
         }
         
@@ -450,20 +752,17 @@ export const ParentCoordinator = {
                 source: 'unified_auth'
             };
             
-            this.ui.protectedUIBlocked = true;
-            
-            this.log('Using unified auth system (parent session not available)');
+            this.ui.protectedUIBlocked = false;
         }
     },
     
     // Handle token expired
     handleTokenExpired: function() {
-        this.log('Token expired in unified system');
-        
         this.sendToParent({
             type: 'TOKEN_EXPIRED',
             source: 'friend.html',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sequenceId: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         });
         
         this.ui.protectedUIBlocked = true;
@@ -472,12 +771,11 @@ export const ParentCoordinator = {
     
     // Handle auth error
     handleAuthError: function() {
-        this.log('Auth error in unified system');
-        
         this.sendToParent({
             type: 'AUTH_ERROR',
             source: 'friend.html',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sequenceId: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         });
         
         this.ui.protectedUIBlocked = true;
@@ -487,11 +785,8 @@ export const ParentCoordinator = {
     // Update unified auth system with parent session
     updateAuthSystem: function(session) {
         if (!window.KnectaAuth) {
-            this.log('Unified auth system not available');
             return;
         }
-        
-        this.log('Updating unified auth system with parent session');
         
         window.KnectaAuth.token = session.token;
         window.KnectaAuth.tokenReady = true;
@@ -514,8 +809,6 @@ export const ParentCoordinator = {
             return;
         }
         
-        this.log('Clearing unified auth system');
-        
         window.KnectaAuth.token = null;
         window.KnectaAuth.tokenReady = false;
         
@@ -532,8 +825,6 @@ export const ParentCoordinator = {
     
     // Handle parent unavailable
     handleParentUnavailable: function() {
-        this.log('Parent window is unavailable');
-        
         this.state.parentReachable = false;
         this.ui.protectedUIBlocked = true;
         this.ui.reconnectionDisplayed = true;
@@ -545,11 +836,7 @@ export const ParentCoordinator = {
     
     // Attempt cached session fallback
     attemptCachedSessionFallback: function() {
-        this.log('Attempting cached session fallback');
-        
         if (window.KnectaAuth && window.KnectaAuth.token && window.KnectaAuth.currentUser) {
-            this.log('Using cached session from unified auth');
-            
             this.state.sessionData = {
                 token: window.KnectaAuth.token,
                 user: window.KnectaAuth.currentUser,
@@ -573,8 +860,6 @@ export const ParentCoordinator = {
             try {
                 const user = JSON.parse(userData);
                 
-                this.log('Using cached session from localStorage');
-                
                 this.state.sessionData = {
                     token: token,
                     user: user,
@@ -595,13 +880,16 @@ export const ParentCoordinator = {
             }
         }
         
-        this.log('No cached session available');
         return false;
     },
     
     // Setup reconnection monitor
     setupReconnectionMonitor: function() {
-        setInterval(() => {
+        if (this.reconnectionInterval) {
+            clearInterval(this.reconnectionInterval);
+        }
+        
+        this.reconnectionInterval = setInterval(() => {
             if (!this.state.parentReachable && this.state.parentDetected) {
                 this.attemptParentReconnection();
             }
@@ -610,12 +898,11 @@ export const ParentCoordinator = {
     
     // Attempt parent reconnection
     attemptParentReconnection: function() {
-        this.log('Attempting parent reconnection');
-        
         this.sendToParent({
             type: 'RECONNECT_ATTEMPT',
             source: 'friend.html',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sequenceId: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         });
         
         if (this.state.sessionData) {
@@ -624,7 +911,8 @@ export const ParentCoordinator = {
                     type: 'REQUEST_SESSION',
                     source: 'friend.html',
                     timestamp: Date.now(),
-                    hasCachedSession: true
+                    hasCachedSession: true,
+                    sequenceId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
                 });
             }, 1000);
         }
@@ -633,13 +921,11 @@ export const ParentCoordinator = {
     // Send message to parent
     sendToParent: function(message) {
         if (!this.state.parentDetected) {
-            this.log('Cannot send to parent: parent not detected');
             return false;
         }
         
         try {
             window.parent.postMessage(message, this.state.parentOrigin || '*');
-            this.log(`Sent to parent: ${message.type}`);
             return true;
         } catch (error) {
             this.logError('Error sending message to parent:', error);
@@ -695,14 +981,18 @@ export const ParentCoordinator = {
     showAuthError: function(message) {
         this.ui.authErrorDisplayed = true;
         
-        const overlay = document.getElementById('authErrorOverlay');
-        const messageElement = document.getElementById('authErrorMessage');
-        
-        if (overlay && messageElement) {
-            messageElement.textContent = message || 'Authentication required';
-            overlay.classList.add('active');
-        } else {
-            showNotification(message || 'Authentication error', 'error');
+        try {
+            const overlay = document.getElementById('authErrorOverlay');
+            const messageElement = document.getElementById('authErrorMessage');
+            
+            if (overlay && messageElement) {
+                messageElement.textContent = message || 'Authentication required';
+                overlay.classList.add('active');
+            } else {
+                showNotification(message || 'Authentication error', 'error');
+            }
+        } catch (error) {
+            this.logError('Error showing auth error:', error);
         }
     },
     
@@ -710,37 +1000,48 @@ export const ParentCoordinator = {
     hideAuthError: function() {
         this.ui.authErrorDisplayed = false;
         
-        const overlay = document.getElementById('authErrorOverlay');
-        if (overlay) {
-            overlay.classList.remove('active');
+        try {
+            const overlay = document.getElementById('authErrorOverlay');
+            if (overlay) {
+                overlay.classList.remove('active');
+            }
+        } catch (error) {
+            this.logError('Error hiding auth error:', error);
         }
     },
     
     // Show reconnection state
     showReconnectionState: function() {
-        const existingIndicator = document.getElementById('reconnectionIndicator');
-        
-        if (!existingIndicator) {
-            const indicator = document.createElement('div');
-            indicator.id = 'reconnectionIndicator';
-            indicator.className = 'reconnection-indicator';
-            indicator.innerHTML = `
-                <div class="reconnection-content">
-                    <i class="fas fa-sync-alt fa-spin"></i>
-                    <span>Reconnecting to parent window...</span>
-                    <button id="retryReconnectionBtn" class="reconnection-btn">
-                        <i class="fas fa-redo"></i> Retry Now
-                    </button>
-                </div>
-            `;
+        try {
+            const existingIndicator = document.getElementById('reconnectionIndicator');
             
-            document.body.appendChild(indicator);
-            
-            document.getElementById('retryReconnectionBtn').addEventListener('click', () => {
-                this.attemptParentReconnection();
-            });
-        } else {
-            existingIndicator.classList.add('active');
+            if (!existingIndicator) {
+                const indicator = document.createElement('div');
+                indicator.id = 'reconnectionIndicator';
+                indicator.className = 'reconnection-indicator';
+                indicator.innerHTML = `
+                    <div class="reconnection-content">
+                        <i class="fas fa-sync-alt fa-spin"></i>
+                        <span>Reconnecting to parent window...</span>
+                        <button id="retryReconnectionBtn" class="reconnection-btn">
+                            <i class="fas fa-redo"></i> Retry Now
+                        </button>
+                    </div>
+                `;
+                
+                document.body.appendChild(indicator);
+                
+                const retryBtn = document.getElementById('retryReconnectionBtn');
+                if (retryBtn) {
+                    retryBtn.addEventListener('click', () => {
+                        this.attemptParentReconnection();
+                    });
+                }
+            } else {
+                existingIndicator.classList.add('active');
+            }
+        } catch (error) {
+            this.logError('Error showing reconnection state:', error);
         }
     },
     
@@ -748,18 +1049,13 @@ export const ParentCoordinator = {
     hideReconnectionState: function() {
         this.ui.reconnectionDisplayed = false;
         
-        const indicator = document.getElementById('reconnectionIndicator');
-        if (indicator) {
-            indicator.classList.remove('active');
-        }
-    },
-    
-    // Show notification
-    showNotification: function(message, type = 'info') {
-        if (typeof showNotification === 'function') {
-            showNotification(message, type);
-        } else {
-            this.log(`[${type.toUpperCase()}] ${message}`);
+        try {
+            const indicator = document.getElementById('reconnectionIndicator');
+            if (indicator) {
+                indicator.classList.remove('active');
+            }
+        } catch (error) {
+            this.logError('Error hiding reconnection state:', error);
         }
     },
     
@@ -826,7 +1122,8 @@ export const ParentCoordinator = {
                 endpoint: endpoint,
                 options: options,
                 timestamp: Date.now(),
-                source: 'friend.html'
+                source: 'friend.html',
+                sequenceId: `api_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
             });
             
             setTimeout(() => {
@@ -903,7 +1200,12 @@ export const ParentCoordinator = {
 
 // Initialize parent coordination when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('[Friend Page] Initializing parent coordination');
+    // Initialize enhanced handshake protocol
+    setTimeout(() => {
+        requestSessionFromParent();
+    }, 100);
+    
+    // Also initialize parent coordinator for compatibility
     ParentCoordinator.init().catch(error => {
         console.error('[Friend Page] Parent coordination failed:', error);
     });
@@ -924,8 +1226,6 @@ export const KnectaAuth = {
     parentControlled: false,
     
     init: async function() {
-        console.log('[Friend Page] Initializing unified auth system with parent coordination');
-        
         try {
             this.checkTokenMigration();
             await this.waitForParentCoordinator();
@@ -933,10 +1233,7 @@ export const KnectaAuth = {
             this.cacheReady = true;
             this.dispatchCacheReadyEvent();
             
-            console.log('[Friend Page] Unified auth system initialized (awaiting parent session)');
-            
         } catch (error) {
-            console.error('[Friend Page] Auth initialization error:', error);
             this.loadCachedData();
             this.cacheReady = true;
             this.dispatchCacheReadyEvent();
@@ -957,15 +1254,12 @@ export const KnectaAuth = {
         
         const unifiedToken = localStorage.getItem(UNIFIED_TOKEN_KEY);
         if (unifiedToken && unifiedToken !== 'null' && unifiedToken !== 'undefined') {
-            console.log('[Friend Page] Unified token found');
             return;
         }
         
         for (const oldKey of OLD_TOKEN_KEYS) {
             const oldToken = localStorage.getItem(oldKey);
             if (oldToken && oldToken !== 'null' && oldToken !== 'undefined') {
-                console.log(`[Friend Page] Migrating token from ${oldKey} to ${UNIFIED_TOKEN_KEY}`);
-                
                 localStorage.setItem(UNIFIED_TOKEN_KEY, oldToken);
                 this.migrationPerformed = true;
                 
@@ -991,13 +1285,11 @@ export const KnectaAuth = {
                 checks++;
                 
                 if (window.parentCoordinator) {
-                    console.log('[Friend Page] Parent coordinator ready');
                     resolve();
                     return;
                 }
                 
                 if (checks >= maxChecks) {
-                    console.log('[Friend Page] Parent coordinator timeout, proceeding');
                     resolve();
                     return;
                 }
@@ -1010,35 +1302,36 @@ export const KnectaAuth = {
     },
     
     loadCachedData: function() {
-        console.log('[Friend Page] Loading cached data for instant UI');
-        
-        const token = localStorage.getItem('USER_TOKEN');
-        if (token && token !== 'null' && token !== 'undefined') {
-            this.token = token;
-        }
-        
-        const userKeys = ['knecta_current_user', 'USER_DATA'];
-        for (const key of userKeys) {
-            const userData = localStorage.getItem(key);
-            if (userData) {
-                try {
-                    this.currentUser = JSON.parse(userData);
-                    console.log(`[Friend Page] Loaded cached user from ${key}`);
-                    break;
-                } catch (e) {
-                    console.log(`[Friend Page] Error parsing user data from ${key}:`, e);
+        try {
+            const token = localStorage.getItem('USER_TOKEN');
+            if (token && token !== 'null' && token !== 'undefined') {
+                this.token = token;
+            }
+            
+            const userKeys = ['knecta_current_user', 'USER_DATA'];
+            for (const key of userKeys) {
+                const userData = localStorage.getItem(key);
+                if (userData) {
+                    try {
+                        this.currentUser = JSON.parse(userData);
+                        break;
+                    } catch (e) {
+                        console.error(`Error parsing user data from ${key}:`, e);
+                    }
                 }
             }
+            
+            const event = new CustomEvent('knectaCacheReady', {
+                detail: { 
+                    token: this.token,
+                    user: this.currentUser,
+                    cacheOnly: true
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            console.error('Error loading cached data:', error);
         }
-        
-        const event = new CustomEvent('knectaCacheReady', {
-            detail: { 
-                token: this.token,
-                user: this.currentUser,
-                cacheOnly: true
-            }
-        });
-        window.dispatchEvent(event);
     },
     
     dispatchReadyEvent: function() {
@@ -1158,8 +1451,6 @@ export const KnectaAuth = {
             return data;
             
         } catch (error) {
-            console.error('[Friend Page] API call error:', error);
-            
             if (error.message.includes('Session expired') || error.message.includes('Authentication required')) {
                 this.handleAuthError();
             }
@@ -1172,19 +1463,21 @@ export const KnectaAuth = {
     },
     
     showLoading: function(show) {
-        const overlay = document.getElementById('loadingOverlay');
-        if (overlay) {
-            if (show) {
-                overlay.classList.add('active');
-            } else {
-                overlay.classList.remove('active');
+        try {
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) {
+                if (show) {
+                    overlay.classList.add('active');
+                } else {
+                    overlay.classList.remove('active');
+                }
             }
+        } catch (error) {
+            // Silent fail
         }
     },
     
     handleTokenExpired: function() {
-        console.log('[Friend Page] Token expired');
-        
         this.token = null;
         this.tokenReady = false;
         localStorage.removeItem('USER_TOKEN');
@@ -1208,8 +1501,6 @@ export const KnectaAuth = {
     },
     
     handleAuthError: function() {
-        console.log('[Friend Page] Authentication error');
-        
         showNotification('Please log in to continue', 'warning');
         
         const event = new CustomEvent('knectaAuthError');
@@ -1222,8 +1513,6 @@ export const KnectaAuth = {
         } else {
             if (typeof showNotification === 'function') {
                 showNotification(message, type);
-            } else {
-                console.log(`[${type.toUpperCase()}] ${message}`);
             }
         }
     },
@@ -1255,7 +1544,6 @@ export const KnectaAuth = {
 
 // Initialize auth system
 window.addEventListener('DOMContentLoaded', () => {
-    console.log('[Friend Page] Starting auth system initialization');
     KnectaAuth.init().catch(error => {
         console.error('[Friend Page] Auth system initialization failed:', error);
     });
@@ -1339,8 +1627,6 @@ export const dataSource = {
 // =============================================
 
 export function initializeParentChildCommunication() {
-    console.log('[Friend Page] Initializing parent-child communication via coordinator');
-    
     setupSessionEventListeners();
     loadCachedDataInstantly();
     waitForParentSession();
@@ -1356,8 +1642,6 @@ function setupSessionEventListeners() {
 }
 
 function handleParentSessionReady(event) {
-    console.log('[Friend Page] Parent session ready:', event.detail);
-    
     dataSource.parentSessionReceived = true;
     dataSource.fetched = true;
     
@@ -1374,13 +1658,9 @@ function handleParentSessionReady(event) {
     updateDataSourceIndicator('parent');
     
     initializeMainFunctionality();
-    
-    console.log('[Friend Page] Successfully initialized with parent session');
 }
 
 function handleParentSessionUpdate(event) {
-    console.log('[Friend Page] Parent session updated');
-    
     const session = event.detail.session;
     
     dataSource.userData = session.user;
@@ -1390,13 +1670,9 @@ function handleParentSessionUpdate(event) {
     userData = currentUser;
     
     updateUIWithUserData(session.user);
-    
-    console.log('[Friend Page] Session updated successfully');
 }
 
 function handleParentLogout(event) {
-    console.log('[Friend Page] Parent logout received');
-    
     dataSource.userData = null;
     dataSource.token = null;
     dataSource.fetched = false;
@@ -1409,14 +1685,16 @@ function handleParentLogout(event) {
     friendRequests = [];
     sentRequests = [];
     
-    updateCurrentSection();
+    try {
+        updateCurrentSection();
+    } catch (error) {
+        console.error('Error updating section after logout:', error);
+    }
     
     showAuthError('You have been logged out. Please log in again.');
 }
 
 function handleParentProfileUpdate(event) {
-    console.log('[Friend Page] Parent profile updated');
-    
     const user = event.detail.user;
     
     dataSource.userData = user;
@@ -1429,8 +1707,6 @@ function handleParentProfileUpdate(event) {
 }
 
 function handleUnifiedAuthReady(event) {
-    console.log('[Friend Page] Unified auth ready (parent session not available)');
-    
     if (!dataSource.parentSessionReceived) {
         const detail = event.detail;
         
@@ -1452,8 +1728,6 @@ function handleUnifiedAuthReady(event) {
 }
 
 function handleUnifiedCacheReady(event) {
-    console.log('[Friend Page] Unified cache ready');
-    
     if (!dataSource.fetched) {
         const detail = event.detail;
         
@@ -1484,13 +1758,10 @@ function waitForParentSession() {
         timeoutCount++;
         
         if (dataSource.parentSessionReceived || dataSource.fetched) {
-            console.log('[Friend Page] Session available, proceeding');
             return;
         }
         
         if (timeoutCount >= maxTimeout) {
-            console.log('[Friend Page] Parent session timeout');
-            
             if (!dataSource.fetched) {
                 attemptCachedDataFallback();
             }
@@ -1527,7 +1798,7 @@ export function getCurrentUser() {
             try {
                 return JSON.parse(userData);
             } catch (e) {
-                console.log('[Friend Page] Error parsing user data:', e);
+                console.error('[Friend Page] Error parsing user data:', e);
             }
         }
     }
@@ -1541,6 +1812,18 @@ export function getCurrentUser() {
 
 export async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
     try {
+        // Validate friendId
+        if (!friendId || typeof friendId !== 'string') {
+            showNotification('Invalid friend ID', 'error');
+            return;
+        }
+        
+        // Validate friend data
+        if (!validateFriendId(friendId)) {
+            showNotification('Invalid friend ID format', 'error');
+            return;
+        }
+        
         const requestData = {
             receiverId: friendId,
             category: category,
@@ -1550,11 +1833,16 @@ export async function sendFriendRequest(friendId, category = 'friend', note = ''
             isBusiness: isBusiness
         };
         
-        console.log('[Friend Page] Sending friend request to:', friendId);
+        // Validate request data
+        if (isTemporary && (!duration || duration < 1)) {
+            showNotification('Please specify a valid duration for temporary friend', 'error');
+            return;
+        }
+        
         const response = await apiCallWithRetry('/api/friend-requests/send', {
             method: 'POST',
             body: JSON.stringify(requestData)
-        }, 1);
+        }, 2);
         
         if (response && response.success) {
             try {
@@ -1565,11 +1853,16 @@ export async function sendFriendRequest(friendId, category = 'friend', note = ''
                     localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                 }
             } catch (error) {
-                console.log('[Friend Page] Failed to refresh sent requests:', error.message);
+                // Silent fail for cache refresh
             }
             
             fetchAllUsersFromBackend();
-            updateCurrentSection();
+            
+            try {
+                updateCurrentSection();
+            } catch (error) {
+                console.error('Error updating section after sending friend request:', error);
+            }
             
             showNotification('Friend request sent successfully', 'success');
         } else {
@@ -1577,9 +1870,37 @@ export async function sendFriendRequest(friendId, category = 'friend', note = ''
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to send friend request:', error.message);
-        showNotification('Failed to send friend request', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to send friend request', 'error');
+        }
     }
+}
+
+// Helper function to validate friend ID
+function validateFriendId(friendId) {
+    if (typeof friendId !== 'string') return false;
+    if (friendId.trim().length === 0) return false;
+    if (friendId.length > 100) return false;
+    
+    // Basic validation for common ID formats
+    const validPattern = /^[a-zA-Z0-9_\-:.@]+$/;
+    return validPattern.test(friendId);
+}
+
+// Helper function to validate friend data
+function validateFriendData(friendData) {
+    if (!friendData || typeof friendData !== 'object') return false;
+    if (!friendData.id || typeof friendData.id !== 'string') return false;
+    
+    // Validate required fields
+    if (!validateFriendId(friendData.id)) return false;
+    
+    // Validate optional fields if present
+    if (friendData.displayName && typeof friendData.displayName !== 'string') return false;
+    if (friendData.username && typeof friendData.username !== 'string') return false;
+    if (friendData.email && typeof friendData.email !== 'string') return false;
+    
+    return true;
 }
 
 export async function acceptFriendRequestOnline(requestId, friendId) {
@@ -1590,9 +1911,20 @@ export async function acceptFriendRequestOnline(requestId, friendId) {
             return;
         }
         
+        // Validate requestId and friendId
+        if (!requestId || !friendId) {
+            showNotification('Invalid request data', 'error');
+            return;
+        }
+        
+        if (!validateFriendId(friendId)) {
+            showNotification('Invalid friend ID format', 'error');
+            return;
+        }
+        
         const response = await apiCallWithRetry(`/api/friend-requests/${requestId}/accept`, {
             method: 'POST'
-        }, 1);
+        }, 2);
         
         if (response && response.success) {
             startParallelDataLoading();
@@ -1602,8 +1934,9 @@ export async function acceptFriendRequestOnline(requestId, friendId) {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to accept friend request:', error.message);
-        showNotification('Failed to accept friend request', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to accept friend request', 'error');
+        }
     }
 }
 
@@ -1615,9 +1948,15 @@ export async function declineFriendRequest(requestData) {
             return;
         }
         
+        // Validate requestData
+        if (!requestData || !requestData.id) {
+            showNotification('Invalid request data', 'error');
+            return;
+        }
+        
         const response = await apiCallWithRetry(`/api/friend-requests/${requestData.id}/decline`, {
             method: 'POST'
-        }, 1);
+        }, 2);
         
         if (response && response.success) {
             try {
@@ -1628,11 +1967,16 @@ export async function declineFriendRequest(requestData) {
                     localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
                 }
             } catch (error) {
-                console.log('[Friend Page] Failed to refresh requests:', error.message);
+                // Silent fail for cache refresh
             }
             
             fetchAllUsersFromBackend();
-            updateCurrentSection();
+            
+            try {
+                updateCurrentSection();
+            } catch (error) {
+                console.error('Error updating section after declining friend request:', error);
+            }
             
             showNotification('Friend request declined', 'success');
         } else {
@@ -1640,8 +1984,9 @@ export async function declineFriendRequest(requestData) {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to decline friend request:', error.message);
-        showNotification('Failed to decline friend request', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to decline friend request', 'error');
+        }
     }
 }
 
@@ -1653,9 +1998,15 @@ export async function cancelFriendRequest(requestData) {
             return;
         }
         
+        // Validate requestData
+        if (!requestData || !requestData.id) {
+            showNotification('Invalid request data', 'error');
+            return;
+        }
+        
         const response = await apiCallWithRetry(`/api/friend-requests/${requestData.id}`, {
             method: 'DELETE'
-        }, 1);
+        }, 2);
         
         if (response && response.success) {
             try {
@@ -1666,11 +2017,16 @@ export async function cancelFriendRequest(requestData) {
                     localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
                 }
             } catch (error) {
-                console.log('[Friend Page] Failed to refresh sent requests:', error.message);
+                // Silent fail for cache refresh
             }
             
             fetchAllUsersFromBackend();
-            updateCurrentSection();
+            
+            try {
+                updateCurrentSection();
+            } catch (error) {
+                console.error('Error updating section after canceling friend request:', error);
+            }
             
             showNotification('Friend request cancelled', 'success');
         } else {
@@ -1678,8 +2034,9 @@ export async function cancelFriendRequest(requestData) {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to cancel friend request:', error.message);
-        showNotification('Failed to cancel friend request', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to cancel friend request', 'error');
+        }
     }
 }
 
@@ -1690,33 +2047,43 @@ export async function cancelFriendRequest(requestData) {
 export async function loadFriendsFromBackend() {
     try {
         if (window.parentCoordinator && window.parentCoordinator.shouldBlockProtectedUI()) {
-            console.log('[Friend Page] Protected UI blocked, skipping friends load');
             throw new Error('Authentication required');
         }
         
-        console.log('[Friend Page] Loading friends from backend');
-        const response = await apiCallWithRetry('/api/friends', null, 1);
+        const response = await apiCallWithRetry('/api/friends', null, 2);
         
         if (response && response.friends) {
-            friends = response.friends;
+            // Validate friend data before assignment
+            friends = response.friends.filter(friend => validateFriendData(friend));
             friends.sort((a, b) => {
                 if (a.online !== b.online) return b.online ? 1 : -1;
                 return (a.displayName || '').localeCompare(b.displayName || '');
             });
             
-            updateFriendCounts();
+            try {
+                updateFriendCounts();
+            } catch (error) {
+                console.error('Error updating friend counts:', error);
+            }
             
             localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
             localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-            
-            console.log('[Friend Page] Loaded', friends.length, 'friends');
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load friends:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cached) {
-            friends = JSON.parse(cached);
-            updateFriendCounts();
+            try {
+                const parsed = JSON.parse(cached);
+                // Validate cached friend data
+                friends = Array.isArray(parsed) ? parsed.filter(friend => validateFriendData(friend)) : [];
+                try {
+                    updateFriendCounts();
+                } catch (error) {
+                    console.error('Error updating friend counts from cache:', error);
+                }
+            } catch (parseError) {
+                friends = [];
+            }
         }
     }
 }
@@ -1726,14 +2093,13 @@ export async function loadFriendRequestsFromBackend() {
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
-        const response = await apiCallWithRetry('/api/friend-requests/incoming', null, 1);
+        const response = await apiCallWithRetry('/api/friend-requests/incoming', null, 2);
         
         if (response && response.requests) {
             friendRequests = response.requests;
             localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load friend requests:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
         if (cached) {
             friendRequests = JSON.parse(cached);
@@ -1746,14 +2112,13 @@ export async function loadSentRequestsFromBackend() {
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
-        const response = await apiCallWithRetry('/api/friend-requests/sent', null, 1);
+        const response = await apiCallWithRetry('/api/friend-requests/sent', null, 2);
         
         if (response && response.requests) {
             sentRequests = response.requests;
             localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load sent requests:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
         if (cached) {
             sentRequests = JSON.parse(cached);
@@ -1766,14 +2131,13 @@ export async function loadPinnedFriendsFromBackend() {
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
-        const response = await apiCallWithRetry('/api/friends/pinned', null, 1);
+        const response = await apiCallWithRetry('/api/friends/pinned', null, 2);
         
         if (response && response.friends) {
-            pinnedFriends = response.friends;
+            pinnedFriends = response.friends.filter(friend => validateFriendData(friend));
             localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load pinned friends:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
         if (cached) {
             pinnedFriends = JSON.parse(cached);
@@ -1786,14 +2150,13 @@ export async function loadMutedFriendsFromBackend() {
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
-        const response = await apiCallWithRetry('/api/friends/muted', null, 1);
+        const response = await apiCallWithRetry('/api/friends/muted', null, 2);
         
         if (response && response.friends) {
-            mutedFriends = response.friends;
+            mutedFriends = response.friends.filter(friend => validateFriendData(friend));
             localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load muted friends:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
         if (cached) {
             mutedFriends = JSON.parse(cached);
@@ -1806,14 +2169,13 @@ export async function loadContactsFromBackend() {
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
-        const response = await apiCallWithRetry('/api/contacts/synced', null, 1);
+        const response = await apiCallWithRetry('/api/contacts/synced', null, 2);
         
         if (response && response.contacts) {
             contacts = response.contacts;
             localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load contacts:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
         if (cached) {
             contacts = JSON.parse(cached);
@@ -1826,14 +2188,13 @@ export async function loadGroupsFromBackend() {
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
-        const response = await apiCallWithRetry('/api/groups/user', null, 1);
+        const response = await apiCallWithRetry('/api/group/user', null, 2);
         
         if (response && response.groups) {
             groups = response.groups;
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
         }
     } catch (error) {
-        console.log('[Friend Page] Failed to load groups:', error.message);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
         if (cached) groups = JSON.parse(cached);
     }
@@ -1853,7 +2214,7 @@ export async function fetchAllUsersFromBackend() {
             return;
         }
         
-        const response = await apiCallWithRetry('/api/users/all?limit=50', null, 1);
+        const response = await apiCallWithRetry('/api/users/all?limit=50', null, 2);
         
         if (response && response.users) {
             const currentUserId = currentUser?.id;
@@ -1869,7 +2230,6 @@ export async function fetchAllUsersFromBackend() {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to load all users:', error.message);
         const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
         if (cachedAllUsers) {
             allUsers = JSON.parse(cachedAllUsers);
@@ -1885,8 +2245,6 @@ export async function enhancedInitialize() {
     if (initializationStarted) return;
     initializationStarted = true;
     
-    console.log('[Friend Page] STARTING ENHANCED INITIALIZATION WITH PARENT COORDINATION');
-    
     try {
         loadCachedDataInstantly();
         cacheLoaded = true;
@@ -1896,11 +2254,9 @@ export async function enhancedInitialize() {
         apiReady = true;
         isInitialized = true;
         
-        console.log('[Friend Page] ENHANCED INITIALIZATION COMPLETE (UI ready, parent coordination active)');
         return true;
         
     } catch (error) {
-        console.error('[Friend Page] Enhanced initialization error:', error.message);
         loadCachedDataInstantly();
         apiReady = false;
         isInitialized = true;
@@ -1911,8 +2267,6 @@ export async function enhancedInitialize() {
 
 export function loadCachedDataInstantly() {
     try {
-        console.log('[Friend Page] Loading cached data for instant UI');
-        
         const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_DATA) || localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
         if (cachedUser) {
             currentUser = JSON.parse(cachedUser);
@@ -1921,8 +2275,13 @@ export function loadCachedDataInstantly() {
         
         const friendsData = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (friendsData) {
-            friends = JSON.parse(friendsData);
-            updateFriendCounts();
+            const parsed = JSON.parse(friendsData);
+            friends = Array.isArray(parsed) ? parsed.filter(friend => validateFriendData(friend)) : [];
+            try {
+                updateFriendCounts();
+            } catch (error) {
+                console.error('Error updating friend counts from cache:', error);
+            }
         }
         
         const contactsData = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
@@ -1942,12 +2301,14 @@ export function loadCachedDataInstantly() {
         
         const pinnedData = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
         if (pinnedData) {
-            pinnedFriends = JSON.parse(pinnedData);
+            const parsed = JSON.parse(pinnedData);
+            pinnedFriends = Array.isArray(parsed) ? parsed.filter(friend => validateFriendData(friend)) : [];
         }
         
         const mutedData = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
         if (mutedData) {
-            mutedFriends = JSON.parse(mutedData);
+            const parsed = JSON.parse(mutedData);
+            mutedFriends = Array.isArray(parsed) ? parsed.filter(friend => validateFriendData(friend)) : [];
         }
         
         const allUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
@@ -1965,44 +2326,45 @@ export function loadCachedDataInstantly() {
         const notesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
         if (notesData) window.privateNotes = JSON.parse(notesData);
         
-        console.log('[Friend Page] Cached data loaded successfully');
-        
     } catch (error) {
-        console.log('[Friend Page] Error loading cached data:', error.message);
+        console.error('[Friend Page] Error loading cached data:', error.message);
     }
 }
 
 export function startParallelDataLoading() {
     if (backgroundTasksStarted) {
-        console.log('[Friend Page] Background tasks already started');
         return;
     }
     
     if (!getValidToken()) {
-        console.log('[Friend Page] No token, skipping background data loading');
         return;
     }
     
-    console.log('[Friend Page] Starting parallel data loading');
     backgroundTasksStarted = true;
     
     if (window.KnectaAuth) {
         window.KnectaAuth.showLoading(true);
     }
     
+    // Use non-blocking parallel loading
     const loadPromises = [];
     
-    loadPromises.push(loadFriendsFromBackend().catch(e => console.log('[Friend Page] Friends load error:', e.message)));
-    loadPromises.push(loadFriendRequestsFromBackend().catch(e => console.log('[Friend Page] Requests load error:', e.message)));
-    loadPromises.push(loadSentRequestsFromBackend().catch(e => console.log('[Friend Page] Sent requests load error:', e.message)));
-    loadPromises.push(loadPinnedFriendsFromBackend().catch(e => console.log('[Friend Page] Pinned friends load error:', e.message)));
-    loadPromises.push(loadMutedFriendsFromBackend().catch(e => console.log('[Friend Page] Muted friends load error:', e.message)));
-    loadPromises.push(loadContactsFromBackend().catch(e => console.log('[Friend Page] Contacts load error:', e.message)));
-    loadPromises.push(loadGroupsFromBackend().catch(e => console.log('[Friend Page] Groups load error:', e.message)));
-    loadPromises.push(fetchAllUsersFromBackend().catch(e => console.log('[Friend Page] All users load error:', e.message)));
+    loadPromises.push(loadFriendsFromBackend().catch(() => {}));
+    loadPromises.push(loadFriendRequestsFromBackend().catch(() => {}));
+    loadPromises.push(loadSentRequestsFromBackend().catch(() => {}));
+    loadPromises.push(loadPinnedFriendsFromBackend().catch(() => {}));
+    loadPromises.push(loadMutedFriendsFromBackend().catch(() => {}));
+    loadPromises.push(loadContactsFromBackend().catch(() => {}));
+    loadPromises.push(loadGroupsFromBackend().catch(() => {}));
+    loadPromises.push(fetchAllUsersFromBackend().catch(() => {}));
     
+    // Don't block UI - use Promise.allSettled for non-blocking completion
     Promise.allSettled(loadPromises).then(() => {
-        updateCurrentSection();
+        try {
+            updateCurrentSection();
+        } catch (error) {
+            console.error('Error updating section after data loading:', error);
+        }
         showNotification('Friends data loaded', 'success');
         
         if (window.KnectaAuth) {
@@ -2052,7 +2414,6 @@ export async function startCameraScanner() {
         showNotification('Camera started successfully', 'success');
         
     } catch (error) {
-        console.log('[Friend Page] Camera access error:', error.message);
         const cameraContainer = document.querySelector('.camera-container');
         if (cameraContainer) {
             cameraContainer.innerHTML = `
@@ -2137,6 +2498,12 @@ function processScannedQRCodeReal(qrData) {
             return;
         }
         
+        // Validate user ID from QR code
+        if (!validateFriendId(parsedData.userId)) {
+            showNotification('Invalid user ID in QR code', 'error');
+            return;
+        }
+        
         showFriendRequestFromQRReal(parsedData);
         
         stopCameraScanner();
@@ -2145,7 +2512,6 @@ function processScannedQRCodeReal(qrData) {
         showNotification('QR code scanned successfully!', 'success');
         
     } catch (error) {
-        console.log('[Friend Page] Error processing QR code:', error.message);
         showNotification('Error processing QR code', 'error');
     }
 }
@@ -2195,9 +2561,13 @@ async function fetchUserInfoFromQR(userId) {
             throw new Error('No valid token');
         }
         
-        const response = await apiCallWithRetry(`/api/users/${userId}`, null, 1);
+        const response = await apiCallWithRetry(`/api/users/${userId}`, null, 2);
         
         if (response && response.user) {
+            // Validate user data from API
+            if (!validateFriendData(response.user)) {
+                throw new Error('Invalid user data received');
+            }
             return response.user;
         }
         throw new Error('User not found');
@@ -2289,6 +2659,17 @@ export function generateUniqueQRCode() {
             return;
         }
         
+        // Validate user data before generating QR code
+        if (!validateFriendData(user)) {
+            qrContainer.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px;"></i>
+                    <p>Invalid user data</p>
+                </div>
+            `;
+            return;
+        }
+        
         const qrData = JSON.stringify({
             type: 'knecta_friend_request',
             userId: user.id,
@@ -2360,7 +2741,13 @@ export async function showMutualFriends(userId, userName) {
             return;
         }
         
-        const response = await apiCallWithRetry(`/api/friends/mutual/${userId}`, null, 1);
+        // Validate userId
+        if (!validateFriendId(userId)) {
+            showNotification('Invalid user ID', 'error');
+            return;
+        }
+        
+        const response = await apiCallWithRetry(`/api/friends/mutual/${userId}`, null, 2);
         
         if (response && response.mutualFriends) {
             const mutualFriends = response.mutualFriends;
@@ -2376,54 +2763,65 @@ export async function showMutualFriends(userId, userName) {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Error loading mutual friends:', error.message);
         showNotification('Error loading mutual friends', 'error');
     }
 }
 
 function displayMutualFriendsModal(mutualFriends, userName) {
-    const mutualCountText = document.getElementById('mutualCountText');
-    const mutualFriendsList = document.getElementById('mutualFriendsList');
-    
-    mutualCountText.textContent = `${mutualFriends.length} mutual friends with ${userName}`;
-    mutualFriendsList.innerHTML = '';
-    
-    if (mutualFriends.length === 0) {
-        mutualFriendsList.innerHTML = `
-            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px;"></i>
-                <p>No mutual friends found</p>
-            </div>
-        `;
-    } else {
-        mutualFriends.forEach(friend => {
-            const friendId = friend.id;
-            const initials = friend.displayName ? 
-                friend.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
-                'U';
-            
-            const friendItem = document.createElement('div');
-            friendItem.className = 'mutual-friend-item';
-            friendItem.innerHTML = `
-                <div class="mutual-friend-avatar" ${friend.photoURL ? `style="background-image: url('${escapeHtml(friend.photoURL)}')"` : ''}>
-                    ${friend.photoURL ? '' : `<span>${initials}</span>`}
-                </div>
-                <div class="mutual-friend-info">
-                    <div class="mutual-friend-name">${escapeHtml(friend.displayName || 'Unknown User')}</div>
-                    ${friend.username ? `<div class="mutual-friend-username">${escapeHtml(friend.username)}</div>` : ''}
+    try {
+        const mutualCountText = document.getElementById('mutualCountText');
+        const mutualFriendsList = document.getElementById('mutualFriendsList');
+        
+        if (!mutualCountText || !mutualFriendsList) {
+            return;
+        }
+        
+        mutualCountText.textContent = `${mutualFriends.length} mutual friends with ${userName}`;
+        mutualFriendsList.innerHTML = '';
+        
+        if (mutualFriends.length === 0) {
+            mutualFriendsList.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <i class="fas fa-users" style="font-size: 48px; margin-bottom: 15px;"></i>
+                    <p>No mutual friends found</p>
                 </div>
             `;
-            
-            friendItem.addEventListener('click', () => {
-                showFriendDetails(friend, 'friend');
-                document.getElementById('mutualFriendsModal').classList.remove('active');
+        } else {
+            mutualFriends.forEach(friend => {
+                const friendId = friend.id;
+                const initials = friend.displayName ? 
+                    friend.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2) : 
+                    'U';
+                
+                const friendItem = document.createElement('div');
+                friendItem.className = 'mutual-friend-item';
+                friendItem.innerHTML = `
+                    <div class="mutual-friend-avatar" ${friend.photoURL ? `style="background-image: url('${escapeHtml(friend.photoURL)}')"` : ''}>
+                        ${friend.photoURL ? '' : `<span>${initials}</span>`}
+                    </div>
+                    <div class="mutual-friend-info">
+                        <div class="mutual-friend-name">${escapeHtml(friend.displayName || 'Unknown User')}</div>
+                        ${friend.username ? `<div class="mutual-friend-username">${escapeHtml(friend.username)}</div>` : ''}
+                    </div>
+                `;
+                
+                friendItem.addEventListener('click', () => {
+                    try {
+                        showFriendDetails(friend, 'friend');
+                    } catch (error) {
+                        console.error('Error showing friend details:', error);
+                    }
+                    document.getElementById('mutualFriendsModal').classList.remove('active');
+                });
+                
+                mutualFriendsList.appendChild(friendItem);
             });
-            
-            mutualFriendsList.appendChild(friendItem);
-        });
+        }
+        
+        document.getElementById('mutualFriendsModal').classList.add('active');
+    } catch (error) {
+        console.error('Error displaying mutual friends modal:', error);
     }
-    
-    document.getElementById('mutualFriendsModal').classList.add('active');
 }
 
 // =============================================
@@ -2438,13 +2836,19 @@ export async function togglePinFriend(friendData) {
             return;
         }
         
+        // Validate friend data
+        if (!validateFriendData(friendData)) {
+            showNotification('Invalid friend data', 'error');
+            return;
+        }
+        
         const friendId = friendData.id;
         const isPinned = pinnedFriends.some(f => f.id === friendId);
         
         if (isPinned) {
             const response = await apiCallWithRetry(`/api/friends/${friendId}/pin`, {
                 method: 'DELETE'
-            }, 1);
+            }, 2);
             if (response && response.success) {
                 pinnedFriends = pinnedFriends.filter(f => f.id !== friendId);
                 showNotification('Friend unpinned', 'success');
@@ -2452,7 +2856,7 @@ export async function togglePinFriend(friendData) {
         } else {
             const response = await apiCallWithRetry(`/api/friends/${friendId}/pin`, {
                 method: 'POST'
-            }, 1);
+            }, 2);
             if (response && response.success) {
                 pinnedFriends.push(friendData);
                 showNotification('Friend pinned', 'success');
@@ -2460,12 +2864,18 @@ export async function togglePinFriend(friendData) {
         }
         
         localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
-        updateCurrentSection();
-        updateFriendCounts();
+        
+        try {
+            updateCurrentSection();
+            updateFriendCounts();
+        } catch (error) {
+            console.error('Error updating UI after pinning friend:', error);
+        }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to update pin status:', error.message);
-        showNotification('Failed to update pin status', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to update pin status', 'error');
+        }
     }
 }
 
@@ -2477,13 +2887,19 @@ export async function toggleMuteFriend(friendData) {
             return;
         }
         
+        // Validate friend data
+        if (!validateFriendData(friendData)) {
+            showNotification('Invalid friend data', 'error');
+            return;
+        }
+        
         const friendId = friendData.id;
         const isMuted = mutedFriends.some(f => f.id === friendId);
         
         if (isMuted) {
             const response = await apiCallWithRetry(`/api/friends/${friendId}/mute`, {
                 method: 'DELETE'
-            }, 1);
+            }, 2);
             if (response && response.success) {
                 mutedFriends = mutedFriends.filter(f => f.id !== friendId);
                 showNotification('Friend unmuted', 'success');
@@ -2491,7 +2907,7 @@ export async function toggleMuteFriend(friendData) {
         } else {
             const response = await apiCallWithRetry(`/api/friends/${friendId}/mute`, {
                 method: 'POST'
-            }, 1);
+            }, 2);
             if (response && response.success) {
                 mutedFriends.push(friendData);
                 showNotification('Friend muted', 'success');
@@ -2499,12 +2915,18 @@ export async function toggleMuteFriend(friendData) {
         }
         
         localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
-        updateCurrentSection();
-        updateFriendCounts();
+        
+        try {
+            updateCurrentSection();
+            updateFriendCounts();
+        } catch (error) {
+            console.error('Error updating UI after muting friend:', error);
+        }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to update mute status:', error.message);
-        showNotification('Failed to update mute status', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to update mute status', 'error');
+        }
     }
 }
 
@@ -2514,12 +2936,23 @@ export function savePrivateNote(friendId, note) {
             window.privateNotes = {};
         }
         
+        // Validate friendId
+        if (!validateFriendId(friendId)) {
+            showNotification('Invalid friend ID', 'error');
+            return;
+        }
+        
+        // Validate note length
+        if (note && note.length > 1000) {
+            showNotification('Note is too long (max 1000 characters)', 'error');
+            return;
+        }
+        
         window.privateNotes[friendId] = note;
         localStorage.setItem(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, JSON.stringify(window.privateNotes));
         showNotification('Note saved', 'success');
         
     } catch (error) {
-        console.log('[Friend Page] Failed to save note:', error.message);
         showNotification('Failed to save note', 'error');
     }
 }
@@ -2556,9 +2989,15 @@ export async function removeFriend(friendData) {
             return;
         }
         
+        // Validate friend data
+        if (!validateFriendData(friendData)) {
+            showNotification('Invalid friend data', 'error');
+            return;
+        }
+        
         const response = await apiCallWithRetry(`/api/friends/${friendData.id}`, {
             method: 'DELETE'
-        }, 1);
+        }, 2);
         
         if (response && response.success) {
             friends = friends.filter(f => f.id !== friendData.id);
@@ -2569,8 +3008,12 @@ export async function removeFriend(friendData) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
             localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
             
-            updateCurrentSection();
-            updateFriendCounts();
+            try {
+                updateCurrentSection();
+                updateFriendCounts();
+            } catch (error) {
+                console.error('Error updating UI after removing friend:', error);
+            }
             
             showNotification('Friend removed successfully', 'success');
         } else {
@@ -2578,8 +3021,9 @@ export async function removeFriend(friendData) {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to remove friend:', error.message);
-        showNotification('Failed to remove friend', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to remove friend', 'error');
+        }
     }
 }
 
@@ -2591,9 +3035,15 @@ export async function blockUser(friendData) {
             return;
         }
         
+        // Validate friend data
+        if (!validateFriendData(friendData)) {
+            showNotification('Invalid user data', 'error');
+            return;
+        }
+        
         const response = await apiCallWithRetry(`/api/users/${friendData.id}/block`, {
             method: 'POST'
-        }, 1);
+        }, 2);
         
         if (response && response.success) {
             friends = friends.filter(f => f.id !== friendData.id);
@@ -2604,8 +3054,12 @@ export async function blockUser(friendData) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
             localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
             
-            updateCurrentSection();
-            updateFriendCounts();
+            try {
+                updateCurrentSection();
+                updateFriendCounts();
+            } catch (error) {
+                console.error('Error updating UI after blocking user:', error);
+            }
             
             showNotification('User blocked successfully', 'success');
         } else {
@@ -2613,8 +3067,9 @@ export async function blockUser(friendData) {
         }
         
     } catch (error) {
-        console.log('[Friend Page] Failed to block user:', error.message);
-        showNotification('Failed to block user', 'error');
+        if (error.message !== 'Session expired') {
+            showNotification('Failed to block user', 'error');
+        }
     }
 }
 
@@ -2633,7 +3088,7 @@ export function saveFriendsToLocalStorage() {
         localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
     } catch (error) {
-        // Silently fail
+        console.error('Error saving friends to localStorage:', error);
     }
 }
 
@@ -2642,12 +3097,14 @@ export function saveFriendsToLocalStorage() {
 // =============================================
 
 export function updateUIWithUserData(userData) {
-    console.log('[Friend Page] Updating UI with user data:', userData);
-    
     currentUser = userData;
     userData = userData;
     
-    updateUserDisplayElements(userData);
+    try {
+        updateUserDisplayElements(userData);
+    } catch (error) {
+        console.error('Error updating user display elements:', error);
+    }
     
     if (userData.id) {
         setTimeout(() => generateUniqueQRCode(), 100);
@@ -2660,35 +3117,37 @@ export function updateUIWithUserData(userData) {
 }
 
 function updateUserDisplayElements(userData) {
-    console.log('[Friend Page] User display elements updated for:', userData.displayName || userData.username);
+    // Implementation depends on external UI functions
 }
 
 export function updateDataSourceIndicator(source) {
-    const indicator = document.getElementById('dataSourceIndicator');
-    if (!indicator) return;
-    
-    indicator.className = 'data-source-indicator active';
-    indicator.classList.add(source);
-    
-    const textElement = document.getElementById('dataSourceText');
-    if (textElement) {
-        const sourceText = {
-            'parent': 'Data from Parent',
-            'unified_auth': 'Data from Auth System',
-            'cache': 'Cached Data',
-            'direct': 'Data from API'
-        };
-        textElement.textContent = sourceText[source] || 'Unknown Source';
+    try {
+        const indicator = document.getElementById('dataSourceIndicator');
+        if (!indicator) return;
+        
+        indicator.className = 'data-source-indicator active';
+        indicator.classList.add(source);
+        
+        const textElement = document.getElementById('dataSourceText');
+        if (textElement) {
+            const sourceText = {
+                'parent': 'Data from Parent',
+                'unified_auth': 'Data from Auth System',
+                'cache': 'Cached Data',
+                'direct': 'Data from API'
+            };
+            textElement.textContent = sourceText[source] || 'Unknown Source';
+        }
+        
+        setTimeout(() => {
+            indicator.classList.remove('active');
+        }, 5000);
+    } catch (error) {
+        console.error('Error updating data source indicator:', error);
     }
-    
-    setTimeout(() => {
-        indicator.classList.remove('active');
-    }, 5000);
 }
 
 export function attemptCachedDataFallback() {
-    console.log('[Friend Page] Attempting cached data fallback');
-    
     try {
         const cachedUser = localStorage.getItem('knecta_current_user') || localStorage.getItem('USER_DATA');
         
@@ -2707,25 +3166,20 @@ export function attemptCachedDataFallback() {
             
             currentUser = userData;
             
-            console.log('[Friend Page] Successfully initialized with cached data');
-            
             showNotification('Using cached data. Some features may be limited.', 'warning');
             
             return true;
         }
         
-        console.log('[Friend Page] No cached data available');
         return false;
         
     } catch (error) {
-        console.log('[Friend Page] Error using cached data:', error.message);
+        console.error('[Friend Page] Error using cached data:', error.message);
         return false;
     }
 }
 
 export function initializeMainFunctionality() {
-    console.log('[Friend Page] Initializing main functionality');
-    
     hideAuthError();
     
     if (typeof enhancedInitialize === 'function') {
@@ -2736,8 +3190,6 @@ export function initializeMainFunctionality() {
 }
 
 function initializeOriginalFunctionality() {
-    console.log('[Friend Page] Using original initialization');
-    
     if (typeof loadCachedDataInstantly === 'function') {
         loadCachedDataInstantly();
         cacheLoaded = true;
@@ -2758,12 +3210,16 @@ export function showAuthError(message) {
         return;
     }
     
-    const overlay = document.getElementById('authErrorOverlay');
-    const messageElement = document.getElementById('authErrorMessage');
-    
-    if (overlay && messageElement) {
-        messageElement.textContent = message || 'Authentication required';
-        overlay.classList.add('active');
+    try {
+        const overlay = document.getElementById('authErrorOverlay');
+        const messageElement = document.getElementById('authErrorMessage');
+        
+        if (overlay && messageElement) {
+            messageElement.textContent = message || 'Authentication required';
+            overlay.classList.add('active');
+        }
+    } catch (error) {
+        console.error('Error showing auth error:', error);
     }
 }
 
@@ -2773,9 +3229,13 @@ export function hideAuthError() {
         return;
     }
     
-    const overlay = document.getElementById('authErrorOverlay');
-    if (overlay) {
-        overlay.classList.remove('active');
+    try {
+        const overlay = document.getElementById('authErrorOverlay');
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+    } catch (error) {
+        console.error('Error hiding auth error:', error);
     }
 }
 
@@ -2785,18 +3245,22 @@ export function showReconnectionState() {
         return;
     }
     
-    const existingIndicator = document.getElementById('reconnectionIndicator');
-    if (!existingIndicator) {
-        const indicator = document.createElement('div');
-        indicator.id = 'reconnectionIndicator';
-        indicator.className = 'reconnection-indicator';
-        indicator.innerHTML = `
-            <div class="reconnection-content">
-                <i class="fas fa-sync-alt fa-spin"></i>
-                <span>Reconnecting...</span>
-            </div>
-        `;
-        document.body.appendChild(indicator);
+    try {
+        const existingIndicator = document.getElementById('reconnectionIndicator');
+        if (!existingIndicator) {
+            const indicator = document.createElement('div');
+            indicator.id = 'reconnectionIndicator';
+            indicator.className = 'reconnection-indicator';
+            indicator.innerHTML = `
+                <div class="reconnection-content">
+                    <i class="fas fa-sync-alt fa-spin"></i>
+                    <span>Reconnecting...</span>
+                </div>
+            `;
+            document.body.appendChild(indicator);
+        }
+    } catch (error) {
+        console.error('Error showing reconnection state:', error);
     }
 }
 
@@ -2806,14 +3270,44 @@ export function hideReconnectionState() {
         return;
     }
     
-    const indicator = document.getElementById('reconnectionIndicator');
-    if (indicator) {
-        indicator.remove();
+    try {
+        const indicator = document.getElementById('reconnectionIndicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    } catch (error) {
+        console.error('Error hiding reconnection state:', error);
     }
 }
 
 // =============================================
-// EXPORT FOR MODULE USE
+// MINIMAL COMPATIBILITY PATCH - escapeHtml
+// =============================================
+
+// Ensure escapeHtml is defined and exported
+let escapeHtmlImplementation;
+if (typeof escapeHtml === 'undefined') {
+    escapeHtmlImplementation = function(text) {
+        if (typeof text !== 'string') {
+            return text;
+        }
+        
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+} else {
+    escapeHtmlImplementation = escapeHtml;
+}
+
+// Export it
+export { escapeHtmlImplementation as escapeHtml };
+
+// =============================================
+// EXPORT FOR MODULE USE (UPDATED)
 // =============================================
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -2823,6 +3317,11 @@ if (typeof module !== 'undefined' && module.exports) {
         apiCallWithRetry,
         getValidToken,
         getCurrentUser,
-        enhancedInitialize
+        enhancedInitialize,
+        escapeHtml,
+        requestSessionFromParent, // Added new function
+        handleEnhancedParentMessage, // Added new function
+        updateGlobalStateFromSession, // Added new function
+        bindUIAfterSession // Added new function
     };
 }

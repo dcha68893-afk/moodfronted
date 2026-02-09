@@ -2071,7 +2071,7 @@
             
             // Invalidate groups cache since we added a new group
             if (_apiCache) {
-                _apiCache.delete('get_/api/groups');
+                _apiCache.delete('get_/api/group');
             }
             
             return result;

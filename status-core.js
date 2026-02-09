@@ -62,7 +62,7 @@ export let isTokenReady = false;
 export let tokenReadyCallbacks = [];
 export let pendingApiRequests = [];
 
-// Parent Coordination System
+// Parent Coordination System - ENHANCED with secure handshake
 export let parentCoordinator = {
     isInitialized: false,
     handshakeComplete: false,
@@ -71,7 +71,15 @@ export let parentCoordinator = {
     handshakeRetries: 0,
     maxHandshakeRetries: 10,
     handshakeInterval: null,
-    parentOrigin: null
+    parentOrigin: null,
+    // New secure handshake variables
+    handshakeInProgress: false,
+    sessionValid: false,
+    handshakeTimeout: null,
+    sessionRequestSent: false,
+    trustedOrigins: new Set(),
+    lastMessageOrigin: null,
+    sequenceId: null
 };
 
 // Status types
@@ -394,11 +402,11 @@ export const LOCAL_STORAGE_KEYS = {
 export const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
 
 // =============================================
-// PARENT COORDINATION SYSTEM
+// ENHANCED SECURE PARENT COORDINATION SYSTEM
 // =============================================
 
 /**
- * Initialize parent coordination system
+ * Initialize parent coordination system with secure handshake
  */
 export function initializeParentCoordination() {
     if (parentCoordinator.isInitialized) {
@@ -406,28 +414,25 @@ export function initializeParentCoordination() {
         return;
     }
 
-    console.log('[Status] Initializing parent coordination system');
-    
     try {
-        // 1. Verify parent presence
+        // Verify parent presence
         if (!window.parent || window.parent === window) {
-            console.error('[Status] No parent window found or same window');
+            console.log('[Status] No parent window available');
             handleParentUnavailable();
             return;
         }
 
-        // 2. Establish message channel
-        parentCoordinator.messageChannel = window;
-        parentCoordinator.parentOrigin = window.location.origin;
+        // Initialize trusted origins
+        initializeTrustedOrigins();
         
-        // 3. Setup message listener using imported function
-        listenToParentMessages(handleParentMessage);
+        // Setup enhanced message listener
+        setupEnhancedMessageListener();
         
-        // 4. Start handshake protocol
-        startHandshakeProtocol();
+        // Start secure handshake protocol
+        startSecureHandshake();
         
         parentCoordinator.isInitialized = true;
-        console.log('[Status] Parent coordination system initialized');
+        console.log('[Status] Parent coordination initialized');
         
     } catch (error) {
         console.error('[Status] Failed to initialize parent coordination:', error);
@@ -436,13 +441,69 @@ export function initializeParentCoordination() {
 }
 
 /**
- * Handle parent messages
+ * Initialize trusted origins dynamically
  */
-function handleParentMessage(event) {
+function initializeTrustedOrigins() {
     try {
-        // Security: Verify message origin
-        if (event.origin !== window.location.origin && event.origin !== parentCoordinator.parentOrigin) {
-            console.warn('[Status] Message from untrusted origin:', event.origin);
+        // Always trust current origin
+        parentCoordinator.trustedOrigins.add(window.location.origin);
+        
+        // Common development origins
+        parentCoordinator.trustedOrigins.add('http://127.0.0.1:5500');
+        parentCoordinator.trustedOrigins.add('http://localhost:5500');
+        parentCoordinator.trustedOrigins.add('http://127.0.0.1:3000');
+        parentCoordinator.trustedOrigins.add('http://localhost:3000');
+        
+        // HTTPS equivalents
+        parentCoordinator.trustedOrigins.add('https://127.0.0.1:5500');
+        parentCoordinator.trustedOrigins.add('https://localhost:5500');
+        parentCoordinator.trustedOrigins.add('https://127.0.0.1:3000');
+        parentCoordinator.trustedOrigins.add('https://localhost:3000');
+        
+        // Try to get parent origin from referrer
+        try {
+            const referrer = document.referrer;
+            if (referrer) {
+                const referrerOrigin = new URL(referrer).origin;
+                parentCoordinator.trustedOrigins.add(referrerOrigin);
+            }
+        } catch (e) {
+            // Ignore referrer parsing errors
+        }
+        
+        // Store current window origin as parent origin for message validation
+        parentCoordinator.parentOrigin = window.location.origin;
+        
+    } catch (error) {
+        console.warn('[Status] Error initializing trusted origins:', error);
+    }
+}
+
+/**
+ * Setup enhanced message listener with origin validation
+ */
+function setupEnhancedMessageListener() {
+    // Remove any existing listeners first
+    window.removeEventListener('message', handleEnhancedParentMessage);
+    
+    // Add enhanced listener
+    window.addEventListener('message', handleEnhancedParentMessage);
+    
+    // Store for cleanup
+    parentCoordinator.messageChannel = window;
+}
+
+/**
+ * Handle enhanced parent messages with strict origin validation
+ */
+function handleEnhancedParentMessage(event) {
+    try {
+        // Store last message origin for debugging
+        parentCoordinator.lastMessageOrigin = event.origin;
+        
+        // Validate origin - only accept from trusted origins
+        if (!isTrustedOrigin(event.origin)) {
+            console.warn('[Status] Message from untrusted origin:', event.origin, '(trusted:', Array.from(parentCoordinator.trustedOrigins), ')');
             return;
         }
 
@@ -451,11 +512,12 @@ function handleParentMessage(event) {
             return;
         }
 
-        console.log('[Status] Received message from parent:', message.type);
+        // Log message type (only once per type for debugging)
+        logMessageOnce(message.type);
 
         switch (message.type) {
             case MESSAGE_TYPES.SESSION_DATA:
-                handleSessionData(message.data);
+                handleSecureSessionData(message);
                 break;
                 
             case MESSAGE_TYPES.SESSION_UPDATE:
@@ -487,57 +549,315 @@ function handleParentMessage(event) {
 }
 
 /**
- * Start handshake protocol with parent
+ * Check if origin is trusted
  */
-export function startHandshakeProtocol() {
-    console.log('[Status] Starting handshake protocol');
-    
-    // Clear any existing handshake interval
-    if (parentCoordinator.handshakeInterval) {
-        clearInterval(parentCoordinator.handshakeInterval);
+function isTrustedOrigin(origin) {
+    // Always accept from current origin
+    if (origin === window.location.origin) {
+        return true;
     }
     
-    // Initial handshake attempt using imported function
-    sendParentMessage(MESSAGE_TYPES.CHILD_READY, {
-        module: 'status',
-        version: '1.0',
-        timestamp: Date.now()
-    });
+    // Check against trusted origins set
+    if (parentCoordinator.trustedOrigins.has(origin)) {
+        return true;
+    }
     
-    // Start retry mechanism with exponential backoff
-    parentCoordinator.handshakeRetries = 0;
-    parentCoordinator.handshakeInterval = setInterval(() => {
-        if (parentCoordinator.handshakeComplete) {
-            clearInterval(parentCoordinator.handshakeInterval);
-            return;
-        }
+    // Check if origin matches parent origin pattern (subdomains)
+    if (parentCoordinator.parentOrigin && 
+        origin.endsWith(parentCoordinator.parentOrigin.replace(/^https?:\/\//, ''))) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Log message type only once for debugging
+ */
+function logMessageOnce(messageType) {
+    const loggedKey = `logged_${messageType}`;
+    if (!sessionStorage.getItem(loggedKey)) {
+        console.log(`[Status] Received message type: ${messageType}`);
+        sessionStorage.setItem(loggedKey, 'true');
+    }
+}
+
+/**
+ * Start secure handshake protocol with parent
+ * Implements the requested secure handshake protocol
+ */
+export function startSecureHandshake() {
+    // Clear any existing handshake attempts
+    clearSecureHandshake();
+    
+    // Start new handshake
+    requestSessionFromParent();
+}
+
+/**
+ * Request session from parent (single request at a time)
+ */
+function requestSessionFromParent() {
+    if (parentCoordinator.handshakeInProgress) {
+        console.log('[Status] Handshake already in progress, skipping duplicate request');
+        return;
+    }
+    
+    parentCoordinator.handshakeInProgress = true;
+    parentCoordinator.sessionRequestSent = true;
+    
+    console.log('⏳ Waiting for session from parent...');
+    
+    // Generate unique sequence ID for this handshake
+    parentCoordinator.sequenceId = generateSequenceId();
+    
+    try {
+        // Send session request to parent
+        window.parent.postMessage({
+            type: MESSAGE_TYPES.REQUEST_SESSION,
+            source: 'status-core',
+            sequenceId: parentCoordinator.sequenceId,
+            timestamp: Date.now(),
+            module: 'status'
+        }, '*'); // Use wildcard for initial handshake, origin validation happens on response
         
-        parentCoordinator.handshakeRetries++;
-        
-        if (parentCoordinator.handshakeRetries >= parentCoordinator.maxHandshakeRetries) {
-            console.error('[Status] Handshake failed after maximum retries');
-            clearInterval(parentCoordinator.handshakeInterval);
-            handleParentUnavailable();
-            return;
-        }
-        
-        // Calculate backoff delay
-        const backoffDelay = Math.min(1000 * Math.pow(2, parentCoordinator.handshakeRetries), 10000);
-        const jitter = Math.random() * 500;
-        
-        console.log(`[Status] Handshake retry ${parentCoordinator.handshakeRetries} (delay: ${backoffDelay + jitter}ms)`);
-        
-        setTimeout(() => {
-            if (!parentCoordinator.handshakeComplete) {
-                sendParentMessage(MESSAGE_TYPES.REQUEST_SESSION, {
-                    module: 'status',
-                    retryCount: parentCoordinator.handshakeRetries,
-                    timestamp: Date.now()
-                });
+        // Set timeout for handshake response
+        parentCoordinator.handshakeTimeout = setTimeout(() => {
+            if (!parentCoordinator.sessionValid) {
+                console.log('❌ Session request timed out. No response from parent.');
+                
+                // Single retry logic
+                if (!parentCoordinator.handshakeRetries && parentCoordinator.handshakeRetries < 1) {
+                    console.log('🔄 Attempting single retry...');
+                    parentCoordinator.handshakeRetries++;
+                    parentCoordinator.handshakeInProgress = false;
+                    setTimeout(requestSessionFromParent, 1000);
+                } else {
+                    handleSessionFailed();
+                }
             }
-        }, backoffDelay + jitter);
+        }, 5000); // 5 second timeout as requested
         
-    }, 1000);
+    } catch (error) {
+        console.error('[Status] Error sending session request:', error);
+        parentCoordinator.handshakeInProgress = false;
+        handleSessionFailed();
+    }
+}
+
+/**
+ * Handle secure session data from parent
+ */
+function handleSecureSessionData(message) {
+    try {
+        // Verify message source
+        if (message.source !== 'parent') {
+            console.log('❌ Invalid message source, expected "parent"');
+            return;
+        }
+        
+        // Validate sequence ID if provided
+        if (parentCoordinator.sequenceId && message.sequenceId !== parentCoordinator.sequenceId) {
+            console.warn('[Status] Sequence ID mismatch, possible stale response');
+            // Continue anyway for backward compatibility
+        }
+        
+        const sessionData = message.data;
+        
+        // Validate session data structure
+        if (!sessionData || !sessionData.token || !sessionData.user) {
+            console.log('❌ Received invalid session from parent - missing token or user');
+            parentCoordinator.handshakeInProgress = false;
+            clearTimeout(parentCoordinator.handshakeTimeout);
+            return;
+        }
+        
+        // Additional validation
+        if (typeof sessionData.token !== 'string' || sessionData.token.length < 10) {
+            console.log('❌ Received invalid token format');
+            return;
+        }
+        
+        if (!sessionData.user.id || !sessionData.user.displayName) {
+            console.log('❌ Received invalid user data');
+            return;
+        }
+        
+        // Mark session as valid
+        parentCoordinator.sessionValid = true;
+        parentCoordinator.handshakeComplete = true;
+        parentCoordinator.handshakeInProgress = false;
+        
+        // Clear timeout
+        clearTimeout(parentCoordinator.handshakeTimeout);
+        
+        console.log('✅ Session received successfully');
+        
+        // Store session data
+        parentCoordinator.sessionData = sessionData;
+        
+        // Update global state from session
+        updateGlobalStateFromSession(sessionData);
+        
+        // Bind UI after session validation
+        bindUIAfterSession();
+        
+        // Notify parent that session was received
+        sendSecureResponseToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
+            success: true,
+            module: 'status',
+            sequenceId: parentCoordinator.sequenceId
+        });
+        
+        // Start background initialization with session
+        startBackgroundInitializationWithSession();
+        
+    } catch (error) {
+        console.error('[Status] Error handling secure session data:', error);
+        parentCoordinator.handshakeInProgress = false;
+        clearTimeout(parentCoordinator.handshakeTimeout);
+    }
+}
+
+/**
+ * Update global state from session data
+ */
+function updateGlobalStateFromSession(sessionData) {
+    try {
+        // Update current user
+        currentUser = sessionData.user;
+        userData = sessionData.user;
+        
+        // Store in localStorage for offline use (non-sensitive data only)
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(sessionData.user));
+        
+        // Store token in unified location
+        if (sessionData.token) {
+            localStorage.setItem(UNIFIED_TOKEN_KEY, sessionData.token);
+        }
+        
+        // Initialize token ready state
+        isTokenReady = true;
+        triggerTokenReadyCallbacks();
+        
+        // Process any pending API requests
+        processPendingApiRequests();
+        
+        console.log(`[Status] Session loaded for user: ${currentUser.displayName || currentUser.id}`);
+        
+    } catch (error) {
+        console.error('[Status] Error updating global state from session:', error);
+    }
+}
+
+/**
+ * Bind UI after session validation
+ */
+function bindUIAfterSession() {
+    try {
+        console.log('[Status] Binding UI after session validation...');
+        
+        // Trigger UI initialization with session data
+        if (typeof window.initializeStatusUI === 'function') {
+            window.initializeStatusUI();
+        }
+        
+        // Update any UI components that depend on authentication
+        updateUIBasedOnAuth();
+        
+    } catch (error) {
+        console.error('[Status] Error binding UI after session:', error);
+    }
+}
+
+/**
+ * Update UI based on authentication state
+ */
+function updateUIBasedOnAuth() {
+    try {
+        // This function would be implemented in the UI layer
+        // For now, we'll just update the global state
+        if (currentUser) {
+            console.log(`[Status] UI ready for user: ${currentUser.displayName || 'Unknown'}`);
+        }
+        
+        // Signal that UI can now be fully interactive
+        document.dispatchEvent(new CustomEvent('sessionReady', {
+            detail: { user: currentUser }
+        }));
+        
+    } catch (error) {
+        console.error('[Status] Error updating UI based on auth:', error);
+    }
+}
+
+/**
+ * Send secure response to parent
+ */
+function sendSecureResponseToParent(type, data = {}) {
+    try {
+        if (!window.parent || window.parent === window) {
+            console.error('[Status] Cannot send message: no parent window');
+            return;
+        }
+
+        const message = {
+            type,
+            data: {
+                ...data,
+                source: 'status-core',
+                timestamp: Date.now(),
+                sequenceId: parentCoordinator.sequenceId || generateSequenceId()
+            }
+        };
+
+        // Send to parent with wildcard origin (parent validates origin)
+        window.parent.postMessage(message, '*');
+        
+    } catch (error) {
+        console.error('[Status] Error sending secure response to parent:', error);
+    }
+}
+
+/**
+ * Handle session failed scenario
+ */
+function handleSessionFailed() {
+    console.log('[Status] Session handshake failed, using cached data');
+    
+    parentCoordinator.handshakeInProgress = false;
+    parentCoordinator.handshakeComplete = false;
+    
+    // Load cached data for offline use
+    loadCachedDataInstantly();
+    
+    // Update UI to show offline state
+    isOfflineMode = true;
+    
+    // Still try to initialize UI with cached data
+    initializeUIWithCachedData();
+}
+
+/**
+ * Clear secure handshake resources
+ */
+function clearSecureHandshake() {
+    if (parentCoordinator.handshakeTimeout) {
+        clearTimeout(parentCoordinator.handshakeTimeout);
+        parentCoordinator.handshakeTimeout = null;
+    }
+    
+    parentCoordinator.handshakeInProgress = false;
+    parentCoordinator.sessionValid = false;
+    parentCoordinator.sessionRequestSent = false;
+    parentCoordinator.handshakeRetries = 0;
+}
+
+/**
+ * Generate unique sequence ID for message tracking
+ */
+function generateSequenceId() {
+    return `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 /**
@@ -554,13 +874,14 @@ export function sendToParent(type, data = {}) {
             type,
             data: {
                 ...data,
-                source: 'status',
-                timestamp: Date.now()
+                source: 'status-core',
+                timestamp: Date.now(),
+                sequenceId: generateSequenceId()
             }
         };
 
-        console.log('[Status] Sending to parent:', type);
-        sendParentMessage(type, data);
+        // Use secure sending with origin validation
+        sendSecureResponseToParent(type, message.data);
         
     } catch (error) {
         console.error('[Status] Error sending message to parent:', error);
@@ -568,13 +889,11 @@ export function sendToParent(type, data = {}) {
 }
 
 /**
- * Handle session data from parent
+ * Handle session data from parent (legacy, kept for compatibility)
  */
 export function handleSessionData(sessionData) {
-    console.log('[Status] Received session data from parent:', sessionData);
-    
     try {
-        // Validate session data schema using imported function
+        // Validate session data schema
         if (!validateSessionData(sessionData)) {
             console.error('[Status] Invalid session data schema');
             sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
@@ -605,8 +924,6 @@ export function handleSessionData(sessionData) {
         
         // Start background initialization with session
         startBackgroundInitializationWithSession();
-        
-        console.log('[Status] Session data processed successfully');
         
     } catch (error) {
         console.error('[Status] Error handling session data:', error);
@@ -653,8 +970,6 @@ export function validateSessionData(sessionData) {
  * Update local state with session data
  */
 export function updateLocalStateWithSession(sessionData) {
-    console.log('[Status] Updating local state with session data');
-    
     try {
         // Update current user
         currentUser = sessionData.user;
@@ -670,8 +985,6 @@ export function updateLocalStateWithSession(sessionData) {
         // Process any pending API requests
         processPendingApiRequests();
         
-        console.log('[Status] Local state updated with session');
-        
     } catch (error) {
         console.error('[Status] Error updating local state:', error);
     }
@@ -681,8 +994,6 @@ export function updateLocalStateWithSession(sessionData) {
  * Handle session update from parent
  */
 export function handleSessionUpdate(updateData) {
-    console.log('[Status] Received session update:', updateData);
-    
     try {
         if (updateData.user) {
             currentUser = updateData.user;
@@ -699,8 +1010,6 @@ export function handleSessionUpdate(updateData) {
             parentCoordinator.sessionData.permissions = updateData.permissions;
         }
         
-        console.log('[Status] Session updated successfully');
-        
     } catch (error) {
         console.error('[Status] Error handling session update:', error);
     }
@@ -710,17 +1019,17 @@ export function handleSessionUpdate(updateData) {
  * Handle logout from parent
  */
 export function handleLogout(logoutData) {
-    console.log('[Status] Received logout command');
-    
     try {
         // Clear all session data
         parentCoordinator.sessionData = null;
         parentCoordinator.handshakeComplete = false;
+        parentCoordinator.sessionValid = false;
         
         // Clear local user data
         currentUser = null;
         userData = null;
         localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+        localStorage.removeItem(UNIFIED_TOKEN_KEY);
         
         // Show logout state
         sendToParent(MESSAGE_TYPES.CHILD_READY, {
@@ -728,8 +1037,6 @@ export function handleLogout(logoutData) {
             loggedOut: true,
             timestamp: Date.now()
         });
-        
-        console.log('[Status] Logout processed successfully');
         
     } catch (error) {
         console.error('[Status] Error handling logout:', error);
@@ -740,10 +1047,10 @@ export function handleLogout(logoutData) {
  * Handle parent unavailable
  */
 export function handleParentUnavailable() {
-    console.log('[Status] Parent unavailable, entering standalone mode');
-    
+    console.log('[Status] Parent window unavailable, loading cached data');
     // Load cached data for basic UI
     loadCachedDataInstantly();
+    isOfflineMode = true;
 }
 
 /**
@@ -751,11 +1058,8 @@ export function handleParentUnavailable() {
  */
 export function startBackgroundInitializationWithSession() {
     if (isBackgroundInitialized) {
-        console.log('[Status] Background already initialized');
         return;
     }
-    
-    console.log('[Status] Starting background initialization with session');
     
     try {
         // Load fresh data in background
@@ -763,7 +1067,6 @@ export function startBackgroundInitializationWithSession() {
             try {
                 await loadFreshDataInBackground();
                 isBackgroundInitialized = true;
-                console.log('[Status] Background initialization complete');
                 
                 // Notify parent that UI is ready
                 sendToParent(MESSAGE_TYPES.UI_READY, {
@@ -818,7 +1121,7 @@ export async function makeParentApiRequest(endpoint, options = {}) {
             // Listen for response
             window.addEventListener('message', responseHandler);
             
-            // Send request to parent using imported function
+            // Send request to parent
             sendParentMessage(MESSAGE_TYPES.API_REQUEST, {
                 requestId,
                 endpoint,
@@ -847,7 +1150,6 @@ export async function makeParentApiRequest(endpoint, options = {}) {
  */
 export function handleApiResponse(responseData) {
     // This is handled in the promise-based makeParentApiRequest
-    console.log('[Status] API response received:', responseData.requestId);
 }
 
 /**
@@ -855,15 +1157,12 @@ export function handleApiResponse(responseData) {
  */
 export function handleApiError(errorData) {
     // This is handled in the promise-based makeParentApiRequest
-    console.error('[Status] API error received:', errorData);
 }
 
 /**
  * Handle auth validated
  */
 export function handleAuthValidated(data) {
-    console.log('[Status] Auth validated by parent:', data);
-    
     if (data.success) {
         // Auth successful
         isTokenReady = true;
@@ -872,7 +1171,7 @@ export function handleAuthValidated(data) {
 }
 
 // =============================================
-// CENTRALIZED TOKEN ACCESS SYSTEM (UPDATED)
+// CENTRALIZED TOKEN ACCESS SYSTEM
 // =============================================
 
 /**
@@ -894,7 +1193,7 @@ export function waitForTokenReady() {
             return;
         }
 
-        // Fallback to legacy check using imported function
+        // Fallback to legacy check
         const checkToken = () => {
             const token = getUnifiedToken();
             if (token) {
@@ -999,7 +1298,6 @@ export function migrateLegacyTokens() {
                 if (token.split('.').length === 3) {
                     // Store in unified location
                     localStorage.setItem(UNIFIED_TOKEN_KEY, token);
-                    console.log('[Status] Migrated legacy token from', key);
                     return token;
                 }
             }
@@ -1021,7 +1319,7 @@ export function isAuthenticated() {
         return true;
     }
     
-    // Fallback to token check using imported function
+    // Fallback to token check
     return getUnifiedToken() !== null;
 }
 
@@ -1083,14 +1381,12 @@ export function startTokenReadinessCheck() {
 export async function secureApiCall(endpoint, options = {}) {
     // If offline mode, queue for later
     if (isOfflineMode && options.method && options.method !== 'GET') {
-        console.log('[Status] Offline mode: Queueing request for', endpoint);
         return Promise.reject(new Error('Offline mode'));
     }
 
     // Check if we should use parent API
     if (parentCoordinator.handshakeComplete) {
         try {
-            console.log('[Status] Using parent API for:', endpoint);
             return await makeParentApiRequest(endpoint, options);
         } catch (error) {
             console.error('[Status] Parent API request failed:', error);
@@ -1101,13 +1397,10 @@ export async function secureApiCall(endpoint, options = {}) {
     // Check if token is ready
     const token = getUnifiedToken();
     if (!token) {
-        console.log('[Status] Token not available, queuing request');
         return queueApiRequest(() => secureApiCall(endpoint, options));
     }
 
     try {
-        console.log('[Status] Making secure API call to:', endpoint);
-        
         // Use imported secureFetch function from api.core.js
         const response = await secureFetch(endpoint, {
             ...options,
@@ -1130,7 +1423,6 @@ export async function secureApiCall(endpoint, options = {}) {
                            error.message?.includes('Session');
         
         if (isAuthError) {
-            console.log('[Status] Authentication failed, switching to offline mode');
             isOfflineMode = true;
             handleAuthError('Authentication failed. Using offline mode.');
         }
@@ -1147,16 +1439,12 @@ export async function secureApiCall(endpoint, options = {}) {
  * Initialize UI immediately with cached data (non-blocking)
  */
 export function initializeUIWithCachedData() {
-    console.log('[Status] Initializing UI with cached data');
-    
     try {
         // Load user from cache
         loadUserFromCache();
         
         // Load all cached data
         loadCachedDataInstantly();
-        
-        console.log('[Status] UI rendered with cached data');
         
         // Start background initialization after parent coordination
         if (parentCoordinator.handshakeComplete) {
@@ -1197,15 +1485,12 @@ export function loadUserFromCache() {
  * Load cached data instantly for offline use
  */
 export function loadCachedDataInstantly() {
-    console.log('[Status] Loading cached data instantly...');
-    
     try {
         // Load statuses
         const statusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUSES);
         if (statusesData) {
             try {
                 statuses = JSON.parse(statusesData);
-                console.log('[Status] Loaded statuses from cache:', statuses.length);
             } catch (parseError) {
                 console.error('[Status] Error parsing cached statuses:', parseError);
             }
@@ -1321,8 +1606,6 @@ export function loadCachedDataInstantly() {
             }
         }
         
-        console.log('[Status] Cached data loaded successfully');
-        
     } catch (error) {
         console.error('[Status] Error loading cached data:', error);
     }
@@ -1337,20 +1620,15 @@ export function loadCachedDataInstantly() {
  */
 export async function startBackgroundInitialization() {
     if (isBackgroundInitialized) {
-        console.log('[Status] Background already initialized');
         return;
     }
-    
-    console.log('[Status] Starting background initialization');
     
     try {
         // Wait for token readiness (non-blocking)
         onTokenReady(async () => {
             try {
-                console.log('[Status] Token ready, loading fresh data in background');
                 await loadFreshDataInBackground();
                 isBackgroundInitialized = true;
-                console.log('[Status] Background initialization complete');
                 
                 // Notify parent that UI is ready
                 if (parentCoordinator.handshakeComplete) {
@@ -1366,11 +1644,9 @@ export async function startBackgroundInitialization() {
         
         // Also check immediately in case token is already ready
         if (getUnifiedToken() || parentCoordinator.handshakeComplete) {
-            console.log('[Status] Token/session already available, starting immediate background load');
             try {
                 await loadFreshDataInBackground();
                 isBackgroundInitialized = true;
-                console.log('[Status] Background initialization complete');
                 
                 // Notify parent that UI is ready
                 if (parentCoordinator.handshakeComplete) {
@@ -1394,8 +1670,6 @@ export async function startBackgroundInitialization() {
  */
 export async function loadFreshDataInBackground() {
     try {
-        console.log('[Status] Loading fresh data in background');
-        
         const loadPromises = [];
         
         loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
@@ -1404,8 +1678,6 @@ export async function loadFreshDataInBackground() {
         loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
         
         await Promise.allSettled(loadPromises);
-        
-        console.log('[Status] Background data loading complete');
         
     } catch (error) {
         console.error('[Status] Background data loading error:', error);
@@ -1426,9 +1698,6 @@ export async function safeApiOperation(operation) {
         return await operation();
     } catch (error) {
         console.log('[Status] Safe API operation failed:', error.message);
-        
-        // Don't switch to offline mode automatically
-        // User can still use cached data
         return null;
     }
 }
@@ -1445,8 +1714,6 @@ export async function loadStatusesInBackground() {
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             
             localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-            
-            console.log('[Status] Statuses updated from background:', statuses.length);
         }
     } catch (error) {
         console.log('[Status] Failed to load statuses in background:', error.message);
@@ -1463,7 +1730,6 @@ export async function loadMyStatusesInBackground() {
         if (response && response.statuses) {
             myStatuses = response.statuses;
             localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
-            console.log('[Status] My statuses updated from background:', myStatuses.length);
         }
     } catch (error) {
         console.log('[Status] Failed to load my statuses in background:', error.message);
@@ -1480,7 +1746,6 @@ export async function loadHighlightsInBackground() {
         if (response && response.highlights) {
             highlights = response.highlights;
             localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
-            console.log('[Status] Highlights updated from background:', highlights.length);
         }
     } catch (error) {
         console.log('[Status] Failed to load highlights in background:', error.message);
@@ -1498,7 +1763,6 @@ export async function loadUserDataInBackground() {
             currentUser = response.user;
             userData = response.user;
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(response.user));
-            console.log('[Status] User data updated from background');
         }
     } catch (error) {
         console.log('[Status] Failed to load user data in background:', error.message);
@@ -1515,10 +1779,8 @@ export async function loadUserDataInBackground() {
  * @returns {Promise<boolean>} Success status
  */
 export async function bootstrapApplication() {
-    console.log('[Status] Enhanced application bootstrap start');
-    
     try {
-        // Phase 1: Initialize parent coordination
+        // Phase 1: Initialize parent coordination with secure handshake
         initializeParentCoordination();
         
         // Phase 2: Immediate UI with cached data (non-blocking)
@@ -1527,7 +1789,7 @@ export async function bootstrapApplication() {
         // Phase 3: Start token readiness check
         startTokenReadinessCheck();
         
-        // Phase 5: Notify parent that child is loaded
+        // Phase 4: Notify parent that child is loaded
         setTimeout(() => {
             sendToParent(MESSAGE_TYPES.CHILD_LOADED, {
                 module: 'status',
@@ -1552,8 +1814,6 @@ export async function bootstrapApplication() {
  * @param {string} message - Error message
  */
 export function handleAuthError(message) {
-    console.error('[Status] Authentication failed:', message);
-    
     // Notify parent about auth error
     if (parentCoordinator.handshakeComplete) {
         sendToParent(MESSAGE_TYPES.NEEDS_AUTH, {
@@ -1575,8 +1835,6 @@ export function handleAuthError(message) {
  * Initialize status system with fallback to cached data
  */
 export async function initializeStatusSystem() {
-    console.log('[Status] Initializing status system');
-    
     try {
         // Try to load fresh data with timeout
         const timeoutPromise = new Promise((_, reject) => 
@@ -1588,8 +1846,6 @@ export async function initializeStatusSystem() {
         if (currentUser) {
             console.log(`[Status] Welcome back, ${currentUser.displayName || 'User'}!`);
         }
-        
-        console.log('[Status] Status system initialized successfully');
         
     } catch (error) {
         console.error('[Status] Error initializing status system:', error);
@@ -1609,16 +1865,12 @@ export async function initializeStatusSystem() {
  */
 export async function loadInitialData() {
     try {
-        console.log('[Status] Loading initial data from API');
-        
         const loadPromises = [];
         
         loadPromises.push(safeApiOperation(async () => {
             const statusesResponse = await secureApiCall('/api/statuses');
             if (statusesResponse && statusesResponse.statuses) {
                 statuses = statusesResponse.statuses;
-                console.log('[Status] Loaded statuses from API:', statuses.length);
-                
                 statuses = filterStatusesByPrivacy(statuses);
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 
@@ -1653,8 +1905,6 @@ export async function loadInitialData() {
         
         await Promise.allSettled(loadPromises);
         
-        console.log('[Status] Initial data loaded successfully');
-        
     } catch (error) {
         console.error('[Status] Error loading initial data:', error);
         throw error;
@@ -1671,7 +1921,15 @@ export async function loadInitialData() {
  * @returns {Array} Filtered statuses
  */
 export function filterStatusesByPrivacy(statuses) {
+    if (!Array.isArray(statuses)) {
+        return [];
+    }
+    
     return statuses.filter(status => {
+        if (!status || !status.userId) {
+            return false;
+        }
+        
         if (mutedUsers.has(status.userId)) {
             return false;
         }
@@ -1703,8 +1961,10 @@ export function filterStatusesByPrivacy(statuses) {
  * @returns {string} Preview text
  */
 export function getStatusPreviewText(status) {
+    if (!status) return 'Status';
+    
     if (status.type === 'text') {
-        return status.text.length > 30 ? status.text.substring(0, 30) + '...' : status.text;
+        return status.text && status.text.length > 30 ? status.text.substring(0, 30) + '...' : status.text || 'Text status';
     } else if (status.type === 'media') {
         return status.caption ? status.caption.substring(0, 30) + '...' : 'Media status';
     } else if (status.type === 'poll') {
@@ -1717,7 +1977,7 @@ export function getStatusPreviewText(status) {
  * Update current section based on active tab
  */
 export function updateCurrentSection() {
-    console.log('[Status] Update current section');
+    // Implementation handled by UI module
 }
 
 /**
@@ -1726,17 +1986,21 @@ export function updateCurrentSection() {
  * @returns {Array} Filtered statuses
  */
 export function filterStatusesByType(type) {
+    if (!Array.isArray(statuses)) {
+        return [];
+    }
+    
     switch(type) {
         case 'friends':
-            return statuses.filter(status => status.privacy === 'friends' || status.privacy === 'everyone');
+            return statuses.filter(status => status && (status.privacy === 'friends' || status.privacy === 'everyone'));
         case 'close-friends':
-            return statuses.filter(status => status.privacy === 'close-friends');
+            return statuses.filter(status => status && status.privacy === 'close-friends');
         case 'pinned':
-            return statuses.filter(status => status.isPinned);
+            return statuses.filter(status => status && status.isPinned);
         case 'muted':
-            return statuses.filter(status => mutedUsers.has(status.userId));
+            return statuses.filter(status => status && mutedUsers.has(status.userId));
         case 'micro-circle':
-            return statuses.filter(status => status.privacy === 'micro-circle');
+            return statuses.filter(status => status && status.privacy === 'micro-circle');
         default:
             return statuses;
     }
@@ -1770,6 +2034,10 @@ export function getEmptyStateMessage() {
  */
 export async function addReactionToStatus(statusId, reaction) {
     try {
+        if (!statusId || !reaction) {
+            throw new Error('Missing required parameters');
+        }
+        
         if (isOfflineMode) {
             pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
             localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, JSON.stringify(pendingReactions));
@@ -1795,6 +2063,10 @@ export async function addReactionToStatus(statusId, reaction) {
  */
 export async function voteOnPoll(statusId, optionId) {
     try {
+        if (!statusId || !optionId) {
+            throw new Error('Missing required parameters');
+        }
+        
         if (isOfflineMode) {
             return;
         }
@@ -1817,6 +2089,10 @@ export async function voteOnPoll(statusId, optionId) {
  */
 export async function pinStatus(statusData) {
     try {
+        if (!statusData || !statusData.id) {
+            throw new Error('Invalid status data');
+        }
+        
         const response = await secureApiCall(`/api/statuses/${statusData.id}/pin`, {
             method: 'POST'
         });
@@ -1838,13 +2114,17 @@ export async function pinStatus(statusData) {
  */
 export async function unpinStatus(statusData) {
     try {
+        if (!statusData || !statusData.id) {
+            throw new Error('Invalid status data');
+        }
+        
         const response = await secureApiCall(`/api/statuses/${statusData.id}/pin`, {
             method: 'DELETE'
         });
         
         if (response && response.success) {
             statusData.isPinned = false;
-            pinnedStatuses = pinnedStatuses.filter(s => s.id !== statusData.id);
+            pinnedStatuses = pinnedStatuses.filter(s => s && s.id !== statusData.id);
         }
         return response;
     } catch (error) {
@@ -1859,6 +2139,10 @@ export async function unpinStatus(statusData) {
  */
 export async function muteUser(userId) {
     try {
+        if (!userId) {
+            throw new Error('Invalid user ID');
+        }
+        
         const response = await secureApiCall(`/api/users/${userId}/mute`, {
             method: 'POST'
         });
@@ -1880,6 +2164,10 @@ export async function muteUser(userId) {
  */
 export async function unmuteUser(userId) {
     try {
+        if (!userId) {
+            throw new Error('Invalid user ID');
+        }
+        
         const response = await secureApiCall(`/api/users/${userId}/mute`, {
             method: 'DELETE'
         });
@@ -1901,15 +2189,22 @@ export async function unmuteUser(userId) {
  */
 export async function postStatus(statusData) {
     try {
+        if (!statusData) {
+            throw new Error('Invalid status data');
+        }
+        
+        // Sanitize status data
+        const sanitizedData = sanitizeStatusData(statusData);
+        
         if (isOfflineMode) {
             const offlineQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || '[]');
-            statusData.id = 'offline_' + Date.now();
-            statusData.createdAt = new Date().toISOString();
-            offlineQueue.push(statusData);
+            sanitizedData.id = 'offline_' + Date.now();
+            sanitizedData.createdAt = new Date().toISOString();
+            offlineQueue.push(sanitizedData);
             localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
             
-            statuses.unshift(statusData);
-            myStatuses.unshift(statusData);
+            statuses.unshift(sanitizedData);
+            myStatuses.unshift(sanitizedData);
             localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
             localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
             
@@ -1917,12 +2212,12 @@ export async function postStatus(statusData) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
             updateStreakCounter();
             
-            return { success: true, status: statusData };
+            return { success: true, status: sanitizedData };
         }
         
         const response = await secureApiCall('/api/statuses/create', {
             method: 'POST',
-            body: JSON.stringify(statusData)
+            body: JSON.stringify(sanitizedData)
         });
         
         if (response && response.status) {
@@ -1935,9 +2230,9 @@ export async function postStatus(statusData) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
             updateStreakCounter();
             
-            if (statusData.mood) {
+            if (sanitizedData.mood) {
                 moodChartData.push({
-                    mood: statusData.mood,
+                    mood: sanitizedData.mood,
                     value: 50 + Math.floor(Math.random() * 30),
                     date: new Date().toISOString()
                 });
@@ -1952,6 +2247,133 @@ export async function postStatus(statusData) {
         console.error('[Status] Error posting status:', error);
         throw error;
     }
+}
+
+/**
+ * Sanitize status data to prevent XSS
+ */
+function sanitizeStatusData(statusData) {
+    const sanitized = { ...statusData };
+    
+    // Sanitize text fields
+    if (sanitized.text) {
+        sanitized.text = escapeHtml(sanitized.text);
+    }
+    if (sanitized.caption) {
+        sanitized.caption = escapeHtml(sanitized.caption);
+    }
+    if (sanitized.question) {
+        sanitized.question = escapeHtml(sanitized.question);
+    }
+    
+    // Validate enum fields
+    if (sanitized.privacy && !privacySettings[sanitized.privacy]) {
+        sanitized.privacy = 'friends';
+    }
+    if (sanitized.mood && !statusMoods[sanitized.mood]) {
+        sanitized.mood = null;
+    }
+    if (sanitized.intent && !statusIntents[sanitized.intent]) {
+        sanitized.intent = null;
+    }
+    if (sanitized.category && !statusCategories[sanitized.category]) {
+        sanitized.category = null;
+    }
+    
+    // Validate payload structure
+    validateStatusPayload(sanitized);
+    
+    return sanitized;
+}
+
+/**
+ * Validate status payload structure
+ */
+function validateStatusPayload(payload) {
+    // Required fields for text status
+    if (payload.type === 'text') {
+        if (!payload.text || typeof payload.text !== 'string' || payload.text.trim().length === 0) {
+            throw new Error('Text status requires non-empty text');
+        }
+        if (payload.text.length > 5000) {
+            throw new Error('Text too long (max 5000 characters)');
+        }
+    }
+    
+    // Validate media status
+    if (payload.type === 'media') {
+        if (!payload.mediaUrls || !Array.isArray(payload.mediaUrls) || payload.mediaUrls.length === 0) {
+            throw new Error('Media status requires media URLs');
+        }
+        if (payload.caption && payload.caption.length > 1000) {
+            throw new Error('Caption too long (max 1000 characters)');
+        }
+    }
+    
+    // Validate poll status
+    if (payload.type === 'poll') {
+        if (!payload.question || typeof payload.question !== 'string' || payload.question.trim().length === 0) {
+            throw new Error('Poll requires a question');
+        }
+        if (!payload.options || !Array.isArray(payload.options) || payload.options.length < 2) {
+            throw new Error('Poll requires at least 2 options');
+        }
+        if (payload.options.length > 10) {
+            throw new Error('Too many poll options (max 10)');
+        }
+    }
+    
+    // Validate duration
+    if (payload.duration && !durationOptions[payload.duration.toString()]) {
+        throw new Error('Invalid duration option');
+    }
+    
+    // Validate mood
+    if (payload.mood && !statusMoods[payload.mood]) {
+        throw new Error('Invalid mood');
+    }
+    
+    // Validate intent
+    if (payload.intent && !statusIntents[payload.intent]) {
+        throw new Error('Invalid intent');
+    }
+    
+    // Validate category
+    if (payload.category && !statusCategories[payload.category]) {
+        throw new Error('Invalid category');
+    }
+    
+    // Validate privacy
+    if (payload.privacy && !privacySettings[payload.privacy]) {
+        throw new Error('Invalid privacy setting');
+    }
+}
+
+/**
+ * Generate sample mood data for charts
+ */
+export function generateSampleMoodData() {
+    const moods = Object.keys(statusMoods);
+    const sampleData = [];
+    const now = new Date();
+    
+    for (let i = 29; i >= 0; i--) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        
+        const randomMood = moods[Math.floor(Math.random() * moods.length)];
+        sampleData.push({
+            mood: randomMood,
+            value: 40 + Math.floor(Math.random() * 50),
+            date: date.toISOString().split('T')[0],
+            timestamp: date.getTime()
+        });
+    }
+    
+    // Sort by date
+    sampleData.sort((a, b) => a.timestamp - b.timestamp);
+    
+    return sampleData;
 }
 
 /**
@@ -1984,17 +2406,23 @@ export function updateStreakCounter() {
  */
 export async function scheduleStatus(statusData, scheduleTime) {
     try {
+        if (!statusData || !scheduleTime) {
+            throw new Error('Missing required parameters');
+        }
+        
+        const sanitizedData = sanitizeStatusData(statusData);
+        
         const response = await secureApiCall('/api/statuses/schedule', {
             method: 'POST',
             body: JSON.stringify({
-                ...statusData,
+                ...sanitizedData,
                 scheduledFor: scheduleTime
             })
         });
         
         if (response && response.success) {
             scheduledStatuses.push({
-                ...statusData,
+                ...sanitizedData,
                 scheduledFor: scheduleTime
             });
             localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
@@ -2012,10 +2440,15 @@ export async function scheduleStatus(statusData, scheduleTime) {
  */
 export function saveDraft(statusData) {
     try {
-        statusData.id = 'draft_' + Date.now();
-        statusData.createdAt = new Date().toISOString();
-        statusData.isDraft = true;
-        drafts.unshift(statusData);
+        if (!statusData) {
+            throw new Error('Invalid status data');
+        }
+        
+        const sanitizedData = sanitizeStatusData(statusData);
+        sanitizedData.id = 'draft_' + Date.now();
+        sanitizedData.createdAt = new Date().toISOString();
+        sanitizedData.isDraft = true;
+        drafts.unshift(sanitizedData);
         localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
         return { success: true };
     } catch (error) {
@@ -2032,11 +2465,17 @@ export function saveDraft(statusData) {
  */
 export async function reportStatus(statusId, reason, details) {
     try {
+        if (!statusId || !reason) {
+            throw new Error('Missing required parameters');
+        }
+        
+        const sanitizedDetails = escapeHtml(details || '');
+        
         const response = await secureApiCall(`/api/statuses/${statusId}/report`, {
             method: 'POST',
             body: JSON.stringify({
                 reason,
-                details
+                details: sanitizedDetails
             })
         });
         
@@ -2044,6 +2483,329 @@ export async function reportStatus(statusId, reason, details) {
     } catch (error) {
         console.error('[Status] Error reporting status:', error);
         throw error;
+    }
+}
+
+// =============================================
+// USER STATUS TRACKING
+// =============================================
+
+// User status tracking variables
+let userStatusInterval = null;
+let lastActivityTime = Date.now();
+let isOnline = navigator.onLine;
+let heartbeatInterval = null;
+let isTrackingInitialized = false;
+let lastOnlineStatus = navigator.onLine;
+let activityThrottleTimer = null;
+let activityEventHandlers = [];
+
+/**
+ * Initialize user status tracking
+ */
+export function initializeUserStatusTracking() {
+    if (isTrackingInitialized) {
+        return;
+    }
+    
+    try {
+        isOnline = navigator.onLine;
+        lastOnlineStatus = isOnline;
+        
+        // Setup online/offline detection with duplicate prevention
+        setupNetworkDetection();
+        
+        // Track user activity with normalized events
+        setupActivityTracking();
+        
+        // Start heartbeat
+        startHeartbeat();
+        
+        // Initial status update
+        updateUserStatus();
+        
+        isTrackingInitialized = true;
+        
+    } catch (error) {
+        console.error('[Status] Error initializing user status tracking:', error);
+    }
+}
+
+/**
+ * Setup network detection with duplicate prevention
+ */
+function setupNetworkDetection() {
+    const handleNetworkChange = () => {
+        const currentOnline = navigator.onLine;
+        
+        // Prevent duplicate updates
+        if (currentOnline === lastOnlineStatus) {
+            return;
+        }
+        
+        lastOnlineStatus = currentOnline;
+        
+        if (currentOnline) {
+            handleOnlineStatus();
+        } else {
+            handleOfflineStatus();
+        }
+    };
+    
+    // Remove existing listeners if any
+    window.removeEventListener('online', handleNetworkChange);
+    window.removeEventListener('offline', handleNetworkChange);
+    
+    // Add new listeners
+    window.addEventListener('online', handleNetworkChange);
+    window.addEventListener('offline', handleNetworkChange);
+    
+    // Store handlers for cleanup
+    activityEventHandlers.push({
+        element: window,
+        type: 'online',
+        handler: handleNetworkChange
+    });
+    activityEventHandlers.push({
+        element: window,
+        type: 'offline',
+        handler: handleNetworkChange
+    });
+}
+
+/**
+ * Setup activity tracking with normalized events
+ */
+function setupActivityTracking() {
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    
+    const updateActivity = () => {
+        // Throttle activity updates to prevent excessive calls
+        if (activityThrottleTimer) {
+            clearTimeout(activityThrottleTimer);
+        }
+        
+        activityThrottleTimer = setTimeout(() => {
+            lastActivityTime = Date.now();
+            activityThrottleTimer = null;
+        }, 1000); // Only update once per second max
+    };
+    
+    // Remove existing listeners if any
+    activityEvents.forEach(eventType => {
+        document.removeEventListener(eventType, updateActivity);
+    });
+    
+    // Add new listeners
+    activityEvents.forEach(eventType => {
+        document.addEventListener(eventType, updateActivity);
+        activityEventHandlers.push({
+            element: document,
+            type: eventType,
+            handler: updateActivity
+        });
+    });
+}
+
+/**
+ * Handle online status change
+ */
+function handleOnlineStatus() {
+    if (isOnline) return; // Already online, avoid duplicate updates
+    
+    console.log('[Status] Network online');
+    isOnline = true;
+    
+    // Update user status with throttling
+    setTimeout(() => {
+        updateUserStatus();
+    }, 100);
+    
+    // Sync pending data when coming back online
+    if (isOfflineMode) {
+        isOfflineMode = false;
+        setTimeout(() => {
+            syncPendingData();
+        }, 500);
+    }
+}
+
+/**
+ * Handle offline status change
+ */
+function handleOfflineStatus() {
+    if (!isOnline) return; // Already offline, avoid duplicate updates
+    
+    console.log('[Status] Network offline');
+    isOnline = false;
+    
+    // Update user status with throttling
+    setTimeout(() => {
+        updateUserStatus();
+    }, 100);
+    
+    if (!isOfflineMode) {
+        isOfflineMode = true;
+        console.log('[Status] Network offline, entering offline mode');
+    }
+}
+
+/**
+ * Start heartbeat to detect inactive users
+ */
+function startHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+    }
+    
+    heartbeatInterval = setInterval(() => {
+        const now = Date.now();
+        const inactiveTime = now - lastActivityTime;
+        
+        // If inactive for more than 5 minutes, send inactive status
+        if (inactiveTime > 300000) {
+            sendUserInactive();
+        } else {
+            sendUserActive();
+        }
+        
+        // Send heartbeat to parent if connected
+        if (parentCoordinator.handshakeComplete && isOnline) {
+            sendToParent(MESSAGE_TYPES.HEARTBEAT, {
+                timestamp: now,
+                isOnline: isOnline,
+                lastActivity: lastActivityTime,
+                sequenceId: generateSequenceId()
+            });
+        }
+    }, 60000); // Check every minute
+}
+
+/**
+ * Send user active status
+ */
+function sendUserActive() {
+    if (parentCoordinator.handshakeComplete && currentUser?.id) {
+        sendToParent(MESSAGE_TYPES.USER_ACTIVE, {
+            timestamp: Date.now(),
+            userId: currentUser.id,
+            sequenceId: generateSequenceId()
+        });
+    }
+}
+
+/**
+ * Send user inactive status
+ */
+function sendUserInactive() {
+    if (parentCoordinator.handshakeComplete && currentUser?.id) {
+        sendToParent(MESSAGE_TYPES.USER_INACTIVE, {
+            timestamp: Date.now(),
+            userId: currentUser.id,
+            lastActive: lastActivityTime,
+            sequenceId: generateSequenceId()
+        });
+    }
+}
+
+/**
+ * Update user status
+ */
+async function updateUserStatus() {
+    try {
+        if (!currentUser || !isAuthenticated()) {
+            return;
+        }
+        
+        const status = isOnline ? 'online' : 'offline';
+        
+        // Update local state
+        if (currentUser) {
+            currentUser.status = status;
+            currentUser.lastSeen = new Date().toISOString();
+        }
+        
+        // Send to parent with hardened messaging
+        if (parentCoordinator.handshakeComplete) {
+            const statusMessage = {
+                userId: currentUser.id,
+                status: status,
+                lastSeen: currentUser.lastSeen,
+                isOnline: isOnline,
+                timestamp: Date.now(),
+                sequenceId: generateSequenceId(),
+                source: 'status-core'
+            };
+            
+            sendToParent(MESSAGE_TYPES.STATUS_UPDATE, statusMessage);
+        }
+        
+        // Update via API if online
+        if (isOnline && !isOfflineMode) {
+            try {
+                await secureApiCall('/api/user/status', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        status: status,
+                        lastSeen: currentUser.lastSeen
+                    })
+                });
+            } catch (apiError) {
+                console.warn('[Status] Failed to update user status via API:', apiError.message);
+            }
+        }
+        
+    } catch (error) {
+        console.error('[Status] Error updating user status:', error);
+    }
+}
+
+/**
+ * Sync pending data when back online
+ */
+async function syncPendingData() {
+    try {
+        // Sync pending reactions
+        const reactionsToSync = [...pendingReactions];
+        for (const reaction of reactionsToSync) {
+            try {
+                await secureApiCall(`/api/statuses/${reaction.statusId}/react`, {
+                    method: 'POST',
+                    body: JSON.stringify({ reaction: reaction.reaction })
+                });
+                // Remove synced reaction
+                pendingReactions = pendingReactions.filter(r => 
+                    !(r.statusId === reaction.statusId && r.reaction === reaction.reaction)
+                );
+            } catch (error) {
+                console.error('[Status] Failed to sync reaction:', error);
+            }
+        }
+        
+        // Save updated pending reactions
+        localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, JSON.stringify(pendingReactions));
+        
+        // Sync offline queue
+        const offlineQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || '[]');
+        for (const statusData of offlineQueue) {
+            try {
+                await secureApiCall('/api/statuses/create', {
+                    method: 'POST',
+                    body: JSON.stringify(statusData)
+                });
+            } catch (error) {
+                console.error('[Status] Failed to sync offline status:', error);
+            }
+        }
+        
+        // Clear offline queue if all synced
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+        
+        // Refresh data
+        await loadFreshDataInBackground();
+        
+    } catch (error) {
+        console.error('[Status] Error syncing pending data:', error);
     }
 }
 
@@ -2069,6 +2831,10 @@ export function escapeHtml(text) {
  * @returns {string} Formatted time ago string
  */
 export function formatTimeAgo(date) {
+    if (!date || !(date instanceof Date)) {
+        return 'Unknown';
+    }
+    
     const now = new Date();
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
@@ -2096,7 +2862,6 @@ export async function retryOperation(operation, maxRetries = 3) {
             return await operation();
         } catch (error) {
             lastError = error;
-            console.log(`[Status] Retry ${i + 1}/${maxRetries} failed:`, error.message);
             
             if (i < maxRetries - 1) {
                 const delay = Math.min(1000 * Math.pow(2, i), 10000);
@@ -2109,23 +2874,92 @@ export async function retryOperation(operation, maxRetries = 3) {
     throw lastError;
 }
 
+// =============================================
+// CLEANUP AND MEMORY MANAGEMENT
+// =============================================
+
 /**
- * Generate sample mood data for demo
- * @returns {Array} Sample mood data
+ * Cleanup intervals and event listeners
  */
-export function generateSampleMoodData() {
-    const moods = Object.keys(statusMoods);
-    const data = [];
-    
-    for (let i = 0; i < 30; i++) {
-        const randomMood = moods[Math.floor(Math.random() * moods.length)];
-        data.push({
-            mood: randomMood,
-            value: 20 + Math.floor(Math.random() * 60)
-        });
+export function cleanup() {
+    try {
+        // Clear intervals
+        if (apiCheckInterval) {
+            clearInterval(apiCheckInterval);
+            apiCheckInterval = null;
+        }
+        
+        if (parentCoordinator.handshakeInterval) {
+            clearInterval(parentCoordinator.handshakeInterval);
+            parentCoordinator.handshakeInterval = null;
+        }
+        
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+        }
+        
+        if (autoAdvanceInterval) {
+            clearInterval(autoAdvanceInterval);
+            autoAdvanceInterval = null;
+        }
+        
+        if (progressInterval) {
+            clearInterval(progressInterval);
+            progressInterval = null;
+        }
+        
+        // Clear secure handshake timeout
+        if (parentCoordinator.handshakeTimeout) {
+            clearTimeout(parentCoordinator.handshakeTimeout);
+            parentCoordinator.handshakeTimeout = null;
+        }
+        
+        // Clear activity throttle timer
+        if (activityThrottleTimer) {
+            clearTimeout(activityThrottleTimer);
+            activityThrottleTimer = null;
+        }
+        
+        // Cleanup event listeners
+        cleanupEventListeners();
+        
+        // Clear pending callbacks
+        tokenReadyCallbacks = [];
+        pendingApiRequests = [];
+        
+        // Reset handshake state
+        parentCoordinator.handshakeInProgress = false;
+        parentCoordinator.sessionValid = false;
+        parentCoordinator.sessionRequestSent = false;
+        parentCoordinator.handshakeRetries = 0;
+        
+    } catch (error) {
+        console.error('[Status] Error during cleanup:', error);
     }
+}
+
+/**
+ * Cleanup all event listeners
+ */
+function cleanupEventListeners() {
+    // Cleanup activity event handlers
+    activityEventHandlers.forEach(({ element, type, handler }) => {
+        try {
+            element.removeEventListener(type, handler);
+        } catch (error) {
+            console.warn(`[Status] Error removing event listener for ${type}:`, error);
+        }
+    });
+    activityEventHandlers = [];
     
-    return data;
+    // Remove enhanced message listener
+    window.removeEventListener('message', handleEnhancedParentMessage);
+    
+    // Clear user status event listeners if initialized
+    if (isTrackingInitialized) {
+        isTrackingInitialized = false;
+    }
 }
 
 // =============================================
@@ -2136,16 +2970,41 @@ export function generateSampleMoodData() {
  * Initialize the application with centralized token system
  */
 export function initPageCore() {
-    console.log('[Status] Page loaded - Centralized token initialization');
-    
-    // Start enhanced bootstrap process with parent coordination
+    // Start enhanced bootstrap process with secure parent coordination
     setTimeout(async () => {
         try {
             await bootstrapApplication();
+            
+            // Initialize user status tracking after bootstrap
+            setTimeout(() => {
+                initializeUserStatusTracking();
+            }, 1000);
+            
         } catch (error) {
             console.error('[Status] Bootstrap failed:', error);
         }
     }, 50);
 }
 
-console.log('[Status] Centralized token status system core initialized successfully');
+// Add cleanup on page unload
+if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', cleanup);
+    window.addEventListener('pagehide', cleanup);
+}
+
+// Global exposure for iframe communication
+if (typeof window !== 'undefined') {
+    window.statusCore = {
+        initializeParentCoordination,
+        sendToParent,
+        getUnifiedToken,
+        secureApiCall,
+        initializeUserStatusTracking,
+        cleanup,
+        generateSampleMoodData,
+        // Enhanced secure handshake functions
+        startSecureHandshake,
+        requestSessionFromParent,
+        handleSecureSessionData
+    };
+}

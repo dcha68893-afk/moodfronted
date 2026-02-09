@@ -43,12 +43,13 @@ import {
     downloadDigitalFile,
     openChat,
     updateTeamMemberRole,
-    inviteTeamMember,
     startFreeTrial,
     restorePurchase,
     sendTip,
     processSubscriptionPayment
 } from './Tool-core.js';
+
+
 
 // DOM Elements
 const marketplaceDetailPanel = document.getElementById('marketplaceDetailPanel');
