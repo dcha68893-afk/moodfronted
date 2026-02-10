@@ -4,6 +4,7 @@
 // INTEGRATION: Exclusively uses api.auth.js for all authentication operations
 // ISOLATION: No DOM dependencies, no UI logic, no automatic initialization
 // UI ORCHESTRATION: Preserves all UI flows, event bindings, and visual feedback patterns
+// SAFETY: Added safety guards to prevent crashes in chat.html and iframes
 
 // ============================================================================
 // MODULAR CORE IMPORTS
@@ -52,6 +53,297 @@ const AUTH_GATEWAY_CONFIG = {
 };
 
 // ============================================================================
+// SAFETY GUARDS - PREVENT CRASHES IN CHAT.HTML AND IFRAMES
+// ============================================================================
+const SafetyGuards = {
+    _loggedErrors: new Set(),
+    _retryCounts: new Map(),
+    _maxRetries: 3,
+    
+    // Safe DOM element access
+    getElement: function(id, context = document) {
+        try {
+            const element = context.getElementById(id);
+            if (!element) {
+                this._logOnce(`DOM element not found: ${id}`, 'DOM_SAFETY');
+            }
+            return element;
+        } catch (error) {
+            this._logOnce(`Failed to access DOM element ${id}: ${error.message}`, 'DOM_ACCESS');
+            return null;
+        }
+    },
+    
+    // Safe query selector
+    querySelector: function(selector, context = document) {
+        try {
+            const element = context.querySelector(selector);
+            if (!element) {
+                this._logOnce(`Element not found with selector: ${selector}`, 'DOM_SAFETY');
+            }
+            return element;
+        } catch (error) {
+            this._logOnce(`Failed to query selector ${selector}: ${error.message}`, 'DOM_ACCESS');
+            return null;
+        }
+    },
+    
+    // Safe event listener addition
+    addEventListener: function(element, event, handler, options = {}) {
+        if (!element || !handler) {
+            this._logOnce(`Invalid parameters for addEventListener: element=${!!element}, handler=${!!handler}`, 'EVENT_SAFETY');
+            return null;
+        }
+        
+        try {
+            const wrappedHandler = (e) => {
+                try {
+                    return handler(e);
+                } catch (error) {
+                    this._logOnce(`Event handler error for ${event}: ${error.message}`, 'EVENT_HANDLER', {
+                        elementId: element.id,
+                        eventType: event
+                    });
+                    e.stopPropagation();
+                    e.preventDefault();
+                    return false;
+                }
+            };
+            
+            element.addEventListener(event, wrappedHandler, options);
+            return () => element.removeEventListener(event, wrappedHandler, options);
+        } catch (error) {
+            this._logOnce(`Failed to add event listener for ${event}: ${error.message}`, 'EVENT_SETUP');
+            return null;
+        }
+    },
+    
+    // Safe form initialization
+    initializeForm: function(formId, submitHandler, validationHandler = null) {
+        try {
+            const form = this.getElement(formId);
+            if (!form) {
+                this._logOnce(`Form ${formId} not found, skipping initialization`, 'FORM_INIT');
+                return { success: false, disabled: true };
+            }
+            
+            // Check required inputs
+            const requiredInputs = form.querySelectorAll('input[required]');
+            const missingInputs = [];
+            
+            Array.from(requiredInputs).forEach(input => {
+                if (!input || input.disabled) {
+                    missingInputs.push(input?.name || 'unknown');
+                }
+            });
+            
+            if (missingInputs.length > 0) {
+                this._logOnce(`Form ${formId} missing required inputs: ${missingInputs.join(', ')}`, 'FORM_VALIDATION');
+            }
+            
+            // Add submit handler
+            const removeListener = this.addEventListener(form, 'submit', (e) => {
+                try {
+                    e.preventDefault();
+                    
+                    // Run validation if provided
+                    if (validationHandler) {
+                        const isValid = validationHandler(form);
+                        if (isValid === false) {
+                            return false;
+                        }
+                    }
+                    
+                    // Call submit handler
+                    return submitHandler(form, e);
+                } catch (error) {
+                    this._logOnce(`Form ${formId} submission error: ${error.message}`, 'FORM_SUBMIT');
+                    form.classList.add('form-error');
+                    return false;
+                }
+            });
+            
+            return { success: true, form: form, removeListener };
+        } catch (error) {
+            this._logOnce(`Form ${formId} initialization failed: ${error.message}`, 'FORM_INIT');
+            return { success: false, disabled: true };
+        }
+    },
+    
+    // Safe session/token check
+    checkSessionValid: function(token, userId) {
+        try {
+            if (!token || token === 'undefined' || token === 'null' || token === '') {
+                this._logOnce('Invalid or missing token', 'SESSION_CHECK');
+                return false;
+            }
+            
+            // Basic JWT validation
+            const parts = token.split('.');
+            if (parts.length !== 3) {
+                this._logOnce('Invalid JWT format', 'SESSION_CHECK');
+                return false;
+            }
+            
+            // Try to decode payload
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            
+            // Check expiration
+            if (payload.exp) {
+                const expiryTime = payload.exp * 1000;
+                const currentTime = Date.now();
+                const buffer = 60000; // 1 minute buffer
+                
+                if (currentTime >= expiryTime - buffer) {
+                    this._logOnce('Token expired or about to expire', 'SESSION_CHECK');
+                    return false;
+                }
+            }
+            
+            return true;
+        } catch (error) {
+            this._logOnce(`Session check error: ${error.message}`, 'SESSION_CHECK');
+            return false;
+        }
+    },
+    
+    // Safe retry with limits
+    withRetry: async function(operationName, operation, maxRetries = 3, delay = 1000) {
+        const key = `${operationName}_${Date.now()}`;
+        let retryCount = this._retryCounts.get(key) || 0;
+        
+        if (retryCount >= maxRetries) {
+            this._logOnce(`Max retries (${maxRetries}) exceeded for ${operationName}`, 'RETRY_LIMIT');
+            return { success: false, retriesExhausted: true };
+        }
+        
+        try {
+            const result = await operation();
+            this._retryCounts.delete(key);
+            return { success: true, result };
+        } catch (error) {
+            retryCount++;
+            this._retryCounts.set(key, retryCount);
+            
+            if (retryCount < maxRetries) {
+                this._logOnce(`Retry ${retryCount}/${maxRetries} for ${operationName}: ${error.message}`, 'RETRY_ATTEMPT');
+                await new Promise(resolve => setTimeout(resolve, delay * retryCount));
+                return this.withRetry(operationName, operation, maxRetries, delay);
+            } else {
+                this._logOnce(`Failed after ${maxRetries} retries for ${operationName}: ${error.message}`, 'RETRY_FAILED');
+                return { success: false, error, retriesExhausted: true };
+            }
+        }
+    },
+    
+    // Safe external library check
+    checkLibrary: function(libraryName, globalPath = []) {
+        try {
+            let current = window;
+            for (const part of globalPath) {
+                current = current[part];
+                if (!current) {
+                    this._logOnce(`Library ${libraryName} not available at path ${globalPath.join('.')}`, 'LIBRARY_CHECK');
+                    return false;
+                }
+            }
+            return !!current;
+        } catch (error) {
+            this._logOnce(`Error checking library ${libraryName}: ${error.message}`, 'LIBRARY_CHECK');
+            return false;
+        }
+    },
+    
+    // Safe UI component initialization
+    initializeUIComponent: function(componentName, initFunction) {
+        try {
+            const result = initFunction();
+            
+            if (result && result.success === false) {
+                this._logOnce(`UI component ${componentName} initialization failed`, 'UI_COMPONENT');
+                // Disable only this component, allow others to continue
+                return { success: false, disabled: true, component: componentName };
+            }
+            
+            return { success: true, component: componentName };
+        } catch (error) {
+            this._logOnce(`UI component ${componentName} crashed: ${error.message}`, 'UI_COMPONENT');
+            // Disable only this component
+            return { success: false, disabled: true, component: componentName, error: error.message };
+        }
+    },
+    
+    // Safe parent-iframe communication
+    safePostMessage: function(targetWindow, message, targetOrigin = '*') {
+        try {
+            if (!targetWindow || !targetWindow.postMessage) {
+                this._logOnce('Invalid target window for postMessage', 'COMMUNICATION');
+                return false;
+            }
+            
+            if (!message || typeof message !== 'object') {
+                this._logOnce('Invalid message for postMessage', 'COMMUNICATION');
+                return false;
+            }
+            
+            targetWindow.postMessage(message, targetOrigin);
+            return true;
+        } catch (error) {
+            this._logOnce(`postMessage failed: ${error.message}`, 'COMMUNICATION');
+            return false;
+        }
+    },
+    
+    // Safe storage operations
+    safeStorageGet: function(key) {
+        try {
+            const value = localStorage.getItem(key);
+            return value ? JSON.parse(value) : null;
+        } catch (error) {
+            this._logOnce(`Failed to get from storage ${key}: ${error.message}`, 'STORAGE');
+            return null;
+        }
+    },
+    
+    safeStorageSet: function(key, value) {
+        try {
+            localStorage.setItem(key, JSON.stringify(value));
+            return true;
+        } catch (error) {
+            this._logOnce(`Failed to set storage ${key}: ${error.message}`, 'STORAGE');
+            return false;
+        }
+    },
+    
+    // Non-repetitive logging
+    _logOnce: function(message, category, details = {}) {
+        const logKey = `${category}:${message}`;
+        if (!this._loggedErrors.has(logKey)) {
+            this._loggedErrors.add(logKey);
+            console.warn(`[AUTH SAFETY:${category}] ${message}`, {
+                timestamp: new Date().toISOString(),
+                ...details
+            });
+            
+            // Clean up old logs after 100 entries to prevent memory leak
+            if (this._loggedErrors.size > 100) {
+                const firstKey = this._loggedErrors.values().next().value;
+                this._loggedErrors.delete(firstKey);
+            }
+        }
+    },
+    
+    // Cleanup
+    cleanup: function() {
+        this._loggedErrors.clear();
+        this._retryCounts.clear();
+    }
+};
+
+// Initialize safety guards
+window.__authSafetyGuards = SafetyGuards;
+
+// ============================================================================
 // API.AUTH.JS READINESS MANAGER - ENHANCED WITH BETTER DETECTION
 // ============================================================================
 class ApiAuthReadinessManager {
@@ -83,45 +375,49 @@ class ApiAuthReadinessManager {
     }
     
     _setupEventListeners() {
-        // Listen for custom ready event from api.auth.js
-        window.addEventListener(this._readyEventName, (event) => {
-            console.log('📬 Received apiAuthReady event:', event.detail);
-            this._markAsReady(event.detail);
-        });
-        
-        // Listen for custom error event
-        window.addEventListener(this._errorEventName, (event) => {
-            console.error('📬 Received apiAuthError event:', event.detail);
-            this._markAsFailed(event.detail);
-        });
-        
-        // NEW: Listen for api.auth.js FULL initialization event
-        window.addEventListener(this._fullyReadyEventName, (event) => {
-            console.log('✅ api.auth.js FULLY INITIALIZED event received:', event.detail);
-            this._markAsFullyInitialized(event.detail);
-        });
-        
-        // Listen for api.auth.js script load events
-        window.addEventListener('apiAuthScriptLoaded', (event) => {
-            console.log('📦 api.auth.js script loaded event received');
-            this._checkApiAuthPresence();
-        });
-        
-        // Listen for v2.1.1+ initialization event
-        window.addEventListener('api:auth:initialized', (event) => {
-            console.log('🎯 RECEIVED api:auth:initialized event from v2.1.1+:', event.detail);
+        try {
+            // Listen for custom ready event from api.auth.js
+            window.addEventListener(this._readyEventName, (event) => {
+                console.log('📬 Received apiAuthReady event:', event.detail);
+                this._markAsReady(event.detail);
+            });
             
-            // Force immediate detection
-            if (window.api?.auth) {
-                console.log('🎯 Event triggered - forcing full initialization');
-                this._markAsFullyInitialized({
-                    module: window.api.auth,
-                    source: 'api:auth:initialized-event',
-                    detail: event.detail,
-                    timestamp: Date.now()
-                });
-            }
-        }, { once: true });
+            // Listen for custom error event
+            window.addEventListener(this._errorEventName, (event) => {
+                console.error('📬 Received apiAuthError event:', event.detail);
+                this._markAsFailed(event.detail);
+            });
+            
+            // NEW: Listen for api.auth.js FULL initialization event
+            window.addEventListener(this._fullyReadyEventName, (event) => {
+                console.log('✅ api.auth.js FULLY INITIALIZED event received:', event.detail);
+                this._markAsFullyInitialized(event.detail);
+            });
+            
+            // Listen for api.auth.js script load events
+            window.addEventListener('apiAuthScriptLoaded', (event) => {
+                console.log('📦 api.auth.js script loaded event received');
+                this._checkApiAuthPresence();
+            });
+            
+            // Listen for v2.1.1+ initialization event
+            window.addEventListener('api:auth:initialized', (event) => {
+                console.log('🎯 RECEIVED api:auth:initialized event from v2.1.1+:', event.detail);
+                
+                // Force immediate detection
+                if (window.api?.auth) {
+                    console.log('🎯 Event triggered - forcing full initialization');
+                    this._markAsFullyInitialized({
+                        module: window.api.auth,
+                        source: 'api:auth:initialized-event',
+                        detail: event.detail,
+                        timestamp: Date.now()
+                    });
+                }
+            }, { once: true });
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to setup API Auth event listeners: ${error.message}`, 'API_AUTH_INIT');
+        }
     }
     
     async _detectApiAuth() {
@@ -157,292 +453,316 @@ class ApiAuthReadinessManager {
     }
     
     _checkApiAuthPresence() {
-        console.log('🔍 DEBUG - Checking for api.auth.js v2.1.1+ compatibility...');
-        
-        // Debug: Show what's actually available
-        console.log('🔍 DEBUG - Global API structure:', {
-            'window.api': !!window.api,
-            'window.api.auth': !!window.api?.auth,
-            'window.api.auth type': typeof window.api?.auth,
-            'window.MoodChatAuth': !!window.MoodChatAuth,
-            'window.auth': !!window.auth,
-            'window.app?.api?.auth': !!window.app?.api?.auth,
-            'window.__authModule': !!window.__authModule
-        });
-        
-        if (window.api?.auth) {
-            const apiAuth = window.api.auth;
-            console.log('🔍 DEBUG - window.api.auth properties:', Object.keys(apiAuth));
-            console.log('🔍 DEBUG - window.api.auth metadata:', {
-                version: apiAuth._version,
-                lifecycleState: apiAuth._lifecycleState,
-                registrationComplete: apiAuth._registrationComplete,
-                _initialized: apiAuth._initialized,
-                ready: apiAuth.ready
+        try {
+            console.log('🔍 DEBUG - Checking for api.auth.js v2.1.1+ compatibility...');
+            
+            // Debug: Show what's actually available
+            console.log('🔍 DEBUG - Global API structure:', {
+                'window.api': !!window.api,
+                'window.api.auth': !!window.api?.auth,
+                'window.api.auth type': typeof window.api?.auth,
+                'window.MoodChatAuth': !!window.MoodChatAuth,
+                'window.auth': !!window.auth,
+                'window.app?.api?.auth': !!window.app?.api?.auth,
+                'window.__authModule': !!window.__authModule
             });
             
-            // Check for essential methods
-            const essentialMethods = ['login', 'logout', 'getUser'];
-            const hasEssentialMethods = essentialMethods.every(method => 
-                typeof apiAuth[method] === 'function'
-            );
-            
-            if (!hasEssentialMethods) {
-                console.warn('❌ api.auth.js missing essential methods:', 
-                    essentialMethods.filter(m => typeof apiAuth[m] !== 'function'));
-                return false;
-            }
-            
-            console.log('✅ api.auth.js v2.1.1+ detected with all essential methods');
-            
-            // DETECTION 1: Check for v2.1.1 specific markers
-            if (apiAuth._version && apiAuth._version.includes('2.1')) {
-                console.log(`✅ api.auth.js v${apiAuth._version} detected with version marker`);
-                this._apiAuthDetected = true;
-                
-                // v2.1.1 is considered fully initialized if it has essential methods
-                this._markAsFullyInitialized({ 
-                    module: apiAuth,
-                    source: 'v2.1.1-version-check',
+            if (window.api?.auth) {
+                const apiAuth = window.api.auth;
+                console.log('🔍 DEBUG - window.api.auth properties:', Object.keys(apiAuth));
+                console.log('🔍 DEBUG - window.api.auth metadata:', {
                     version: apiAuth._version,
-                    fullyInitialized: true
+                    lifecycleState: apiAuth._lifecycleState,
+                    registrationComplete: apiAuth._registrationComplete,
+                    _initialized: apiAuth._initialized,
+                    ready: apiAuth.ready
                 });
-                return true;
-            }
-            
-            // DETECTION 2: Check for lifecycle state
-            if (apiAuth._lifecycleState === 'initialized' || 
-                apiAuth._lifecycleState === 'ready' ||
-                apiAuth._lifecycleState === 'running') {
-                console.log(`✅ api.auth.js fully initialized via lifecycle state: ${apiAuth._lifecycleState}`);
-                this._apiAuthDetected = true;
-                this._markAsFullyInitialized({ 
-                    module: apiAuth,
-                    source: 'lifecycle-state',
-                    state: apiAuth._lifecycleState,
-                    fullyInitialized: true
-                });
-                return true;
-            }
-            
-            // DETECTION 3: Check for registration completion
-            if (apiAuth._registrationComplete === true) {
-                console.log('✅ api.auth.js fully initialized via registration complete');
-                this._apiAuthDetected = true;
-                this._markAsFullyInitialized({ 
-                    module: apiAuth,
-                    source: 'registration-complete',
-                    fullyInitialized: true
-                });
-                return true;
-            }
-            
-            // DETECTION 4: Check for any initialization flag
-            if (apiAuth._initialized === true || apiAuth.ready === true) {
-                console.log('✅ api.auth.js fully initialized via initialization flag');
-                this._apiAuthDetected = true;
-                this._markAsFullyInitialized({ 
-                    module: apiAuth,
-                    source: 'init-flag',
-                    fullyInitialized: true
-                });
-                return true;
-            }
-            
-            // DETECTION 5: If we have essential methods, assume it's ready
-            console.log('⚠️ api.auth.js has essential methods but no init flags, assuming ready');
-            this._apiAuthDetected = true;
-            this._markAsFullyInitialized({ 
-                module: apiAuth,
-                source: 'essential-methods-fallback',
-                fullyInitialized: true
-            });
-            return true;
-        }
-        
-        // Fallback: Check other possible locations
-        const fallbackPaths = [
-            () => window.MoodChatAuth,
-            () => window.auth,
-            () => window.app?.api?.auth,
-            () => window.__authModule
-        ];
-        
-        for (const getter of fallbackPaths) {
-            try {
-                const module = getter();
-                if (module && typeof module === 'object') {
-                    console.log('🔍 Fallback detection:', getter.toString());
-                    
-                    const essentialMethods = ['login', 'logout', 'getUser'];
-                    const hasEssentialMethods = essentialMethods.some(method => 
-                        typeof module[method] === 'function'
-                    );
-                    
-                    if (hasEssentialMethods) {
-                        console.log('✅ Fallback api.auth.js detected');
-                        this._apiAuthDetected = true;
-                        
-                        // Ensure it's properly exposed to window.api.auth
-                        if (!window.api?.auth) {
-                            window.api = window.api || {};
-                            window.api.auth = module;
-                        }
-                        
-                        this._markAsFullyInitialized({ 
-                            module: module,
-                            source: 'fallback-detection',
-                            fullyInitialized: true
-                        });
-                        return true;
-                    }
+                
+                // Check for essential methods
+                const essentialMethods = ['login', 'logout', 'getUser'];
+                const hasEssentialMethods = essentialMethods.every(method => 
+                    typeof apiAuth[method] === 'function'
+                );
+                
+                if (!hasEssentialMethods) {
+                    console.warn('❌ api.auth.js missing essential methods:', 
+                        essentialMethods.filter(m => typeof apiAuth[m] !== 'function'));
+                    return false;
                 }
-            } catch (error) {
-                // Continue to next path
+                
+                console.log('✅ api.auth.js v2.1.1+ detected with all essential methods');
+                
+                // DETECTION 1: Check for v2.1.1 specific markers
+                if (apiAuth._version && apiAuth._version.includes('2.1')) {
+                    console.log(`✅ api.auth.js v${apiAuth._version} detected with version marker`);
+                    this._apiAuthDetected = true;
+                    
+                    // v2.1.1 is considered fully initialized if it has essential methods
+                    this._markAsFullyInitialized({ 
+                        module: apiAuth,
+                        source: 'v2.1.1-version-check',
+                        version: apiAuth._version,
+                        fullyInitialized: true
+                    });
+                    return true;
+                }
+                
+                // DETECTION 2: Check for lifecycle state
+                if (apiAuth._lifecycleState === 'initialized' || 
+                    apiAuth._lifecycleState === 'ready' ||
+                    apiAuth._lifecycleState === 'running') {
+                    console.log(`✅ api.auth.js fully initialized via lifecycle state: ${apiAuth._lifecycleState}`);
+                    this._apiAuthDetected = true;
+                    this._markAsFullyInitialized({ 
+                        module: apiAuth,
+                        source: 'lifecycle-state',
+                        state: apiAuth._lifecycleState,
+                        fullyInitialized: true
+                    });
+                    return true;
+                }
+                
+                // DETECTION 3: Check for registration completion
+                if (apiAuth._registrationComplete === true) {
+                    console.log('✅ api.auth.js fully initialized via registration complete');
+                    this._apiAuthDetected = true;
+                    this._markAsFullyInitialized({ 
+                        module: apiAuth,
+                        source: 'registration-complete',
+                        fullyInitialized: true
+                    });
+                    return true;
+                }
+                
+                // DETECTION 4: Check for any initialization flag
+                if (apiAuth._initialized === true || apiAuth.ready === true) {
+                    console.log('✅ api.auth.js fully initialized via initialization flag');
+                    this._apiAuthDetected = true;
+                    this._markAsFullyInitialized({ 
+                        module: apiAuth,
+                        source: 'init-flag',
+                        fullyInitialized: true
+                    });
+                    return true;
+                }
+                
+                // DETECTION 5: If we have essential methods, assume it's ready
+                console.log('⚠️ api.auth.js has essential methods but no init flags, assuming ready');
+                this._apiAuthDetected = true;
+                this._markAsFullyInitialized({ 
+                    module: apiAuth,
+                    source: 'essential-methods-fallback',
+                    fullyInitialized: true
+                });
+                return true;
             }
+            
+            // Fallback: Check other possible locations
+            const fallbackPaths = [
+                () => window.MoodChatAuth,
+                () => window.auth,
+                () => window.app?.api?.auth,
+                () => window.__authModule
+            ];
+            
+            for (const getter of fallbackPaths) {
+                try {
+                    const module = getter();
+                    if (module && typeof module === 'object') {
+                        console.log('🔍 Fallback detection:', getter.toString());
+                        
+                        const essentialMethods = ['login', 'logout', 'getUser'];
+                        const hasEssentialMethods = essentialMethods.some(method => 
+                            typeof module[method] === 'function'
+                        );
+                        
+                        if (hasEssentialMethods) {
+                            console.log('✅ Fallback api.auth.js detected');
+                            this._apiAuthDetected = true;
+                            
+                            // Ensure it's properly exposed to window.api.auth
+                            if (!window.api?.auth) {
+                                window.api = window.api || {};
+                                window.api.auth = module;
+                            }
+                            
+                            this._markAsFullyInitialized({ 
+                                module: module,
+                                source: 'fallback-detection',
+                                fullyInitialized: true
+                            });
+                            return true;
+                        }
+                    }
+                } catch (error) {
+                    // Continue to next path
+                }
+            }
+            
+            console.log('❌ No api.auth.js detected in any location');
+            return false;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`API Auth presence check failed: ${error.message}`, 'API_AUTH_CHECK');
+            return false;
         }
-        
-        console.log('❌ No api.auth.js detected in any location');
-        return false;
     }
     
     _isApiAuthFullyInitialized(module) {
-        if (!module || typeof module !== 'object') return false;
-        
-        console.log('🔍 Checking if api.auth.js is fully initialized:', {
-            moduleType: typeof module,
-            hasLogin: typeof module.login,
-            hasLogout: typeof module.logout,
-            hasGetUser: typeof module.getUser
-        });
-        
-        // Check for essential methods - THIS IS THE MOST IMPORTANT CHECK
-        const hasEssentialMethods = 
-            typeof module.login === 'function' &&
-            typeof module.logout === 'function' &&
-            typeof module.getUser === 'function';
-        
-        if (!hasEssentialMethods) {
-            console.warn('❌ Module missing essential methods');
+        try {
+            if (!module || typeof module !== 'object') return false;
+            
+            console.log('🔍 Checking if api.auth.js is fully initialized:', {
+                moduleType: typeof module,
+                hasLogin: typeof module.login,
+                hasLogout: typeof module.logout,
+                hasGetUser: typeof module.getUser
+            });
+            
+            // Check for essential methods - THIS IS THE MOST IMPORTANT CHECK
+            const hasEssentialMethods = 
+                typeof module.login === 'function' &&
+                typeof module.logout === 'function' &&
+                typeof module.getUser === 'function';
+            
+            if (!hasEssentialMethods) {
+                console.warn('❌ Module missing essential methods');
+                return false;
+            }
+            
+            // For v2.1.1+, if we have essential methods, it's considered ready
+            // The module handles its own initialization internally
+            console.log('✅ Module has essential methods, considering fully initialized');
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`API Auth initialization check failed: ${error.message}`, 'API_AUTH_INIT_CHECK');
             return false;
         }
-        
-        // For v2.1.1+, if we have essential methods, it's considered ready
-        // The module handles its own initialization internally
-        console.log('✅ Module has essential methods, considering fully initialized');
-        return true;
     }
     
     async _waitForScriptTag() {
         return new Promise((resolve) => {
-            // Look for script tag
-            const scripts = document.querySelectorAll('script[src*="api.auth"]');
-            if (scripts.length === 0) {
-                console.log('📦 No api.auth.js script tag found');
-                resolve(false);
-                return;
-            }
-            
-            const script = scripts[0];
-            console.log('📦 Found api.auth.js script tag:', script.src);
-            
-            // Check if script has loaded
-            if (script.getAttribute('data-loaded') === 'true') {
-                console.log('📦 Script already loaded');
-                resolve(this._checkApiAuthPresence());
-                return;
-            }
-            
-            // Listen for load event
-            script.addEventListener('load', () => {
-                console.log('📦 Script load event fired');
-                script.setAttribute('data-loaded', 'true');
+            try {
+                // Look for script tag
+                const scripts = document.querySelectorAll('script[src*="api.auth"]');
+                if (scripts.length === 0) {
+                    console.log('📦 No api.auth.js script tag found');
+                    resolve(false);
+                    return;
+                }
                 
-                // Give it a moment to initialize
+                const script = scripts[0];
+                console.log('📦 Found api.auth.js script tag:', script.src);
+                
+                // Check if script has loaded
+                if (script.getAttribute('data-loaded') === 'true') {
+                    console.log('📦 Script already loaded');
+                    resolve(this._checkApiAuthPresence());
+                    return;
+                }
+                
+                // Listen for load event
+                script.addEventListener('load', () => {
+                    console.log('📦 Script load event fired');
+                    script.setAttribute('data-loaded', 'true');
+                    
+                    // Give it a moment to initialize
+                    setTimeout(() => {
+                        const detected = this._checkApiAuthPresence();
+                        resolve(detected);
+                    }, 100);
+                });
+                
+                // Listen for error event
+                script.addEventListener('error', () => {
+                    console.error('📦 Script failed to load');
+                    resolve(false);
+                });
+                
+                // Timeout after 5 seconds
                 setTimeout(() => {
-                    const detected = this._checkApiAuthPresence();
-                    resolve(detected);
-                }, 100);
-            });
-            
-            // Listen for error event
-            script.addEventListener('error', () => {
-                console.error('📦 Script failed to load');
+                    console.warn('📦 Script load timeout');
+                    resolve(false);
+                }, 5000);
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`Script tag wait failed: ${error.message}`, 'SCRIPT_LOAD');
                 resolve(false);
-            });
-            
-            // Timeout after 5 seconds
-            setTimeout(() => {
-                console.warn('📦 Script load timeout');
-                resolve(false);
-            }, 5000);
+            }
         });
     }
     
     async _pollForApiAuth() {
         return new Promise((resolve) => {
-            const maxRetries = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_RETRIES;
-            const retryInterval = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_RETRY_INTERVAL;
-            const maxWait = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_WAIT;
-            
-            let attempts = 0;
-            const startTime = Date.now();
-            
-            const poll = () => {
-                attempts++;
+            try {
+                const maxRetries = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_RETRIES;
+                const retryInterval = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_RETRY_INTERVAL;
+                const maxWait = AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_WAIT;
                 
-                // Check if we've waited too long
-                if (Date.now() - startTime > maxWait) {
-                    console.warn(`⏰ Polling timeout after ${maxWait}ms`);
-                    resolve(false);
-                    return;
-                }
+                let attempts = 0;
+                const startTime = Date.now();
                 
-                // Check for api.auth
-                if (this._checkApiAuthPresence()) {
-                    console.log(`✅ api.auth.js found after ${attempts} attempts`);
-                    resolve(true);
-                    return;
-                }
+                const poll = () => {
+                    attempts++;
+                    
+                    // Check if we've waited too long
+                    if (Date.now() - startTime > maxWait) {
+                        console.warn(`⏰ Polling timeout after ${maxWait}ms`);
+                        resolve(false);
+                        return;
+                    }
+                    
+                    // Check for api.auth
+                    if (this._checkApiAuthPresence()) {
+                        console.log(`✅ api.auth.js found after ${attempts} attempts`);
+                        resolve(true);
+                        return;
+                    }
+                    
+                    // Check if we've reached max retries
+                    if (attempts >= maxRetries) {
+                        console.warn(`🔄 Max retries reached (${maxRetries})`);
+                        resolve(false);
+                        return;
+                    }
+                    
+                    // Continue polling
+                    setTimeout(poll, retryInterval);
+                };
                 
-                // Check if we've reached max retries
-                if (attempts >= maxRetries) {
-                    console.warn(`🔄 Max retries reached (${maxRetries})`);
-                    resolve(false);
-                    return;
-                }
-                
-                // Continue polling
-                setTimeout(poll, retryInterval);
-            };
-            
-            // Start polling
-            poll();
+                // Start polling
+                poll();
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`API Auth polling failed: ${error.message}`, 'API_POLLING');
+                resolve(false);
+            }
         });
     }
     
     _listenForModuleEvents() {
-        // Listen for various module initialization events
-        const events = [
-            'apiModuleReady',
-            'authModuleReady',
-            'apiInitialized',
-            'modulesLoaded',
-            'api:auth:initialized' // Specific event from api.auth.js
-        ];
-        
-        events.forEach(eventName => {
-            window.addEventListener(eventName, (event) => {
-                console.log(`🎯 Received module event: ${eventName}`, event.detail);
-                
-                // Check for api.auth after event
-                setTimeout(() => {
-                    if (this._checkApiAuthPresence()) {
-                        console.log(`✅ api.auth.js detected after ${eventName} event`);
-                    }
-                }, 100);
-            }, { once: true });
-        });
+        try {
+            // Listen for various module initialization events
+            const events = [
+                'apiModuleReady',
+                'authModuleReady',
+                'apiInitialized',
+                'modulesLoaded',
+                'api:auth:initialized' // Specific event from api.auth.js
+            ];
+            
+            events.forEach(eventName => {
+                window.addEventListener(eventName, (event) => {
+                    console.log(`🎯 Received module event: ${eventName}`, event.detail);
+                    
+                    // Check for api.auth after event
+                    setTimeout(() => {
+                        if (this._checkApiAuthPresence()) {
+                            console.log(`✅ api.auth.js detected after ${eventName} event`);
+                        }
+                    }, 100);
+                }, { once: true });
+            });
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Module event listener setup failed: ${error.message}`, 'MODULE_EVENTS');
+        }
     }
     
     _markAsReady(detail = {}) {
@@ -553,36 +873,48 @@ class ApiAuthReadinessManager {
     }
     
     _dispatchReadyEvent(detail) {
-        const event = new CustomEvent('apiAuthManagerReady', {
-            detail: {
-                ...detail,
-                timestamp: Date.now(),
-                ready: true
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('apiAuthManagerReady', {
+                detail: {
+                    ...detail,
+                    timestamp: Date.now(),
+                    ready: true
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to dispatch ready event: ${error.message}`, 'EVENT_DISPATCH');
+        }
     }
     
     _dispatchFullyInitializedEvent(detail) {
-        const event = new CustomEvent('apiAuthManagerFullyInitialized', {
-            detail: {
-                ...detail,
-                timestamp: Date.now(),
-                fullyInitialized: true
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('apiAuthManagerFullyInitialized', {
+                detail: {
+                    ...detail,
+                    timestamp: Date.now(),
+                    fullyInitialized: true
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to dispatch fully initialized event: ${error.message}`, 'EVENT_DISPATCH');
+        }
     }
     
     _dispatchErrorEvent(detail) {
-        const event = new CustomEvent('apiAuthManagerError', {
-            detail: {
-                ...detail,
-                timestamp: Date.now(),
-                error: true
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('apiAuthManagerError', {
+                detail: {
+                    ...detail,
+                    timestamp: Date.now(),
+                    error: true
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to dispatch error event: ${error.message}`, 'EVENT_DISPATCH');
+        }
     }
     
     // Public API
@@ -596,74 +928,110 @@ class ApiAuthReadinessManager {
     
     waitForReady() {
         return new Promise((resolve, reject) => {
-            if (this._isReady) {
-                resolve({ ready: true, fullyInitialized: this._isFullyInitialized });
-                return;
-            }
-            
-            this._readyCallbacks.push(resolve);
-            
-            // Set timeout for safety
-            setTimeout(() => {
-                const index = this._readyCallbacks.indexOf(resolve);
-                if (index > -1) {
-                    this._readyCallbacks.splice(index, 1);
-                    resolve({ 
-                        ready: false, 
-                        timeout: true,
-                        fallbackMode: true,
-                        fullyInitialized: false
-                    });
+            try {
+                if (this._isReady) {
+                    resolve({ ready: true, fullyInitialized: this._isFullyInitialized });
+                    return;
                 }
-            }, AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_WAIT);
+                
+                this._readyCallbacks.push(resolve);
+                
+                // Set timeout for safety
+                setTimeout(() => {
+                    const index = this._readyCallbacks.indexOf(resolve);
+                    if (index > -1) {
+                        this._readyCallbacks.splice(index, 1);
+                        resolve({ 
+                            ready: false, 
+                            timeout: true,
+                            fallbackMode: true,
+                            fullyInitialized: false
+                        });
+                    }
+                }, AUTH_GATEWAY_CONFIG.API_AUTH_INIT_MAX_WAIT);
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`waitForReady failed: ${error.message}`, 'API_READY_WAIT');
+                resolve({ 
+                    ready: false, 
+                    error: error.message,
+                    fallbackMode: true,
+                    fullyInitialized: false
+                });
+            }
         });
     }
     
     waitForFullInitialization() {
         return new Promise((resolve, reject) => {
-            if (this._isFullyInitialized) {
-                resolve({ ready: true, fullyInitialized: true });
-                return;
-            }
-            
-            // Listen for full initialization event
-            const handler = (event) => {
-                window.removeEventListener('apiAuthManagerFullyInitialized', handler);
-                resolve({ 
-                    ready: true, 
-                    fullyInitialized: true,
-                    detail: event.detail 
-                });
-            };
-            
-            window.addEventListener('apiAuthManagerFullyInitialized', handler);
-            
-            // Set timeout for safety
-            setTimeout(() => {
-                window.removeEventListener('apiAuthManagerFullyInitialized', handler);
-                console.warn('⚠️ Timeout waiting for api.auth.js full initialization');
+            try {
+                if (this._isFullyInitialized) {
+                    resolve({ ready: true, fullyInitialized: true });
+                    return;
+                }
+                
+                // Listen for full initialization event
+                const handler = (event) => {
+                    window.removeEventListener('apiAuthManagerFullyInitialized', handler);
+                    resolve({ 
+                        ready: true, 
+                        fullyInitialized: true,
+                        detail: event.detail 
+                    });
+                };
+                
+                window.addEventListener('apiAuthManagerFullyInitialized', handler);
+                
+                // Set timeout for safety
+                setTimeout(() => {
+                    window.removeEventListener('apiAuthManagerFullyInitialized', handler);
+                    console.warn('⚠️ Timeout waiting for api.auth.js full initialization');
+                    resolve({ 
+                        ready: true, 
+                        fullyInitialized: false,
+                        timeout: true 
+                    });
+                }, 10000); // 10 second timeout for full initialization
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`waitForFullInitialization failed: ${error.message}`, 'FULL_INIT_WAIT');
                 resolve({ 
                     ready: true, 
                     fullyInitialized: false,
-                    timeout: true 
+                    error: error.message 
                 });
-            }, 10000); // 10 second timeout for full initialization
+            }
         });
     }
     
     onError(callback) {
-        this._errorCallbacks.push(callback);
+        try {
+            this._errorCallbacks.push(callback);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to add error callback: ${error.message}`, 'ERROR_CALLBACK');
+        }
     }
     
     getDetectionInfo() {
-        return {
-            isReady: this._isReady,
-            isFullyInitialized: this._isFullyInitialized,
-            detectionInProgress: this._detectionInProgress,
-            apiAuthDetected: this._apiAuthDetected,
-            detectionTime: Date.now() - this._detectionStartTime,
-            pendingCallbacks: this._readyCallbacks.length
-        };
+        try {
+            return {
+                isReady: this._isReady,
+                isFullyInitialized: this._isFullyInitialized,
+                detectionInProgress: this._detectionInProgress,
+                apiAuthDetected: this._apiAuthDetected,
+                detectionTime: Date.now() - this._detectionStartTime,
+                pendingCallbacks: this._readyCallbacks.length
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`getDetectionInfo failed: ${error.message}`, 'DETECTION_INFO');
+            return {
+                isReady: false,
+                isFullyInitialized: false,
+                detectionInProgress: false,
+                apiAuthDetected: false,
+                detectionTime: 0,
+                pendingCallbacks: 0,
+                error: error.message
+            };
+        }
     }
 }
 
@@ -680,70 +1048,98 @@ class UIOrchestrationRegistry {
     }
     
     registerUIModule(name, module) {
-        if (this._uiModules.has(name)) {
-            console.warn(`UI module "${name}" already registered, preserving existing`);
+        try {
+            if (this._uiModules.has(name)) {
+                console.warn(`UI module "${name}" already registered, preserving existing`);
+                return false;
+            }
+            
+            this._uiModules.set(name, module);
+            console.log(`UI module "${name}" registered`);
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to register UI module ${name}: ${error.message}`, 'UI_MODULE_REG');
             return false;
         }
-        
-        this._uiModules.set(name, module);
-        console.log(`UI module "${name}" registered`);
-        return true;
     }
     
     getUIModule(name) {
-        return this._uiModules.get(name);
+        try {
+            return this._uiModules.get(name);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to get UI module ${name}: ${error.message}`, 'UI_MODULE_GET');
+            return null;
+        }
     }
     
     registerEventListener(elementId, eventType, handler, options = {}) {
-        const key = `${elementId}_${eventType}`;
-        if (this._eventListeners.has(key)) {
-            console.warn(`Event listener for ${key} already registered, preserving existing`);
+        try {
+            const key = `${elementId}_${eventType}`;
+            if (this._eventListeners.has(key)) {
+                console.warn(`Event listener for ${key} already registered, preserving existing`);
+                return false;
+            }
+            
+            this._eventListeners.set(key, {
+                elementId,
+                eventType,
+                handler,
+                options,
+                registered: false
+            });
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to register event listener for ${elementId}: ${error.message}`, 'EVENT_REG');
             return false;
         }
-        
-        this._eventListeners.set(key, {
-            elementId,
-            eventType,
-            handler,
-            options,
-            registered: false
-        });
-        return true;
     }
     
     registerFormHandler(formId, submitHandler) {
-        if (this._formHandlers.has(formId)) {
-            console.warn(`Form handler for ${formId} already registered, preserving existing`);
+        try {
+            if (this._formHandlers.has(formId)) {
+                console.warn(`Form handler for ${formId} already registered, preserving existing`);
+                return false;
+            }
+            
+            this._formHandlers.set(formId, {
+                formId,
+                submitHandler,
+                registered: false
+            });
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to register form handler for ${formId}: ${error.message}`, 'FORM_REG');
             return false;
         }
-        
-        this._formHandlers.set(formId, {
-            formId,
-            submitHandler,
-            registered: false
-        });
-        return true;
     }
     
     onUIReady(callback) {
-        if (this._uiReady) {
-            callback();
-        } else {
-            this._readyCallbacks.push(callback);
+        try {
+            if (this._uiReady) {
+                callback();
+            } else {
+                this._readyCallbacks.push(callback);
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`UI ready callback failed: ${error.message}`, 'UI_READY_CALLBACK');
         }
     }
     
     markUIReady() {
-        if (!this._uiReady) {
-            this._uiReady = true;
-            this._readyCallbacks.forEach(callback => {
-                try {
-                    callback();
-                } catch (error) {
-                    console.error('UI ready callback error:', error);
-                }
-            });
-            this._readyCallbacks = [];
+        try {
+            if (!this._uiReady) {
+                this._uiReady = true;
+                this._readyCallbacks.forEach(callback => {
+                    try {
+                        callback();
+                    } catch (error) {
+                        console.error('UI ready callback error:', error);
+                    }
+                });
+                this._readyCallbacks = [];
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to mark UI as ready: ${error.message}`, 'UI_READY_MARK');
         }
     }
     
@@ -753,29 +1149,46 @@ class UIOrchestrationRegistry {
 }
 
 // Initialize global UI registry
-window.__uiOrchestrationRegistry = new UIOrchestrationRegistry();
+try {
+    window.__uiOrchestrationRegistry = new UIOrchestrationRegistry();
+} catch (error) {
+    window.__authSafetyGuards._logOnce(`Failed to initialize UI Orchestration Registry: ${error.message}`, 'UI_REGISTRY_INIT');
+    window.__uiOrchestrationRegistry = { 
+        registerUIModule: () => false,
+        getUIModule: () => null,
+        registerEventListener: () => false,
+        registerFormHandler: () => false,
+        onUIReady: () => {},
+        markUIReady: () => {},
+        isUIReady: () => false
+    };
+}
 
 // ============================================================================
 // GLOBAL NAMESPACE HARMONIZATION - PRESERVES EXISTING STRUCTURE
 // ============================================================================
 (function ensureGlobalNamespace() {
-    // Defensively create window.app if it doesn't exist
-    if (typeof window.app === 'undefined') {
-        window.app = {};
-        console.log('Created window.app namespace');
-    }
-    
-    // Defensively create window.app.ui if it doesn't exist
-    if (typeof window.app.ui === 'undefined') {
-        window.app.ui = {};
-        console.log('Created window.app.ui namespace');
-    }
-    
-    // Preserve any existing window.app.ui.auth
-    const existingAuthModule = window.app.ui.auth;
-    if (existingAuthModule && typeof existingAuthModule === 'object') {
-        console.log('Preserving existing window.app.ui.auth module');
-        window.__preservedAuthModule = existingAuthModule;
+    try {
+        // Defensively create window.app if it doesn't exist
+        if (typeof window.app === 'undefined') {
+            window.app = {};
+            console.log('Created window.app namespace');
+        }
+        
+        // Defensively create window.app.ui if it doesn't exist
+        if (typeof window.app.ui === 'undefined') {
+            window.app.ui = {};
+            console.log('Created window.app.ui namespace');
+        }
+        
+        // Preserve any existing window.app.ui.auth
+        const existingAuthModule = window.app.ui.auth;
+        if (existingAuthModule && typeof existingAuthModule === 'object') {
+            console.log('Preserving existing window.app.ui.auth module');
+            window.__preservedAuthModule = existingAuthModule;
+        }
+    } catch (error) {
+        window.__authSafetyGuards._logOnce(`Global namespace harmonization failed: ${error.message}`, 'NAMESPACE_INIT');
     }
 })();
 
@@ -796,97 +1209,105 @@ class ApiAuthProxy {
     }
     
     async initialize() {
-        console.log('🔧 Initializing ApiAuthProxy...');
-        
-        // Wait for api.auth to be ready (detected)
-        const readinessResult = await window.__apiAuthReadinessManager.waitForReady();
-        
-        if (readinessResult.fallbackMode) {
-            console.warn('⚠️ No real api.auth found, using fallback mode');
+        try {
+            console.log('🔧 Initializing ApiAuthProxy...');
+            
+            // Wait for api.auth to be ready (detected)
+            const readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+            
+            if (readinessResult.fallbackMode) {
+                console.warn('⚠️ No real api.auth found, using fallback mode');
+                this._isFallbackMode = true;
+                this._initializeFallback();
+                this._initialized = true;
+                return this;
+            }
+            
+            // Get the real api.auth module
+            // FORCE DIRECT CONNECTION TO api.auth.js
+            // Check multiple locations for the real module
+            const possibleAuthModules = [
+                window.api?.auth,
+                window.MoodChatAuth,
+                window.auth,
+                window.app?.api?.auth,
+                window.__authModule
+            ].filter(Boolean); // Remove null/undefined
+            
+            console.log('🔍 Looking for real api.auth module in:', possibleAuthModules.map(m => m.constructor.name));
+            
+            // Find the first module with essential methods
+            for (const module of possibleAuthModules) {
+                if (module && typeof module === 'object') {
+                    const hasEssentialMethods = 
+                        typeof module.login === 'function' &&
+                        typeof module.logout === 'function' &&
+                        typeof module.getUser === 'function';
+                    
+                    if (hasEssentialMethods) {
+                        this._realApiAuth = module;
+                        console.log('✅ Found real api.auth module with essential methods');
+                        break;
+                    }
+                }
+            }
+            
+            if (this._realApiAuth && typeof this._realApiAuth === 'object') {
+                console.log('✅ Connected to real api.auth module');
+                console.log('🔍 Module details:', {
+                    hasLogin: typeof this._realApiAuth.login,
+                    hasLogout: typeof this._realApiAuth.logout,
+                    hasGetUser: typeof this._realApiAuth.getUser,
+                    version: this._realApiAuth._version,
+                    lifecycleState: this._realApiAuth._lifecycleState
+                });
+                
+                // For v2.1.1+, if we have essential methods, we're ready
+                if (typeof this._realApiAuth.login === 'function' &&
+                    typeof this._realApiAuth.logout === 'function' &&
+                    typeof this._realApiAuth.getUser === 'function') {
+                    
+                    console.log('✅ api.auth.js v2.1.1+ is ready with essential methods');
+                    this._isFallbackMode = false;
+                    this._initialized = true;
+                    
+                    // Immediately update readiness manager
+                    if (window.__apiAuthReadinessManager) {
+                        window.__apiAuthReadinessManager._markAsFullyInitialized({
+                            module: this._realApiAuth,
+                            source: 'direct-connection',
+                            timestamp: Date.now()
+                        });
+                    }
+                } else {
+                    console.warn('⚠️ api.auth.js missing some methods, using fallback');
+                    this._isFallbackMode = true;
+                    this._initializeFallback();
+                }
+                
+                // Process any queued operations
+                this._processQueue();
+            } else {
+                console.warn('⚠️ No real api.auth with essential methods found, using fallback mode');
+                this._isFallbackMode = true;
+                this._initializeFallback();
+            }
+            
+            this._initialized = true;
+            
+            // Notify listeners
+            window.dispatchEvent(new CustomEvent('apiAuthProxyReady', {
+                detail: { isFallbackMode: this._isFallbackMode }
+            }));
+            
+            return this;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`ApiAuthProxy initialization failed: ${error.message}`, 'API_PROXY_INIT');
             this._isFallbackMode = true;
             this._initializeFallback();
             this._initialized = true;
             return this;
         }
-        
-        // Get the real api.auth module
-        // FORCE DIRECT CONNECTION TO api.auth.js
-        // Check multiple locations for the real module
-        const possibleAuthModules = [
-            window.api?.auth,
-            window.MoodChatAuth,
-            window.auth,
-            window.app?.api?.auth,
-            window.__authModule
-        ].filter(Boolean); // Remove null/undefined
-        
-        console.log('🔍 Looking for real api.auth module in:', possibleAuthModules.map(m => m.constructor.name));
-        
-        // Find the first module with essential methods
-        for (const module of possibleAuthModules) {
-            if (module && typeof module === 'object') {
-                const hasEssentialMethods = 
-                    typeof module.login === 'function' &&
-                    typeof module.logout === 'function' &&
-                    typeof module.getUser === 'function';
-                
-                if (hasEssentialMethods) {
-                    this._realApiAuth = module;
-                    console.log('✅ Found real api.auth module with essential methods');
-                    break;
-                }
-            }
-        }
-        
-        if (this._realApiAuth && typeof this._realApiAuth === 'object') {
-            console.log('✅ Connected to real api.auth module');
-            console.log('🔍 Module details:', {
-                hasLogin: typeof this._realApiAuth.login,
-                hasLogout: typeof this._realApiAuth.logout,
-                hasGetUser: typeof this._realApiAuth.getUser,
-                version: this._realApiAuth._version,
-                lifecycleState: this._realApiAuth._lifecycleState
-            });
-            
-            // For v2.1.1+, if we have essential methods, we're ready
-            if (typeof this._realApiAuth.login === 'function' &&
-                typeof this._realApiAuth.logout === 'function' &&
-                typeof this._realApiAuth.getUser === 'function') {
-                
-                console.log('✅ api.auth.js v2.1.1+ is ready with essential methods');
-                this._isFallbackMode = false;
-                this._initialized = true;
-                
-                // Immediately update readiness manager
-                if (window.__apiAuthReadinessManager) {
-                    window.__apiAuthReadinessManager._markAsFullyInitialized({
-                        module: this._realApiAuth,
-                        source: 'direct-connection',
-                        timestamp: Date.now()
-                    });
-                }
-            } else {
-                console.warn('⚠️ api.auth.js missing some methods, using fallback');
-                this._isFallbackMode = true;
-                this._initializeFallback();
-            }
-            
-            // Process any queued operations
-            this._processQueue();
-        } else {
-            console.warn('⚠️ No real api.auth with essential methods found, using fallback mode');
-            this._isFallbackMode = true;
-            this._initializeFallback();
-        }
-        
-        this._initialized = true;
-        
-        // Notify listeners
-        window.dispatchEvent(new CustomEvent('apiAuthProxyReady', {
-            detail: { isFallbackMode: this._isFallbackMode }
-        }));
-        
-        return this;
     }
     
     async _waitForFullInitialization() {
@@ -935,165 +1356,204 @@ class ApiAuthProxy {
     }
     
     _isApiAuthFullyInitialized(module) {
-        if (!module || typeof module !== 'object') {
-            console.log('❌ _isApiAuthFullyInitialized: module is invalid');
+        try {
+            if (!module || typeof module !== 'object') {
+                console.log('❌ _isApiAuthFullyInitialized: module is invalid');
+                return false;
+            }
+            
+            console.log('🔍 _isApiAuthFullyInitialized checking:', {
+                moduleType: typeof module,
+                keys: Object.keys(module).slice(0, 10), // First 10 keys
+                hasLogin: typeof module.login,
+                hasLogout: typeof module.logout,
+                hasGetUser: typeof module.getUser
+            });
+            
+            // CRITICAL CHECK: Must have essential methods
+            const hasEssentialMethods = 
+                typeof module.login === 'function' &&
+                typeof module.logout === 'function' &&
+                typeof module.getUser === 'function';
+            
+            if (!hasEssentialMethods) {
+                console.warn('❌ Module missing essential methods');
+                return false;
+            }
+            
+            // For v2.1.1+, we consider it fully initialized if it has essential methods
+            // The module handles its own internal initialization state
+            console.log('✅ Module has all essential methods, considering fully initialized');
+            
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`API Auth full initialization check failed: ${error.message}`, 'API_FULL_INIT_CHECK');
             return false;
         }
-        
-        console.log('🔍 _isApiAuthFullyInitialized checking:', {
-            moduleType: typeof module,
-            keys: Object.keys(module).slice(0, 10), // First 10 keys
-            hasLogin: typeof module.login,
-            hasLogout: typeof module.logout,
-            hasGetUser: typeof module.getUser
-        });
-        
-        // CRITICAL CHECK: Must have essential methods
-        const hasEssentialMethods = 
-            typeof module.login === 'function' &&
-            typeof module.logout === 'function' &&
-            typeof module.getUser === 'function';
-        
-        if (!hasEssentialMethods) {
-            console.warn('❌ Module missing essential methods');
-            return false;
-        }
-        
-        // For v2.1.1+, we consider it fully initialized if it has essential methods
-        // The module handles its own internal initialization state
-        console.log('✅ Module has all essential methods, considering fully initialized');
-        
-        return true;
     }
     
     _createProxyMethods() {
-        // Create proxy methods for all api.auth operations
-        const methods = [
-            'login', 'logout', 'register', 'getUser', 'validateAuth',
-            'refreshToken', 'forgotPassword', 'resetPassword', 'verifyEmail',
-            'onAuthReady', 'getAuthState', 'isAuthenticated'
-        ];
-        
-        methods.forEach(method => {
-            this[method] = async (...args) => {
-                // Ensure initialized
-                if (!this._initialized) {
-                    await this.initialize();
-                }
-                
-                // If in fallback mode, use fallback implementation
-                if (this._isFallbackMode) {
-                    return this._handleFallbackCall(method, args);
-                }
-                
-                // Wait for full initialization if needed
-                if (!this._isApiAuthFullyInitialized(this._realApiAuth)) {
-                    console.log(`⏳ api.auth.js not fully initialized for ${method}, waiting...`);
-                    const fullyReady = await this._waitForFullInitialization();
-                    
-                    if (!fullyReady) {
-                        console.warn(`⚠️ api.auth.js still not ready for ${method}, using fallback`);
-                        return this._handleFallbackCall(method, args, { error: 'Authentication module not ready' });
-                    }
-                }
-                
-                // Use real api.auth method
-                if (this._realApiAuth && typeof this._realApiAuth[method] === 'function') {
+        try {
+            // Create proxy methods for all api.auth operations
+            const methods = [
+                'login', 'logout', 'register', 'getUser', 'validateAuth',
+                'refreshToken', 'forgotPassword', 'resetPassword', 'verifyEmail',
+                'onAuthReady', 'getAuthState', 'isAuthenticated'
+            ];
+            
+            methods.forEach(method => {
+                this[method] = async (...args) => {
                     try {
-                        return await this._realApiAuth[method](...args);
-                    } catch (error) {
-                        console.error(`api.auth.${method} failed:`, error);
-                        
-                        // Check for "module not ready" errors
-                        if (error.message && error.message.includes('not ready')) {
-                            console.warn(`⚠️ api.auth.js ${method} reports "not ready", using fallback`);
-                            return this._handleFallbackCall(method, args, error);
+                        // Ensure initialized
+                        if (!this._initialized) {
+                            await this.initialize();
                         }
                         
-                        // Fallback on error
+                        // If in fallback mode, use fallback implementation
+                        if (this._isFallbackMode) {
+                            return this._handleFallbackCall(method, args);
+                        }
+                        
+                        // Wait for full initialization if needed
+                        if (!this._isApiAuthFullyInitialized(this._realApiAuth)) {
+                            console.log(`⏳ api.auth.js not fully initialized for ${method}, waiting...`);
+                            const fullyReady = await this._waitForFullInitialization();
+                            
+                            if (!fullyReady) {
+                                console.warn(`⚠️ api.auth.js still not ready for ${method}, using fallback`);
+                                return this._handleFallbackCall(method, args, { error: 'Authentication module not ready' });
+                            }
+                        }
+                        
+                        // Use real api.auth method
+                        if (this._realApiAuth && typeof this._realApiAuth[method] === 'function') {
+                            try {
+                                return await this._realApiAuth[method](...args);
+                            } catch (error) {
+                                console.error(`api.auth.${method} failed:`, error);
+                                
+                                // Check for "module not ready" errors
+                                if (error.message && error.message.includes('not ready')) {
+                                    console.warn(`⚠️ api.auth.js ${method} reports "not ready", using fallback`);
+                                    return this._handleFallbackCall(method, args, error);
+                                }
+                                
+                                // Fallback on error
+                                return this._handleFallbackCall(method, args, error);
+                            }
+                        } else {
+                            console.warn(`api.auth.${method} not available, using fallback`);
+                            return this._handleFallbackCall(method, args);
+                        }
+                    } catch (error) {
+                        window.__authSafetyGuards._logOnce(`ApiAuthProxy.${method} failed: ${error.message}`, 'API_PROXY_METHOD');
                         return this._handleFallbackCall(method, args, error);
                     }
-                } else {
-                    console.warn(`api.auth.${method} not available, using fallback`);
-                    return this._handleFallbackCall(method, args);
-                }
-            };
-        });
+                };
+            });
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to create proxy methods: ${error.message}`, 'PROXY_METHODS');
+            // Create minimal fallback methods
+            this.login = this.logout = this.getUser = () => Promise.resolve({
+                success: false,
+                message: 'Authentication proxy initialization failed',
+                fallbackMode: true
+            });
+        }
     }
     
     _initializeFallback() {
-        // Create minimal fallback implementation
-        this._fallbackAuth = {
-            login: async (credentials) => {
-                console.warn('⚠️ Fallback login called - Authentication service unavailable');
-                return {
-                    success: false,
-                    message: 'Authentication service is initializing. Please try again in a moment.',
-                    fallback: true,
-                    retryable: true
-                };
-            },
-            
-            logout: async () => {
-                console.warn('⚠️ Fallback logout called');
-                return { success: true, fallback: true };
-            },
-            
-            getUser: async () => {
-                console.warn('⚠️ Fallback getUser called');
-                return { 
-                    success: false, 
-                    message: 'Service unavailable - initializing',
-                    fallback: true,
-                    retryable: true
-                };
-            },
-            
-            validateAuth: async () => {
-                console.warn('⚠️ Fallback validateAuth called');
-                return { 
-                    success: false, 
-                    valid: false,
-                    fallback: true,
-                    retryable: true
-                };
-            }
-        };
+        try {
+            // Create minimal fallback implementation
+            this._fallbackAuth = {
+                login: async (credentials) => {
+                    console.warn('⚠️ Fallback login called - Authentication service unavailable');
+                    return {
+                        success: false,
+                        message: 'Authentication service is initializing. Please try again in a moment.',
+                        fallback: true,
+                        retryable: true
+                    };
+                },
+                
+                logout: async () => {
+                    console.warn('⚠️ Fallback logout called');
+                    return { success: true, fallback: true };
+                },
+                
+                getUser: async () => {
+                    console.warn('⚠️ Fallback getUser called');
+                    return { 
+                        success: false, 
+                        message: 'Service unavailable - initializing',
+                        fallback: true,
+                        retryable: true
+                    };
+                },
+                
+                validateAuth: async () => {
+                    console.warn('⚠️ Fallback validateAuth called');
+                    return { 
+                        success: false, 
+                        valid: false,
+                        fallback: true,
+                        retryable: true
+                    };
+                }
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Fallback initialization failed: ${error.message}`, 'FALLBACK_INIT');
+            this._fallbackAuth = {};
+        }
     }
     
     async _handleFallbackCall(method, args, originalError = null) {
-        console.warn(`🔧 Using fallback for ${method}`, args);
-        
-        // Queue the call for later retry if this is a temporary failure
-        if (!this._isFallbackMode && originalError) {
-            this._queueForRetry(method, args);
+        try {
+            console.warn(`🔧 Using fallback for ${method}`, args);
+            
+            // Queue the call for later retry if this is a temporary failure
+            if (!this._isFallbackMode && originalError) {
+                this._queueForRetry(method, args);
+            }
+            
+            // Use fallback implementation
+            if (this._fallbackAuth && typeof this._fallbackAuth[method] === 'function') {
+                const result = await this._fallbackAuth[method](...args);
+                return { ...result, fallbackMode: true, originalError };
+            }
+            
+            // Default fallback response
+            return {
+                success: false,
+                message: `Authentication service unavailable (${method})`,
+                fallbackMode: true,
+                originalError: originalError?.message,
+                retryable: true
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Fallback call for ${method} failed: ${error.message}`, 'FALLBACK_CALL');
+            return {
+                success: false,
+                message: 'Authentication service completely unavailable',
+                fallbackMode: true,
+                criticalError: true
+            };
         }
-        
-        // Use fallback implementation
-        if (this._fallbackAuth && typeof this._fallbackAuth[method] === 'function') {
-            const result = await this._fallbackAuth[method](...args);
-            return { ...result, fallbackMode: true, originalError };
-        }
-        
-        // Default fallback response
-        return {
-            success: false,
-            message: `Authentication service unavailable (${method})`,
-            fallbackMode: true,
-            originalError: originalError?.message,
-            retryable: true
-        };
     }
     
     _queueForRetry(method, args) {
-        this._fallbackQueue.push({
-            method,
-            args,
-            timestamp: Date.now(),
-            attempts: 0
-        });
-        
-        console.log(`📥 Queued ${method} for retry (queue size: ${this._fallbackQueue.length})`);
+        try {
+            this._fallbackQueue.push({
+                method,
+                args,
+                timestamp: Date.now(),
+                attempts: 0
+            });
+            
+            console.log(`📥 Queued ${method} for retry (queue size: ${this._fallbackQueue.length})`);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to queue for retry: ${error.message}`, 'RETRY_QUEUE');
+        }
     }
     
     _processQueue() {
@@ -1105,39 +1565,43 @@ class ApiAuthProxy {
         
         // Process queue asynchronously
         setTimeout(async () => {
-            const processed = [];
-            
-            for (const item of this._fallbackQueue) {
-                if (item.attempts >= 3) {
-                    console.warn(`Skipping ${item.method} after ${item.attempts} attempts`);
-                    continue;
-                }
+            try {
+                const processed = [];
                 
-                try {
-                    if (this._realApiAuth && typeof this._realApiAuth[item.method] === 'function') {
-                        console.log(`🔄 Retrying ${item.method}...`);
-                        await this._realApiAuth[item.method](...item.args);
-                        console.log(`✅ Retry successful for ${item.method}`);
-                    }
-                    processed.push(item);
-                } catch (error) {
-                    console.warn(`Retry failed for ${item.method}:`, error);
-                    item.attempts++;
-                    
-                    // Keep in queue for another retry
-                    if (item.attempts < 3) {
+                for (const item of this._fallbackQueue) {
+                    if (item.attempts >= 3) {
+                        console.warn(`Skipping ${item.method} after ${item.attempts} attempts`);
                         continue;
                     }
-                    processed.push(item);
+                    
+                    try {
+                        if (this._realApiAuth && typeof this._realApiAuth[item.method] === 'function') {
+                            console.log(`🔄 Retrying ${item.method}...`);
+                            await this._realApiAuth[item.method](...item.args);
+                            console.log(`✅ Retry successful for ${item.method}`);
+                        }
+                        processed.push(item);
+                    } catch (error) {
+                        console.warn(`Retry failed for ${item.method}:`, error);
+                        item.attempts++;
+                        
+                        // Keep in queue for another retry
+                        if (item.attempts < 3) {
+                            continue;
+                        }
+                        processed.push(item);
+                    }
                 }
+                
+                // Remove processed items
+                this._fallbackQueue = this._fallbackQueue.filter(item => 
+                    !processed.includes(item)
+                );
+                
+                console.log(`✅ Queue processed. Remaining: ${this._fallbackQueue.length}`);
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`Queue processing failed: ${error.message}`, 'QUEUE_PROCESSING');
             }
-            
-            // Remove processed items
-            this._fallbackQueue = this._fallbackQueue.filter(item => 
-                !processed.includes(item)
-            );
-            
-            console.log(`✅ Queue processed. Remaining: ${this._fallbackQueue.length}`);
         }, 1000);
     }
     
@@ -1155,206 +1619,260 @@ class ApiAuthProxy {
 // ============================================================================
 class AuthGateway {
     constructor() {
-        this._state = {
-            status: 'unknown', // 'unknown', 'authenticated', 'unauthenticated', 'error'
-            user: null,
-            token: null,
-            lastUpdated: null
-        };
-        
-        this._listeners = new Set();
-        this._isIframeContext = window.self !== window.top;
-        this._sessionSyncKey = `${AUTH_GATEWAY_CONFIG.SESSION_SYNC_KEY}_${Date.now()}`;
-        this._loginAttempts = new Map();
-        this._blockedUsers = new Map();
-        this._refreshPromise = null;
-        this._validationInProgress = false;
-        this._loginInProgress = false;
-        this._pendingLoginResolvers = new Map();
-        this._apiReady = false;
-        this._apiReadyCallbacks = [];
-        this._uiOrchestrationReady = false;
-        this._uiOrchestrationCallbacks = [];
-        this._eventBusSubscriptions = new Map();
-        this._apiAuthProxy = null;
-        this._apiAuthReady = false;
-        this._apiAuthFullyInitialized = false; // NEW: Track full initialization
-        
-        // Initialize API readiness manager
-        if (!window.__apiAuthReadinessManager) {
-            window.__apiAuthReadinessManager = new ApiAuthReadinessManager();
+        try {
+            this._state = {
+                status: 'unknown', // 'unknown', 'authenticated', 'unauthenticated', 'error'
+                user: null,
+                token: null,
+                lastUpdated: null
+            };
+            
+            this._listeners = new Set();
+            this._isIframeContext = window.self !== window.top;
+            this._sessionSyncKey = `${AUTH_GATEWAY_CONFIG.SESSION_SYNC_KEY}_${Date.now()}`;
+            this._loginAttempts = new Map();
+            this._blockedUsers = new Map();
+            this._refreshPromise = null;
+            this._validationInProgress = false;
+            this._loginInProgress = false;
+            this._pendingLoginResolvers = new Map();
+            this._apiReady = false;
+            this._apiReadyCallbacks = [];
+            this._uiOrchestrationReady = false;
+            this._uiOrchestrationCallbacks = [];
+            this._eventBusSubscriptions = new Map();
+            this._apiAuthProxy = null;
+            this._apiAuthReady = false;
+            this._apiAuthFullyInitialized = false; // NEW: Track full initialization
+            
+            // Initialize API readiness manager
+            if (!window.__apiAuthReadinessManager) {
+                window.__apiAuthReadinessManager = new ApiAuthReadinessManager();
+            }
+            
+            // Initialize API auth proxy
+            this._apiAuthProxy = new ApiAuthProxy();
+            
+            this._init();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`AuthGateway constructor failed: ${error.message}`, 'AUTH_GATEWAY_CONSTRUCTOR');
+            // Set up minimal safe state
+            this._state = { status: 'error', user: null, token: null, lastUpdated: null };
+            this._listeners = new Set();
+            this._isIframeContext = false;
+            // Continue with minimal initialization
+            setTimeout(() => this._safeInit(), 100);
         }
-        
-        // Initialize API auth proxy
-        this._apiAuthProxy = new ApiAuthProxy();
-        
-        this._init();
+    }
+    
+    async _safeInit() {
+        try {
+            // Minimal safe initialization
+            console.warn('⚠️ AuthGateway running in safe mode due to initialization error');
+            this._apiReady = true;
+            this._uiOrchestrationReady = true;
+            this._apiAuthReady = true;
+            this._loadAuthState();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Safe init failed: ${error.message}`, 'SAFE_INIT');
+        }
     }
     
     async _init() {
-        console.log('🚀 Auth Gateway initializing with enhanced API auth integration...');
-        
-        // Step 1: Wait for API Auth to be ready
-        await this._waitForApiAuth();
-        
-        // Step 2: Initialize API Auth Proxy
-        await this._apiAuthProxy.initialize();
-        
-        // Step 3: Wait for UI orchestration to be ready
-        await this._waitForUIOrchestration();
-        
-        // Step 4: Load stored auth state
-        this._loadAuthState();
-        
-        // Step 5: Set up cross-tab/iframe synchronization
-        this._setupSynchronization();
-        
-        // Step 6: Start session monitoring
-        this._startSessionMonitoring();
-        
-        // Step 7: Register with global UI namespace
-        this._registerWithUINamespace();
-        
-        console.log('✅ Auth Gateway initialized with robust API auth integration');
+        try {
+            console.log('🚀 Auth Gateway initializing with enhanced API auth integration...');
+            
+            // Step 1: Wait for API Auth to be ready
+            await this._waitForApiAuth();
+            
+            // Step 2: Initialize API Auth Proxy
+            await this._apiAuthProxy.initialize();
+            
+            // Step 3: Wait for UI orchestration to be ready
+            await this._waitForUIOrchestration();
+            
+            // Step 4: Load stored auth state
+            this._loadAuthState();
+            
+            // Step 5: Set up cross-tab/iframe synchronization
+            this._setupSynchronization();
+            
+            // Step 6: Start session monitoring
+            this._startSessionMonitoring();
+            
+            // Step 7: Register with global UI namespace
+            this._registerWithUINamespace();
+            
+            console.log('✅ Auth Gateway initialized with robust API auth integration');
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`AuthGateway initialization failed: ${error.message}`, 'AUTH_GATEWAY_INIT');
+            // Still try to set up basic functionality
+            this._loadAuthState();
+            this._setupSynchronization();
+        }
     }
     
     /**
      * Wait for API Auth to be fully ready
      */
     async _waitForApiAuth() {
-        console.log('⏳ Waiting for api.auth.js to be ready...');
-        
-        // Use the readiness manager
-        const readinessResult = await window.__apiAuthReadinessManager.waitForReady();
-        
-        if (readinessResult.fallbackMode) {
-            console.warn('⚠️ API Auth not fully available, using fallback mode');
+        try {
+            console.log('⏳ Waiting for api.auth.js to be ready...');
+            
+            // Use the readiness manager
+            const readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+            
+            if (readinessResult.fallbackMode) {
+                console.warn('⚠️ API Auth not fully available, using fallback mode');
+                this._apiAuthReady = true;
+                this._apiReady = true;
+                return;
+            }
+            
+            // Wait for FULL initialization (not just detection)
+            console.log('⏳ Waiting for api.auth.js FULL initialization...');
+            const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+            
+            if (fullInitResult.fullyInitialized) {
+                console.log('✅ api.auth.js is FULLY INITIALIZED and ready');
+                this._apiAuthFullyInitialized = true;
+            } else {
+                console.warn('⚠️ api.auth.js not fully initialized yet, but detected');
+                this._apiAuthFullyInitialized = false;
+            }
+            
             this._apiAuthReady = true;
             this._apiReady = true;
-            return;
+            
+            // Execute any pending callbacks
+            this._apiReadyCallbacks.forEach(callback => callback());
+            this._apiReadyCallbacks = [];
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to wait for API Auth: ${error.message}`, 'API_AUTH_WAIT');
+            this._apiAuthReady = true;
+            this._apiReady = true;
+            this._apiReadyCallbacks.forEach(callback => callback());
+            this._apiReadyCallbacks = [];
         }
-        
-        // Wait for FULL initialization (not just detection)
-        console.log('⏳ Waiting for api.auth.js FULL initialization...');
-        const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-        
-        if (fullInitResult.fullyInitialized) {
-            console.log('✅ api.auth.js is FULLY INITIALIZED and ready');
-            this._apiAuthFullyInitialized = true;
-        } else {
-            console.warn('⚠️ api.auth.js not fully initialized yet, but detected');
-            this._apiAuthFullyInitialized = false;
-        }
-        
-        this._apiAuthReady = true;
-        this._apiReady = true;
-        
-        // Execute any pending callbacks
-        this._apiReadyCallbacks.forEach(callback => callback());
-        this._apiReadyCallbacks = [];
     }
     
     /**
      * Verify api.auth.js is properly initialized
      */
     async _verifyApiAuth() {
-        console.log('🔍 Verifying api.auth.js initialization...');
-        
-        // Check multiple times with increasing delays
-        const checks = [
-            { delay: 0, description: 'Immediate check' },
-            { delay: 100, description: 'Short delay check' },
-            { delay: 500, description: 'Medium delay check' }
-        ];
-        
-        for (const check of checks) {
-            await new Promise(resolve => setTimeout(resolve, check.delay));
+        try {
+            console.log('🔍 Verifying api.auth.js initialization...');
             
-            if (this._isApiAuthValid()) {
-                console.log(`✅ ${check.description}: api.auth.js is valid`);
-                return true;
+            // Check multiple times with increasing delays
+            const checks = [
+                { delay: 0, description: 'Immediate check' },
+                { delay: 100, description: 'Short delay check' },
+                { delay: 500, description: 'Medium delay check' }
+            ];
+            
+            for (const check of checks) {
+                await new Promise(resolve => setTimeout(resolve, check.delay));
+                
+                if (this._isApiAuthValid()) {
+                    console.log(`✅ ${check.description}: api.auth.js is valid`);
+                    return true;
+                }
             }
+            
+            console.warn('⚠️ api.auth.js verification incomplete, but proceeding');
+            return false;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`API Auth verification failed: ${error.message}`, 'API_AUTH_VERIFY');
+            return false;
         }
-        
-        console.warn('⚠️ api.auth.js verification incomplete, but proceeding');
-        return false;
     }
     
     /**
      * Check if api.auth.js is valid and ready
      */
     _isApiAuthValid() {
-        // Check if api.auth exists
-        if (!window.api?.auth) {
-            console.log('❌ window.api.auth does not exist');
+        try {
+            // Check if api.auth exists
+            if (!window.api?.auth) {
+                console.log('❌ window.api.auth does not exist');
+                return false;
+            }
+            
+            const apiAuth = window.api.auth;
+            
+            // Check for essential methods
+            const essentialMethods = ['login', 'logout', 'getUser'];
+            const hasEssentialMethods = essentialMethods.every(method => 
+                typeof apiAuth[method] === 'function'
+            );
+            
+            if (!hasEssentialMethods) {
+                console.log('❌ Missing essential methods:', essentialMethods.filter(m => 
+                    typeof apiAuth[m] !== 'function'
+                ));
+                return false;
+            }
+            
+            // Check for initialization markers
+            const hasInitializationMarkers = 
+                apiAuth._initialized === true ||
+                apiAuth.ready === true ||
+                typeof apiAuth.onAuthReady === 'function' ||
+                apiAuth._isShim !== true;
+            
+            if (!hasInitializationMarkers) {
+                console.log('❌ No initialization markers found');
+                // Still return true if we have essential methods
+                return hasEssentialMethods;
+            }
+            
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`API Auth validity check failed: ${error.message}`, 'API_AUTH_VALIDITY');
             return false;
         }
-        
-        const apiAuth = window.api.auth;
-        
-        // Check for essential methods
-        const essentialMethods = ['login', 'logout', 'getUser'];
-        const hasEssentialMethods = essentialMethods.every(method => 
-            typeof apiAuth[method] === 'function'
-        );
-        
-        if (!hasEssentialMethods) {
-            console.log('❌ Missing essential methods:', essentialMethods.filter(m => 
-                typeof apiAuth[m] !== 'function'
-            ));
-            return false;
-        }
-        
-        // Check for initialization markers
-        const hasInitializationMarkers = 
-            apiAuth._initialized === true ||
-            apiAuth.ready === true ||
-            typeof apiAuth.onAuthReady === 'function' ||
-            apiAuth._isShim !== true;
-        
-        if (!hasInitializationMarkers) {
-            console.log('❌ No initialization markers found');
-            // Still return true if we have essential methods
-            return hasEssentialMethods;
-        }
-        
-        return true;
     }
     
     /**
      * Wait for UI orchestration to be ready
      */
     async _waitForUIOrchestration() {
-        console.log('⏳ Waiting for UI orchestration to be ready...');
-        
-        return new Promise((resolve) => {
-            if (window.__uiOrchestrationRegistry.isUIReady()) {
-                console.log('✅ UI orchestration already ready');
-                this._uiOrchestrationReady = true;
-                resolve();
-                return;
-            }
+        try {
+            console.log('⏳ Waiting for UI orchestration to be ready...');
             
-            const maxWait = AUTH_GATEWAY_CONFIG.UI_READY_MAX_WAIT;
-            const checkInterval = AUTH_GATEWAY_CONFIG.UI_READY_CHECK_INTERVAL;
-            const startTime = Date.now();
-            
-            const checkUIReady = () => {
+            return new Promise((resolve) => {
                 if (window.__uiOrchestrationRegistry.isUIReady()) {
-                    console.log('✅ UI orchestration is now ready');
+                    console.log('✅ UI orchestration already ready');
                     this._uiOrchestrationReady = true;
                     resolve();
-                } else if (Date.now() - startTime > maxWait) {
-                    console.warn('⚠️ UI orchestration not ready after maximum wait, proceeding anyway');
-                    this._uiOrchestrationReady = true;
-                    resolve();
-                } else {
-                    setTimeout(checkUIReady, checkInterval);
+                    return;
                 }
-            };
-            
-            checkUIReady();
-        });
+                
+                const maxWait = AUTH_GATEWAY_CONFIG.UI_READY_MAX_WAIT;
+                const checkInterval = AUTH_GATEWAY_CONFIG.UI_READY_CHECK_INTERVAL;
+                const startTime = Date.now();
+                
+                const checkUIReady = () => {
+                    if (window.__uiOrchestrationRegistry.isUIReady()) {
+                        console.log('✅ UI orchestration is now ready');
+                        this._uiOrchestrationReady = true;
+                        resolve();
+                    } else if (Date.now() - startTime > maxWait) {
+                        console.warn('⚠️ UI orchestration not ready after maximum wait, proceeding anyway');
+                        this._uiOrchestrationReady = true;
+                        resolve();
+                    } else {
+                        setTimeout(checkUIReady, checkInterval);
+                    }
+                };
+                
+                checkUIReady();
+            });
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to wait for UI orchestration: ${error.message}`, 'UI_ORCHESTRATION_WAIT');
+            this._uiOrchestrationReady = true;
+            return Promise.resolve();
+        }
     }
     
     /**
@@ -1366,18 +1884,32 @@ class AuthGateway {
         }
         
         return new Promise((resolve) => {
-            this._apiReadyCallbacks.push(resolve);
-            
-            // Start waiting if not already
-            if (!this._waitingForAPI) {
-                this._waitingForAPI = true;
-                this._waitForApiAuth().catch(error => {
-                    console.error('Failed to wait for API:', error);
-                    this._apiReady = true;
-                    this._apiAuthReady = true;
-                    this._apiReadyCallbacks.forEach(cb => cb());
-                    this._apiReadyCallbacks = [];
-                });
+            try {
+                this._apiReadyCallbacks.push(resolve);
+                
+                // Set timeout for safety
+                setTimeout(() => {
+                    const index = this._apiReadyCallbacks.indexOf(resolve);
+                    if (index > -1) {
+                        this._apiReadyCallbacks.splice(index, 1);
+                        resolve();
+                    }
+                }, 5000);
+                
+                // Start waiting if not already
+                if (!this._waitingForAPI) {
+                    this._waitingForAPI = true;
+                    this._waitForApiAuth().catch(error => {
+                        console.error('Failed to wait for API:', error);
+                        this._apiReady = true;
+                        this._apiAuthReady = true;
+                        this._apiReadyCallbacks.forEach(cb => cb());
+                        this._apiReadyCallbacks = [];
+                    });
+                }
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`ensureAPIReady failed: ${error.message}`, 'ENSURE_API_READY');
+                resolve();
             }
         });
     }
@@ -1389,16 +1921,21 @@ class AuthGateway {
         if (this._uiOrchestrationReady) return;
         
         return new Promise((resolve) => {
-            this._uiOrchestrationCallbacks.push(resolve);
-            // Start waiting if not already
-            if (!this._waitingForUIOrchestration) {
-                this._waitingForUIOrchestration = true;
-                this._waitForUIOrchestration().catch(error => {
-                    console.error('Failed to wait for UI orchestration:', error);
-                    this._uiOrchestrationReady = true;
-                    this._uiOrchestrationCallbacks.forEach(cb => cb());
-                    this._uiOrchestrationCallbacks = [];
-                });
+            try {
+                this._uiOrchestrationCallbacks.push(resolve);
+                // Start waiting if not already
+                if (!this._waitingForUIOrchestration) {
+                    this._waitingForUIOrchestration = true;
+                    this._waitForUIOrchestration().catch(error => {
+                        console.error('Failed to wait for UI orchestration:', error);
+                        this._uiOrchestrationReady = true;
+                        this._uiOrchestrationCallbacks.forEach(cb => cb());
+                        this._uiOrchestrationCallbacks = [];
+                    });
+                }
+            } catch (error) {
+                window.__authSafetyGuards._logOnce(`ensureUIOrchestrationReady failed: ${error.message}`, 'ENSURE_UI_READY');
+                resolve();
             }
         });
     }
@@ -1407,38 +1944,42 @@ class AuthGateway {
      * Register with global UI namespace
      */
     _registerWithUINamespace() {
-        console.log('📝 Registering auth module with UI namespace...');
-        
-        // Ensure UI orchestration is ready
-        if (!this._uiOrchestrationReady) {
-            console.warn('UI orchestration not ready, deferring registration');
-            setTimeout(() => this._registerWithUINamespace(), 100);
-            return;
-        }
-        
-        // Register with UI orchestration registry
-        window.__uiOrchestrationRegistry.registerUIModule('auth', this);
-        
-        // Register with window.app.ui namespace
-        if (window.app && window.app.ui) {
-            // Check if already registered to avoid overwriting
-            if (window.app.ui.auth && window.app.ui.auth !== this) {
-                console.warn('window.app.ui.auth already exists, preserving existing reference');
-                // Store reference for potential fallback
-                window.app.ui.__authGatewayBackup = window.app.ui.auth;
+        try {
+            console.log('📝 Registering auth module with UI namespace...');
+            
+            // Ensure UI orchestration is ready
+            if (!this._uiOrchestrationReady) {
+                console.warn('UI orchestration not ready, deferring registration');
+                setTimeout(() => this._registerWithUINamespace(), 100);
+                return;
             }
             
-            // Register with safe assignment
-            Object.defineProperty(window.app.ui, 'auth', {
-                value: this,
-                writable: false,
-                configurable: true,
-                enumerable: true
-            });
+            // Register with UI orchestration registry
+            window.__uiOrchestrationRegistry.registerUIModule('auth', this);
             
-            console.log('✅ Auth module registered to window.app.ui.auth');
-        } else {
-            console.error('window.app.ui namespace not available for registration');
+            // Register with window.app.ui namespace
+            if (window.app && window.app.ui) {
+                // Check if already registered to avoid overwriting
+                if (window.app.ui.auth && window.app.ui.auth !== this) {
+                    console.warn('window.app.ui.auth already exists, preserving existing reference');
+                    // Store reference for potential fallback
+                    window.app.ui.__authGatewayBackup = window.app.ui.auth;
+                }
+                
+                // Register with safe assignment
+                Object.defineProperty(window.app.ui, 'auth', {
+                    value: this,
+                    writable: false,
+                    configurable: true,
+                    enumerable: true
+                });
+                
+                console.log('✅ Auth module registered to window.app.ui.auth');
+            } else {
+                console.error('window.app.ui namespace not available for registration');
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Failed to register with UI namespace: ${error.message}`, 'UI_NAMESPACE_REG');
         }
     }
     
@@ -1450,310 +1991,139 @@ class AuthGateway {
      * Login with credentials - Uses apiAuthProxy.login()
      */
     async login(credentials) {
-        if (!credentials || !credentials.email || !credentials.password) {
-            throw new Error('Missing credentials: email and password are required');
-        }
-        
-        const email = credentials.email.trim();
-        const password = credentials.password;
-        
-        // Ensure API Auth is ready AND fully initialized
-        await this._ensureAPIReady();
-        
-        // Additional wait for full initialization
-        
-        // Check if api.auth.js is available directly
-        if (window.api?.auth && typeof window.api.auth.login === 'function') {
-            console.log('✅ api.auth.js v2.1.1+ is directly available, skipping wait');
-            this._apiAuthFullyInitialized = true;
-        } else {
-            // Additional wait for full initialization (legacy path)
-            if (!this._apiAuthFullyInitialized) {
-                console.log('⏳ api.auth.js not fully initialized, waiting before login...');
-                const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
-                
-                if (!this._apiAuthFullyInitialized) {
-                    console.warn('⚠️ api.auth.js still not fully initialized for login');
-                    // Force check: if we have essential methods, we're ready
-                    if (window.api?.auth && typeof window.api.auth.login === 'function') {
-                        console.log('✅ Forcing ready state - essential methods present');
-                        this._apiAuthFullyInitialized = true;
-                    }
-                }
-            }
-        }
-        
-        // Ensure UI orchestration is ready
-        await this._ensureUIOrchestrationReady();
-        
-        // Check if login is already in progress for this user
-        const loginKey = `${email}_${Date.now() % 1000}`;
-        if (this._loginInProgress && this._pendingLoginResolvers.has(loginKey)) {
-            console.log('Login already in progress for this user, waiting for existing request');
-            return new Promise((resolve) => {
-                const checkInterval = setInterval(() => {
-                    if (!this._loginInProgress || !this._pendingLoginResolvers.has(loginKey)) {
-                        clearInterval(checkInterval);
-                        resolve(this.login(credentials));
-                    }
-                }, 100);
-            });
-        }
-        
-        // Check if user is blocked
-        const blockInfo = this._isUserBlocked(email);
-        if (blockInfo) {
-            return {
-                success: false,
-                message: `Too many login attempts. Please wait ${Math.ceil(blockInfo.remaining / 1000)} seconds.`,
-                blocked: true,
-                remaining: blockInfo.remaining
-            };
-        }
-        
-        // Mark login as in progress
-        this._loginInProgress = true;
-        this._pendingLoginResolvers.set(loginKey, null);
-        
         try {
-            console.log('Attempting login with identifier:', email.substring(0, 3) + '...');
-            
-            // ✅ UPDATED: Use apiAuthProxy.login() instead of direct API call
-            const response = await this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
-            
-            console.log('Login API call completed, processing response...');
-            console.debug('[AUTH] Raw login response:', response);
-            
-            // Handle fallback mode
-            if (response.fallbackMode) {
-                console.warn('⚠️ Login in fallback mode');
-                this._loginInProgress = false;
-                this._pendingLoginResolvers.delete(loginKey);
-                
-                // If retryable, queue for retry
-                if (response.retryable) {
-                    console.log('🔄 Login fallback is retryable, will retry automatically');
-                }
-                
-                return response;
+            if (!credentials || !credentials.email || !credentials.password) {
+                throw new Error('Missing credentials: email and password are required');
             }
             
-            // Check if response indicates success
-            const isSuccessful = response.success === true || response.ok === true || response.token;
+            const email = credentials.email.trim();
+            const password = credentials.password;
             
-            if (isSuccessful) {
-                // Extract data from response
-                const token = response.token || response.accessToken || response.jwt;
-                let user = response.user || response.data?.user || response.data;
-                
-                // Handle edge cases
-                if (!user && token) {
-                    console.warn('Login successful but no user data, creating minimal user object');
-                    user = {
-                        email: email,
-                        username: email.split('@')[0],
-                        id: 'temp_' + Date.now()
-                    };
-                }
-                
-                // Validate user object
-                if (user && !this._validateUserObject(user)) {
-                    console.error('Login failed: Invalid user object', user);
-                    this._recordLoginAttempt(email, false);
-                    this._loginInProgress = false;
-                    this._pendingLoginResolvers.delete(loginKey);
-                    return {
-                        success: false,
-                        message: 'Login failed: Invalid user data received'
-                    };
-                }
-                
-                // Record successful attempt
-                this._recordLoginAttempt(email, true);
-                
-                // Update auth state immediately
-                const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
-                
-                if (!updateResult.success) {
-                    console.error('Failed to update auth state immediately:', updateResult.error);
-                    this._loginInProgress = false;
-                    this._pendingLoginResolvers.delete(loginKey);
-                    return {
-                        success: false,
-                        message: 'Login failed: Could not save authentication state'
-                    };
-                }
-                
-                // Update window.currentUser for UI compatibility
-                if (typeof window !== 'undefined') {
-                    window.currentUser = user;
-                    Object.defineProperty(window, 'currentUser', {
-                        value: user,
-                        writable: true,
-                        configurable: true
-                    });
-                }
-                
-                // Force immediate UI update
-                this._forceUIUpdate();
-                
-                // Clear login in progress flag
-                this._loginInProgress = false;
-                this._pendingLoginResolvers.delete(loginKey);
-                
-                console.log('✅ Login successful, auth state updated:', {
-                    userEmail: user ? (user.email || user.username) : 'unknown',
-                    tokenPresent: !!token,
-                    successIndicators: {
-                        success: response.success,
-                        ok: response.ok,
-                        hasToken: !!token
-                    }
-                });
-                
-                // Get success message
-                const successMessage = response.message || response.msg || 'Authentication successful';
-                
-                return {
-                    success: true,
-                    user,
-                    token,
-                    message: successMessage
-                };
+            // Ensure API Auth is ready AND fully initialized
+            await this._ensureAPIReady();
+            
+            // Additional wait for full initialization
+            
+            // Check if api.auth.js is available directly
+            if (window.api?.auth && typeof window.api.auth.login === 'function') {
+                console.log('✅ api.auth.js v2.1.1+ is directly available, skipping wait');
+                this._apiAuthFullyInitialized = true;
             } else {
-                // Handle error response
-                console.log('Login failed - response:', response);
-                this._recordLoginAttempt(email, false);
-                this._loginInProgress = false;
-                this._pendingLoginResolvers.delete(loginKey);
-                
-                // Get error message
-                const errorMessage = response.message || response.error || 'Login failed';
-                
-                return {
-                    success: false,
-                    message: errorMessage
-                };
-            }
-        } catch (error) {
-            console.error('Login error:', error);
-            this._recordLoginAttempt(email, false);
-            this._loginInProgress = false;
-            this._pendingLoginResolvers.delete(loginKey);
-            
-            // Check if it's a network timeout but auth state was updated
-            if (error.message && (error.message.includes('timeout') || error.message.includes('Timeout'))) {
-                console.warn('Login request timed out, checking if auth state was updated');
-                if (this._state.status === 'authenticated' && this._state.user && this._state.token) {
-                    console.log('Auth state indicates successful login despite timeout');
-                    return {
-                        success: true,
-                        user: this._state.user,
-                        token: this._state.token,
-                        message: 'Login successful (recovered from timeout)'
-                    };
+                // Additional wait for full initialization (legacy path)
+                if (!this._apiAuthFullyInitialized) {
+                    console.log('⏳ api.auth.js not fully initialized, waiting before login...');
+                    const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                    this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                    
+                    if (!this._apiAuthFullyInitialized) {
+                        console.warn('⚠️ api.auth.js still not fully initialized for login');
+                        // Force check: if we have essential methods, we're ready
+                        if (window.api?.auth && typeof window.api.auth.login === 'function') {
+                            console.log('✅ Forcing ready state - essential methods present');
+                            this._apiAuthFullyInitialized = true;
+                        }
+                    }
                 }
             }
             
-            // Check if it's a "module not ready" error
-            if (error.message && error.message.includes('not ready')) {
-                console.warn('Login failed: Authentication module not ready');
+            // Ensure UI orchestration is ready
+            await this._ensureUIOrchestrationReady();
+            
+            // Check if login is already in progress for this user
+            const loginKey = `${email}_${Date.now() % 1000}`;
+            if (this._loginInProgress && this._pendingLoginResolvers.has(loginKey)) {
+                console.log('Login already in progress for this user, waiting for existing request');
+                return new Promise((resolve) => {
+                    const checkInterval = setInterval(() => {
+                        if (!this._loginInProgress || !this._pendingLoginResolvers.has(loginKey)) {
+                            clearInterval(checkInterval);
+                            resolve(this.login(credentials));
+                        }
+                    }, 100);
+                });
+            }
+            
+            // Check if user is blocked
+            const blockInfo = this._isUserBlocked(email);
+            if (blockInfo) {
                 return {
                     success: false,
-                    message: 'Authentication service is still initializing. Please try again in a moment.',
-                    retryable: true,
-                    fallback: true
+                    message: `Too many login attempts. Please wait ${Math.ceil(blockInfo.remaining / 1000)} seconds.`,
+                    blocked: true,
+                    remaining: blockInfo.remaining
                 };
             }
             
-            return {
-                success: false,
-                message: this._getUserFriendlyErrorMessage(error)
-            };
-        }
-    }
-    
-    /**
-     * Register a new user - Uses apiAuthProxy.register()
-     */
-    async register(data) {
-        if (!data || !data.email || !data.password || !data.username) {
-            throw new Error('Missing required registration data');
-        }
-        
-        // Ensure API Auth is ready AND fully initialized
-        await this._ensureAPIReady();
-        
-        // Wait for full initialization if needed
-        if (!this._apiAuthFullyInitialized) {
-            const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-            this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
-        }
-        
-        // Ensure UI orchestration is ready
-        await this._ensureUIOrchestrationReady();
-        
-        try {
-            // Validate passwords match
-            if (data.password !== data.confirmPassword) {
-                return {
-                    success: false,
-                    message: 'Passwords do not match'
-                };
-            }
+            // Mark login as in progress
+            this._loginInProgress = true;
+            this._pendingLoginResolvers.set(loginKey, null);
             
-            // Validate email format
-            if (!this._validateEmail(data.email)) {
-                return {
-                    success: false,
-                    message: 'Please provide a valid email address'
-                };
-            }
-            
-            console.log('Attempting registration for:', data.email);
-            
-            // ✅ UPDATED: Use apiAuthProxy.register()
-            const response = await this._apiAuthProxy.register({
-                email: data.email.trim().toLowerCase(),
-                username: data.username.trim(),
-                password: data.password,
-                displayName: data.displayName || data.username
-            });
-            
-            console.log('Registration API call completed, processing response...');
-            
-            // Handle fallback mode
-            if (response.fallbackMode) {
-                console.warn('⚠️ Registration in fallback mode');
-                return response;
-            }
-            
-            // Check success - rest of method remains the same as original
-            const isSuccessful = response.success === true || response.ok === true;
-            
-            if (isSuccessful) {
-                const token = response.token || response.accessToken || response.jwt;
-                let user = response.user || response.data?.user || response.data;
+            try {
+                console.log('Attempting login with identifier:', email.substring(0, 3) + '...');
                 
-                if (token && user) {
-                    // Auto-login after registration
-                    if (!this._validateUserObject(user)) {
-                        console.error('Registration failed: Invalid user object', user);
-                        return {
-                            success: false,
-                            message: 'Registration successful but user data is invalid'
+                // ✅ UPDATED: Use apiAuthProxy.login() instead of direct API call
+                const response = await this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
+                
+                console.log('Login API call completed, processing response...');
+                console.debug('[AUTH] Raw login response:', response);
+                
+                // Handle fallback mode
+                if (response.fallbackMode) {
+                    console.warn('⚠️ Login in fallback mode');
+                    this._loginInProgress = false;
+                    this._pendingLoginResolvers.delete(loginKey);
+                    
+                    // If retryable, queue for retry
+                    if (response.retryable) {
+                        console.log('🔄 Login fallback is retryable, will retry automatically');
+                    }
+                    
+                    return response;
+                }
+                
+                // Check if response indicates success
+                const isSuccessful = response.success === true || response.ok === true || response.token;
+                
+                if (isSuccessful) {
+                    // Extract data from response
+                    const token = response.token || response.accessToken || response.jwt;
+                    let user = response.user || response.data?.user || response.data;
+                    
+                    // Handle edge cases
+                    if (!user && token) {
+                        console.warn('Login successful but no user data, creating minimal user object');
+                        user = {
+                            email: email,
+                            username: email.split('@')[0],
+                            id: 'temp_' + Date.now()
                         };
                     }
+                    
+                    // Validate user object
+                    if (user && !this._validateUserObject(user)) {
+                        console.error('Login failed: Invalid user object', user);
+                        this._recordLoginAttempt(email, false);
+                        this._loginInProgress = false;
+                        this._pendingLoginResolvers.delete(loginKey);
+                        return {
+                            success: false,
+                            message: 'Login failed: Invalid user data received'
+                        };
+                    }
+                    
+                    // Record successful attempt
+                    this._recordLoginAttempt(email, true);
                     
                     // Update auth state immediately
                     const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
                     
                     if (!updateResult.success) {
-                        console.error('Failed to update auth state after registration:', updateResult.error);
+                        console.error('Failed to update auth state immediately:', updateResult.error);
+                        this._loginInProgress = false;
+                        this._pendingLoginResolvers.delete(loginKey);
                         return {
                             success: false,
-                            message: 'Registration successful but could not auto-login'
+                            message: 'Login failed: Could not save authentication state'
                         };
                     }
                     
@@ -1770,40 +2140,231 @@ class AuthGateway {
                     // Force immediate UI update
                     this._forceUIUpdate();
                     
+                    // Clear login in progress flag
+                    this._loginInProgress = false;
+                    this._pendingLoginResolvers.delete(loginKey);
+                    
+                    console.log('✅ Login successful, auth state updated:', {
+                        userEmail: user ? (user.email || user.username) : 'unknown',
+                        tokenPresent: !!token,
+                        successIndicators: {
+                            success: response.success,
+                            ok: response.ok,
+                            hasToken: !!token
+                        }
+                    });
+                    
                     // Get success message
-                    const successMessage = response.message || response.msg || 'Registration successful';
+                    const successMessage = response.message || response.msg || 'Authentication successful';
                     
                     return {
                         success: true,
                         user,
                         token,
-                        autoLoggedIn: true,
                         message: successMessage
                     };
                 } else {
-                    // Registration successful, no auto-login
-                    const successMessage = response.message || response.msg || 'Registration successful. Please check your email to verify your account.';
+                    // Handle error response
+                    console.log('Login failed - response:', response);
+                    this._recordLoginAttempt(email, false);
+                    this._loginInProgress = false;
+                    this._pendingLoginResolvers.delete(loginKey);
+                    
+                    // Get error message
+                    const errorMessage = response.message || response.error || 'Login failed';
                     
                     return {
-                        success: true,
-                        autoLoggedIn: false,
-                        message: successMessage
+                        success: false,
+                        message: errorMessage
                     };
                 }
-            } else {
-                // Get error message
-                const errorMessage = response.message || response.error || 'Registration failed';
+            } catch (error) {
+                console.error('Login error:', error);
+                this._recordLoginAttempt(email, false);
+                this._loginInProgress = false;
+                this._pendingLoginResolvers.delete(loginKey);
+                
+                // Check if it's a network timeout but auth state was updated
+                if (error.message && (error.message.includes('timeout') || error.message.includes('Timeout'))) {
+                    console.warn('Login request timed out, checking if auth state was updated');
+                    if (this._state.status === 'authenticated' && this._state.user && this._state.token) {
+                        console.log('Auth state indicates successful login despite timeout');
+                        return {
+                            success: true,
+                            user: this._state.user,
+                            token: this._state.token,
+                            message: 'Login successful (recovered from timeout)'
+                        };
+                    }
+                }
+                
+                // Check if it's a "module not ready" error
+                if (error.message && error.message.includes('not ready')) {
+                    console.warn('Login failed: Authentication module not ready');
+                    return {
+                        success: false,
+                        message: 'Authentication service is still initializing. Please try again in a moment.',
+                        retryable: true,
+                        fallback: true
+                    };
+                }
                 
                 return {
                     success: false,
-                    message: errorMessage
+                    message: this._getUserFriendlyErrorMessage(error)
                 };
             }
         } catch (error) {
-            console.error('Registration error:', error);
+            window.__authSafetyGuards._logOnce(`Login method failed: ${error.message}`, 'LOGIN_METHOD');
             return {
                 success: false,
-                message: this._getUserFriendlyErrorMessage(error)
+                message: 'Login service temporarily unavailable',
+                fallback: true,
+                retryable: true
+            };
+        }
+    }
+    
+    /**
+     * Register a new user - Uses apiAuthProxy.register()
+     */
+    async register(data) {
+        try {
+            if (!data || !data.email || !data.password || !data.username) {
+                throw new Error('Missing required registration data');
+            }
+            
+            // Ensure API Auth is ready AND fully initialized
+            await this._ensureAPIReady();
+            
+            // Wait for full initialization if needed
+            if (!this._apiAuthFullyInitialized) {
+                const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+            }
+            
+            // Ensure UI orchestration is ready
+            await this._ensureUIOrchestrationReady();
+            
+            try {
+                // Validate passwords match
+                if (data.password !== data.confirmPassword) {
+                    return {
+                        success: false,
+                        message: 'Passwords do not match'
+                    };
+                }
+                
+                // Validate email format
+                if (!this._validateEmail(data.email)) {
+                    return {
+                        success: false,
+                        message: 'Please provide a valid email address'
+                    };
+                }
+                
+                console.log('Attempting registration for:', data.email);
+                
+                // ✅ UPDATED: Use apiAuthProxy.register()
+                const response = await this._apiAuthProxy.register({
+                    email: data.email.trim().toLowerCase(),
+                    username: data.username.trim(),
+                    password: data.password,
+                    displayName: data.displayName || data.username
+                });
+                
+                console.log('Registration API call completed, processing response...');
+                
+                // Handle fallback mode
+                if (response.fallbackMode) {
+                    console.warn('⚠️ Registration in fallback mode');
+                    return response;
+                }
+                
+                // Check success - rest of method remains the same as original
+                const isSuccessful = response.success === true || response.ok === true;
+                
+                if (isSuccessful) {
+                    const token = response.token || response.accessToken || response.jwt;
+                    let user = response.user || response.data?.user || response.data;
+                    
+                    if (token && user) {
+                        // Auto-login after registration
+                        if (!this._validateUserObject(user)) {
+                            console.error('Registration failed: Invalid user object', user);
+                            return {
+                                success: false,
+                                message: 'Registration successful but user data is invalid'
+                            };
+                        }
+                        
+                        // Update auth state immediately
+                        const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
+                        
+                        if (!updateResult.success) {
+                            console.error('Failed to update auth state after registration:', updateResult.error);
+                            return {
+                                success: false,
+                                message: 'Registration successful but could not auto-login'
+                            };
+                        }
+                        
+                        // Update window.currentUser for UI compatibility
+                        if (typeof window !== 'undefined') {
+                            window.currentUser = user;
+                            Object.defineProperty(window, 'currentUser', {
+                                value: user,
+                                writable: true,
+                                configurable: true
+                            });
+                        }
+                        
+                        // Force immediate UI update
+                        this._forceUIUpdate();
+                        
+                        // Get success message
+                        const successMessage = response.message || response.msg || 'Registration successful';
+                        
+                        return {
+                            success: true,
+                            user,
+                            token,
+                            autoLoggedIn: true,
+                            message: successMessage
+                        };
+                    } else {
+                        // Registration successful, no auto-login
+                        const successMessage = response.message || response.msg || 'Registration successful. Please check your email to verify your account.';
+                        
+                        return {
+                            success: true,
+                            autoLoggedIn: false,
+                            message: successMessage
+                        };
+                    }
+                } else {
+                    // Get error message
+                    const errorMessage = response.message || response.error || 'Registration failed';
+                    
+                    return {
+                        success: false,
+                        message: errorMessage
+                    };
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                return {
+                    success: false,
+                    message: this._getUserFriendlyErrorMessage(error)
+                };
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Register method failed: ${error.message}`, 'REGISTER_METHOD');
+            return {
+                success: false,
+                message: 'Registration service temporarily unavailable',
+                fallback: true,
+                retryable: true
             };
         }
     }
@@ -1812,133 +2373,120 @@ class AuthGateway {
      * Auto-login from stored token - Uses apiAuthProxy.validateAuth() or getUser()
      */
     async autoLogin() {
-        console.log('Attempting auto-login from stored token...');
-        
-        // Ensure API Auth is ready AND fully initialized
-        await this._ensureAPIReady();
-        
-        // Wait for full initialization if needed
-        if (!this._apiAuthFullyInitialized) {
-            const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-            this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
-        }
-        
-        // Ensure UI orchestration is ready
-        await this._ensureUIOrchestrationReady();
-        
-        // Check if we have a stored token
-        const storedToken = this._state.token;
-        if (!storedToken || !this._isTokenValid(storedToken)) {
-            console.log('Auto-login: No valid stored token');
-            return {
-                success: false,
-                message: 'No valid authentication token found'
-            };
-        }
-        
-        // Check if auto-login is already in progress
-        if (this._validationInProgress) {
-            console.log('Auto-login already in progress, waiting...');
-            return new Promise((resolve) => {
-                const checkInterval = setInterval(() => {
-                    if (!this._validationInProgress) {
-                        clearInterval(checkInterval);
-                        resolve(this.autoLogin());
-                    }
-                }, 100);
-            });
-        }
-        
-        this._validationInProgress = true;
-        
         try {
-            // ✅ UPDATED: Use apiAuthProxy.validateAuth() or getUser() for token validation
-            let response;
+            console.log('Attempting auto-login from stored token...');
             
-            if (typeof this._apiAuthProxy.validateAuth === 'function') {
-                response = await this._apiAuthProxy.validateAuth();
-            } else if (typeof this._apiAuthProxy.getUser === 'function') {
-                response = await this._apiAuthProxy.getUser();
-            } else {
-                throw new Error('No token validation method available in apiAuthProxy');
+            // Ensure API Auth is ready AND fully initialized
+            await this._ensureAPIReady();
+            
+            // Wait for full initialization if needed
+            if (!this._apiAuthFullyInitialized) {
+                const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
             }
             
-            console.debug('[AUTH] Auto-login validation response:', response);
+            // Ensure UI orchestration is ready
+            await this._ensureUIOrchestrationReady();
             
-            // Handle fallback mode
-            if (response.fallbackMode) {
-                console.warn('⚠️ Auto-login in fallback mode');
-                this._validationInProgress = false;
+            // Check if we have a stored token
+            const storedToken = this._state.token;
+            if (!storedToken || !this._isTokenValid(storedToken)) {
+                console.log('Auto-login: No valid stored token');
                 return {
                     success: false,
-                    message: 'Authentication service unavailable',
-                    fallback: true
+                    message: 'No valid authentication token found'
                 };
             }
             
-            // Check success
-            const isSuccessful = response.success === true || 
-                                response.ok === true || 
-                                (response.user && (response.user.id || response.user.email));
-            
-            if (isSuccessful) {
-                const user = response.user || response.data?.user || response.data;
-                const token = response.token || storedToken;
-                
-                if (user && this._validateUserObject(user)) {
-                    // Update auth state with validated user IMMEDIATELY
-                    const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
-                    
-                    if (!updateResult.success) {
-                        console.error('Failed to update auth state during auto-login:', updateResult.error);
-                        this._validationInProgress = false;
-                        return {
-                            success: false,
-                            message: 'Auto-login failed: Could not update authentication state'
-                        };
-                    }
-                    
-                    // Update window.currentUser safely
-                    if (typeof window !== 'undefined') {
-                        window.currentUser = user;
-                        Object.defineProperty(window, 'currentUser', {
-                            value: user,
-                            writable: true,
-                            configurable: true
-                        });
-                    }
-                    
-                    // Force immediate UI update
-                    this._forceUIUpdate();
-                    
-                    console.log('Auto-login successful for user:', user.email || user.username);
-                    
-                    this._validationInProgress = false;
-                    return {
-                        success: true,
-                        user,
-                        token,
-                        message: 'Auto-login successful'
-                    };
-                }
+            // Check if auto-login is already in progress
+            if (this._validationInProgress) {
+                console.log('Auto-login already in progress, waiting...');
+                return new Promise((resolve) => {
+                    const checkInterval = setInterval(() => {
+                        if (!this._validationInProgress) {
+                            clearInterval(checkInterval);
+                            resolve(this.autoLogin());
+                        }
+                    }, 100);
+                });
             }
             
-            // Validation failed
-            console.log('Auto-login: Token validation failed');
-            await this._updateAuthStateImmediately('unauthenticated', null, null);
+            this._validationInProgress = true;
             
-            this._validationInProgress = false;
-            return {
-                success: false,
-                message: 'Session expired. Please login again.'
-            };
-            
-        } catch (error) {
-            console.error('Auto-login error:', error);
-            
-            // Handle 401 Unauthorized specifically
-            if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
-                console.log('Auto-login: Token is unauthorized, clearing');
+            try {
+                // ✅ UPDATED: Use apiAuthProxy.validateAuth() or getUser() for token validation
+                let response;
+                
+                if (typeof this._apiAuthProxy.validateAuth === 'function') {
+                    response = await this._apiAuthProxy.validateAuth();
+                } else if (typeof this._apiAuthProxy.getUser === 'function') {
+                    response = await this._apiAuthProxy.getUser();
+                } else {
+                    throw new Error('No token validation method available in apiAuthProxy');
+                }
+                
+                console.debug('[AUTH] Auto-login validation response:', response);
+                
+                // Handle fallback mode
+                if (response.fallbackMode) {
+                    console.warn('⚠️ Auto-login in fallback mode');
+                    this._validationInProgress = false;
+                    return {
+                        success: false,
+                        message: 'Authentication service unavailable',
+                        fallback: true
+                    };
+                }
+                
+                // Check success
+                const isSuccessful = response.success === true || 
+                                    response.ok === true || 
+                                    (response.user && (response.user.id || response.user.email));
+                
+                if (isSuccessful) {
+                    const user = response.user || response.data?.user || response.data;
+                    const token = response.token || storedToken;
+                    
+                    if (user && this._validateUserObject(user)) {
+                        // Update auth state with validated user IMMEDIATELY
+                        const updateResult = await this._updateAuthStateImmediately('authenticated', user, token);
+                        
+                        if (!updateResult.success) {
+                            console.error('Failed to update auth state during auto-login:', updateResult.error);
+                            this._validationInProgress = false;
+                            return {
+                                success: false,
+                                message: 'Auto-login failed: Could not update authentication state'
+                            };
+                        }
+                        
+                        // Update window.currentUser safely
+                        if (typeof window !== 'undefined') {
+                            window.currentUser = user;
+                            Object.defineProperty(window, 'currentUser', {
+                                value: user,
+                                writable: true,
+                                configurable: true
+                            });
+                        }
+                        
+                        // Force immediate UI update
+                        this._forceUIUpdate();
+                        
+                        console.log('Auto-login successful for user:', user.email || user.username);
+                        
+                        this._validationInProgress = false;
+                        return {
+                            success: true,
+                            user,
+                            token,
+                            message: 'Auto-login successful'
+                        };
+                    }
+                }
+                
+                // Validation failed
+                console.log('Auto-login: Token validation failed');
                 await this._updateAuthStateImmediately('unauthenticated', null, null);
                 
                 this._validationInProgress = false;
@@ -1946,27 +2494,49 @@ class AuthGateway {
                     success: false,
                     message: 'Session expired. Please login again.'
                 };
-            }
-            
-            // For network errors, check if we have valid cached state
-            console.warn('Auto-login: Network error, checking cached state');
-            if (this._state.status === 'authenticated' && this._state.token && this._isTokenValid(this._state.token)) {
-                console.log('Auto-login: Using cached state due to network error');
+                
+            } catch (error) {
+                console.error('Auto-login error:', error);
+                
+                // Handle 401 Unauthorized specifically
+                if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
+                    console.log('Auto-login: Token is unauthorized, clearing');
+                    await this._updateAuthStateImmediately('unauthenticated', null, null);
+                    
+                    this._validationInProgress = false;
+                    return {
+                        success: false,
+                        message: 'Session expired. Please login again.'
+                    };
+                }
+                
+                // For network errors, check if we have valid cached state
+                console.warn('Auto-login: Network error, checking cached state');
+                if (this._state.status === 'authenticated' && this._state.token && this._isTokenValid(this._state.token)) {
+                    console.log('Auto-login: Using cached state due to network error');
+                    this._validationInProgress = false;
+                    return {
+                        success: true,
+                        user: this._state.user,
+                        token: this._state.token,
+                        message: 'Auto-login successful (using cached session)',
+                        cached: true
+                    };
+                }
+                
                 this._validationInProgress = false;
                 return {
-                    success: true,
-                    user: this._state.user,
-                    token: this._state.token,
-                    message: 'Auto-login successful (using cached session)',
-                    cached: true
+                    success: false,
+                    message: 'Network error during auto-login',
+                    cached: false
                 };
             }
-            
-            this._validationInProgress = false;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`Auto-login method failed: ${error.message}`, 'AUTO_LOGIN_METHOD');
             return {
                 success: false,
-                message: 'Network error during auto-login',
-                cached: false
+                message: 'Auto-login service temporarily unavailable',
+                fallback: true
             };
         }
     }
@@ -1975,65 +2545,76 @@ class AuthGateway {
      * Logout current user - Uses apiAuthProxy.logout()
      */
     async logout() {
-        // Ensure API Auth is ready
-        await this._ensureAPIReady();
-        
-        // Ensure UI orchestration is ready
-        await this._ensureUIOrchestrationReady();
-        
         try {
-            // ✅ UPDATED: Use apiAuthProxy.logout()
-            if (typeof this._apiAuthProxy.logout === 'function') {
-                try {
-                    await this._apiAuthProxy.logout();
-                } catch (error) {
-                    console.warn('Logout API call failed:', error);
-                    // Continue with local logout even if API fails
+            // Ensure API Auth is ready
+            await this._ensureAPIReady();
+            
+            // Ensure UI orchestration is ready
+            await this._ensureUIOrchestrationReady();
+            
+            try {
+                // ✅ UPDATED: Use apiAuthProxy.logout()
+                if (typeof this._apiAuthProxy.logout === 'function') {
+                    try {
+                        await this._apiAuthProxy.logout();
+                    } catch (error) {
+                        console.warn('Logout API call failed:', error);
+                        // Continue with local logout even if API fails
+                    }
                 }
+                
+                // Clear local auth state IMMEDIATELY
+                await this._updateAuthStateImmediately('unauthenticated', null, null);
+                
+                // Clear window.currentUser for UI compatibility
+                if (typeof window !== 'undefined') {
+                    window.currentUser = null;
+                    Object.defineProperty(window, 'currentUser', {
+                        value: null,
+                        writable: true,
+                        configurable: true
+                    });
+                }
+                
+                // Clear login attempts for all users
+                this._loginAttempts.clear();
+                this._blockedUsers.clear();
+                this._saveLoginAttempts();
+                
+                // Force immediate UI update
+                this._forceUIUpdate();
+                
+                return {
+                    success: true,
+                    message: 'Logged out successfully'
+                };
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Still clear local state even on error
+                await this._updateAuthStateImmediately('unauthenticated', null, null);
+                
+                if (typeof window !== 'undefined') {
+                    window.currentUser = null;
+                    Object.defineProperty(window, 'currentUser', {
+                        value: null,
+                        writable: true,
+                        configurable: true
+                    });
+                }
+                
+                return {
+                    success: true,
+                    message: 'Logged out (with errors)'
+                };
             }
-            
-            // Clear local auth state IMMEDIATELY
-            await this._updateAuthStateImmediately('unauthenticated', null, null);
-            
-            // Clear window.currentUser for UI compatibility
-            if (typeof window !== 'undefined') {
-                window.currentUser = null;
-                Object.defineProperty(window, 'currentUser', {
-                    value: null,
-                    writable: true,
-                    configurable: true
-                });
-            }
-            
-            // Clear login attempts for all users
-            this._loginAttempts.clear();
-            this._blockedUsers.clear();
-            this._saveLoginAttempts();
-            
-            // Force immediate UI update
-            this._forceUIUpdate();
-            
-            return {
-                success: true,
-                message: 'Logged out successfully'
-            };
         } catch (error) {
-            console.error('Logout error:', error);
-            // Still clear local state even on error
-            await this._updateAuthStateImmediately('unauthenticated', null, null);
-            
-            if (typeof window !== 'undefined') {
-                window.currentUser = null;
-                Object.defineProperty(window, 'currentUser', {
-                    value: null,
-                    writable: true,
-                    configurable: true
-                });
-            }
-            
+            window.__authSafetyGuards._logOnce(`Logout method failed: ${error.message}`, 'LOGOUT_METHOD');
+            // Still try to clear local state
+            this._clearAuthState();
             return {
                 success: true,
-                message: 'Logged out (with errors)'
+                message: 'Logged out (with system errors)',
+                fallback: true
             };
         }
     }
@@ -2042,162 +2623,198 @@ class AuthGateway {
      * Get current authentication state
      */
     getAuthState() {
-        return {
-            ...this._state,
-            user: this._state.user ? { ...this._state.user } : null
-        };
+        try {
+            return {
+                ...this._state,
+                user: this._state.user ? { ...this._state.user } : null
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`getAuthState failed: ${error.message}`, 'GET_AUTH_STATE');
+            return {
+                status: 'error',
+                user: null,
+                token: null,
+                lastUpdated: null
+            };
+        }
     }
     
     /**
      * Check if user is authenticated
      */
     isAuthenticated() {
-        return this._state.status === 'authenticated' && 
-               this._state.user !== null && 
-               this._state.token !== null &&
-               this._isTokenValid(this._state.token);
+        try {
+            return this._state.status === 'authenticated' && 
+                   this._state.user !== null && 
+                   this._state.token !== null &&
+                   this._isTokenValid(this._state.token);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`isAuthenticated failed: ${error.message}`, 'IS_AUTHENTICATED');
+            return false;
+        }
     }
     
     /**
      * Get current user
      */
     getCurrentUser() {
-        return this._state.user ? { ...this._state.user } : null;
+        try {
+            return this._state.user ? { ...this._state.user } : null;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`getCurrentUser failed: ${error.message}`, 'GET_CURRENT_USER');
+            return null;
+        }
     }
     
     /**
      * Get authentication token
      */
     getToken() {
-        return this._state.token;
+        try {
+            return this._state.token;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`getToken failed: ${error.message}`, 'GET_TOKEN');
+            return null;
+        }
     }
     
     /**
      * Get authentication headers for API calls
      */
     getAuthHeaders() {
-        const headers = {
-            'Content-Type': 'application/json'
-        };
-        
-        const token = this._state.token;
-        if (token && this._isTokenValid(token)) {
-            headers['Authorization'] = `Bearer ${token}`;
+        try {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            const token = this._state.token;
+            if (token && this._isTokenValid(token)) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            
+            return headers;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`getAuthHeaders failed: ${error.message}`, 'GET_AUTH_HEADERS');
+            return { 'Content-Type': 'application/json' };
         }
-        
-        return headers;
     }
     
     /**
      * Validate current token - Uses apiAuthProxy.validateAuth()
      */
     async validateToken() {
-        if (this._validationInProgress) {
-            return new Promise(resolve => {
-                const checkInterval = setInterval(() => {
-                    if (!this._validationInProgress) {
-                        clearInterval(checkInterval);
-                        resolve(this.isAuthenticated());
-                    }
-                }, 100);
-            });
-        }
-        
-        if (!this._state.token) {
-            return false;
-        }
-        
-        // First check token validity locally
-        if (!this._isTokenValid(this._state.token)) {
-            console.log('Token invalid locally, clearing auth state');
-            await this._updateAuthStateImmediately('unauthenticated', null, null);
-            return false;
-        }
-        
-        this._validationInProgress = true;
-        
         try {
-            // Ensure API Auth is ready
-            await this._ensureAPIReady();
-            
-            // ✅ UPDATED: Use apiAuthProxy.validateAuth() for server validation
-            let response;
-            if (typeof this._apiAuthProxy.validateAuth === 'function') {
-                response = await this._apiAuthProxy.validateAuth();
-            } else if (typeof this._apiAuthProxy.getUser === 'function') {
-                response = await this._apiAuthProxy.getUser();
-            } else {
-                throw new Error('No token validation method available');
-            }
-            
-            console.debug('[AUTH] Token validation response:', response);
-            
-            // Handle fallback mode
-            if (response.fallbackMode) {
-                console.warn('⚠️ Token validation in fallback mode');
-                this._validationInProgress = false;
-                return true; // Assume token is valid in fallback mode
-            }
-            
-            // Check success
-            const isSuccessful = response.success === true || 
-                                response.ok === true || 
-                                (response.user && (response.user.id || response.user.email));
-            
-            if (isSuccessful) {
-                const user = response.user || response.data?.user || response.data;
-                if (user && this._validateUserObject(user)) {
-                    // Update user data if changed
-                    const currentUserStr = JSON.stringify(this._state.user);
-                    const newUserStr = JSON.stringify(user);
-                    
-                    if (currentUserStr !== newUserStr) {
-                        console.log('User data updated during token validation');
-                        const updateResult = await this._updateAuthStateImmediately('authenticated', user, this._state.token);
-                        if (!updateResult.success) {
-                            console.error('Failed to update user data:', updateResult.error);
+            if (this._validationInProgress) {
+                return new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (!this._validationInProgress) {
+                            clearInterval(checkInterval);
+                            resolve(this.isAuthenticated());
                         }
-                    }
-                    
-                    this._validationInProgress = false;
-                    return true;
-                }
+                    }, 100);
+                });
             }
             
-            // Validation failed, clear token
-            console.log('Token validation failed on server');
-            await this._updateAuthStateImmediately('unauthenticated', null, null);
+            if (!this._state.token) {
+                return false;
+            }
             
-            this._validationInProgress = false;
-            return false;
-        } catch (error) {
-            console.warn('Token validation error:', error);
+            // First check token validity locally
+            if (!this._isTokenValid(this._state.token)) {
+                console.log('Token invalid locally, clearing auth state');
+                await this._updateAuthStateImmediately('unauthenticated', null, null);
+                return false;
+            }
             
-            // Handle 401 Unauthorized specifically
-            if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
-                console.log('Auth error during validation, clearing token');
+            this._validationInProgress = true;
+            
+            try {
+                // Ensure API Auth is ready
+                await this._ensureAPIReady();
+                
+                // ✅ UPDATED: Use apiAuthProxy.validateAuth() for server validation
+                let response;
+                if (typeof this._apiAuthProxy.validateAuth === 'function') {
+                    response = await this._apiAuthProxy.validateAuth();
+                } else if (typeof this._apiAuthProxy.getUser === 'function') {
+                    response = await this._apiAuthProxy.getUser();
+                } else {
+                    throw new Error('No token validation method available');
+                }
+                
+                console.debug('[AUTH] Token validation response:', response);
+                
+                // Handle fallback mode
+                if (response.fallbackMode) {
+                    console.warn('⚠️ Token validation in fallback mode');
+                    this._validationInProgress = false;
+                    return true; // Assume token is valid in fallback mode
+                }
+                
+                // Check success
+                const isSuccessful = response.success === true || 
+                                    response.ok === true || 
+                                    (response.user && (response.user.id || response.user.email));
+                
+                if (isSuccessful) {
+                    const user = response.user || response.data?.user || response.data;
+                    if (user && this._validateUserObject(user)) {
+                        // Update user data if changed
+                        const currentUserStr = JSON.stringify(this._state.user);
+                        const newUserStr = JSON.stringify(user);
+                        
+                        if (currentUserStr !== newUserStr) {
+                            console.log('User data updated during token validation');
+                            const updateResult = await this._updateAuthStateImmediately('authenticated', user, this._state.token);
+                            if (!updateResult.success) {
+                                console.error('Failed to update user data:', updateResult.error);
+                            }
+                        }
+                        
+                        this._validationInProgress = false;
+                        return true;
+                    }
+                }
+                
+                // Validation failed, clear token
+                console.log('Token validation failed on server');
                 await this._updateAuthStateImmediately('unauthenticated', null, null);
                 
                 this._validationInProgress = false;
                 return false;
-            }
-            
-            // For network errors, assume token is still valid (cached) but refresh if needed
-            if (this.shouldRefreshToken()) {
-                console.log('Network error but token needs refresh, attempting refresh');
-                try {
-                    const refreshed = await this.refreshToken();
+            } catch (error) {
+                console.warn('Token validation error:', error);
+                
+                // Handle 401 Unauthorized specifically
+                if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
+                    console.log('Auth error during validation, clearing token');
+                    await this._updateAuthStateImmediately('unauthenticated', null, null);
+                    
                     this._validationInProgress = false;
-                    return refreshed;
-                } catch (refreshError) {
-                    console.warn('Token refresh failed after network error:', refreshError);
-                    this._validationInProgress = false;
-                    return true; // Still return true to avoid logging out on temporary network issues
+                    return false;
                 }
+                
+                // For network errors, assume token is still valid (cached) but refresh if needed
+                if (this.shouldRefreshToken()) {
+                    console.log('Network error but token needs refresh, attempting refresh');
+                    try {
+                        const refreshed = await this.refreshToken();
+                        this._validationInProgress = false;
+                        return refreshed;
+                    } catch (refreshError) {
+                        console.warn('Token refresh failed after network error:', refreshError);
+                        this._validationInProgress = false;
+                        return true; // Still return true to avoid logging out on temporary network issues
+                    }
+                }
+                
+                this._validationInProgress = false;
+                return true;
             }
-            
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`validateToken failed: ${error.message}`, 'VALIDATE_TOKEN');
             this._validationInProgress = false;
-            return true;
+            return false;
         }
     }
     
@@ -2205,135 +2822,155 @@ class AuthGateway {
      * Refresh authentication token - Uses apiAuthProxy.refreshToken()
      */
     async refreshToken() {
-        if (!this._state.token) {
-            return false;
-        }
-        
-        // Ensure API Auth is ready
-        await this._ensureAPIReady();
-        
-        // Prevent multiple simultaneous refresh attempts
-        if (this._refreshPromise) {
-            console.log('Refresh already in progress, waiting...');
-            return this._refreshPromise;
-        }
-        
-        this._refreshPromise = (async () => {
-            try {
-                console.log('Attempting token refresh...');
-                
-                // ✅ UPDATED: Use apiAuthProxy.refreshToken()
-                let response;
-                if (typeof this._apiAuthProxy.refreshToken === 'function') {
-                    response = await this._apiAuthProxy.refreshToken();
-                } else {
-                    console.warn('No refreshToken method in apiAuthProxy, skipping refresh');
-                    this._refreshPromise = null;
-                    return false;
-                }
-                
-                console.debug('[AUTH] Token refresh response:', response);
-                
-                // Handle fallback mode
-                if (response.fallbackMode) {
-                    console.warn('⚠️ Token refresh in fallback mode');
-                    this._refreshPromise = null;
-                    return false;
-                }
-                
-                // Check success
-                const isSuccessful = response.success === true || response.ok === true;
-                
-                if (isSuccessful) {
-                    const newToken = response.token || response.accessToken || response.jwt;
+        try {
+            if (!this._state.token) {
+                return false;
+            }
+            
+            // Ensure API Auth is ready
+            await this._ensureAPIReady();
+            
+            // Prevent multiple simultaneous refresh attempts
+            if (this._refreshPromise) {
+                console.log('Refresh already in progress, waiting...');
+                return this._refreshPromise;
+            }
+            
+            this._refreshPromise = (async () => {
+                try {
+                    console.log('Attempting token refresh...');
                     
-                    if (newToken && this._isTokenValid(newToken)) {
-                        console.log('Token refreshed successfully');
-                        const updateResult = await this._updateAuthStateImmediately('authenticated', this._state.user, newToken);
-                        this._refreshPromise = null;
-                        return updateResult.success;
+                    // ✅ UPDATED: Use apiAuthProxy.refreshToken()
+                    let response;
+                    if (typeof this._apiAuthProxy.refreshToken === 'function') {
+                        response = await this._apiAuthProxy.refreshToken();
                     } else {
-                        console.error('Refreshed token is invalid or missing');
+                        console.warn('No refreshToken method in apiAuthProxy, skipping refresh');
                         this._refreshPromise = null;
                         return false;
                     }
+                    
+                    console.debug('[AUTH] Token refresh response:', response);
+                    
+                    // Handle fallback mode
+                    if (response.fallbackMode) {
+                        console.warn('⚠️ Token refresh in fallback mode');
+                        this._refreshPromise = null;
+                        return false;
+                    }
+                    
+                    // Check success
+                    const isSuccessful = response.success === true || response.ok === true;
+                    
+                    if (isSuccessful) {
+                        const newToken = response.token || response.accessToken || response.jwt;
+                        
+                        if (newToken && this._isTokenValid(newToken)) {
+                            console.log('Token refreshed successfully');
+                            const updateResult = await this._updateAuthStateImmediately('authenticated', this._state.user, newToken);
+                            this._refreshPromise = null;
+                            return updateResult.success;
+                        } else {
+                            console.error('Refreshed token is invalid or missing');
+                            this._refreshPromise = null;
+                            return false;
+                        }
+                    }
+                    
+                    console.log('Token refresh failed:', response.message);
+                    this._refreshPromise = null;
+                    return false;
+                } catch (error) {
+                    console.error('Token refresh error:', error);
+                    
+                    // Handle 401 Unauthorized specifically
+                    if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
+                        console.log('Auth error during refresh, clearing token');
+                        await this._updateAuthStateImmediately('unauthenticated', null, null);
+                    }
+                    
+                    this._refreshPromise = null;
+                    return false;
                 }
-                
-                console.log('Token refresh failed:', response.message);
-                this._refreshPromise = null;
-                return false;
-            } catch (error) {
-                console.error('Token refresh error:', error);
-                
-                // Handle 401 Unauthorized specifically
-                if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
-                    console.log('Auth error during refresh, clearing token');
-                    await this._updateAuthStateImmediately('unauthenticated', null, null);
-                }
-                
-                this._refreshPromise = null;
-                return false;
-            }
-        })();
-        
-        return this._refreshPromise;
+            })();
+            
+            return this._refreshPromise;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`refreshToken failed: ${error.message}`, 'REFRESH_TOKEN');
+            this._refreshPromise = null;
+            return false;
+        }
     }
     
     /**
      * Subscribe to auth state changes
      */
     onAuthStateChange(callback) {
-        if (typeof callback !== 'function') {
-            throw new Error('Callback must be a function');
+        try {
+            if (typeof callback !== 'function') {
+                throw new Error('Callback must be a function');
+            }
+            
+            this._listeners.add(callback);
+            
+            // Return unsubscribe function
+            return () => {
+                this._listeners.delete(callback);
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`onAuthStateChange failed: ${error.message}`, 'AUTH_STATE_CHANGE');
+            return () => {}; // Return empty unsubscribe function
         }
-        
-        this._listeners.add(callback);
-        
-        // Return unsubscribe function
-        return () => {
-            this._listeners.delete(callback);
-        };
     }
     
     /**
      * Subscribe to event bus events
      */
     subscribeToEvent(eventName, handler) {
-        if (typeof handler !== 'function') {
-            throw new Error('Handler must be a function');
-        }
-        
-        if (!this._eventBusSubscriptions.has(eventName)) {
-            this._eventBusSubscriptions.set(eventName, new Set());
-        }
-        
-        this._eventBusSubscriptions.get(eventName).add(handler);
-        
-        // Return unsubscribe function
-        return () => {
-            const handlers = this._eventBusSubscriptions.get(eventName);
-            if (handlers) {
-                handlers.delete(handler);
-                if (handlers.size === 0) {
-                    this._eventBusSubscriptions.delete(eventName);
-                }
+        try {
+            if (typeof handler !== 'function') {
+                throw new Error('Handler must be a function');
             }
-        };
+            
+            if (!this._eventBusSubscriptions.has(eventName)) {
+                this._eventBusSubscriptions.set(eventName, new Set());
+            }
+            
+            this._eventBusSubscriptions.get(eventName).add(handler);
+            
+            // Return unsubscribe function
+            return () => {
+                const handlers = this._eventBusSubscriptions.get(eventName);
+                if (handlers) {
+                    handlers.delete(handler);
+                    if (handlers.size === 0) {
+                        this._eventBusSubscriptions.delete(eventName);
+                    }
+                }
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`subscribeToEvent failed: ${error.message}`, 'EVENT_SUBSCRIPTION');
+            return () => {}; // Return empty unsubscribe function
+        }
     }
     
     /**
      * Emit event to event bus
      */
     emitEvent(eventName, data) {
-        const handlers = this._eventBusSubscriptions.get(eventName);
-        if (handlers) {
-            handlers.forEach(handler => {
-                try {
-                    setTimeout(() => handler(data), 0);
-                } catch (error) {
-                    console.error(`Event handler error for ${eventName}:`, error);
-                }
-            });
+        try {
+            const handlers = this._eventBusSubscriptions.get(eventName);
+            if (handlers) {
+                handlers.forEach(handler => {
+                    try {
+                        setTimeout(() => handler(data), 0);
+                    } catch (error) {
+                        console.error(`Event handler error for ${eventName}:`, error);
+                    }
+                });
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`emitEvent failed: ${error.message}`, 'EVENT_EMIT');
         }
     }
     
@@ -2341,9 +2978,9 @@ class AuthGateway {
      * Check if token is about to expire and needs refresh
      */
     shouldRefreshToken() {
-        if (!this._state.token) return false;
-        
         try {
+            if (!this._state.token) return false;
+            
             const parts = this._state.token.split('.');
             if (parts.length !== 3) return false;
             
@@ -2357,7 +2994,7 @@ class AuthGateway {
             
             return currentTime >= (expiryTime - refreshThreshold - buffer);
         } catch (error) {
-            console.error('Error checking token refresh:', error);
+            window.__authSafetyGuards._logOnce(`shouldRefreshToken failed: ${error.message}`, 'SHOULD_REFRESH_TOKEN');
             return false;
         }
     }
@@ -2366,26 +3003,56 @@ class AuthGateway {
      * Manually update auth state (for external integrations)
      */
     async setAuthState(status, user = null, token = null) {
-        const updateResult = await this._updateAuthStateImmediately(status, user, token);
-        
-        if (!updateResult.success) {
-            throw new Error(updateResult.error || 'Failed to update auth state');
-        }
-        
-        // Update window.currentUser for UI compatibility
-        if (status === 'authenticated' && user) {
-            if (typeof window !== 'undefined') {
-                window.currentUser = user;
-                Object.defineProperty(window, 'currentUser', {
-                    value: user,
-                    writable: true,
-                    configurable: true
-                });
+        try {
+            const updateResult = await this._updateAuthStateImmediately(status, user, token);
+            
+            if (!updateResult.success) {
+                throw new Error(updateResult.error || 'Failed to update auth state');
             }
             
-            // Force immediate UI update
-            this._forceUIUpdate();
-        } else if (status !== 'authenticated') {
+            // Update window.currentUser for UI compatibility
+            if (status === 'authenticated' && user) {
+                if (typeof window !== 'undefined') {
+                    window.currentUser = user;
+                    Object.defineProperty(window, 'currentUser', {
+                        value: user,
+                        writable: true,
+                        configurable: true
+                    });
+                }
+                
+                // Force immediate UI update
+                this._forceUIUpdate();
+            } else if (status !== 'authenticated') {
+                // Clear window.currentUser
+                if (typeof window !== 'undefined') {
+                    window.currentUser = null;
+                    Object.defineProperty(window, 'currentUser', {
+                        value: null,
+                        writable: true,
+                        configurable: true
+                    });
+                }
+                
+                // Force immediate UI update
+                this._forceUIUpdate();
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`setAuthState failed: ${error.message}`, 'SET_AUTH_STATE');
+            throw error;
+        }
+    }
+    
+    /**
+     * Clear all authentication data
+     */
+    async clear() {
+        try {
+            this._loginAttempts.clear();
+            this._blockedUsers.clear();
+            this._saveLoginAttempts();
+            await this._updateAuthStateImmediately('unauthenticated', null, null);
+            
             // Clear window.currentUser
             if (typeof window !== 'undefined') {
                 window.currentUser = null;
@@ -2398,38 +3065,38 @@ class AuthGateway {
             
             // Force immediate UI update
             this._forceUIUpdate();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`clear failed: ${error.message}`, 'CLEAR_AUTH');
         }
-    }
-    
-    /**
-     * Clear all authentication data
-     */
-    async clear() {
-        this._loginAttempts.clear();
-        this._blockedUsers.clear();
-        this._saveLoginAttempts();
-        await this._updateAuthStateImmediately('unauthenticated', null, null);
-        
-        // Clear window.currentUser
-        if (typeof window !== 'undefined') {
-            window.currentUser = null;
-            Object.defineProperty(window, 'currentUser', {
-                value: null,
-                writable: true,
-                configurable: true
-            });
-        }
-        
-        // Force immediate UI update
-        this._forceUIUpdate();
     }
     
     /**
      * Get login attempts statistics for a user
      */
     getLoginAttempts(identifier) {
-        const attempts = this._loginAttempts.get(identifier);
-        if (!attempts) {
+        try {
+            const attempts = this._loginAttempts.get(identifier);
+            if (!attempts) {
+                return {
+                    count: 0,
+                    failed: 0,
+                    lastAttempt: null,
+                    blocked: false
+                };
+            }
+            
+            const blockInfo = this._isUserBlocked(identifier);
+            const failedAttempts = attempts.history.filter(h => !h.success).length;
+            
+            return {
+                count: attempts.count,
+                failed: failedAttempts,
+                lastAttempt: attempts.lastAttempt,
+                blocked: !!blockInfo,
+                blockInfo
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`getLoginAttempts failed: ${error.message}`, 'GET_LOGIN_ATTEMPTS');
             return {
                 count: 0,
                 failed: 0,
@@ -2437,80 +3104,90 @@ class AuthGateway {
                 blocked: false
             };
         }
-        
-        const blockInfo = this._isUserBlocked(identifier);
-        const failedAttempts = attempts.history.filter(h => !h.success).length;
-        
-        return {
-            count: attempts.count,
-            failed: failedAttempts,
-            lastAttempt: attempts.lastAttempt,
-            blocked: !!blockInfo,
-            blockInfo
-        };
     }
     
     /**
      * Reset login attempts for a user
      */
     resetLoginAttempts(identifier = null) {
-        if (identifier) {
-            this._loginAttempts.delete(identifier);
-            this._blockedUsers.delete(identifier);
-        } else {
-            this._loginAttempts.clear();
-            this._blockedUsers.clear();
+        try {
+            if (identifier) {
+                this._loginAttempts.delete(identifier);
+                this._blockedUsers.delete(identifier);
+            } else {
+                this._loginAttempts.clear();
+                this._blockedUsers.clear();
+            }
+            
+            this._saveLoginAttempts();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`resetLoginAttempts failed: ${error.message}`, 'RESET_LOGIN_ATTEMPTS');
         }
-        
-        this._saveLoginAttempts();
     }
     
     /**
      * Check if a user is currently blocked
      */
     isUserBlocked(identifier) {
-        return this._isUserBlocked(identifier);
+        try {
+            return this._isUserBlocked(identifier);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`isUserBlocked failed: ${error.message}`, 'IS_USER_BLOCKED');
+            return false;
+        }
     }
     
     /**
      * Debug information
      */
     debug() {
-        return {
-            state: this.getAuthState(),
-            isAuthenticated: this.isAuthenticated(),
-            hasValidToken: this._state.token ? this._isTokenValid(this._state.token) : false,
-            shouldRefreshToken: this.shouldRefreshToken(),
-            loginAttempts: this._loginAttempts.size,
-            blockedUsers: this._blockedUsers.size,
-            isIframeContext: this._isIframeContext,
-            listeners: this._listeners.size,
-            config: AUTH_GATEWAY_CONFIG,
-            loginInProgress: this._loginInProgress,
-            validationInProgress: this._validationInProgress,
-            apiReady: this._apiReady,
-            uiOrchestrationReady: this._uiOrchestrationReady,
-            apiAuthReady: this._apiAuthReady,
-            apiAuthFullyInitialized: this._apiAuthFullyInitialized,
-            apiAuthProxy: {
-                initialized: this._apiAuthProxy ? true : false,
-                fallbackMode: this._apiAuthProxy?.isFallbackMode() || false,
-                hasRealApiAuth: !!this._apiAuthProxy?.getRealApiAuth()
-            },
-            apiModules: {
-                core: !!window.api?.core,
-                auth: !!window.api?.auth,
-                request: !!window.api?.request
-            },
-            uiNamespace: {
-                app: !!window.app,
-                appUi: !!window.app?.ui,
-                appUiAuth: !!window.app?.ui?.auth,
-                preservedAuthModule: !!window.__preservedAuthModule,
-                uiRegistry: !!window.__uiOrchestrationRegistry
-            },
-            apiAuthReadiness: window.__apiAuthReadinessManager?.getDetectionInfo() || {}
-        };
+        try {
+            return {
+                state: this.getAuthState(),
+                isAuthenticated: this.isAuthenticated(),
+                hasValidToken: this._state.token ? this._isTokenValid(this._state.token) : false,
+                shouldRefreshToken: this.shouldRefreshToken(),
+                loginAttempts: this._loginAttempts.size,
+                blockedUsers: this._blockedUsers.size,
+                isIframeContext: this._isIframeContext,
+                listeners: this._listeners.size,
+                config: AUTH_GATEWAY_CONFIG,
+                loginInProgress: this._loginInProgress,
+                validationInProgress: this._validationInProgress,
+                apiReady: this._apiReady,
+                uiOrchestrationReady: this._uiOrchestrationReady,
+                apiAuthReady: this._apiAuthReady,
+                apiAuthFullyInitialized: this._apiAuthFullyInitialized,
+                apiAuthProxy: {
+                    initialized: this._apiAuthProxy ? true : false,
+                    fallbackMode: this._apiAuthProxy?.isFallbackMode() || false,
+                    hasRealApiAuth: !!this._apiAuthProxy?.getRealApiAuth()
+                },
+                apiModules: {
+                    core: !!window.api?.core,
+                    auth: !!window.api?.auth,
+                    request: !!window.api?.request
+                },
+                uiNamespace: {
+                    app: !!window.app,
+                    appUi: !!window.app?.ui,
+                    appUiAuth: !!window.app?.ui?.auth,
+                    preservedAuthModule: !!window.__preservedAuthModule,
+                    uiRegistry: !!window.__uiOrchestrationRegistry
+                },
+                apiAuthReadiness: window.__apiAuthReadinessManager?.getDetectionInfo() || {},
+                safetyGuards: {
+                    initialized: !!window.__authSafetyGuards,
+                    loggedErrors: window.__authSafetyGuards?._loggedErrors?.size || 0
+                }
+            };
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`debug failed: ${error.message}`, 'DEBUG_INFO');
+            return {
+                error: 'Debug information unavailable',
+                message: error.message
+            };
+        }
     }
     
     // ============================================================================
@@ -2587,7 +3264,7 @@ class AuthGateway {
                 success: true
             };
         } catch (error) {
-            console.error('Error updating auth state immediately:', error);
+            window.__authSafetyGuards._logOnce(`_updateAuthStateImmediately failed: ${error.message}`, 'UPDATE_AUTH_STATE');
             return {
                 success: false,
                 error: error.message
@@ -2623,7 +3300,7 @@ class AuthGateway {
             }
             
         } catch (error) {
-            console.error('Error saving auth state immediately:', error);
+            window.__authSafetyGuards._logOnce(`_saveAuthStateImmediately failed: ${error.message}`, 'SAVE_AUTH_STATE');
             // Try fallback method
             setTimeout(() => this._saveAuthState(), 0);
         }
@@ -2633,26 +3310,30 @@ class AuthGateway {
      * Sync auth state immediately
      */
     _syncAuthStateImmediately(status, user = null, token = null) {
-        const syncData = {
-            type: 'auth_state_sync',
-            source: this._sessionSyncKey,
-            status,
-            user,
-            token,
-            timestamp: Date.now(),
-            immediate: true
-        };
-        
-        // Send sync message immediately
         try {
-            // Broadcast to all windows
-            window.postMessage(syncData, '*');
+            const syncData = {
+                type: 'auth_state_sync',
+                source: this._sessionSyncKey,
+                status,
+                user,
+                token,
+                timestamp: Date.now(),
+                immediate: true
+            };
             
-            // Also send as storage event for same-tab
-            this._dispatchCustomEvent('authStateChanged', syncData);
-            
+            // Send sync message immediately
+            try {
+                // Broadcast to all windows
+                window.postMessage(syncData, '*');
+                
+                // Also send as storage event for same-tab
+                this._dispatchCustomEvent('authStateChanged', syncData);
+                
+            } catch (error) {
+                console.warn('Failed to sync auth state immediately:', error);
+            }
         } catch (error) {
-            console.warn('Failed to sync auth state immediately:', error);
+            window.__authSafetyGuards._logOnce(`_syncAuthStateImmediately failed: ${error.message}`, 'SYNC_AUTH_STATE');
         }
     }
     
@@ -2697,7 +3378,7 @@ class AuthGateway {
             });
             
         } catch (error) {
-            console.warn('Failed to force UI update:', error);
+            window.__authSafetyGuards._logOnce(`_forceUIUpdate failed: ${error.message}`, 'FORCE_UI_UPDATE');
         }
     }
     
@@ -2709,7 +3390,7 @@ class AuthGateway {
             const event = new CustomEvent(eventName, { detail });
             window.dispatchEvent(event);
         } catch (error) {
-            console.warn(`Failed to dispatch custom event ${eventName}:`, error);
+            window.__authSafetyGuards._logOnce(`_dispatchCustomEvent failed for ${eventName}: ${error.message}`, 'DISPATCH_CUSTOM_EVENT');
         }
     }
     
@@ -2767,7 +3448,7 @@ class AuthGateway {
             // Load login attempts
             this._loadLoginAttempts();
         } catch (error) {
-            console.error('Error loading auth state:', error);
+            window.__authSafetyGuards._logOnce(`_loadAuthState failed: ${error.message}`, 'LOAD_AUTH_STATE');
             this._clearAuthState();
         }
     }
@@ -2785,19 +3466,19 @@ class AuthGateway {
             localStorage.setItem(AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY, JSON.stringify(authState));
             console.log('Auth state saved to localStorage');
         } catch (error) {
-            console.error('Error saving auth state:', error);
+            window.__authSafetyGuards._logOnce(`_saveAuthState failed: ${error.message}`, 'SAVE_AUTH_STATE_FALLBACK');
         }
     }
     
     _clearAuthState() {
-        this._state = {
-            status: 'unauthenticated',
-            user: null,
-            token: null,
-            lastUpdated: new Date()
-        };
-        
         try {
+            this._state = {
+                status: 'unauthenticated',
+                user: null,
+                token: null,
+                lastUpdated: new Date()
+            };
+            
             localStorage.removeItem(AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY);
             
             // Clear window.currentUser
@@ -2810,44 +3491,52 @@ class AuthGateway {
                 });
             }
         } catch (error) {
-            console.error('Error clearing auth state:', error);
+            window.__authSafetyGuards._logOnce(`_clearAuthState failed: ${error.message}`, 'CLEAR_AUTH_STATE');
         }
     }
     
     _notifyListeners(change) {
-        const listeners = Array.from(this._listeners);
-        listeners.forEach(callback => {
-            try {
-                setTimeout(() => callback(change), 0);
-            } catch (error) {
-                console.error('Auth state change listener error:', error);
-            }
-        });
+        try {
+            const listeners = Array.from(this._listeners);
+            listeners.forEach(callback => {
+                try {
+                    setTimeout(() => callback(change), 0);
+                } catch (error) {
+                    console.error('Auth state change listener error:', error);
+                }
+            });
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_notifyListeners failed: ${error.message}`, 'NOTIFY_LISTENERS');
+        }
     }
     
     _setupSynchronization() {
-        // Listen for storage events (cross-tab sync)
-        window.addEventListener('storage', this._handleStorageEvent.bind(this));
-        
-        // Listen for message events (iframe sync)
-        window.addEventListener('message', this._handleMessageEvent.bind(this));
-        
-        // Listen for custom auth state change events
-        window.addEventListener('authGatewayStateChange', this._handleCustomAuthEvent.bind(this));
-        
-        // Listen for UI orchestration events
-        window.addEventListener('uiOrchestrationReady', this._handleUIOrchestrationReady.bind(this));
-        
-        // Listen for API auth events
-        window.addEventListener('apiAuthManagerReady', this._handleApiAuthReady.bind(this));
-        window.addEventListener('apiAuthManagerError', this._handleApiAuthError.bind(this));
-        window.addEventListener('apiAuthProxyReady', this._handleApiAuthProxyReady.bind(this));
-        window.addEventListener('apiAuthManagerFullyInitialized', this._handleApiAuthFullyInitialized.bind(this)); // NEW
+        try {
+            // Listen for storage events (cross-tab sync)
+            window.addEventListener('storage', this._handleStorageEvent.bind(this));
+            
+            // Listen for message events (iframe sync)
+            window.addEventListener('message', this._handleMessageEvent.bind(this));
+            
+            // Listen for custom auth state change events
+            window.addEventListener('authGatewayStateChange', this._handleCustomAuthEvent.bind(this));
+            
+            // Listen for UI orchestration events
+            window.addEventListener('uiOrchestrationReady', this._handleUIOrchestrationReady.bind(this));
+            
+            // Listen for API auth events
+            window.addEventListener('apiAuthManagerReady', this._handleApiAuthReady.bind(this));
+            window.addEventListener('apiAuthManagerError', this._handleApiAuthError.bind(this));
+            window.addEventListener('apiAuthProxyReady', this._handleApiAuthProxyReady.bind(this));
+            window.addEventListener('apiAuthManagerFullyInitialized', this._handleApiAuthFullyInitialized.bind(this)); // NEW
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_setupSynchronization failed: ${error.message}`, 'SETUP_SYNCHRONIZATION');
+        }
     }
     
     _handleStorageEvent(event) {
-        if (event.key === AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY) {
-            try {
+        try {
+            if (event.key === AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY) {
                 if (event.newValue) {
                     const newState = JSON.parse(event.newValue);
                     
@@ -2909,165 +3598,209 @@ class AuthGateway {
                     // Force immediate UI update
                     this._forceUIUpdate();
                 }
-            } catch (error) {
-                console.error('Error handling storage event:', error);
             }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleStorageEvent failed: ${error.message}`, 'HANDLE_STORAGE_EVENT');
         }
     }
     
     _handleMessageEvent(event) {
-        // Handle cross-window/iframe auth state synchronization
-        if (event.data && (event.data.type === 'auth_state_sync' || event.data.type === 'auth_state_broadcast')) {
-            this._processIncomingSync(event.data);
+        try {
+            // Handle cross-window/iframe auth state synchronization
+            if (event.data && (event.data.type === 'auth_state_sync' || event.data.type === 'auth_state_broadcast')) {
+                this._processIncomingSync(event.data);
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleMessageEvent failed: ${error.message}`, 'HANDLE_MESSAGE_EVENT');
         }
     }
     
     _handleCustomAuthEvent(event) {
-        // Handle custom auth state change events
-        if (event.detail && event.type === 'authGatewayStateChange') {
-            // Update internal state from event
-            if (event.detail.status !== this._state.status ||
-                event.detail.token !== this._state.token ||
-                JSON.stringify(event.detail.user) !== JSON.stringify(this._state.user)) {
-                
-                this._state = {
-                    status: event.detail.status,
-                    user: event.detail.user || null,
-                    token: event.detail.token || null,
-                    lastUpdated: new Date(event.detail.timestamp || Date.now())
-                };
+        try {
+            // Handle custom auth state change events
+            if (event.detail && event.type === 'authGatewayStateChange') {
+                // Update internal state from event
+                if (event.detail.status !== this._state.status ||
+                    event.detail.token !== this._state.token ||
+                    JSON.stringify(event.detail.user) !== JSON.stringify(this._state.user)) {
+                    
+                    this._state = {
+                        status: event.detail.status,
+                        user: event.detail.user || null,
+                        token: event.detail.token || null,
+                        lastUpdated: new Date(event.detail.timestamp || Date.now())
+                    };
+                }
             }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleCustomAuthEvent failed: ${error.message}`, 'HANDLE_CUSTOM_AUTH_EVENT');
         }
     }
     
     _handleUIOrchestrationReady(event) {
-        console.log('UI orchestration ready event received');
-        this._uiOrchestrationReady = true;
-        this._uiOrchestrationCallbacks.forEach(callback => callback());
-        this._uiOrchestrationCallbacks = [];
+        try {
+            console.log('UI orchestration ready event received');
+            this._uiOrchestrationReady = true;
+            this._uiOrchestrationCallbacks.forEach(callback => callback());
+            this._uiOrchestrationCallbacks = [];
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleUIOrchestrationReady failed: ${error.message}`, 'HANDLE_UI_READY');
+        }
     }
     
     _handleApiAuthReady(event) {
-        console.log('API Auth Manager ready event received:', event.detail);
-        this._apiAuthReady = true;
+        try {
+            console.log('API Auth Manager ready event received:', event.detail);
+            this._apiAuthReady = true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleApiAuthReady failed: ${error.message}`, 'HANDLE_API_AUTH_READY');
+        }
     }
     
     _handleApiAuthError(event) {
-        console.error('API Auth Manager error event received:', event.detail);
-        // Still mark as ready but note the error
-        this._apiAuthReady = true;
+        try {
+            console.error('API Auth Manager error event received:', event.detail);
+            // Still mark as ready but note the error
+            this._apiAuthReady = true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleApiAuthError failed: ${error.message}`, 'HANDLE_API_AUTH_ERROR');
+        }
     }
     
     _handleApiAuthProxyReady(event) {
-        console.log('API Auth Proxy ready event received:', event.detail);
-        // Update proxy status
-        if (this._apiAuthProxy) {
-            // Already initialized
+        try {
+            console.log('API Auth Proxy ready event received:', event.detail);
+            // Update proxy status
+            if (this._apiAuthProxy) {
+                // Already initialized
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleApiAuthProxyReady failed: ${error.message}`, 'HANDLE_API_AUTH_PROXY_READY');
         }
     }
     
     _handleApiAuthFullyInitialized(event) {
-        console.log('✅ API Auth FULLY INITIALIZED event received:', event.detail);
-        this._apiAuthFullyInitialized = true;
+        try {
+            console.log('✅ API Auth FULLY INITIALIZED event received:', event.detail);
+            this._apiAuthFullyInitialized = true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_handleApiAuthFullyInitialized failed: ${error.message}`, 'HANDLE_API_AUTH_FULL_INIT');
+        }
     }
     
     _processIncomingSync(data) {
-        // Don't process our own sync messages
-        if (data.source === this._sessionSyncKey) {
-            return;
-        }
-        
-        if (data.status === 'authenticated' && data.user && data.token) {
-            if (this._validateUserObject(data.user) && 
-                this._isTokenValid(data.token) &&
-                (this._state.status !== 'authenticated' || 
-                 this._state.token !== data.token)) {
-                
-                this._updateAuthStateImmediately('authenticated', data.user, data.token)
+        try {
+            // Don't process our own sync messages
+            if (data.source === this._sessionSyncKey) {
+                return;
+            }
+            
+            if (data.status === 'authenticated' && data.user && data.token) {
+                if (this._validateUserObject(data.user) && 
+                    this._isTokenValid(data.token) &&
+                    (this._state.status !== 'authenticated' || 
+                     this._state.token !== data.token)) {
+                    
+                    this._updateAuthStateImmediately('authenticated', data.user, data.token)
+                        .catch(error => console.error('Error updating from sync:', error));
+                }
+            } else if (data.status === 'unauthenticated' && this._state.status === 'authenticated') {
+                this._updateAuthStateImmediately('unauthenticated', null, null)
                     .catch(error => console.error('Error updating from sync:', error));
             }
-        } else if (data.status === 'unauthenticated' && this._state.status === 'authenticated') {
-            this._updateAuthStateImmediately('unauthenticated', null, null)
-                .catch(error => console.error('Error updating from sync:', error));
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_processIncomingSync failed: ${error.message}`, 'PROCESS_INCOMING_SYNC');
         }
     }
     
     _syncAuthState(status, user = null, token = null) {
-        const syncData = {
-            type: 'auth_state_sync',
-            source: this._sessionSyncKey,
-            status,
-            user,
-            token,
-            timestamp: Date.now()
-        };
-        
-        // If in iframe, send message to parent
-        if (this._isIframeContext) {
-            try {
-                window.parent.postMessage(syncData, '*');
-            } catch (error) {
-                console.warn('Failed to sync auth state to parent:', error);
-            }
-        }
-        
-        // If in parent window, broadcast to all iframes
-        if (!this._isIframeContext) {
-            try {
-                // Broadcast to all iframes
-                const broadcastData = {
-                    ...syncData,
-                    type: 'auth_state_broadcast'
-                };
-                
-                window.postMessage(broadcastData, '*');
-                
-                // Also send to specific frames if we can access them
-                if (window.frames && window.frames.length > 0) {
-                    Array.from(window.frames).forEach((frame, index) => {
-                        try {
-                            frame.postMessage(broadcastData, '*');
-                        } catch (error) {
-                            console.warn(`Failed to broadcast to frame ${index}:`, error);
-                        }
-                    });
+        try {
+            const syncData = {
+                type: 'auth_state_sync',
+                source: this._sessionSyncKey,
+                status,
+                user,
+                token,
+                timestamp: Date.now()
+            };
+            
+            // If in iframe, send message to parent
+            if (this._isIframeContext) {
+                try {
+                    window.parent.postMessage(syncData, '*');
+                } catch (error) {
+                    console.warn('Failed to sync auth state to parent:', error);
                 }
-            } catch (error) {
-                console.warn('Failed to broadcast auth state:', error);
             }
+            
+            // If in parent window, broadcast to all iframes
+            if (!this._isIframeContext) {
+                try {
+                    // Broadcast to all iframes
+                    const broadcastData = {
+                        ...syncData,
+                        type: 'auth_state_broadcast'
+                    };
+                    
+                    window.postMessage(broadcastData, '*');
+                    
+                    // Also send to specific frames if we can access them
+                    if (window.frames && window.frames.length > 0) {
+                        Array.from(window.frames).forEach((frame, index) => {
+                            try {
+                                frame.postMessage(broadcastData, '*');
+                            } catch (error) {
+                                console.warn(`Failed to broadcast to frame ${index}:`, error);
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.warn('Failed to broadcast auth state:', error);
+                }
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_syncAuthState failed: ${error.message}`, 'SYNC_AUTH_STATE_LEGACY');
         }
     }
     
     _startSessionMonitoring() {
-        // Initial check
-        setTimeout(() => {
-            this._checkSession();
-        }, 5000);
-        
-        // Check session every 30 seconds
-        setInterval(() => {
-            this._checkSession();
-        }, AUTH_GATEWAY_CONFIG.SESSION_CHECK_INTERVAL);
+        try {
+            // Initial check
+            setTimeout(() => {
+                this._checkSession();
+            }, 5000);
+            
+            // Check session every 30 seconds
+            setInterval(() => {
+                this._checkSession();
+            }, AUTH_GATEWAY_CONFIG.SESSION_CHECK_INTERVAL);
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_startSessionMonitoring failed: ${error.message}`, 'START_SESSION_MONITORING');
+        }
     }
     
     _checkSession() {
-        if (this._state.status === 'authenticated' && this._state.token) {
-            // Check if token is still valid
-            if (!this._isTokenValid(this._state.token)) {
-                console.log('Token expired during session monitoring');
-                this._updateAuthStateImmediately('unauthenticated', null, null)
-                    .catch(error => console.error('Error updating expired session:', error));
-            } else if (this.shouldRefreshToken()) {
-                // Try to refresh token if needed
-                console.log('Token needs refresh, attempting refresh...');
-                this.refreshToken().catch(error => 
-                    console.warn('Token refresh failed during session check:', error)
-                );
+        try {
+            if (this._state.status === 'authenticated' && this._state.token) {
+                // Check if token is still valid
+                if (!this._isTokenValid(this._state.token)) {
+                    console.log('Token expired during session monitoring');
+                    this._updateAuthStateImmediately('unauthenticated', null, null)
+                        .catch(error => console.error('Error updating expired session:', error));
+                } else if (this.shouldRefreshToken()) {
+                    // Try to refresh token if needed
+                    console.log('Token needs refresh, attempting refresh...');
+                    this.refreshToken().catch(error => 
+                        console.warn('Token refresh failed during session check:', error)
+                    );
+                }
             }
+            
+            // Clean up expired login blocks
+            this._cleanupExpiredBlocks();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_checkSession failed: ${error.message}`, 'CHECK_SESSION');
         }
-        
-        // Clean up expired login blocks
-        this._cleanupExpiredBlocks();
     }
     
     _loadLoginAttempts() {
@@ -3086,7 +3819,7 @@ class AuthGateway {
                 }
             }
         } catch (error) {
-            console.error('Error loading login attempts:', error);
+            window.__authSafetyGuards._logOnce(`_loadLoginAttempts failed: ${error.message}`, 'LOAD_LOGIN_ATTEMPTS');
             this._loginAttempts.clear();
             this._blockedUsers.clear();
         }
@@ -3101,131 +3834,148 @@ class AuthGateway {
             };
             localStorage.setItem('moodchat_login_attempts', JSON.stringify(data));
         } catch (error) {
-            console.error('Error saving login attempts:', error);
+            window.__authSafetyGuards._logOnce(`_saveLoginAttempts failed: ${error.message}`, 'SAVE_LOGIN_ATTEMPTS');
         }
     }
     
     _recordLoginAttempt(identifier, success) {
-        const now = Date.now();
-        
-        if (!this._loginAttempts.has(identifier)) {
-            this._loginAttempts.set(identifier, {
-                count: 1,
-                lastAttempt: now,
-                lastSuccess: success ? now : null,
-                history: [{
+        try {
+            const now = Date.now();
+            
+            if (!this._loginAttempts.has(identifier)) {
+                this._loginAttempts.set(identifier, {
+                    count: 1,
+                    lastAttempt: now,
+                    lastSuccess: success ? now : null,
+                    history: [{
+                        timestamp: now,
+                        success: success,
+                        ip: 'client'
+                    }]
+                });
+            } else {
+                const attempt = this._loginAttempts.get(identifier);
+                attempt.count++;
+                attempt.lastAttempt = now;
+                if (success) {
+                    attempt.lastSuccess = now;
+                }
+                
+                attempt.history.push({
                     timestamp: now,
                     success: success,
                     ip: 'client'
-                }]
-            });
-        } else {
-            const attempt = this._loginAttempts.get(identifier);
-            attempt.count++;
-            attempt.lastAttempt = now;
-            if (success) {
-                attempt.lastSuccess = now;
+                });
+                
+                // Keep only last 20 attempts in history
+                if (attempt.history.length > 20) {
+                    attempt.history = attempt.history.slice(-20);
+                }
+                
+                this._loginAttempts.set(identifier, attempt);
             }
             
-            attempt.history.push({
-                timestamp: now,
-                success: success,
-                ip: 'client'
-            });
-            
-            // Keep only last 20 attempts in history
-            if (attempt.history.length > 20) {
-                attempt.history = attempt.history.slice(-20);
+            // If failed, check if user should be blocked
+            if (!success) {
+                this._checkAndBlockUser(identifier);
+            } else {
+                // Reset on successful login
+                this._loginAttempts.delete(identifier);
+                this._blockedUsers.delete(identifier);
             }
             
-            this._loginAttempts.set(identifier, attempt);
+            this._saveLoginAttempts();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_recordLoginAttempt failed: ${error.message}`, 'RECORD_LOGIN_ATTEMPT');
         }
-        
-        // If failed, check if user should be blocked
-        if (!success) {
-            this._checkAndBlockUser(identifier);
-        } else {
-            // Reset on successful login
-            this._loginAttempts.delete(identifier);
-            this._blockedUsers.delete(identifier);
-        }
-        
-        this._saveLoginAttempts();
     }
     
     _checkAndBlockUser(identifier) {
-        const attempt = this._loginAttempts.get(identifier);
-        if (!attempt) return;
-        
-        // Count failed attempts in last hour
-        const oneHourAgo = Date.now() - (60 * 60 * 1000);
-        const recentFailed = attempt.history.filter(h => 
-            !h.success && h.timestamp > oneHourAgo
-        ).length;
-        
-        if (recentFailed >= AUTH_GATEWAY_CONFIG.MAX_LOGIN_ATTEMPTS) {
-            const blockIndex = Math.min(
-                recentFailed - AUTH_GATEWAY_CONFIG.MAX_LOGIN_ATTEMPTS, 
-                AUTH_GATEWAY_CONFIG.LOGIN_BLOCK_DURATIONS.length - 1
-            );
-            const blockDuration = AUTH_GATEWAY_CONFIG.LOGIN_BLOCK_DURATIONS[blockIndex];
-            const blockedUntil = Date.now() + blockDuration;
+        try {
+            const attempt = this._loginAttempts.get(identifier);
+            if (!attempt) return;
             
-            this._blockedUsers.set(identifier, {
-                blockedUntil,
-                reason: 'Too many failed attempts',
-                attempts: recentFailed,
-                timestamp: Date.now()
-            });
+            // Count failed attempts in last hour
+            const oneHourAgo = Date.now() - (60 * 60 * 1000);
+            const recentFailed = attempt.history.filter(h => 
+                !h.success && h.timestamp > oneHourAgo
+            ).length;
             
-            this._saveLoginAttempts();
-            
-            console.log(`User ${identifier} blocked for ${blockDuration}ms`);
+            if (recentFailed >= AUTH_GATEWAY_CONFIG.MAX_LOGIN_ATTEMPTS) {
+                const blockIndex = Math.min(
+                    recentFailed - AUTH_GATEWAY_CONFIG.MAX_LOGIN_ATTEMPTS, 
+                    AUTH_GATEWAY_CONFIG.LOGIN_BLOCK_DURATIONS.length - 1
+                );
+                const blockDuration = AUTH_GATEWAY_CONFIG.LOGIN_BLOCK_DURATIONS[blockIndex];
+                const blockedUntil = Date.now() + blockDuration;
+                
+                this._blockedUsers.set(identifier, {
+                    blockedUntil,
+                    reason: 'Too many failed attempts',
+                    attempts: recentFailed,
+                    timestamp: Date.now()
+                });
+                
+                this._saveLoginAttempts();
+                
+                console.log(`User ${identifier} blocked for ${blockDuration}ms`);
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_checkAndBlockUser failed: ${error.message}`, 'CHECK_AND_BLOCK_USER');
         }
     }
     
     _isUserBlocked(identifier) {
-        const blockedInfo = this._blockedUsers.get(identifier);
-        if (!blockedInfo) return false;
-        
-        if (Date.now() < blockedInfo.blockedUntil) {
-            return {
-                blocked: true,
-                blockedUntil: blockedInfo.blockedUntil,
-                remaining: blockedInfo.blockedUntil - Date.now(),
-                reason: blockedInfo.reason,
-                attempts: blockedInfo.attempts
-            };
-        } else {
-            // Block expired, remove it
-            this._blockedUsers.delete(identifier);
-            this._saveLoginAttempts();
+        try {
+            const blockedInfo = this._blockedUsers.get(identifier);
+            if (!blockedInfo) return false;
+            
+            if (Date.now() < blockedInfo.blockedUntil) {
+                return {
+                    blocked: true,
+                    blockedUntil: blockedInfo.blockedUntil,
+                    remaining: blockedInfo.blockedUntil - Date.now(),
+                    reason: blockedInfo.reason,
+                    attempts: blockedInfo.attempts
+                };
+            } else {
+                // Block expired, remove it
+                this._blockedUsers.delete(identifier);
+                this._saveLoginAttempts();
+                return false;
+            }
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_isUserBlocked failed: ${error.message}`, 'IS_USER_BLOCKED_INTERNAL');
             return false;
         }
     }
     
     _cleanupExpiredBlocks() {
-        const now = Date.now();
-        let cleaned = 0;
-        
-        this._blockedUsers.forEach((info, identifier) => {
-            if (now >= info.blockedUntil) {
-                this._blockedUsers.delete(identifier);
-                cleaned++;
+        try {
+            const now = Date.now();
+            let cleaned = 0;
+            
+            this._blockedUsers.forEach((info, identifier) => {
+                if (now >= info.blockedUntil) {
+                    this._blockedUsers.delete(identifier);
+                    cleaned++;
+                }
+            });
+            
+            if (cleaned > 0) {
+                this._saveLoginAttempts();
             }
-        });
-        
-        if (cleaned > 0) {
-            this._saveLoginAttempts();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_cleanupExpiredBlocks failed: ${error.message}`, 'CLEANUP_EXPIRED_BLOCKS');
         }
     }
     
     _isTokenValid(token) {
-        if (!token || token === 'undefined' || token === 'null' || token === '') {
-            return false;
-        }
-        
         try {
+            if (!token || token === 'undefined' || token === 'null' || token === '') {
+                return false;
+            }
+            
             // Basic JWT validation
             const parts = token.split('.');
             if (parts.length !== 3) {
@@ -3261,75 +4011,90 @@ class AuthGateway {
             
             return true;
         } catch (error) {
-            console.error('Token validation error:', error);
+            window.__authSafetyGuards._logOnce(`_isTokenValid failed: ${error.message}`, 'IS_TOKEN_VALID');
             return false;
         }
     }
     
     _validateUserObject(user) {
-        if (!user || typeof user !== 'object' || Array.isArray(user)) {
-            console.error('Invalid user object:', user);
+        try {
+            if (!user || typeof user !== 'object' || Array.isArray(user)) {
+                console.error('Invalid user object:', user);
+                return false;
+            }
+            
+            // Check for required properties
+            const hasIdentifier = user.id || user._id || user.email || user.username;
+            if (!hasIdentifier) {
+                console.error('User object missing identifier:', user);
+                return false;
+            }
+            
+            return true;
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_validateUserObject failed: ${error.message}`, 'VALIDATE_USER_OBJECT');
             return false;
         }
-        
-        // Check for required properties
-        const hasIdentifier = user.id || user._id || user.email || user.username;
-        if (!hasIdentifier) {
-            console.error('User object missing identifier:', user);
-            return false;
-        }
-        
-        return true;
     }
     
     _validateEmail(email) {
-        if (!email || typeof email !== 'string') return false;
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        return emailRegex.test(email.trim());
+        try {
+            if (!email || typeof email !== 'string') return false;
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email.trim());
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_validateEmail failed: ${error.message}`, 'VALIDATE_EMAIL');
+            return false;
+        }
     }
     
     _getUserFriendlyErrorMessage(error) {
-        // Handle error response objects
-        if (error && typeof error === 'object' && error.message) {
-            const message = error.message;
-            
-            if (message.includes('429') || message.includes('Too Many Requests')) {
-                return 'Too many attempts. Please wait and try again.';
-            } else if (message.includes('Invalid credentials') || message.includes('401')) {
-                return 'Invalid email/username or password.';
-            } else if (message.includes('Network') || message.includes('fetch') || message.includes('Failed to fetch')) {
-                return 'Network error. Please check your connection.';
-            } else if (message.includes('timeout') || message.includes('Timeout')) {
-                return 'Request timed out. Please try again.';
-            } else if (message.includes('validation') || message.includes('invalid') || message.includes('Validation')) {
-                return 'Please check your information and try again.';
-            } else if (message.includes('not found') || message.includes('404')) {
-                return 'Service not available. Please try again later.';
-            } else if (message.includes('500') || message.includes('Internal Server Error')) {
-                return 'Server error. Please try again later.';
-            } else if (message.includes('User not found') || message.includes('No user found')) {
-                return 'No account found with these credentials.';
-            } else if (message.includes('Email not verified')) {
-                return 'Please verify your email before logging in.';
-            } else if (message.includes('Account locked') || message.includes('suspended')) {
-                return 'Account is locked. Please contact support.';
-            } else if (message.includes('400') || message.includes('Bad Request')) {
-                return 'Invalid request. Please check your information.';
-            } else if (message.includes('identifier') && message.includes('required')) {
-                return 'Email/username is required.';
-            } else if (message.includes('not ready') || message.includes('module not ready')) {
-                return 'Authentication service is initializing. Please try again in a moment.';
+        try {
+            // Handle error response objects
+            if (error && typeof error === 'object' && error.message) {
+                const message = error.message;
+                
+                if (message.includes('429') || message.includes('Too Many Requests')) {
+                    return 'Too many attempts. Please wait and try again.';
+                } else if (message.includes('Invalid credentials') || message.includes('401')) {
+                    return 'Invalid email/username or password.';
+                } else if (message.includes('Network') || message.includes('fetch') || message.includes('Failed to fetch')) {
+                    return 'Network error. Please check your connection.';
+                } else if (message.includes('timeout') || message.includes('Timeout')) {
+                    return 'Request timed out. Please try again.';
+                } else if (message.includes('validation') || message.includes('invalid') || message.includes('Validation')) {
+                    return 'Please check your information and try again.';
+                } else if (message.includes('not found') || message.includes('404')) {
+                    return 'Service not available. Please try again later.';
+                } else if (message.includes('500') || message.includes('Internal Server Error')) {
+                    return 'Server error. Please try again later.';
+                } else if (message.includes('User not found') || message.includes('No user found')) {
+                    return 'No account found with these credentials.';
+                } else if (message.includes('Email not verified')) {
+                    return 'Please verify your email before logging in.';
+                } else if (message.includes('Account locked') || message.includes('suspended')) {
+                    return 'Account is locked. Please contact support.';
+                } else if (message.includes('400') || message.includes('Bad Request')) {
+                    return 'Invalid request. Please check your information.';
+                } else if (message.includes('identifier') && message.includes('required')) {
+                    return 'Email/username is required.';
+                } else if (message.includes('not ready') || message.includes('module not ready')) {
+                    return 'Authentication service is initializing. Please try again in a moment.';
+                }
+                
+                return message.length > 100 ? message.substring(0, 100) + '...' : message;
             }
             
-            return message.length > 100 ? message.substring(0, 100) + '...' : message;
+            // Handle string errors
+            if (typeof error === 'string') {
+                return error.length > 100 ? error.substring(0, 100) + '...' : error;
+            }
+            
+            return 'An unexpected error occurred. Please try again.';
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`_getUserFriendlyErrorMessage failed: ${error.message}`, 'GET_USER_FRIENDLY_ERROR');
+            return 'An unexpected error occurred. Please try again.';
         }
-        
-        // Handle string errors
-        if (typeof error === 'string') {
-            return error.length > 100 ? error.substring(0, 100) + '...' : error;
-        }
-        
-        return 'An unexpected error occurred. Please try again.';
     }
 }
 
@@ -3338,25 +4103,40 @@ class AuthGateway {
 // ============================================================================
 
 // Create and export single global instance
-window.AuthGateway = new AuthGateway();
-
-// Export for testing/debugging
-window.AuthGatewayDebug = window.AuthGateway.debug.bind(window.AuthGateway);
-
-// Legacy compatibility alias (if needed)
-window.authGateway = window.AuthGateway;
-
-// UI Orchestration event to signal readiness
-setTimeout(() => {
-    const uiReadyEvent = new CustomEvent('uiOrchestrationReady', {
-        detail: {
-            timestamp: Date.now(),
-            modules: ['auth']
+try {
+    window.AuthGateway = new AuthGateway();
+    
+    // Export for testing/debugging
+    window.AuthGatewayDebug = window.AuthGateway.debug.bind(window.AuthGateway);
+    
+    // Legacy compatibility alias (if needed)
+    window.authGateway = window.AuthGateway;
+    
+    // UI Orchestration event to signal readiness
+    setTimeout(() => {
+        try {
+            const uiReadyEvent = new CustomEvent('uiOrchestrationReady', {
+                detail: {
+                    timestamp: Date.now(),
+                    modules: ['auth']
+                }
+            });
+            window.dispatchEvent(uiReadyEvent);
+            window.__uiOrchestrationRegistry.markUIReady();
+        } catch (error) {
+            window.__authSafetyGuards._logOnce(`UI ready event dispatch failed: ${error.message}`, 'UI_READY_EVENT');
         }
-    });
-    window.dispatchEvent(uiReadyEvent);
-    window.__uiOrchestrationRegistry.markUIReady();
-}, 100);
+    }, 100);
+} catch (error) {
+    window.__authSafetyGuards._logOnce(`Global AuthGateway initialization failed: ${error.message}`, 'GLOBAL_AUTH_INIT');
+    // Create minimal fallback
+    window.AuthGateway = {
+        login: () => Promise.resolve({ success: false, message: 'Authentication service unavailable' }),
+        logout: () => Promise.resolve({ success: false, message: 'Service unavailable' }),
+        getAuthState: () => ({ status: 'error', user: null, token: null }),
+        isAuthenticated: () => false
+    };
+}
 
 console.log('✅ app.ui.auth.js - AUTHENTICATION GATEWAY MODULE LOADED (v4.0.4)');
 console.log('🚀 ENHANCED API.AUTH.JS INTEGRATION WITH MODULAR CORE:');
@@ -3369,7 +4149,13 @@ console.log('  • ✅ NEW: Waits for api.auth.js FULL initialization event');
 console.log('  • ✅ NEW: Prevents "module not ready" errors');
 console.log('  • ✅ NEW: Better fallback messages with retry hints');
 console.log('  • ✅ FIXED: Race condition between detection and initialization');
-console.log('🔗 GLOBAL OBJECTS: AuthGateway, __apiAuthReadinessManager, __uiOrchestrationRegistry');
+console.log('  • ✅ SAFETY: Added safety guards to prevent crashes in chat.html and iframes');
+console.log('  • ✅ SAFETY: Form initialization isolated with try/catch');
+console.log('  • ✅ SAFETY: DOM element access protected');
+console.log('  • ✅ SAFETY: Event handlers wrapped in safe execution');
+console.log('  • ✅ SAFETY: Session checks with graceful degradation');
+console.log('🔗 GLOBAL OBJECTS: AuthGateway, __apiAuthReadinessManager, __uiOrchestrationRegistry, __authSafetyGuards');
 console.log('⚡ READY STATE: Waits for api.auth.js FULL initialization before auth operations');
 console.log('🛡️ FALLBACK SAFE: User-friendly messages when service is initializing');
 console.log('⚠️ CRITICAL FIX: No more "Authentication module not ready" console errors');
+console.log('🛡️ CRASH PROTECTION: Auth UI failures will not crash chat.html or iframes');

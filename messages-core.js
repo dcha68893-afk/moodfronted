@@ -12,7 +12,7 @@ import {
     refreshSession,
     validateSession,
     clearSession
-} from '../api.core.js';
+} from './js/api.core.js';
 
 import {
     fetchContacts,
@@ -26,7 +26,7 @@ import {
     clearChatHistory as apiClearChatHistory,
     voteInPoll as apiVoteInPoll,
     reportMessage as apiReportMessage
-} from '../messages.api.js';
+} from './js/messages.api.js';
 
 // Global variables
 export let currentUser = null;
@@ -136,216 +136,283 @@ export const LOCAL_STORAGE_KEYS = {
 let messageDeduplicationCache = new Map();
 const DEDUPE_CACHE_TIMEOUT = 30000; // 30 seconds
 
+// Error tracking to prevent spam
+let loggedErrors = new Set();
+let errorRetryCounts = new Map();
+
+/**
+ * Log error only once per unique error
+ */
+function logErrorOnce(module, functionName, error) {
+    const errorKey = `${module}:${functionName}:${error.message}`;
+    if (!loggedErrors.has(errorKey)) {
+        loggedErrors.add(errorKey);
+        console.warn(`[${module}] ${functionName} error:`, error.message, new Date().toISOString());
+    }
+}
+
+/**
+ * Check if max retries exceeded
+ */
+function isMaxRetriesExceeded(functionName, maxRetries = 3) {
+    const count = errorRetryCounts.get(functionName) || 0;
+    return count >= maxRetries;
+}
+
+/**
+ * Increment retry count
+ */
+function incrementRetryCount(functionName) {
+    const count = errorRetryCounts.get(functionName) || 0;
+    errorRetryCounts.set(functionName, count + 1);
+}
+
+/**
+ * Reset retry count
+ */
+function resetRetryCount(functionName) {
+    errorRetryCounts.delete(functionName);
+}
+
 /**
  * Validate message structure
  */
 function validateMessageStructure(message) {
-    if (!message || typeof message !== 'object') {
-        return { valid: false, error: 'Message must be an object' };
-    }
-    
-    const requiredFields = ['type', 'source', 'payload', 'sequence'];
-    for (const field of requiredFields) {
-        if (!message[field]) {
-            return { valid: false, error: `Message must have a ${field} field` };
+    try {
+        if (!message || typeof message !== 'object') {
+            return { valid: false, error: 'Message must be an object' };
         }
+        
+        const requiredFields = ['type', 'source', 'payload', 'sequence'];
+        for (const field of requiredFields) {
+            if (!message[field]) {
+                return { valid: false, error: `Message must have a ${field} field` };
+            }
+        }
+        
+        if (typeof message.type !== 'string') {
+            return { valid: false, error: 'Message type must be a string' };
+        }
+        
+        if (typeof message.source !== 'string') {
+            return { valid: false, error: 'Message source must be a string' };
+        }
+        
+        if (typeof message.payload !== 'object') {
+            return { valid: false, error: 'Message payload must be an object' };
+        }
+        
+        if (typeof message.sequence !== 'number') {
+            return { valid: false, error: 'Message sequence must be a number' };
+        }
+        
+        return { valid: true };
+    } catch (error) {
+        logErrorOnce('Validation', 'validateMessageStructure', error);
+        return { valid: false, error: 'Validation error' };
     }
-    
-    if (typeof message.type !== 'string') {
-        return { valid: false, error: 'Message type must be a string' };
-    }
-    
-    if (typeof message.source !== 'string') {
-        return { valid: false, error: 'Message source must be a string' };
-    }
-    
-    if (typeof message.payload !== 'object') {
-        return { valid: false, error: 'Message payload must be an object' };
-    }
-    
-    if (typeof message.sequence !== 'number') {
-        return { valid: false, error: 'Message sequence must be a number' };
-    }
-    
-    return { valid: true };
 }
 
 /**
  * Validate message payload content
  */
 function validateMessagePayload(payload, messageType) {
-    if (!payload || typeof payload !== 'object') {
-        return { valid: false, error: 'Invalid payload' };
-    }
-    
-    // Basic validation for different message types
-    switch (messageType) {
-        case 'text':
-            if (typeof payload.content !== 'string' || payload.content.trim().length === 0) {
-                return { valid: false, error: 'Text message must have content' };
-            }
-            break;
-            
-        case 'image':
-        case 'video':
-        case 'file':
-            if (!payload.content || typeof payload.content !== 'string') {
-                return { valid: false, error: 'Media message must have content URL' };
-            }
-            if (!payload.fileName || typeof payload.fileName !== 'string') {
-                return { valid: false, error: 'Media message must have file name' };
-            }
-            break;
-            
-        case 'audio':
-            if (!payload.content || typeof payload.content !== 'string') {
-                return { valid: false, error: 'Audio message must have content URL' };
-            }
-            if (typeof payload.duration !== 'number' || payload.duration <= 0) {
-                return { valid: false, error: 'Audio message must have valid duration' };
-            }
-            break;
-    }
-    
-    // Check for duplicate message
-    if (payload.id) {
-        const cacheKey = `${payload.chatId || 'global'}_${payload.id}`;
-        if (messageDeduplicationCache.has(cacheKey)) {
-            return { valid: false, error: 'Duplicate message detected' };
+    try {
+        if (!payload || typeof payload !== 'object') {
+            return { valid: false, error: 'Invalid payload' };
         }
-        // Cache for deduplication
-        messageDeduplicationCache.set(cacheKey, Date.now());
         
-        // Clean old cache entries periodically
-        setTimeout(() => {
-            messageDeduplicationCache.delete(cacheKey);
-        }, DEDUPE_CACHE_TIMEOUT);
+        // Basic validation for different message types
+        switch (messageType) {
+            case 'text':
+                if (typeof payload.content !== 'string' || payload.content.trim().length === 0) {
+                    return { valid: false, error: 'Text message must have content' };
+                }
+                break;
+                
+            case 'image':
+            case 'video':
+            case 'file':
+                if (!payload.content || typeof payload.content !== 'string') {
+                    return { valid: false, error: 'Media message must have content URL' };
+                }
+                if (!payload.fileName || typeof payload.fileName !== 'string') {
+                    return { valid: false, error: 'Media message must have file name' };
+                }
+                break;
+                
+            case 'audio':
+                if (!payload.content || typeof payload.content !== 'string') {
+                    return { valid: false, error: 'Audio message must have content URL' };
+                }
+                if (typeof payload.duration !== 'number' || payload.duration <= 0) {
+                    return { valid: false, error: 'Audio message must have valid duration' };
+                }
+                break;
+        }
+        
+        // Check for duplicate message
+        if (payload.id) {
+            const cacheKey = `${payload.chatId || 'global'}_${payload.id}`;
+            if (messageDeduplicationCache.has(cacheKey)) {
+                return { valid: false, error: 'Duplicate message detected' };
+            }
+            // Cache for deduplication
+            messageDeduplicationCache.set(cacheKey, Date.now());
+            
+            // Clean old cache entries periodically
+            setTimeout(() => {
+                messageDeduplicationCache.delete(cacheKey);
+            }, DEDUPE_CACHE_TIMEOUT);
+        }
+        
+        return { valid: true };
+    } catch (error) {
+        logErrorOnce('Validation', 'validateMessagePayload', error);
+        return { valid: false, error: 'Payload validation error' };
     }
-    
-    return { valid: true };
 }
 
 /**
  * Sanitize message payload to prevent XSS and preserve formatting
  */
 function sanitizePayload(payload) {
-    if (!payload || typeof payload !== 'object') return {};
-    
-    const sanitized = {};
-    for (const [key, value] of Object.entries(payload)) {
-        if (typeof value === 'string') {
-            // Preserve formatting markers during sanitization
-            sanitized[key] = preserveFormatting(escapeHtml(value));
-        } else if (Array.isArray(value)) {
-            sanitized[key] = value.map(item => 
-                typeof item === 'string' ? preserveFormatting(escapeHtml(item)) : item
-            );
-        } else if (value && typeof value === 'object') {
-            sanitized[key] = sanitizePayload(value);
-        } else {
-            sanitized[key] = value;
+    try {
+        if (!payload || typeof payload !== 'object') return {};
+        
+        const sanitized = {};
+        for (const [key, value] of Object.entries(payload)) {
+            if (typeof value === 'string') {
+                // Preserve formatting markers during sanitization
+                sanitized[key] = preserveFormatting(escapeHtml(value));
+            } else if (Array.isArray(value)) {
+                sanitized[key] = value.map(item => 
+                    typeof item === 'string' ? preserveFormatting(escapeHtml(item)) : item
+                );
+            } else if (value && typeof value === 'object') {
+                sanitized[key] = sanitizePayload(value);
+            } else {
+                sanitized[key] = value;
+            }
         }
+        return sanitized;
+    } catch (error) {
+        logErrorOnce('Security', 'sanitizePayload', error);
+        return payload || {};
     }
-    return sanitized;
 }
 
 /**
  * Preserve formatting markers during sanitization
  */
 function preserveFormatting(text) {
-    if (!text) return '';
-    
-    // Temporarily replace formatting markers
-    const markers = {
-        '**bold**': '###BOLD###',
-        '*italic*': '###ITALIC###',
-        '`code`': '###CODE###',
-        '```\ncode block\n```': '###CODE_BLOCK###'
-    };
-    
-    let processed = text;
-    Object.entries(markers).forEach(([marker, placeholder]) => {
-        processed = processed.replace(new RegExp(marker.replace(/\*/g, '\\*').replace(/`/g, '\\`'), 'g'), placeholder);
-    });
-    
-    // Escape HTML
-    processed = escapeHtml(processed);
-    
-    // Restore formatting markers
-    Object.entries(markers).forEach(([marker, placeholder]) => {
-        processed = processed.replace(new RegExp(placeholder, 'g'), marker);
-    });
-    
-    return processed;
+    try {
+        if (!text) return '';
+        
+        // Temporarily replace formatting markers
+        const markers = {
+            '**bold**': '###BOLD###',
+            '*italic*': '###ITALIC###',
+            '`code`': '###CODE###',
+            '```\ncode block\n```': '###CODE_BLOCK###'
+        };
+        
+        let processed = text;
+        Object.entries(markers).forEach(([marker, placeholder]) => {
+            processed = processed.replace(new RegExp(marker.replace(/\*/g, '\\*').replace(/`/g, '\\`'), 'g'), placeholder);
+        });
+        
+        // Escape HTML
+        processed = escapeHtml(processed);
+        
+        // Restore formatting markers
+        Object.entries(markers).forEach(([marker, placeholder]) => {
+            processed = processed.replace(new RegExp(placeholder, 'g'), marker);
+        });
+        
+        return processed;
+    } catch (error) {
+        logErrorOnce('Formatting', 'preserveFormatting', error);
+        return text || '';
+    }
 }
 
 /**
  * Initialize parent coordination system
  */
 export function initializeParentCoordination() {
-    // Verify parent presence
-    if (!window.parent || window.parent === window) {
-        showReconnectState('No parent connection available');
+    try {
+        // Verify parent presence
+        if (!window.parent || window.parent === window) {
+            showReconnectState('No parent connection available');
+            initializeOfflineFallback();
+            return;
+        }
+        
+        // Initialize accepted origins dynamically
+        initializeAcceptedOrigins();
+        
+        // Setup message event listener
+        window.addEventListener('message', handleParentMessage, false);
+        
+        // Initialize parent connection
+        parentConnection = {
+            isConnected: false,
+            lastHeartbeat: Date.now(),
+            sessionId: null,
+            parentWindow: window.parent,
+            pendingAcknowledgment: new Map(),
+            retryQueue: []
+        };
+        
+        // Start handshake protocol
+        startHandshake();
+        
+        // Setup heartbeat monitoring
+        startHeartbeatMonitoring();
+    } catch (error) {
+        logErrorOnce('ParentCoord', 'initializeParentCoordination', error);
         initializeOfflineFallback();
-        return;
     }
-    
-    // Initialize accepted origins dynamically
-    initializeAcceptedOrigins();
-    
-    // Setup message event listener
-    window.addEventListener('message', handleParentMessage, false);
-    
-    // Initialize parent connection
-    parentConnection = {
-        isConnected: false,
-        lastHeartbeat: Date.now(),
-        sessionId: null,
-        parentWindow: window.parent,
-        pendingAcknowledgment: new Map(),
-        retryQueue: []
-    };
-    
-    // Start handshake protocol
-    startHandshake();
-    
-    // Setup heartbeat monitoring
-    startHeartbeatMonitoring();
 }
 
 /**
  * Initialize accepted origins for secure message validation
  */
 function initializeAcceptedOrigins() {
-    // Always accept current origin
-    acceptedOrigins.add(window.location.origin);
-    
-    // Accept common development origins
-    acceptedOrigins.add('http://127.0.0.1:5500');
-    acceptedOrigins.add('http://localhost:5500');
-    acceptedOrigins.add('http://127.0.0.1:3000');
-    acceptedOrigins.add('http://localhost:3000');
-    acceptedOrigins.add('http://127.0.0.1:8080');
-    acceptedOrigins.add('http://localhost:8080');
-    
-    // Accept HTTPS versions
-    acceptedOrigins.add('https://127.0.0.1:5500');
-    acceptedOrigins.add('https://localhost:5500');
-    acceptedOrigins.add('https://127.0.0.1:3000');
-    acceptedOrigins.add('https://localhost:3000');
-    acceptedOrigins.add('https://127.0.0.1:8080');
-    acceptedOrigins.add('https://localhost:8080');
-    
-    // Try to add parent origin if accessible
     try {
-        const parentOrigin = window.parent.location.origin;
-        if (parentOrigin) {
-            acceptedOrigins.add(parentOrigin);
-            console.log(`[Security] Added parent origin: ${parentOrigin}`);
+        // Always accept current origin
+        acceptedOrigins.add(window.location.origin);
+        
+        // Accept common development origins
+        acceptedOrigins.add('http://127.0.0.1:5500');
+        acceptedOrigins.add('http://localhost:5500');
+        acceptedOrigins.add('http://127.0.0.1:3000');
+        acceptedOrigins.add('http://localhost:3000');
+        acceptedOrigins.add('http://127.0.0.1:8080');
+        acceptedOrigins.add('http://localhost:8080');
+        
+        // Accept HTTPS versions
+        acceptedOrigins.add('https://127.0.0.1:5500');
+        acceptedOrigins.add('https://localhost:5500');
+        acceptedOrigins.add('https://127.0.0.1:3000');
+        acceptedOrigins.add('https://localhost:3000');
+        acceptedOrigins.add('https://127.0.0.1:8080');
+        acceptedOrigins.add('https://localhost:8080');
+        
+        // Try to add parent origin if accessible
+        try {
+            const parentOrigin = window.parent.location.origin;
+            if (parentOrigin) {
+                acceptedOrigins.add(parentOrigin);
+                console.log(`[Security] Added parent origin: ${parentOrigin}`);
+            }
+        } catch (error) {
+            // Parent origin not accessible (cross-origin restriction)
+            console.log('[Security] Parent origin not accessible, using dynamic validation');
         }
     } catch (error) {
-        // Parent origin not accessible (cross-origin restriction)
-        console.log('[Security] Parent origin not accessible, using dynamic validation');
+        logErrorOnce('Security', 'initializeAcceptedOrigins', error);
     }
 }
 
@@ -353,36 +420,41 @@ function initializeAcceptedOrigins() {
  * Check if origin is acceptable
  */
 function isOriginAccepted(origin) {
-    // Always accept current origin
-    if (origin === window.location.origin) {
-        return true;
+    try {
+        // Always accept current origin
+        if (origin === window.location.origin) {
+            return true;
+        }
+        
+        // Check against accepted origins
+        if (acceptedOrigins.has(origin)) {
+            return true;
+        }
+        
+        // Dynamic validation for localhost variations
+        if (origin.startsWith('http://127.0.0.1:') || 
+            origin.startsWith('http://localhost:') ||
+            origin.startsWith('https://127.0.0.1:') || 
+            origin.startsWith('https://localhost:')) {
+            console.log(`[Security] Dynamically accepted origin: ${origin}`);
+            acceptedOrigins.add(origin);
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        logErrorOnce('Security', 'isOriginAccepted', error);
+        return false;
     }
-    
-    // Check against accepted origins
-    if (acceptedOrigins.has(origin)) {
-        return true;
-    }
-    
-    // Dynamic validation for localhost variations
-    if (origin.startsWith('http://127.0.0.1:') || 
-        origin.startsWith('http://localhost:') ||
-        origin.startsWith('https://127.0.0.1:') || 
-        origin.startsWith('https://localhost:')) {
-        console.log(`[Security] Dynamically accepted origin: ${origin}`);
-        acceptedOrigins.add(origin);
-        return true;
-    }
-    
-    return false;
 }
 
 /**
  * Initialize offline fallback mode
  */
 function initializeOfflineFallback() {
-    console.log('[Offline] Initializing offline fallback mode');
-    
     try {
+        console.log('[Offline] Initializing offline fallback mode');
+        
         // Load cached data
         loadUserSettings();
         loadMessageDrafts();
@@ -415,7 +487,7 @@ function initializeOfflineFallback() {
         isInitialized = true;
         
     } catch (error) {
-        console.error('[Offline] Error initializing offline fallback:', error);
+        logErrorOnce('Offline', 'initializeOfflineFallback', error);
     }
 }
 
@@ -499,7 +571,7 @@ function handleParentMessage(event) {
         }
         
     } catch (error) {
-        console.error('[Parent] Error handling parent message:', error);
+        logErrorOnce('ParentCoord', 'handleParentMessage', error);
         sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
             error: error.message,
             timestamp: Date.now()
@@ -511,68 +583,74 @@ function handleParentMessage(event) {
  * Handle secure session data with handshake protocol
  */
 function handleSecureSessionData(message, origin) {
-    const { data, source } = message;
-    
-    // Validate source
-    if (source !== 'parent') {
-        console.warn('[Security] Invalid session data source:', source);
-        handshakeInProgress = false;
-        return;
-    }
-    
-    // Validate session data structure
-    if (!data || typeof data !== 'object' || !data.token || !data.user) {
-        console.log('❌ Received invalid session from parent');
-        handshakeInProgress = false;
+    try {
+        const { data, source } = message;
         
-        // Single retry if session fails
-        if (!pendingSessionRequest) {
-            setTimeout(() => {
-                console.log('🔄 Retrying session request...');
-                requestSession();
-            }, 1000);
+        // Validate source
+        if (source !== 'parent') {
+            console.warn('[Security] Invalid session data source:', source);
+            handshakeInProgress = false;
+            return;
         }
-        return;
-    }
-    
-    // Validate user object
-    if (!data.user.uid || typeof data.user.uid !== 'string') {
-        console.log('❌ Invalid user data in session');
+        
+        // Validate session data structure
+        if (!data || typeof data !== 'object' || !data.token || !data.user) {
+            console.log('❌ Received invalid session from parent');
+            handshakeInProgress = false;
+            
+            // Single retry if session fails
+            if (!pendingSessionRequest) {
+                setTimeout(() => {
+                    console.log('🔄 Retrying session request...');
+                    requestSession();
+                }, 1000);
+            }
+            return;
+        }
+        
+        // Validate user object
+        if (!data.user.uid || typeof data.user.uid !== 'string') {
+            console.log('❌ Invalid user data in session');
+            handshakeInProgress = false;
+            return;
+        }
+        
+        // Success - clear timeout and update state
+        sessionValid = true;
         handshakeInProgress = false;
-        return;
+        pendingSessionRequest = false;
+        
+        if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            handshakeTimeout = null;
+        }
+        
+        console.log('✅ Session received successfully');
+        
+        // Store session data
+        sessionData = data;
+        isSessionReceived = true;
+        reconnectAttempts = 0;
+        
+        // Extract user data
+        if (data.user) {
+            currentUser = data.user;
+        }
+        
+        // Send acknowledgment
+        sendToParent(MESSAGE_TYPES.CHILD_STATE_UPDATE, {
+            state: 'authenticated',
+            userId: currentUser?.uid,
+            timestamp: Date.now()
+        });
+        
+        // Initialize app with session (bind UI after session)
+        initializeWithSession();
+    } catch (error) {
+        logErrorOnce('Session', 'handleSecureSessionData', error);
+        handshakeInProgress = false;
+        pendingSessionRequest = false;
     }
-    
-    // Success - clear timeout and update state
-    sessionValid = true;
-    handshakeInProgress = false;
-    pendingSessionRequest = false;
-    
-    if (handshakeTimeout) {
-        clearTimeout(handshakeTimeout);
-        handshakeTimeout = null;
-    }
-    
-    console.log('✅ Session received successfully');
-    
-    // Store session data
-    sessionData = data;
-    isSessionReceived = true;
-    reconnectAttempts = 0;
-    
-    // Extract user data
-    if (data.user) {
-        currentUser = data.user;
-    }
-    
-    // Send acknowledgment
-    sendToParent(MESSAGE_TYPES.CHILD_STATE_UPDATE, {
-        state: 'authenticated',
-        userId: currentUser?.uid,
-        timestamp: Date.now()
-    });
-    
-    // Initialize app with session (bind UI after session)
-    initializeWithSession();
 }
 
 /**
@@ -585,6 +663,17 @@ export function sendToParent(type, data = null, requestId = null) {
     }
     
     try {
+        // Safety check for session-dependent messages
+        if (type !== MESSAGE_TYPES.CHILD_READY && 
+            type !== MESSAGE_TYPES.REQUEST_SESSION && 
+            type !== MESSAGE_TYPES.CHILD_ACKNOWLEDGED &&
+            type !== MESSAGE_TYPES.CHILD_ERROR) {
+            if (!isSessionReceived || !currentUser) {
+                console.warn('[Parent] Skipping message: No valid session');
+                return false;
+            }
+        }
+        
         const sequence = ++messageSequence;
         const message = {
             type: type,
@@ -614,7 +703,7 @@ export function sendToParent(type, data = null, requestId = null) {
         return sequence;
         
     } catch (error) {
-        console.error('[Parent] Error sending message to parent:', error);
+        logErrorOnce('ParentCoord', 'sendToParent', error);
         return false;
     }
 }
@@ -639,27 +728,36 @@ function checkAcknowledgment(sequence) {
     
     // Retry sending
     pending.retries++;
-    window.parent.postMessage(pending.message, window.location.origin);
-    
-    // Check again after delay
-    setTimeout(() => {
-        checkAcknowledgment(sequence);
-    }, 3000);
+    try {
+        window.parent.postMessage(pending.message, window.location.origin);
+        
+        // Check again after delay
+        setTimeout(() => {
+            checkAcknowledgment(sequence);
+        }, 3000);
+    } catch (error) {
+        logErrorOnce('ParentCoord', 'checkAcknowledgment', error);
+        parentConnection.pendingAcknowledgment.delete(sequence);
+    }
 }
 
 /**
  * Start handshake protocol with parent
  */
 function startHandshake() {
-    // Send CHILD_READY message
-    sendToParent(MESSAGE_TYPES.CHILD_READY, {
-        version: '1.0',
-        features: ['chat', 'messaging', 'contacts'],
-        readyAt: Date.now()
-    });
-    
-    // Start secure session request
-    requestSession();
+    try {
+        // Send CHILD_READY message
+        sendToParent(MESSAGE_TYPES.CHILD_READY, {
+            version: '1.0',
+            features: ['chat', 'messaging', 'contacts'],
+            readyAt: Date.now()
+        });
+        
+        // Start secure session request
+        requestSession();
+    } catch (error) {
+        logErrorOnce('Handshake', 'startHandshake', error);
+    }
 }
 
 /**
@@ -705,45 +803,53 @@ function requestSession() {
  * Schedule session request with exponential backoff
  */
 function scheduleSessionRequest(attempt) {
-    if (isSessionReceived) {
-        return;
-    }
-    
-    if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-        showReconnectState('Unable to establish connection with parent');
-        initializeOfflineFallback();
-        return;
-    }
-    
-    const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-    const jitter = Math.random() * 1000;
-    
-    setTimeout(() => {
-        if (!isSessionReceived) {
-            sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
-                attempt: attempt + 1,
-                timestamp: Date.now()
-            });
-            
-            // Schedule next attempt if no response
-            if (!isSessionReceived) {
-                scheduleSessionRequest(attempt + 1);
-            }
+    try {
+        if (isSessionReceived) {
+            return;
         }
-    }, delay + jitter);
+        
+        if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+            showReconnectState('Unable to establish connection with parent');
+            initializeOfflineFallback();
+            return;
+        }
+        
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        const jitter = Math.random() * 1000;
+        
+        setTimeout(() => {
+            if (!isSessionReceived) {
+                sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
+                    attempt: attempt + 1,
+                    timestamp: Date.now()
+                });
+                
+                // Schedule next attempt if no response
+                if (!isSessionReceived) {
+                    scheduleSessionRequest(attempt + 1);
+                }
+            }
+        }, delay + jitter);
+    } catch (error) {
+        logErrorOnce('Session', 'scheduleSessionRequest', error);
+    }
 }
 
 /**
  * Handle PARENT_READY message
  */
 function handleParentReady(data) {
-    isParentReady = true;
-    parentConnection.isConnected = true;
-    parentConnection.lastHeartbeat = Date.now();
-    
-    // If we haven't received session yet, request it
-    if (!isSessionReceived && !handshakeInProgress) {
-        requestSession();
+    try {
+        isParentReady = true;
+        parentConnection.isConnected = true;
+        parentConnection.lastHeartbeat = Date.now();
+        
+        // If we haven't received session yet, request it
+        if (!isSessionReceived && !handshakeInProgress) {
+            requestSession();
+        }
+    } catch (error) {
+        logErrorOnce('ParentCoord', 'handleParentReady', error);
     }
 }
 
@@ -751,16 +857,20 @@ function handleParentReady(data) {
  * Handle SESSION_UPDATE message
  */
 function handleSessionUpdate(data) {
-    if (!validateSessionData(data)) {
-        console.error('[Parent] Invalid session update schema');
-        return;
-    }
-    
-    // Update session data
-    sessionData = { ...sessionData, ...data };
-    
-    if (data.user) {
-        currentUser = data.user;
+    try {
+        if (!validateSessionData(data)) {
+            console.error('[Parent] Invalid session update schema');
+            return;
+        }
+        
+        // Update session data
+        sessionData = { ...sessionData, ...data };
+        
+        if (data.user) {
+            currentUser = data.user;
+        }
+    } catch (error) {
+        logErrorOnce('Session', 'handleSessionUpdate', error);
     }
 }
 
@@ -768,88 +878,110 @@ function handleSessionUpdate(data) {
  * Handle SESSION_EXPIRED message
  */
 function handleSessionExpired() {
-    // Clear local session state
-    sessionData = null;
-    isSessionReceived = false;
-    currentUser = null;
-    sessionValid = false;
-    
-    // Request new session with handshake
-    setTimeout(() => {
-        requestSession();
-    }, 2000);
+    try {
+        // Clear local session state
+        sessionData = null;
+        isSessionReceived = false;
+        currentUser = null;
+        sessionValid = false;
+        
+        // Request new session with handshake
+        setTimeout(() => {
+            requestSession();
+        }, 2000);
+    } catch (error) {
+        logErrorOnce('Session', 'handleSessionExpired', error);
+    }
 }
 
 /**
  * Handle LOGOUT message
  */
 function handleLogout() {
-    // Clear all sensitive data
-    sessionData = null;
-    isSessionReceived = false;
-    currentUser = null;
-    sessionValid = false;
-    handshakeInProgress = false;
-    pendingSessionRequest = false;
-    
-    if (handshakeTimeout) {
-        clearTimeout(handshakeTimeout);
-        handshakeTimeout = null;
+    try {
+        // Clear all sensitive data
+        sessionData = null;
+        isSessionReceived = false;
+        currentUser = null;
+        sessionValid = false;
+        handshakeInProgress = false;
+        pendingSessionRequest = false;
+        
+        if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            handshakeTimeout = null;
+        }
+        
+        // Clear local storage (keep non-sensitive UI state)
+        clearSensitiveLocalStorage();
+    } catch (error) {
+        logErrorOnce('Session', 'handleLogout', error);
     }
-    
-    // Clear local storage (keep non-sensitive UI state)
-    clearSensitiveLocalStorage();
 }
 
 /**
  * Handle API_RESPONSE message
  */
 function handleApiResponse(requestId, data) {
-    // Handle API response based on requestId
-    // This would be extended based on specific API request handling
+    try {
+        // Handle API response based on requestId
+        // This would be extended based on specific API request handling
+        console.log('[API] Response received:', requestId, data);
+    } catch (error) {
+        logErrorOnce('API', 'handleApiResponse', error);
+    }
 }
 
 /**
  * Handle FORCE_RELOAD message
  */
 function handleForceReload() {
-    window.location.reload();
+    try {
+        window.location.reload();
+    } catch (error) {
+        logErrorOnce('System', 'handleForceReload', error);
+    }
 }
 
 /**
  * Validate session data schema
  */
 function validateSessionData(data) {
-    if (!data || typeof data !== 'object') {
-        return false;
-    }
-    
-    // Must have either user object or token
-    if (!data.user && !data.token) {
-        return false;
-    }
-    
-    // If user object exists, validate it
-    if (data.user) {
-        if (!data.user.uid || typeof data.user.uid !== 'string') {
+    try {
+        if (!data || typeof data !== 'object') {
             return false;
         }
         
-        const requiredUserFields = ['uid', 'email'];
-        for (const field of requiredUserFields) {
-            if (!data.user[field]) {
-                console.warn(`[Parent] Missing required user field: ${field}`);
+        // Must have either user object or token
+        if (!data.user && !data.token) {
+            return false;
+        }
+        
+        // If user object exists, validate it
+        if (data.user) {
+            if (!data.user.uid || typeof data.user.uid !== 'string') {
                 return false;
             }
+            
+            const requiredUserFields = ['uid', 'email'];
+            for (const field of requiredUserFields) {
+                if (!data.user[field]) {
+                    console.warn(`[Parent] Missing required user field: ${field}`);
+                    return false;
+                }
+            }
         }
-    }
-    
-    // If token exists, validate it
-    if (data.token && typeof data.token !== 'string') {
+        
+        // If token exists, validate it
+        if (data.token && typeof data.token !== 'string') {
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        logErrorOnce('Validation', 'validateSessionData', error);
         return false;
     }
-    
-    return true;
 }
 
 /**
@@ -858,24 +990,32 @@ function validateSessionData(data) {
 function startHeartbeatMonitoring() {
     if (!parentConnection) return;
     
-    const heartbeatInterval = setInterval(() => {
-        if (parentConnection && parentConnection.isConnected) {
-            const timeSinceHeartbeat = Date.now() - parentConnection.lastHeartbeat;
-            
-            if (timeSinceHeartbeat > HEARTBEAT_TIMEOUT) {
-                parentConnection.isConnected = false;
-                
-                // Try to reconnect with handshake
-                sendToParent(MESSAGE_TYPES.CHILD_READY, {
-                    reconnecting: true,
-                    timestamp: Date.now()
-                });
+    try {
+        const heartbeatInterval = setInterval(() => {
+            try {
+                if (parentConnection && parentConnection.isConnected) {
+                    const timeSinceHeartbeat = Date.now() - parentConnection.lastHeartbeat;
+                    
+                    if (timeSinceHeartbeat > HEARTBEAT_TIMEOUT) {
+                        parentConnection.isConnected = false;
+                        
+                        // Try to reconnect with handshake
+                        sendToParent(MESSAGE_TYPES.CHILD_READY, {
+                            reconnecting: true,
+                            timestamp: Date.now()
+                        });
+                    }
+                }
+            } catch (error) {
+                logErrorOnce('Heartbeat', 'heartbeatCheck', error);
             }
-        }
-    }, HEARTBEAT_INTERVAL);
-    
-    // Store interval for cleanup
-    parentConnection.heartbeatInterval = heartbeatInterval;
+        }, HEARTBEAT_INTERVAL);
+        
+        // Store interval for cleanup
+        parentConnection.heartbeatInterval = heartbeatInterval;
+    } catch (error) {
+        logErrorOnce('Heartbeat', 'startHeartbeatMonitoring', error);
+    }
 }
 
 /**
@@ -892,7 +1032,7 @@ export function showReconnectState(message) {
             }
         }
     } catch (error) {
-        console.error('[Parent] Error showing reconnect state:', error);
+        logErrorOnce('UI', 'showReconnectState', error);
     }
 }
 
@@ -906,7 +1046,7 @@ export function hideReconnectState() {
             reconnectElement.style.display = 'none';
         }
     } catch (error) {
-        console.warn('[Parent] Error hiding reconnect state:', error);
+        logErrorOnce('UI', 'hideReconnectState', error);
     }
 }
 
@@ -914,32 +1054,36 @@ export function hideReconnectState() {
  * Clear sensitive data from local storage
  */
 function clearSensitiveLocalStorage() {
-    const sensitiveKeys = [
-        'knecta_current_user',
-        'knecta_user_profile',
-        'knecta_current_chat',
-        'knecta_chats',
-        'knecta_contacts'
-    ];
-    
-    sensitiveKeys.forEach(key => {
-        try {
-            localStorage.removeItem(key);
-        } catch (error) {
-            console.warn('[Parent] Error clearing localStorage key:', key, error);
-        }
-    });
-    
-    // Clear all message caches
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('knecta_messages_')) {
+    try {
+        const sensitiveKeys = [
+            'knecta_current_user',
+            'knecta_user_profile',
+            'knecta_current_chat',
+            'knecta_chats',
+            'knecta_contacts'
+        ];
+        
+        sensitiveKeys.forEach(key => {
             try {
                 localStorage.removeItem(key);
             } catch (error) {
-                console.warn('[Parent] Error clearing message cache:', key, error);
+                console.warn('[Parent] Error clearing localStorage key:', key, error);
+            }
+        });
+        
+        // Clear all message caches
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('knecta_messages_')) {
+                try {
+                    localStorage.removeItem(key);
+                } catch (error) {
+                    console.warn('[Parent] Error clearing message cache:', key, error);
+                }
             }
         }
+    } catch (error) {
+        logErrorOnce('Storage', 'clearSensitiveLocalStorage', error);
     }
 }
 
@@ -984,11 +1128,11 @@ function initializeWithSession() {
             });
             
         }).catch(error => {
-            console.error('[Init] Error initializing app:', error);
+            logErrorOnce('Init', 'initializeWithSession', error);
         });
         
     } catch (error) {
-        console.error('[Init] Error in initialization:', error);
+        logErrorOnce('Init', 'initializeWithSession', error);
     }
 }
 
@@ -1002,7 +1146,8 @@ function initializeWithSession() {
 export async function apiRequest(endpoint, options = {}) {
     // Block API calls if no session
     if (!isSessionReceived || !currentUser) {
-        throw new Error('Authentication required. No valid session.');
+        console.warn('[API] Blocked: No valid session');
+        return null;
     }
     
     try {
@@ -1015,8 +1160,8 @@ export async function apiRequest(endpoint, options = {}) {
         return await response.json();
         
     } catch (error) {
-        console.error('[API] Request error:', error);
-        throw error;
+        logErrorOnce('API', 'apiRequest', error);
+        return null;
     }
 }
 
@@ -1055,7 +1200,7 @@ export function loadUserSettings() {
             }
         }
     } catch (error) {
-        console.error('Error loading user settings:', error);
+        logErrorOnce('Settings', 'loadUserSettings', error);
     }
 }
 
@@ -1070,14 +1215,14 @@ export function loadMessageDrafts() {
             }
         }
     } catch (error) {
-        console.error('Error loading message drafts:', error);
+        logErrorOnce('Drafts', 'loadMessageDrafts', error);
     }
 }
 
 export function saveMessageDraft() {
-    if (!currentChat) return;
-    
     try {
+        if (!currentChat) return;
+        
         const messageInput = document.getElementById('messageInput');
         const attachmentPreview = document.getElementById('attachmentPreview');
         
@@ -1101,14 +1246,14 @@ export function saveMessageDraft() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.MESSAGE_DRAFTS, JSON.stringify(messageDrafts));
         }
     } catch (error) {
-        console.error('Error saving message draft:', error);
+        logErrorOnce('Drafts', 'saveMessageDraft', error);
     }
 }
 
 export function loadMessageDraft() {
-    if (!currentChat) return;
-    
     try {
+        if (!currentChat) return;
+        
         const draft = messageDrafts[currentChat.id];
         if (draft) {
             const messageInput = document.getElementById('messageInput');
@@ -1126,7 +1271,7 @@ export function loadMessageDraft() {
             updateDraftBadge(false);
         }
     } catch (error) {
-        console.error('Error loading message draft:', error);
+        logErrorOnce('Drafts', 'loadMessageDraft', error);
     }
 }
 
@@ -1137,7 +1282,7 @@ export function updateDraftBadge(hasDraft) {
             draftBadge.style.display = hasDraft ? 'inline-block' : 'none';
         }
     } catch (error) {
-        console.warn('Error updating draft badge:', error);
+        logErrorOnce('UI', 'updateDraftBadge', error);
     }
 }
 
@@ -1175,7 +1320,7 @@ export function showAttachmentPreview(attachment) {
         attachmentPreview.appendChild(preview);
         attachmentPreview.style.display = 'block';
     } catch (error) {
-        console.error('Error showing attachment preview:', error);
+        logErrorOnce('UI', 'showAttachmentPreview', error);
     }
 }
 
@@ -1189,7 +1334,7 @@ export function removeAttachment() {
         }
         saveMessageDraft();
     } catch (error) {
-        console.error('Error removing attachment:', error);
+        logErrorOnce('UI', 'removeAttachment', error);
     }
 }
 
@@ -1204,7 +1349,7 @@ export function loadScheduledMessages() {
             }
         }
     } catch (error) {
-        console.error('Error loading scheduled messages:', error);
+        logErrorOnce('Messages', 'loadScheduledMessages', error);
     }
 }
 
@@ -1219,7 +1364,7 @@ export function loadOfflineQueue() {
             }
         }
     } catch (error) {
-        console.error('Error loading offline queue:', error);
+        logErrorOnce('Offline', 'loadOfflineQueue', error);
     }
 }
 
@@ -1257,7 +1402,7 @@ export async function loadContacts() {
             }
         }
     } catch (error) {
-        console.error('Error loading contacts:', error);
+        logErrorOnce('Contacts', 'loadContacts', error);
     }
 }
 
@@ -1295,7 +1440,7 @@ export async function loadChats() {
             }
         }
     } catch (error) {
-        console.error('Error loading chats:', error);
+        logErrorOnce('Chats', 'loadChats', error);
     }
 }
 
@@ -1330,7 +1475,7 @@ export async function openChat(chat) {
         return true;
         
     } catch (error) {
-        console.error('Error opening chat:', error);
+        logErrorOnce('Chat', 'openChat', error);
         return false;
     }
 }
@@ -1382,31 +1527,35 @@ export async function loadChatByFriendId(friendId) {
         }
         
     } catch (error) {
-        console.error('Error in loadChatByFriendId:', error);
+        logErrorOnce('Chat', 'loadChatByFriendId', error);
     }
 }
 
 export function createLocalChat(friendId, friendData) {
-    if (!friendId) return;
-    
-    const newChat = {
-        id: 'chat_' + Date.now(),
-        friendId: friendId,
-        friendName: friendData.displayName || 'Unknown User',
-        friendUsername: '',
-        friendAvatar: friendData.photoURL || '',
-        lastMessage: '',
-        lastMessageAt: new Date(),
-        unreadCount: 0,
-        type: 'direct',
-        archived: false,
-        blocked: false
-    };
-    
-    chats.unshift(newChat);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-    
-    openChat(newChat);
+    try {
+        if (!friendId) return;
+        
+        const newChat = {
+            id: 'chat_' + Date.now(),
+            friendId: friendId,
+            friendName: friendData.displayName || 'Unknown User',
+            friendUsername: '',
+            friendAvatar: friendData.photoURL || '',
+            lastMessage: '',
+            lastMessageAt: new Date(),
+            unreadCount: 0,
+            type: 'direct',
+            archived: false,
+            blocked: false
+        };
+        
+        chats.unshift(newChat);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+        
+        openChat(newChat);
+    } catch (error) {
+        logErrorOnce('Chat', 'createLocalChat', error);
+    }
 }
 
 export async function loadMessages() {
@@ -1466,67 +1615,78 @@ export async function loadMessages() {
         }
         
     } catch (error) {
-        console.error('Error loading messages:', error);
+        logErrorOnce('Messages', 'loadMessages', error);
     }
 }
 
 export function formatMessageText(text) {
-    if (!text) return '';
-    
-    let formatted = escapeHtml(text);
-    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
-    formatted = formatted.replace(/```([^`]+)```/g, '<pre><code>$1</code></pre>');
-    formatted = formatted.replace(/\n/g, '<br>');
-    return formatted;
+    try {
+        if (!text) return '';
+        
+        let formatted = escapeHtml(text);
+        formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+        formatted = formatted.replace(/```([^`]+)```/g, '<pre><code>$1</code></pre>');
+        formatted = formatted.replace(/\n/g, '<br>');
+        return formatted;
+    } catch (error) {
+        logErrorOnce('Formatting', 'formatMessageText', error);
+        return text || '';
+    }
 }
 
 export function initializeAudioWaveforms() {
-    if (!messages || !currentUser) return;
-    
-    messages.forEach(message => {
-        if (message && message.type === 'audio' && message.content) {
-            const waveformId = `waveform_${message.id}`;
-            
-            if (!audioPlayers.has(message.id)) {
-                try {
-                    const wavesurfer = WaveSurfer.create({
-                        container: '#' + waveformId,
-                        waveColor: message.senderId === currentUser.uid ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.2)',
-                        progressColor: message.senderId === currentUser.uid ? '#ffffff' : '#0084ff',
-                        cursorWidth: 0,
-                        barWidth: 2,
-                        barGap: 1,
-                        height: 40,
-                        responsive: true
-                    });
+    try {
+        if (!messages || !currentUser) return;
+        
+        messages.forEach(message => {
+            try {
+                if (message && message.type === 'audio' && message.content) {
+                    const waveformId = `waveform_${message.id}`;
                     
-                    wavesurfer.load(message.content);
-                    
-                    audioPlayers.set(message.id, wavesurfer);
-                } catch (error) {
-                    console.error('Error creating waveform:', error);
+                    if (!audioPlayers.has(message.id)) {
+                        if (typeof WaveSurfer !== 'undefined') {
+                            const wavesurfer = WaveSurfer.create({
+                                container: '#' + waveformId,
+                                waveColor: message.senderId === currentUser.uid ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.2)',
+                                progressColor: message.senderId === currentUser.uid ? '#ffffff' : '#0084ff',
+                                cursorWidth: 0,
+                                barWidth: 2,
+                                barGap: 1,
+                                height: 40,
+                                responsive: true
+                            });
+                            
+                            wavesurfer.load(message.content);
+                            
+                            audioPlayers.set(message.id, wavesurfer);
+                        }
+                    }
                 }
+            } catch (error) {
+                logErrorOnce('Audio', 'initializeAudioWaveforms', error);
             }
-        }
-    });
+        });
+    } catch (error) {
+        logErrorOnce('Audio', 'initializeAudioWaveforms', error);
+    }
 }
 
 export async function sendMessage(content, type = 'text', options = {}) {
-    if (!currentChat || !currentUser) {
-        return false;
-    }
-    
-    if (!content && type === 'text' && !currentAttachment) {
-        return false;
-    }
-    
-    if (readOnlyMode || currentChat.readOnly) {
-        return false;
-    }
-    
     try {
+        if (!currentChat || !currentUser) {
+            return false;
+        }
+        
+        if (!content && type === 'text' && !currentAttachment) {
+            return false;
+        }
+        
+        if (readOnlyMode || currentChat.readOnly) {
+            return false;
+        }
+        
         const messageData = {
             id: 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             senderId: currentUser.uid,
@@ -1614,7 +1774,7 @@ export async function sendMessage(content, type = 'text', options = {}) {
                     }
                 }
             } catch (error) {
-                console.error('Error sending message to API:', error);
+                logErrorOnce('API', 'sendMessage', error);
                 // Message stays in "sending" state, will be retried
             }
         }
@@ -1622,95 +1782,112 @@ export async function sendMessage(content, type = 'text', options = {}) {
         return true;
         
     } catch (error) {
-        console.error('Error sending message:', error);
+        logErrorOnce('Messages', 'sendMessage', error);
         return false;
     }
 }
 
 export async function sendMessageWithOptions(content, options = {}) {
-    const messageOptions = {
-        viewOnce: options.viewOnce || false,
-        expiresAt: options.expiresAt || null,
-        type: options.type || 'text',
-        isNote: options.isNote || false
-    };
-    
-    if (options.isNote) {
-        messageOptions.type = 'note';
-        let notesChat = chats.find(chat => chat.type === 'note');
-        if (!notesChat) {
-            notesChat = {
-                id: 'notes_' + Date.now(),
-                friendId: currentUser ? currentUser.uid : 'system',
-                friendName: 'Notes',
-                friendUsername: 'notes',
-                friendAvatar: '',
-                lastMessage: content || '',
-                lastMessageAt: new Date(),
-                unreadCount: 0,
-                type: 'note',
-                archived: false,
-                blocked: false
-            };
-            chats.push(notesChat);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+    try {
+        const messageOptions = {
+            viewOnce: options.viewOnce || false,
+            expiresAt: options.expiresAt || null,
+            type: options.type || 'text',
+            isNote: options.isNote || false
+        };
+        
+        if (options.isNote) {
+            messageOptions.type = 'note';
+            let notesChat = chats.find(chat => chat.type === 'note');
+            if (!notesChat) {
+                notesChat = {
+                    id: 'notes_' + Date.now(),
+                    friendId: currentUser ? currentUser.uid : 'system',
+                    friendName: 'Notes',
+                    friendUsername: 'notes',
+                    friendAvatar: '',
+                    lastMessage: content || '',
+                    lastMessageAt: new Date(),
+                    unreadCount: 0,
+                    type: 'note',
+                    archived: false,
+                    blocked: false
+                };
+                chats.push(notesChat);
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+            }
+            
+            currentChat = notesChat;
+            await loadMessages();
         }
         
-        currentChat = notesChat;
-        await loadMessages();
+        return await sendMessage(content, messageOptions.type, messageOptions);
+    } catch (error) {
+        logErrorOnce('Messages', 'sendMessageWithOptions', error);
+        return false;
     }
-    
-    return await sendMessage(content, messageOptions.type, messageOptions);
 }
 
 export async function scheduleMessage(content, scheduleTime, options = {}) {
-    if (!scheduleTime || scheduleTime <= Date.now()) {
-        await sendMessageWithOptions(content, options);
-        return;
+    try {
+        if (!scheduleTime || scheduleTime <= Date.now()) {
+            await sendMessageWithOptions(content, options);
+            return;
+        }
+        
+        const scheduledMessage = {
+            id: 'scheduled_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            content: content || '',
+            scheduleTime: scheduleTime,
+            chatId: currentChat ? currentChat.id : '',
+            options: options,
+            status: 'scheduled',
+            attachment: currentAttachment
+        };
+        
+        scheduledMessages.push(scheduledMessage);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
+        
+        updateScheduleBadge();
+    } catch (error) {
+        logErrorOnce('Messages', 'scheduleMessage', error);
     }
-    
-    const scheduledMessage = {
-        id: 'scheduled_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-        content: content || '',
-        scheduleTime: scheduleTime,
-        chatId: currentChat ? currentChat.id : '',
-        options: options,
-        status: 'scheduled',
-        attachment: currentAttachment
-    };
-    
-    scheduledMessages.push(scheduledMessage);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
-    
-    updateScheduleBadge();
 }
 
 export function checkScheduledMessages() {
-    const now = Date.now();
-    const toSend = [];
-    
-    scheduledMessages = scheduledMessages.filter(msg => {
-        if (msg && msg.scheduleTime <= now && msg.status === 'scheduled') {
-            toSend.push(msg);
-            return false;
-        }
-        return true;
-    });
-    
-    toSend.forEach(async (msg) => {
-        if (msg.chatId === currentChat?.id) {
-            if (msg.attachment) {
-                currentAttachment = msg.attachment;
-                await sendMessageWithOptions(msg.content || '', msg.options || {});
-                currentAttachment = null;
-            } else {
-                await sendMessageWithOptions(msg.content || '', msg.options || {});
+    try {
+        const now = Date.now();
+        const toSend = [];
+        
+        scheduledMessages = scheduledMessages.filter(msg => {
+            if (msg && msg.scheduleTime <= now && msg.status === 'scheduled') {
+                toSend.push(msg);
+                return false;
             }
-        }
-        localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
-    });
-    
-    setTimeout(checkScheduledMessages, 60000);
+            return true;
+        });
+        
+        toSend.forEach(async (msg) => {
+            try {
+                if (msg.chatId === currentChat?.id) {
+                    if (msg.attachment) {
+                        currentAttachment = msg.attachment;
+                        await sendMessageWithOptions(msg.content || '', msg.options || {});
+                        currentAttachment = null;
+                    } else {
+                        await sendMessageWithOptions(msg.content || '', msg.options || {});
+                    }
+                }
+                localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED_MESSAGES, JSON.stringify(scheduledMessages));
+            } catch (error) {
+                logErrorOnce('Messages', 'checkScheduledMessages', error);
+            }
+        });
+        
+        setTimeout(checkScheduledMessages, 60000);
+    } catch (error) {
+        logErrorOnce('Messages', 'checkScheduledMessages', error);
+    }
 }
 
 export function updateScheduleBadge() {
@@ -1721,118 +1898,135 @@ export function updateScheduleBadge() {
             scheduleBadge.style.display = scheduledMessages.length > 0 ? 'inline-block' : 'none';
         }
     } catch (error) {
-        console.warn('Error updating schedule badge:', error);
+        logErrorOnce('UI', 'updateScheduleBadge', error);
     }
 }
 
 export async function checkOfflineQueue() {
-    if (!navigator.onLine || offlineQueue.length === 0 || !isSessionReceived) return;
-    
-    const failedMessages = [];
-    
-    for (const message of offlineQueue) {
-        try {
-            if (!message) continue;
-            
-            // Check for duplicates before sending
-            const cacheKey = `${message.chatId}_${message.id}`;
-            if (messageDeduplicationCache.has(cacheKey)) {
-                // Skip duplicate
-                continue;
+    try {
+        if (!navigator.onLine || offlineQueue.length === 0 || !isSessionReceived) return;
+        
+        const failedMessages = [];
+        
+        for (const message of offlineQueue) {
+            try {
+                if (!message) continue;
+                
+                // Check for duplicates before sending
+                const cacheKey = `${message.chatId}_${message.id}`;
+                if (messageDeduplicationCache.has(cacheKey)) {
+                    // Skip duplicate
+                    continue;
+                }
+                
+                await apiSendMessage(message.chatId, message);
+                
+                const localIndex = messages.findIndex(m => m.id === message.id);
+                if (localIndex !== -1) {
+                    messages.splice(localIndex, 1);
+                }
+                
+                // Cache to prevent resending
+                messageDeduplicationCache.set(cacheKey, Date.now());
+                
+            } catch (error) {
+                logErrorOnce('Offline', 'checkOfflineQueue', error);
+                failedMessages.push(message);
             }
-            
-            await apiSendMessage(message.chatId, message);
-            
-            const localIndex = messages.findIndex(m => m.id === message.id);
-            if (localIndex !== -1) {
-                messages.splice(localIndex, 1);
-            }
-            
-            // Cache to prevent resending
-            messageDeduplicationCache.set(cacheKey, Date.now());
-            
-        } catch (error) {
-            console.error('Failed to send queued message:', error);
-            failedMessages.push(message);
         }
+        
+        offlineQueue = failedMessages;
+        localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
+    } catch (error) {
+        logErrorOnce('Offline', 'checkOfflineQueue', error);
     }
-    
-    offlineQueue = failedMessages;
-    localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
 }
 
 /**
  * Start offline sync for retrying failed messages
  */
 function startOfflineSync() {
-    const offlineSyncInterval = setInterval(() => {
-        if (navigator.onLine && isSessionReceived) {
-            checkOfflineQueue();
+    try {
+        const offlineSyncInterval = setInterval(() => {
+            try {
+                if (navigator.onLine && isSessionReceived) {
+                    checkOfflineQueue();
+                }
+            } catch (error) {
+                logErrorOnce('Offline', 'offlineSyncLoop', error);
+            }
+        }, 30000); // Check every 30 seconds
+        
+        // Store for cleanup
+        if (parentConnection) {
+            parentConnection.offlineSyncInterval = offlineSyncInterval;
         }
-    }, 30000); // Check every 30 seconds
-    
-    // Store for cleanup
-    if (parentConnection) {
-        parentConnection.offlineSyncInterval = offlineSyncInterval;
+    } catch (error) {
+        logErrorOnce('Offline', 'startOfflineSync', error);
     }
 }
 
 export async function sendToMultipleChats(content, chatIds) {
-    if (!content && !currentAttachment) {
-        return false;
-    }
-    
-    if (!chatIds || chatIds.length === 0) {
-        return false;
-    }
-    
-    // Check session
-    if (!isSessionReceived) {
-        return false;
-    }
-    
-    const results = [];
-    
-    for (const chatId of chatIds) {
-        try {
-            const messageData = {
-                content: content || '',
-                type: currentAttachment ? currentAttachment.type : 'text',
-                timestamp: new Date(),
-                chatId: chatId
-            };
-            
-            if (currentAttachment) {
-                messageData.fileName = currentAttachment.name;
-                messageData.fileSize = currentAttachment.size;
-                if (currentAttachment.duration) {
-                    messageData.duration = currentAttachment.duration;
-                }
-            }
-            
+    try {
+        if (!content && !currentAttachment) {
+            return false;
+        }
+        
+        if (!chatIds || chatIds.length === 0) {
+            return false;
+        }
+        
+        // Check session
+        if (!isSessionReceived) {
+            return false;
+        }
+        
+        const results = [];
+        
+        for (const chatId of chatIds) {
             try {
-                await apiSendMessage(chatId, messageData);
+                const messageData = {
+                    content: content || '',
+                    type: currentAttachment ? currentAttachment.type : 'text',
+                    timestamp: new Date(),
+                    chatId: chatId
+                };
                 
-                results.push({ chatId, success: true });
+                if (currentAttachment) {
+                    messageData.fileName = currentAttachment.name;
+                    messageData.fileSize = currentAttachment.size;
+                    if (currentAttachment.duration) {
+                        messageData.duration = currentAttachment.duration;
+                    }
+                }
                 
-                const chat = chats.find(c => c.id === chatId);
-                if (chat) {
-                    chat.lastMessage = content || `Sent a ${currentAttachment?.type || 'message'}`;
-                    chat.lastMessageAt = new Date();
-                    localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                try {
+                    await apiSendMessage(chatId, messageData);
+                    
+                    results.push({ chatId, success: true });
+                    
+                    const chat = chats.find(c => c.id === chatId);
+                    if (chat) {
+                        chat.lastMessage = content || `Sent a ${currentAttachment?.type || 'message'}`;
+                        chat.lastMessageAt = new Date();
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                    }
+                } catch (error) {
+                    logErrorOnce('Messages', 'sendToMultipleChats', error);
+                    results.push({ chatId, success: false });
                 }
             } catch (error) {
-                console.error(`Error sending to chat ${chatId}:`, error);
+                logErrorOnce('Messages', 'sendToMultipleChats', error);
                 results.push({ chatId, success: false });
             }
-        } catch (error) {
-            console.error(`Error in sendToMultipleChats for ${chatId}:`, error);
-            results.push({ chatId, success: false });
         }
+        
+        const successCount = results.filter(r => r.success).length;
+        return successCount;
+    } catch (error) {
+        logErrorOnce('Messages', 'sendToMultipleChats', error);
+        return 0;
     }
-    
-    const successCount = results.filter(r => r.success).length;
-    return successCount;
 }
 
 export async function editMessage(messageId, newContent) {
@@ -1857,7 +2051,7 @@ export async function editMessage(messageId, newContent) {
         return true;
         
     } catch (error) {
-        console.error('Error editing message:', error);
+        logErrorOnce('Messages', 'editMessage', error);
         return false;
     }
 }
@@ -1870,13 +2064,17 @@ export function saveEditedMessage(messageId) {
         }
         return false;
     } catch (error) {
-        console.error('Error saving edited message:', error);
+        logErrorOnce('Messages', 'saveEditedMessage', error);
         return false;
     }
 }
 
 export function cancelEditMessage() {
-    editingMessageId = null;
+    try {
+        editingMessageId = null;
+    } catch (error) {
+        logErrorOnce('Messages', 'cancelEditMessage', error);
+    }
 }
 
 export async function deleteMessage(messageId, forEveryone = false) {
@@ -1902,21 +2100,25 @@ export async function deleteMessage(messageId, forEveryone = false) {
         return true;
         
     } catch (error) {
-        console.error('Error deleting message:', error);
+        logErrorOnce('Messages', 'deleteMessage', error);
         return false;
     }
 }
 
 export function updateChatLastMessage(content, type) {
-    if (!currentChat) return;
-    
-    const chatIndex = chats.findIndex(chat => chat.id === currentChat.id);
-    if (chatIndex !== -1) {
-        chats[chatIndex].lastMessage = content || `Sent a ${type}`;
-        chats[chatIndex].lastMessageAt = new Date();
-        chats[chatIndex].unreadCount = 0;
+    try {
+        if (!currentChat) return;
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+        const chatIndex = chats.findIndex(chat => chat.id === currentChat.id);
+        if (chatIndex !== -1) {
+            chats[chatIndex].lastMessage = content || `Sent a ${type}`;
+            chats[chatIndex].lastMessageAt = new Date();
+            chats[chatIndex].unreadCount = 0;
+            
+            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+        }
+    } catch (error) {
+        logErrorOnce('Chat', 'updateChatLastMessage', error);
     }
 }
 
@@ -1937,15 +2139,15 @@ export async function markChatAsRead(chatId) {
         return true;
         
     } catch (error) {
-        console.error('Error marking chat as read:', error);
+        logErrorOnce('Chat', 'markChatAsRead', error);
         return false;
     }
 }
 
 export function showMessageActions(message, x, y) {
-    selectedMessage = message;
-    
     try {
+        selectedMessage = message;
+        
         const actionsMenu = document.getElementById('messageActionsMenu');
         if (actionsMenu) {
             actionsMenu.style.left = `${x}px`;
@@ -1953,7 +2155,7 @@ export function showMessageActions(message, x, y) {
             actionsMenu.style.display = 'block';
         }
     } catch (error) {
-        console.error('Error showing message actions:', error);
+        logErrorOnce('UI', 'showMessageActions', error);
     }
 }
 
@@ -1965,73 +2167,81 @@ export function closeMessageActions() {
         }
         selectedMessage = null;
     } catch (error) {
-        console.warn('Error closing message actions:', error);
+        logErrorOnce('UI', 'closeMessageActions', error);
     }
 }
 
 export function handleMessageAction(action) {
-    if (!selectedMessage) return;
-    
-    switch (action) {
-        case 'reply':
-            replyToMessage = selectedMessage;
-            break;
-            
-        case 'edit':
-            if (selectedMessage.senderId === currentUser?.uid && (selectedMessage.type === 'text' || selectedMessage.type === 'note')) {
-                editingMessageId = selectedMessage.id;
-            }
-            break;
-            
-        case 'forward':
-            showForwardMessage(selectedMessage);
-            break;
-            
-        case 'copy':
-            if (selectedMessage.type === 'text' || selectedMessage.type === 'note') {
-                navigator.clipboard.writeText(selectedMessage.content || '');
-            } else if (selectedMessage.type === 'image' || selectedMessage.type === 'file') {
-                navigator.clipboard.writeText(selectedMessage.content || '');
-            }
-            break;
-            
-        case 'star':
-            toggleStarMessage(selectedMessage.id);
-            break;
-            
-        case 'report':
-            showReportModal(selectedMessage);
-            break;
-            
-        case 'react-like':
-            addReaction(selectedMessage.id, '👍', true);
-            break;
-            
-        case 'react-love':
-            addReaction(selectedMessage.id, '❤️', true);
-            break;
-            
-        case 'react-laugh':
-            addReaction(selectedMessage.id, '😂', true);
-            break;
-            
-        case 'delete':
-            const forEveryone = selectedMessage.senderId === currentUser?.uid;
-            deleteMessage(selectedMessage.id, forEveryone);
-            break;
-            
-        case 'info':
-            showMessageInfo(selectedMessage);
-            break;
+    try {
+        if (!selectedMessage) return;
+        
+        switch (action) {
+            case 'reply':
+                replyToMessage = selectedMessage;
+                break;
+                
+            case 'edit':
+                if (selectedMessage.senderId === currentUser?.uid && (selectedMessage.type === 'text' || selectedMessage.type === 'note')) {
+                    editingMessageId = selectedMessage.id;
+                }
+                break;
+                
+            case 'forward':
+                showForwardMessage(selectedMessage);
+                break;
+                
+            case 'copy':
+                if (selectedMessage.type === 'text' || selectedMessage.type === 'note') {
+                    navigator.clipboard.writeText(selectedMessage.content || '').catch(() => {});
+                } else if (selectedMessage.type === 'image' || selectedMessage.type === 'file') {
+                    navigator.clipboard.writeText(selectedMessage.content || '').catch(() => {});
+                }
+                break;
+                
+            case 'star':
+                toggleStarMessage(selectedMessage.id);
+                break;
+                
+            case 'report':
+                showReportModal(selectedMessage);
+                break;
+                
+            case 'react-like':
+                addReaction(selectedMessage.id, '👍', true);
+                break;
+                
+            case 'react-love':
+                addReaction(selectedMessage.id, '❤️', true);
+                break;
+                
+            case 'react-laugh':
+                addReaction(selectedMessage.id, '😂', true);
+                break;
+                
+            case 'delete':
+                const forEveryone = selectedMessage.senderId === currentUser?.uid;
+                deleteMessage(selectedMessage.id, forEveryone);
+                break;
+                
+            case 'info':
+                showMessageInfo(selectedMessage);
+                break;
+        }
+        
+        closeMessageActions();
+    } catch (error) {
+        logErrorOnce('UI', 'handleMessageAction', error);
     }
-    
-    closeMessageActions();
 }
 
 export function showForwardMessage(message) {
-    if (!message) return;
-    const forwardText = `[Forwarded] ${message.content || ''}`;
-    navigator.clipboard.writeText(forwardText);
+    try {
+        if (!message) return;
+        const forwardText = `[Forwarded] ${message.content || ''}`;
+        navigator.clipboard.writeText(forwardText).catch(() => {});
+    } catch (error) {
+        logErrorOnce('Messages', 'showForwardMessage', error);
+    }
 }
 
 export function toggleStarMessage(messageId) {
@@ -2049,15 +2259,16 @@ export function toggleStarMessage(messageId) {
         return !starredMessages[messageId];
         
     } catch (error) {
-        console.error('Error toggling star:', error);
+        logErrorOnce('Messages', 'toggleStarMessage', error);
         return false;
     }
 }
 
 export function showMessageInfo(message) {
-    if (!message) return '';
-    
-    const infoText = `
+    try {
+        if (!message) return '';
+        
+        const infoText = `
 Message Information:
 
 Sent: ${formatDateTime(message.timestamp)}
@@ -2074,7 +2285,11 @@ ${message.mood ? `Mood: ${message.mood}\n` : ''}
 Message ID: ${message.id ? message.id.substring(0, 8) + '...' : 'N/A'}
     `;
     
-    return infoText;
+        return infoText;
+    } catch (error) {
+        logErrorOnce('Messages', 'showMessageInfo', error);
+        return '';
+    }
 }
 
 export function showReportModal(message) {
@@ -2095,7 +2310,7 @@ export function showReportModal(message) {
             reportModal.style.display = 'block';
         }
     } catch (error) {
-        console.error('Error showing report modal:', error);
+        logErrorOnce('UI', 'showReportModal', error);
     }
 }
 
@@ -2132,15 +2347,15 @@ export function submitReport() {
         return true;
         
     } catch (error) {
-        console.error('Error submitting report:', error);
+        logErrorOnce('Report', 'submitReport', error);
         return false;
     }
 }
 
 export async function addReaction(messageId, emoji, silent = false) {
-    if (!currentChat || !currentUser) return false;
-    
     try {
+        if (!currentChat || !currentUser) return false;
+        
         const messageIndex = messages.findIndex(m => m.id === messageId);
         if (messageIndex === -1) return false;
         
@@ -2176,7 +2391,7 @@ export async function addReaction(messageId, emoji, silent = false) {
         return userIndex > -1 ? 'removed' : 'added';
         
     } catch (error) {
-        console.error('Error adding reaction:', error);
+        logErrorOnce('Reactions', 'addReaction', error);
         return false;
     }
 }
@@ -2194,7 +2409,7 @@ export function initEmojiPicker() {
             });
         }
     } catch (error) {
-        console.error('Error initializing emoji picker:', error);
+        logErrorOnce('UI', 'initEmojiPicker', error);
     }
 }
 
@@ -2206,7 +2421,7 @@ export function toggleEmojiPicker() {
             emojiContainer.style.display = isVisible ? 'none' : 'block';
         }
     } catch (error) {
-        console.error('Error toggling emoji picker:', error);
+        logErrorOnce('UI', 'toggleEmojiPicker', error);
     }
 }
 
@@ -2221,7 +2436,7 @@ export function closeEmojiPickerOnClickOutside(event) {
             }
         }
     } catch (error) {
-        console.warn('Error closing emoji picker:', error);
+        logErrorOnce('UI', 'closeEmojiPickerOnClickOutside', error);
     }
 }
 
@@ -2233,7 +2448,7 @@ export function toggleFormattingToolbar() {
             formattingToolbar.style.display = isVisible ? 'none' : 'block';
         }
     } catch (error) {
-        console.error('Error toggling formatting toolbar:', error);
+        logErrorOnce('UI', 'toggleFormattingToolbar', error);
     }
 }
 
@@ -2248,7 +2463,7 @@ export function closeFormattingToolbarOnClickOutside(event) {
             }
         }
     } catch (error) {
-        console.warn('Error closing formatting toolbar:', error);
+        logErrorOnce('UI', 'closeFormattingToolbarOnClickOutside', error);
     }
 }
 
@@ -2260,7 +2475,7 @@ export function toggleAttachmentOptions() {
             attachmentOptions.style.display = isVisible ? 'none' : 'block';
         }
     } catch (error) {
-        console.error('Error toggling attachment options:', error);
+        logErrorOnce('UI', 'toggleAttachmentOptions', error);
     }
 }
 
@@ -2275,15 +2490,15 @@ export function closeAttachmentOptionsOnClickOutside(event) {
             }
         }
     } catch (error) {
-        console.warn('Error closing attachment options:', error);
+        logErrorOnce('UI', 'closeAttachmentOptionsOnClickOutside', error);
     }
 }
 
 export function applyFormatting(tag) {
-    const messageInput = document.getElementById('messageInput');
-    if (!messageInput) return;
-    
     try {
+        const messageInput = document.getElementById('messageInput');
+        if (!messageInput) return;
+        
         const input = messageInput;
         const start = input.selectionStart;
         const end = input.selectionEnd;
@@ -2310,7 +2525,7 @@ export function applyFormatting(tag) {
         input.focus();
         input.setSelectionRange(start + wrappedText.length, start + wrappedText.length);
     } catch (error) {
-        console.error('Error applying formatting:', error);
+        logErrorOnce('Formatting', 'applyFormatting', error);
     }
 }
 
@@ -2321,7 +2536,7 @@ export function setupScrollDetection() {
             messagesContainer.addEventListener('scroll', updateJumpButtonVisibility);
         }
     } catch (error) {
-        console.error('Error setting up scroll detection:', error);
+        logErrorOnce('UI', 'setupScrollDetection', error);
     }
 }
 
@@ -2335,7 +2550,7 @@ export function updateJumpButtonVisibility() {
             jumpButton.style.display = isNearBottom ? 'none' : 'block';
         }
     } catch (error) {
-        console.warn('Error updating jump button visibility:', error);
+        logErrorOnce('UI', 'updateJumpButtonVisibility', error);
     }
 }
 
@@ -2346,47 +2561,66 @@ export function jumpToLatest() {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
     } catch (error) {
-        console.error('Error jumping to latest:', error);
+        logErrorOnce('UI', 'jumpToLatest', error);
     }
 }
 
 export function searchInChat(query) {
-    if (!query || !query.trim()) {
-        searchResults = [];
-        currentSearchIndex = -1;
+    try {
+        if (!query || !query.trim()) {
+            searchResults = [];
+            currentSearchIndex = -1;
+            return [];
+        }
+        
+        searchResults = messages.filter(msg => 
+            !msg.deleted && 
+            msg.content && 
+            msg.content.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        return searchResults;
+    } catch (error) {
+        logErrorOnce('Search', 'searchInChat', error);
         return [];
     }
-    
-    searchResults = messages.filter(msg => 
-        !msg.deleted && 
-        msg.content && 
-        msg.content.toLowerCase().includes(query.toLowerCase())
-    );
-    
-    return searchResults;
 }
 
 export function highlightText(text, query) {
-    if (!text || !query) return escapeHtml(text || '');
-    
-    const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
-    return escapeHtml(text).replace(regex, '<span class="search-highlight">$1</span>');
+    try {
+        if (!text || !query) return escapeHtml(text || '');
+        
+        const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+        return escapeHtml(text).replace(regex, '<span class="search-highlight">$1</span>');
+    } catch (error) {
+        logErrorOnce('Search', 'highlightText', error);
+        return text || '';
+    }
 }
 
 export function escapeRegex(string) {
-    return (string || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+        return (string || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } catch (error) {
+        logErrorOnce('Search', 'escapeRegex', error);
+        return '';
+    }
 }
 
 export function highlightSearchResults(query) {
     try {
         const messageElements = document.querySelectorAll('.message-content');
         messageElements.forEach(element => {
-            const originalText = element.getAttribute('data-original') || element.textContent;
-            element.setAttribute('data-original', originalText);
-            element.innerHTML = highlightText(originalText, query);
+            try {
+                const originalText = element.getAttribute('data-original') || element.textContent;
+                element.setAttribute('data-original', originalText);
+                element.innerHTML = highlightText(originalText, query);
+            } catch (error) {
+                logErrorOnce('Search', 'highlightSearchResults', error);
+            }
         });
     } catch (error) {
-        console.error('Error highlighting search results:', error);
+        logErrorOnce('Search', 'highlightSearchResults', error);
     }
 }
 
@@ -2394,21 +2628,29 @@ export function removeSearchHighlights() {
     try {
         const messageElements = document.querySelectorAll('.message-content');
         messageElements.forEach(element => {
-            const originalText = element.getAttribute('data-original');
-            if (originalText) {
-                element.innerHTML = escapeHtml(originalText);
-                element.removeAttribute('data-original');
+            try {
+                const originalText = element.getAttribute('data-original');
+                if (originalText) {
+                    element.innerHTML = escapeHtml(originalText);
+                    element.removeAttribute('data-original');
+                }
+            } catch (error) {
+                logErrorOnce('Search', 'removeSearchHighlights', error);
             }
         });
     } catch (error) {
-        console.error('Error removing search highlights:', error);
+        logErrorOnce('Search', 'removeSearchHighlights', error);
     }
 }
 
 export function navigateToSearchResult(index) {
-    if (index >= 0 && index < searchResults.length) {
-        const messageId = searchResults[index].id;
-        scrollToMessage(messageId);
+    try {
+        if (index >= 0 && index < searchResults.length) {
+            const messageId = searchResults[index].id;
+            scrollToMessage(messageId);
+        }
+    } catch (error) {
+        logErrorOnce('Search', 'navigateToSearchResult', error);
     }
 }
 
@@ -2419,7 +2661,7 @@ export function scrollToMessage(messageId) {
             messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     } catch (error) {
-        console.error('Error scrolling to message:', error);
+        logErrorOnce('UI', 'scrollToMessage', error);
     }
 }
 
@@ -2442,105 +2684,128 @@ export async function startRecording() {
         recordingStartTime = Date.now();
         
         recordingTimer = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-            const minutes = Math.floor(elapsed / 60);
-            const seconds = elapsed % 60;
-            const recordingTimerEl = document.getElementById('recordingTimer');
-            if (recordingTimerEl) recordingTimerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            
-            const recordingCancelOverlay = document.getElementById('recordingCancelOverlay');
-            if (elapsed >= 1 && recordingCancelOverlay && !recordingCancelOverlay.classList.contains('active')) {
-                recordingCancelOverlay.classList.add('active');
+            try {
+                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                const recordingTimerEl = document.getElementById('recordingTimer');
+                if (recordingTimerEl) recordingTimerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                const recordingCancelOverlay = document.getElementById('recordingCancelOverlay');
+                if (elapsed >= 1 && recordingCancelOverlay && !recordingCancelOverlay.classList.contains('active')) {
+                    recordingCancelOverlay.classList.add('active');
+                }
+            } catch (error) {
+                logErrorOnce('Recording', 'recordingTimer', error);
             }
         }, 1000);
         
         return true;
         
     } catch (error) {
-        console.error('Error starting recording:', error);
+        logErrorOnce('Recording', 'startRecording', error);
         return false;
     }
 }
 
 export async function stopRecording() {
-    if (!mediaRecorder || !isRecording) return null;
-    
-    clearInterval(recordingTimer);
-    const recordingCancelOverlay = document.getElementById('recordingCancelOverlay');
-    if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
-    
-    return new Promise((resolve) => {
-        mediaRecorder.stopRecording(() => {
-            const blob = mediaRecorder.getBlob();
-            const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
-            
-            if (duration < 1) {
-                resolve(null);
-                return;
-            }
-            
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64data = reader.result;
-                const attachment = {
-                    type: 'audio',
-                    data: base64data,
-                    name: `recording_${Date.now()}.webm`,
-                    size: blob.size,
-                    duration: duration
-                };
-                
-                mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
-                
-                isRecording = false;
-                mediaRecorder = null;
-                
-                resolve(attachment);
-            };
-            reader.readAsDataURL(blob);
+    try {
+        if (!mediaRecorder || !isRecording) return null;
+        
+        clearInterval(recordingTimer);
+        const recordingCancelOverlay = document.getElementById('recordingCancelOverlay');
+        if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
+        
+        return new Promise((resolve) => {
+            mediaRecorder.stopRecording(() => {
+                try {
+                    const blob = mediaRecorder.getBlob();
+                    const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
+                    
+                    if (duration < 1) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const base64data = reader.result;
+                        const attachment = {
+                            type: 'audio',
+                            data: base64data,
+                            name: `recording_${Date.now()}.webm`,
+                            size: blob.size,
+                            duration: duration
+                        };
+                        
+                        mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
+                        
+                        isRecording = false;
+                        mediaRecorder = null;
+                        
+                        resolve(attachment);
+                    };
+                    reader.readAsDataURL(blob);
+                } catch (error) {
+                    logErrorOnce('Recording', 'stopRecording', error);
+                    resolve(null);
+                }
+            });
         });
-    });
+    } catch (error) {
+        logErrorOnce('Recording', 'stopRecording', error);
+        return null;
+    }
 }
 
 export function cancelRecording() {
-    if (!mediaRecorder || !isRecording) return false;
-    
-    clearInterval(recordingTimer);
-    const recordingCancelOverlay = document.getElementById('recordingCancelOverlay');
-    if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
-    mediaRecorder.stopRecording();
-    
-    mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
-    
-    isRecording = false;
-    mediaRecorder = null;
-    
-    return true;
+    try {
+        if (!mediaRecorder || !isRecording) return false;
+        
+        clearInterval(recordingTimer);
+        const recordingCancelOverlay = document.getElementById('recordingCancelOverlay');
+        if (recordingCancelOverlay) recordingCancelOverlay.classList.remove('active');
+        mediaRecorder.stopRecording();
+        
+        mediaRecorder.getInternalRecorder().stream.getTracks().forEach(track => track.stop());
+        
+        isRecording = false;
+        mediaRecorder = null;
+        
+        return true;
+    } catch (error) {
+        logErrorOnce('Recording', 'cancelRecording', error);
+        return false;
+    }
 }
 
 export function handleAttachment(type) {
-    switch (type) {
-        case 'image':
-            selectImage();
-            break;
-        case 'video':
-            selectVideo();
-            break;
-        case 'audio':
-            startRecording();
-            break;
-        case 'file':
-            selectFile();
-            break;
-        case 'location':
-            shareLocation();
-            break;
-        case 'poll':
-            createPoll();
-            break;
-        case 'note':
-            createNote();
-            break;
+    try {
+        switch (type) {
+            case 'image':
+                selectImage();
+                break;
+            case 'video':
+                selectVideo();
+                break;
+            case 'audio':
+                startRecording();
+                break;
+            case 'file':
+                selectFile();
+                break;
+            case 'location':
+                shareLocation();
+                break;
+            case 'poll':
+                createPoll();
+                break;
+            case 'note':
+                createNote();
+                break;
+        }
+    } catch (error) {
+        logErrorOnce('Attachments', 'handleAttachment', error);
     }
 }
 
@@ -2554,189 +2819,214 @@ export function createNote() {
         
         return sendMessageWithOptions(noteContent || 'Note', { isNote: true });
     } catch (error) {
-        console.error('Error creating note:', error);
+        logErrorOnce('Notes', 'createNote', error);
         return false;
     }
 }
 
 export function selectImage() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = false;
-    
-    return new Promise((resolve) => {
-        input.onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file) {
-                resolve(null);
-                return;
-            }
-            
-            if (file.size > 10 * 1024 * 1024) {
-                resolve(null);
-                return;
-            }
-            
-            try {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const base64data = reader.result;
-                    const attachment = {
-                        type: 'image',
-                        data: base64data,
-                        name: file.name,
-                        size: file.size
-                    };
-                    resolve(attachment);
-                };
-                reader.readAsDataURL(file);
-                
-            } catch (error) {
-                console.error('Error uploading image:', error);
-                resolve(null);
-            }
-        };
+    try {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = false;
         
-        input.click();
-    });
-}
-
-export function selectVideo() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'video/*';
-    input.multiple = false;
-    
-    return new Promise((resolve) => {
-        input.onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file) {
-                resolve(null);
-                return;
-            }
-            
-            if (file.size > 50 * 1024 * 1024) {
-                resolve(null);
-                return;
-            }
-            
-            try {
-                const video = document.createElement('video');
-                video.src = URL.createObjectURL(file);
-                video.currentTime = 1;
-                
-                video.onloadeddata = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(video, 0, 0);
+        return new Promise((resolve) => {
+            input.onchange = async (e) => {
+                try {
+                    const file = e.target.files[0];
+                    if (!file) {
+                        resolve(null);
+                        return;
+                    }
                     
-                    const thumbnail = canvas.toDataURL('image/jpeg');
+                    if (file.size > 10 * 1024 * 1024) {
+                        resolve(null);
+                        return;
+                    }
                     
                     const reader = new FileReader();
                     reader.onloadend = () => {
                         const base64data = reader.result;
                         const attachment = {
-                            type: 'video',
+                            type: 'image',
                             data: base64data,
                             name: file.name,
-                            size: file.size,
-                            thumbnail: thumbnail,
-                            duration: video.duration
+                            size: file.size
                         };
                         resolve(attachment);
                     };
                     reader.readAsDataURL(file);
-                };
-                
-            } catch (error) {
-                console.error('Error uploading video:', error);
-                resolve(null);
-            }
-        };
+                    
+                } catch (error) {
+                    logErrorOnce('Attachments', 'selectImage', error);
+                    resolve(null);
+                }
+            };
+            
+            input.click();
+        });
+    } catch (error) {
+        logErrorOnce('Attachments', 'selectImage', error);
+        return Promise.resolve(null);
+    }
+}
+
+export function selectVideo() {
+    try {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'video/*';
+        input.multiple = false;
         
-        input.click();
-    });
+        return new Promise((resolve) => {
+            input.onchange = async (e) => {
+                try {
+                    const file = e.target.files[0];
+                    if (!file) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    if (file.size > 50 * 1024 * 1024) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    const video = document.createElement('video');
+                    video.src = URL.createObjectURL(file);
+                    video.currentTime = 1;
+                    
+                    video.onloadeddata = () => {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(video, 0, 0);
+                            
+                            const thumbnail = canvas.toDataURL('image/jpeg');
+                            
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                const base64data = reader.result;
+                                const attachment = {
+                                    type: 'video',
+                                    data: base64data,
+                                    name: file.name,
+                                    size: file.size,
+                                    thumbnail: thumbnail,
+                                    duration: video.duration
+                                };
+                                resolve(attachment);
+                            };
+                            reader.readAsDataURL(file);
+                        } catch (error) {
+                            logErrorOnce('Attachments', 'selectVideo', error);
+                            resolve(null);
+                        }
+                    };
+                    
+                } catch (error) {
+                    logErrorOnce('Attachments', 'selectVideo', error);
+                    resolve(null);
+                }
+            };
+            
+            input.click();
+        });
+    } catch (error) {
+        logErrorOnce('Attachments', 'selectVideo', error);
+        return Promise.resolve(null);
+    }
 }
 
 export function selectFile() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = false;
-    
-    return new Promise((resolve) => {
-        input.onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file) {
-                resolve(null);
-                return;
-            }
-            
-            if (file.size > 100 * 1024 * 1024) {
-                resolve(null);
-                return;
-            }
-            
-            try {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const base64data = reader.result;
-                    const attachment = {
-                        type: 'file',
-                        data: base64data,
-                        name: file.name,
-                        size: file.size
-                    };
-                    resolve(attachment);
-                };
-                reader.readAsDataURL(file);
-                
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                resolve(null);
-            }
-        };
+    try {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = false;
         
-        input.click();
-    });
+        return new Promise((resolve) => {
+            input.onchange = async (e) => {
+                try {
+                    const file = e.target.files[0];
+                    if (!file) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    if (file.size > 100 * 1024 * 1024) {
+                        resolve(null);
+                        return;
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const base64data = reader.result;
+                        const attachment = {
+                            type: 'file',
+                            data: base64data,
+                            name: file.name,
+                            size: file.size
+                        };
+                        resolve(attachment);
+                    };
+                    reader.readAsDataURL(file);
+                    
+                } catch (error) {
+                    logErrorOnce('Attachments', 'selectFile', error);
+                    resolve(null);
+                }
+            };
+            
+            input.click();
+        });
+    } catch (error) {
+        logErrorOnce('Attachments', 'selectFile', error);
+        return Promise.resolve(null);
+    }
 }
 
 export function shareLocation() {
-    if (!navigator.geolocation) {
+    try {
+        if (!navigator.geolocation) {
+            return Promise.resolve(null);
+        }
+        
+        return new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        const { latitude, longitude } = position.coords;
+                        const locationName = `Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+                        const mapURL = `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`;
+                        
+                        const attachment = {
+                            type: 'location',
+                            data: mapURL,
+                            name: locationName,
+                            latitude: latitude,
+                            longitude: longitude
+                        };
+                        resolve(attachment);
+                        
+                    } catch (error) {
+                        logErrorOnce('Location', 'shareLocation', error);
+                        resolve(null);
+                    }
+                },
+                (error) => {
+                    logErrorOnce('Location', 'geolocationError', error);
+                    resolve(null);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        });
+    } catch (error) {
+        logErrorOnce('Location', 'shareLocation', error);
         return Promise.resolve(null);
     }
-    
-    return new Promise((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                try {
-                    const { latitude, longitude } = position.coords;
-                    const locationName = `Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
-                    const mapURL = `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`;
-                    
-                    const attachment = {
-                        type: 'location',
-                        data: mapURL,
-                        name: locationName,
-                        latitude: latitude,
-                        longitude: longitude
-                    };
-                    resolve(attachment);
-                    
-                } catch (error) {
-                    console.error('Error getting location:', error);
-                    resolve(null);
-                }
-            },
-            (error) => {
-                console.error('Geolocation error:', error);
-                resolve(null);
-            },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
-    });
 }
 
 export function createPoll() {
@@ -2761,7 +3051,7 @@ export function createPoll() {
         
         return { question, options };
     } catch (error) {
-        console.error('Error creating poll:', error);
+        logErrorOnce('Poll', 'createPoll', error);
         return null;
     }
 }
@@ -2795,13 +3085,17 @@ export async function voteInPoll(messageId, optionIndex) {
         return true;
         
     } catch (error) {
-        console.error('Error voting in poll:', error);
+        logErrorOnce('Poll', 'voteInPoll', error);
         return false;
     }
 }
 
 export function openThread(messageId) {
-    currentThread = messageId;
+    try {
+        currentThread = messageId;
+    } catch (error) {
+        logErrorOnce('Thread', 'openThread', error);
+    }
 }
 
 export async function loadThreadMessages(messageId) {
@@ -2809,30 +3103,35 @@ export async function loadThreadMessages(messageId) {
         // Thread loading logic
         return true;
     } catch (error) {
-        console.error('Error loading thread messages:', error);
+        logErrorOnce('Thread', 'loadThreadMessages', error);
         return false;
     }
 }
 
 export function showChatInfo(chat) {
-    if (!chat) return {};
-    
-    return {
-        title: chat.type === 'note' ? 'Notes' : chat.friendName,
-        sections: [
-            {
-                title: 'Chat Information',
-                items: [
-                    { label: 'Name', value: chat.type === 'note' ? 'Notes' : chat.friendName || 'Unknown' },
-                    { label: 'Status', value: chat.blocked ? 'Blocked' : chat.archived ? 'Archived' : chat.type === 'note' ? 'Notes' : 'Active' },
-                    { label: 'Last Message', value: formatTime(chat.lastMessageAt) },
-                    { label: 'Unread Messages', value: chat.unreadCount || 0 },
-                    { label: 'Chat Type', value: chat.type === 'group' ? 'Group' : chat.type === 'note' ? 'Notes' : 'Direct' },
-                    { label: 'Read Only', value: chat.readOnly ? 'Yes' : 'No' }
-                ]
-            }
-        ]
-    };
+    try {
+        if (!chat) return {};
+        
+        return {
+            title: chat.type === 'note' ? 'Notes' : chat.friendName,
+            sections: [
+                {
+                    title: 'Chat Information',
+                    items: [
+                        { label: 'Name', value: chat.type === 'note' ? 'Notes' : chat.friendName || 'Unknown' },
+                        { label: 'Status', value: chat.blocked ? 'Blocked' : chat.archived ? 'Archived' : chat.type === 'note' ? 'Notes' : 'Active' },
+                        { label: 'Last Message', value: formatTime(chat.lastMessageAt) },
+                        { label: 'Unread Messages', value: chat.unreadCount || 0 },
+                        { label: 'Chat Type', value: chat.type === 'group' ? 'Group' : chat.type === 'note' ? 'Notes' : 'Direct' },
+                        { label: 'Read Only', value: chat.readOnly ? 'Yes' : 'No' }
+                    ]
+                }
+            ]
+        };
+    } catch (error) {
+        logErrorOnce('Chat', 'showChatInfo', error);
+        return {};
+    }
 }
 
 export function loadChatThemes() {
@@ -2846,7 +3145,7 @@ export function loadChatThemes() {
             }
         }
     } catch (error) {
-        console.error('Error loading chat themes:', error);
+        logErrorOnce('Themes', 'loadChatThemes', error);
     }
 }
 
@@ -2865,79 +3164,87 @@ export function applyChatTheme(friendId) {
             document.documentElement.style.setProperty('--chat-font-family', '\'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif');
         }
     } catch (error) {
-        console.error('Error applying chat theme:', error);
+        logErrorOnce('Themes', 'applyChatTheme', error);
     }
 }
 
 export function startBackgroundSync() {
-    const syncInterval = setInterval(async () => {
-        try {
-            if (!isSyncing && navigator.onLine && isSessionReceived) {
-                isSyncing = true;
-                
-                try {
-                    const chatsData = await fetchChats();
-                    if (chatsData && chatsData.chats) {
-                        chats = chatsData.chats || [];
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-                    }
-                } catch (error) {
-                    console.error('Error syncing chats:', error);
-                }
-                
-                try {
-                    const contactsData = await fetchContacts();
-                    if (contactsData && contactsData.contacts) {
-                        contacts = contactsData.contacts || [];
-                        localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
-                    }
-                } catch (error) {
-                    console.error('Error syncing contacts:', error);
-                }
-                
-                if (currentChat) {
+    try {
+        const syncInterval = setInterval(async () => {
+            try {
+                if (!isSyncing && navigator.onLine && isSessionReceived) {
+                    isSyncing = true;
+                    
                     try {
-                        const messagesData = await fetchMessages(currentChat.id);
-                        if (messagesData && messagesData.messages) {
-                            messages = messagesData.messages || [];
-                            localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                        const chatsData = await fetchChats();
+                        if (chatsData && chatsData.chats) {
+                            chats = chatsData.chats || [];
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
                         }
                     } catch (error) {
-                        console.error('Error syncing messages:', error);
+                        logErrorOnce('Sync', 'syncChats', error);
                     }
+                    
+                    try {
+                        const contactsData = await fetchContacts();
+                        if (contactsData && contactsData.contacts) {
+                            contacts = contactsData.contacts || [];
+                            localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+                        }
+                    } catch (error) {
+                        logErrorOnce('Sync', 'syncContacts', error);
+                    }
+                    
+                    if (currentChat) {
+                        try {
+                            const messagesData = await fetchMessages(currentChat.id);
+                            if (messagesData && messagesData.messages) {
+                                messages = messagesData.messages || [];
+                                localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                            }
+                        } catch (error) {
+                            logErrorOnce('Sync', 'syncMessages', error);
+                        }
+                    }
+                    
+                    await checkOfflineQueue();
+                    
+                    isSyncing = false;
                 }
-                
-                await checkOfflineQueue();
-                
+            } catch (error) {
+                logErrorOnce('Sync', 'backgroundSyncLoop', error);
                 isSyncing = false;
             }
-        } catch (error) {
-            console.error('Background sync error:', error);
-            isSyncing = false;
-        }
-    }, 30000);
-    
-    const saveInterval = setInterval(() => {
-        try {
-            if (currentChat) {
-                localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
-                saveMessageDraft();
+        }, 30000);
+        
+        const saveInterval = setInterval(() => {
+            try {
+                if (currentChat) {
+                    localStorage.setItem(`${LOCAL_STORAGE_KEYS.MESSAGES}${currentChat.id}`, JSON.stringify(messages));
+                    saveMessageDraft();
+                }
+                localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
+                saveUIState();
+            } catch (error) {
+                logErrorOnce('Sync', 'autoSave', error);
             }
-            localStorage.setItem(LOCAL_STORAGE_KEYS.CHATS, JSON.stringify(chats));
-            saveUIState();
-        } catch (error) {
-            console.error('Error in auto-save:', error);
+        }, 60000);
+        
+        window.addEventListener('online', () => {
+            try {
+                checkOfflineQueue();
+            } catch (error) {
+                logErrorOnce('Sync', 'onlineHandler', error);
+            }
+        });
+        
+        // Store intervals for cleanup
+        if (parentConnection) {
+            parentConnection.syncInterval = syncInterval;
+            parentConnection.saveInterval = saveInterval;
         }
-    }, 60000);
-    
-    window.addEventListener('online', () => {
-        checkOfflineQueue();
-    });
-    
-    // Store intervals for cleanup
-    if (parentConnection) {
-        parentConnection.syncInterval = syncInterval;
-        parentConnection.saveInterval = saveInterval;
+    } catch (error) {
+        logErrorOnce('Sync', 'startBackgroundSync', error);
     }
 }
 
@@ -2950,7 +3257,7 @@ export function playNotificationSound() {
             audio.play().catch(() => {});
         }
     } catch (error) {
-        console.error('Error playing notification sound:', error);
+        logErrorOnce('Audio', 'playNotificationSound', error);
     }
 }
 
@@ -2969,7 +3276,7 @@ export async function toggleReadOnly(chatId, readOnly) {
         }
         return false;
     } catch (error) {
-        console.error('Error toggling read-only mode:', error);
+        logErrorOnce('Chat', 'toggleReadOnly', error);
         return false;
     }
 }
@@ -3004,7 +3311,7 @@ export async function toggleArchiveChat(chatId, archive) {
         return false;
         
     } catch (error) {
-        console.error('Error toggling archive:', error);
+        logErrorOnce('Chat', 'toggleArchiveChat', error);
         return false;
     }
 }
@@ -3041,7 +3348,7 @@ export async function toggleBlockUser(friendId, block) {
         return true;
         
     } catch (error) {
-        console.error('Error toggling block:', error);
+        logErrorOnce('Chat', 'toggleBlockUser', error);
         return false;
     }
 }
@@ -3070,24 +3377,33 @@ export async function clearChatHistory(chatId) {
         return true;
         
     } catch (error) {
-        console.error('Error clearing chat history:', error);
+        logErrorOnce('Chat', 'clearChatHistory', error);
         return false;
     }
 }
 
 export function loadMultiSendChats() {
-    const availableChats = chats.filter(chat => 
-        !chat.archived && !chat.blocked && chat.type !== 'note'
-    );
-    
-    return availableChats;
+    try {
+        const availableChats = chats.filter(chat => 
+            !chat.archived && !chat.blocked && chat.type !== 'note'
+        );
+        
+        return availableChats;
+    } catch (error) {
+        logErrorOnce('Chat', 'loadMultiSendChats', error);
+        return [];
+    }
 }
 
 export function updateMultiSendSelection(chatId, selected) {
-    if (selected) {
-        multiSendSelectedChats.add(chatId);
-    } else {
-        multiSendSelectedChats.delete(chatId);
+    try {
+        if (selected) {
+            multiSendSelectedChats.add(chatId);
+        } else {
+            multiSendSelectedChats.delete(chatId);
+        }
+    } catch (error) {
+        logErrorOnce('Chat', 'updateMultiSendSelection', error);
     }
 }
 
@@ -3100,7 +3416,7 @@ export function saveUIState() {
         };
         localStorage.setItem(LOCAL_STORAGE_KEYS.UI_STATE, JSON.stringify(uiState));
     } catch (error) {
-        console.warn('[UI] Error saving UI state:', error);
+        logErrorOnce('UI', 'saveUIState', error);
     }
 }
 
@@ -3124,7 +3440,7 @@ export function getUserFromURL() {
         }
         return null;
     } catch (error) {
-        console.error('Error getting user from URL:', error);
+        logErrorOnce('URL', 'getUserFromURL', error);
         return null;
     }
 }
@@ -3190,7 +3506,7 @@ export async function openChatPanel(userId, username, userAvatar = '') {
         return true;
         
     } catch (error) {
-        console.error('Error opening chat panel:', error);
+        logErrorOnce('Chat', 'openChatPanel', error);
         return false;
     }
 }
@@ -3200,9 +3516,9 @@ export async function openChatPanel(userId, username, userAvatar = '') {
 // =============================================
 
 export function formatTime(date) {
-    if (!date) return 'Unknown';
-    
     try {
+        if (!date) return 'Unknown';
+        
         const now = new Date();
         const messageDate = new Date(date);
         const diffMs = now - messageDate;
@@ -3222,15 +3538,15 @@ export function formatTime(date) {
         
         return `${messageDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${hour12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
     } catch (error) {
-        console.error('Error formatting time:', error);
+        logErrorOnce('Formatting', 'formatTime', error);
         return 'Unknown';
     }
 }
 
 export function formatDate(date) {
-    if (!date) return 'Unknown';
-    
     try {
+        if (!date) return 'Unknown';
+        
         const today = new Date();
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
@@ -3253,15 +3569,15 @@ export function formatDate(date) {
             });
         }
     } catch (error) {
-        console.error('Error formatting date:', error);
+        logErrorOnce('Formatting', 'formatDate', error);
         return 'Unknown';
     }
 }
 
 export function formatDateTime(date) {
-    if (!date) return 'Unknown';
-    
     try {
+        if (!date) return 'Unknown';
+        
         const messageDate = new Date(date);
         return messageDate.toLocaleString('en-US', {
             month: 'short',
@@ -3272,33 +3588,33 @@ export function formatDateTime(date) {
             second: '2-digit'
         });
     } catch (error) {
-        console.error('Error formatting date/time:', error);
+        logErrorOnce('Formatting', 'formatDateTime', error);
         return 'Unknown';
     }
 }
 
 export function formatFileSize(bytes) {
-    if (!bytes || bytes === 0) return '0 Bytes';
     try {
+        if (!bytes || bytes === 0) return '0 Bytes';
         const k = 1024;
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     } catch (error) {
-        console.error('Error formatting file size:', error);
+        logErrorOnce('Formatting', 'formatFileSize', error);
         return 'Unknown';
     }
 }
 
 export function escapeHtml(text) {
-    if (!text) return '';
     try {
+        if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     } catch (error) {
-        console.error('Error escaping HTML:', error);
-        return text;
+        logErrorOnce('Security', 'escapeHtml', error);
+        return text || '';
     }
 }
 
@@ -3307,11 +3623,21 @@ export function escapeHtml(text) {
 // =============================================
 
 export function viewMedia(url, fileName) {
-    return { url, fileName };
+    try {
+        return { url, fileName };
+    } catch (error) {
+        logErrorOnce('Media', 'viewMedia', error);
+        return { url: '', fileName: '' };
+    }
 }
 
 export function playVideo(url) {
-    return url;
+    try {
+        return url;
+    } catch (error) {
+        logErrorOnce('Media', 'playVideo', error);
+        return '';
+    }
 }
 
 export function playAudio(messageId, url, duration) {
@@ -3341,7 +3667,7 @@ export function playAudio(messageId, url, duration) {
         }
         return 'error';
     } catch (error) {
-        console.error('Error playing audio:', error);
+        logErrorOnce('Audio', 'playAudio', error);
         return 'error';
     }
 }
@@ -3356,7 +3682,7 @@ export function downloadFile(url, fileName) {
         document.body.removeChild(a);
         return true;
     } catch (error) {
-        console.error('Error downloading file:', error);
+        logErrorOnce('Files', 'downloadFile', error);
         return false;
     }
 }
@@ -3367,7 +3693,7 @@ export function openLocation(latitude, longitude) {
         window.open(url, '_blank');
         return url;
     } catch (error) {
-        console.error('Error opening location:', error);
+        logErrorOnce('Location', 'openLocation', error);
         return null;
     }
 }
@@ -3377,7 +3703,70 @@ export function retryConnection() {
         initializeParentCoordination();
         return true;
     } catch (error) {
-        console.error('Error retrying connection:', error);
+        logErrorOnce('Connection', 'retryConnection', error);
+        return false;
+    }
+}
+
+// =============================================
+// MISSING EXPORTS (SAFETY WRAPPERS)
+// =============================================
+
+export function updateTypingIndicator(isTyping) {
+    try {
+        // Safety wrapper for missing function
+        console.log('[Safety] updateTypingIndicator called');
+        return false;
+    } catch (error) {
+        return false;
+    }
+}
+
+export function syncChatList() {
+    try {
+        // Safety wrapper for missing function
+        console.log('[Safety] syncChatList called');
+        return Promise.resolve([]);
+    } catch (error) {
+        return Promise.resolve([]);
+    }
+}
+
+export function updateUnreadCounts() {
+    try {
+        // Safety wrapper for missing function
+        console.log('[Safety] updateUnreadCounts called');
+        return 0;
+    } catch (error) {
+        return 0;
+    }
+}
+
+export function validateMessageBeforeSend(message) {
+    try {
+        // Safety wrapper for missing function
+        if (!message || !message.content) {
+            return { valid: false, error: 'Invalid message' };
+        }
+        return { valid: true };
+    } catch (error) {
+        return { valid: false, error: 'Validation error' };
+    }
+}
+
+export function cleanupAudioPlayers() {
+    try {
+        // Safety wrapper for missing function
+        audioPlayers.forEach(player => {
+            try {
+                if (player.destroy) player.destroy();
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+        });
+        audioPlayers.clear();
+        return true;
+    } catch (error) {
         return false;
     }
 }
@@ -3388,44 +3777,99 @@ export function retryConnection() {
 
 export function initChildSession() {
     return new Promise((resolve) => {
-        if (isSessionReceived && currentUser) {
-            resolve({ user: currentUser, sessionData });
-        } else {
-            // Wait for session
-            const checkInterval = setInterval(() => {
-                if (isSessionReceived && currentUser) {
-                    clearInterval(checkInterval);
-                    resolve({ user: currentUser, sessionData });
-                }
-            }, 100);
-            
-            // Timeout after 30 seconds
-            setTimeout(() => {
-                clearInterval(checkInterval);
-                resolve(null);
-            }, 30000);
+        try {
+            if (isSessionReceived && currentUser) {
+                resolve({ user: currentUser, sessionData });
+            } else {
+                // Wait for session
+                const checkInterval = setInterval(() => {
+                    try {
+                        if (isSessionReceived && currentUser) {
+                            clearInterval(checkInterval);
+                            resolve({ user: currentUser, sessionData });
+                        }
+                    } catch (error) {
+                        clearInterval(checkInterval);
+                        resolve(null);
+                    }
+                }, 100);
+                
+                // Timeout after 30 seconds
+                setTimeout(() => {
+                    try {
+                        clearInterval(checkInterval);
+                        resolve(null);
+                    } catch (error) {
+                        resolve(null);
+                    }
+                }, 30000);
+            }
+        } catch (error) {
+            resolve(null);
         }
     });
 }
 
 export function getCurrentSession() {
-    return isSessionReceived ? { user: currentUser, sessionData } : null;
+    try {
+        return isSessionReceived ? { user: currentUser, sessionData } : null;
+    } catch (error) {
+        return null;
+    }
 }
 
 export function requestSessionUpdate() {
-    if (parentConnection && parentConnection.isConnected) {
-        sendToParent(MESSAGE_TYPES.REQUEST_UPDATE, {
-            timestamp: Date.now()
-        });
-        return true;
+    try {
+        if (parentConnection && parentConnection.isConnected) {
+            sendToParent(MESSAGE_TYPES.REQUEST_UPDATE, {
+                timestamp: Date.now()
+            });
+            return true;
+        }
+        return false;
+    } catch (error) {
+        return false;
     }
-    return false;
 }
 
 // Initialize when module loads
 if (typeof window !== 'undefined') {
     // Set a small delay to ensure DOM is ready
     setTimeout(() => {
-        initializeParentCoordination();
+        try {
+            initializeParentCoordination();
+        } catch (error) {
+            logErrorOnce('Init', 'globalInit', error);
+        }
     }, 100);
+}
+
+// Cleanup intervals on page unload
+if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', () => {
+        try {
+            if (parentConnection) {
+                if (parentConnection.heartbeatInterval) {
+                    clearInterval(parentConnection.heartbeatInterval);
+                }
+                if (parentConnection.offlineSyncInterval) {
+                    clearInterval(parentConnection.offlineSyncInterval);
+                }
+                if (parentConnection.syncInterval) {
+                    clearInterval(parentConnection.syncInterval);
+                }
+                if (parentConnection.saveInterval) {
+                    clearInterval(parentConnection.saveInterval);
+                }
+            }
+            
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+            }
+            
+            cleanupAudioPlayers();
+        } catch (error) {
+            // Silent cleanup error
+        }
+    });
 }

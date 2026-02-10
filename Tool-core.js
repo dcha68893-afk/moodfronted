@@ -76,6 +76,12 @@ export let handshakeRequestSent = false;
 export let sessionRetryAttempt = 0;
 export const MAX_SESSION_RETRIES = 2;
 
+// Error tracking to prevent spam
+let errorLog = new Set();
+let warningLog = new Set();
+let messageResendCache = new Map();
+const MAX_RETRIES = 3;
+
 // Marketplace constants
 export const LISTING_TYPES = {
     SERVICE: 'service',
@@ -221,6 +227,51 @@ export let tokenRefreshInProgress = false;
 export const apiCallQueue = [];
 export let isProcessingQueue = false;
 
+// Safety: Log errors once only
+function safeLogError(module, functionName, error, isWarning = false) {
+    const errorKey = `${module}:${functionName}:${error?.message || 'unknown'}`;
+    
+    if (isWarning) {
+        if (!warningLog.has(errorKey)) {
+            warningLog.add(errorKey);
+            console.warn(`[${module}] ${functionName}: ${error?.message || 'Warning'}`, error || '');
+        }
+    } else {
+        if (!errorLog.has(errorKey)) {
+            errorLog.add(errorKey);
+            console.error(`[${module}] ${functionName}: ${error?.message || 'Error'}`, error || '');
+        }
+    }
+}
+
+// Safety: Check if DOM element exists
+function safeGetElement(id) {
+    try {
+        const element = document.getElementById(id);
+        if (!element) {
+            const warningKey = `element_missing:${id}`;
+            if (!warningLog.has(warningKey)) {
+                warningLog.add(warningKey);
+                console.warn(`[Marketplace] DOM element #${id} not found`);
+            }
+        }
+        return element;
+    } catch (error) {
+        safeLogError('Marketplace', 'safeGetElement', error, true);
+        return null;
+    }
+}
+
+// Safety: Session guard
+function hasValidSession() {
+    return sessionData && sessionData.userToken && sessionData.userId;
+}
+
+// Safety: User guard
+function hasValidUser() {
+    return currentUser && (currentUser.id || currentUser._id);
+}
+
 // Initialize the application with enhanced parent-child communication
 export async function initializeMarketplaceCore() {
     try {
@@ -241,14 +292,17 @@ export async function initializeMarketplaceCore() {
             initializeTokenSystem();
             
             // Step 5: Start background data fetching after token is ready
-            tokenInitializationPromise.then(() => {
-                if (!backgroundJobsStarted) {
-                    startBackgroundJobs();
-                    backgroundJobsStarted = true;
-                }
-            }).catch(() => {
-                // Continue with cached data
-            });
+            if (tokenInitializationPromise) {
+                tokenInitializationPromise.then(() => {
+                    if (!backgroundJobsStarted) {
+                        startBackgroundJobs();
+                        backgroundJobsStarted = true;
+                    }
+                }).catch((error) => {
+                    safeLogError('Marketplace', 'initializeMarketplaceCore', error, true);
+                    // Continue with cached data
+                });
+            }
         }
         
     } catch (error) {
@@ -262,41 +316,45 @@ export async function initializeMarketplaceCore() {
  * 1. Parent Detection & Secure Channel Establishment
  */
 export async function initializeEnhancedParentCommunication() {
-    // Generate unique ID for this iframe
-    parentCommunicationId = 'marketplace_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    
-    // Verify presence of window.parent
-    if (!window.parent || window.parent === window) {
-        handleStandaloneMode();
-        return;
-    }
-    
-    // Try to detect same-origin (with error handling for cross-origin)
-    let sameOrigin = false;
     try {
-        sameOrigin = window.location.origin === window.parent.location.origin;
-    } catch (e) {
-        // Cross-origin iframe detected
+        // Generate unique ID for this iframe
+        parentCommunicationId = 'marketplace_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        // Verify presence of window.parent
+        if (!window.parent || window.parent === window) {
+            handleStandaloneMode();
+            return;
+        }
+        
+        // Try to detect same-origin (with error handling for cross-origin)
+        let sameOrigin = false;
+        try {
+            sameOrigin = window.location.origin === window.parent.location.origin;
+        } catch (e) {
+            // Cross-origin iframe detected
+        }
+        
+        // Establish secure messaging channel
+        secureMessagingChannel = {
+            id: parentCommunicationId,
+            origin: window.location.origin,
+            parentOrigin: sameOrigin ? window.parent.location.origin : '*',
+            sameOrigin: sameOrigin,
+            ready: false
+        };
+        
+        // Listen for messages from parent with enhanced security
+        setupSecureMessageListener();
+        
+        // Start handshake protocol
+        startHandshakeProtocol();
+        
+    } catch (error) {
+        safeLogError('Marketplace', 'initializeEnhancedParentCommunication', error);
+        handleStandaloneMode();
     }
     
-    // Establish secure messaging channel
-    secureMessagingChannel = {
-        id: parentCommunicationId,
-        origin: window.location.origin,
-        parentOrigin: sameOrigin ? window.parent.location.origin : '*',
-        sameOrigin: sameOrigin,
-        ready: false
-    };
-    
-    // Listen for messages from parent with enhanced security
-    setupSecureMessageListener();
-    
-    // Start handshake protocol
-    startHandshakeProtocol();
-    
-    return new Promise((resolve) => {
-        resolve();
-    });
+    return Promise.resolve();
 }
 
 /**
@@ -308,14 +366,19 @@ export async function startSecureHandshakeProtocol() {
         return;
     }
     
-    handshakeInProgress = true;
-    handshakeRequestSent = false;
-    sessionRetryAttempt = 0;
-    
-    console.log('⏳ [Secure Handshake] Initializing secure handshake with parent...');
-    
-    // Request session from parent
-    requestSessionFromParent();
+    try {
+        handshakeInProgress = true;
+        handshakeRequestSent = false;
+        sessionRetryAttempt = 0;
+        
+        console.log('⏳ [Secure Handshake] Initializing secure handshake with parent...');
+        
+        // Request session from parent
+        requestSessionFromParent();
+    } catch (error) {
+        safeLogError('Marketplace', 'startSecureHandshakeProtocol', error);
+        handshakeInProgress = false;
+    }
 }
 
 /**
@@ -326,45 +389,55 @@ export function requestSessionFromParent() {
         return;
     }
     
-    handshakeRequestSent = true;
-    console.log('⏳ [Secure Handshake] Waiting for session from parent...');
-    
-    // Send session request to parent
-    sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
-        source: 'marketplace_iframe',
-        id: parentCommunicationId,
-        timestamp: Date.now(),
-        version: '2.1',
-        retryCount: sessionRetryAttempt
-    });
-    
-    // Set timeout for session response
-    clearTimeout(handshakeTimeout);
-    handshakeTimeout = setTimeout(() => {
-        if (!sessionValid) {
-            handleSessionRequestTimeout();
-        }
-    }, 5000);
+    try {
+        handshakeRequestSent = true;
+        console.log('⏳ [Secure Handshake] Waiting for session from parent...');
+        
+        // Send session request to parent
+        sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+            source: 'marketplace_iframe',
+            id: parentCommunicationId,
+            timestamp: Date.now(),
+            version: '2.1',
+            retryCount: sessionRetryAttempt
+        });
+        
+        // Set timeout for session response
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = setTimeout(() => {
+            if (!sessionValid) {
+                handleSessionRequestTimeout();
+            }
+        }, 5000);
+    } catch (error) {
+        safeLogError('Marketplace', 'requestSessionFromParent', error);
+        handshakeRequestSent = false;
+    }
 }
 
 /**
  * Handle session request timeout
  */
 export function handleSessionRequestTimeout() {
-    if (sessionRetryAttempt < MAX_SESSION_RETRIES) {
-        sessionRetryAttempt++;
-        console.log(`🔄 [Secure Handshake] Session request timed out. Retrying (${sessionRetryAttempt}/${MAX_SESSION_RETRIES})...`);
-        
-        handshakeRequestSent = false;
-        requestSessionFromParent();
-    } else {
-        handshakeInProgress = false;
-        console.log('❌ [Secure Handshake] Session request failed after maximum retries.');
-        
-        // Fall back to other authentication methods
-        if (!parentDataLoaded && !dataFetchInProgress) {
-            fetchUserDataDirectly();
+    try {
+        if (sessionRetryAttempt < MAX_SESSION_RETRIES) {
+            sessionRetryAttempt++;
+            console.log(`🔄 [Secure Handshake] Session request timed out. Retrying (${sessionRetryAttempt}/${MAX_SESSION_RETRIES})...`);
+            
+            handshakeRequestSent = false;
+            requestSessionFromParent();
+        } else {
+            handshakeInProgress = false;
+            console.log('❌ [Secure Handshake] Session request failed after maximum retries.');
+            
+            // Fall back to other authentication methods
+            if (!parentDataLoaded && !dataFetchInProgress) {
+                fetchUserDataDirectly();
+            }
         }
+    } catch (error) {
+        safeLogError('Marketplace', 'handleSessionRequestTimeout', error);
+        handshakeInProgress = false;
     }
 }
 
@@ -372,92 +445,104 @@ export function handleSessionRequestTimeout() {
  * Setup secure message listener with validation
  */
 export function setupSecureMessageListener() {
-    window.addEventListener('message', handleSecureParentMessage, false);
+    try {
+        window.addEventListener('message', handleSecureParentMessage, false);
+    } catch (error) {
+        safeLogError('Marketplace', 'setupSecureMessageListener', error);
+    }
 }
 
 /**
  * Enhanced message handler with security checks
  */
 export function handleSecureParentMessage(event) {
-    // Basic security checks
-    if (!validateMessageOrigin(event)) {
-        return;
-    }
-    
-    const message = event.data;
-    
-    // Handle different message types
-    switch (message?.type) {
-        // PARENT AUTHORITY MESSAGES
-        case PARENT_MESSAGE_TYPES.PARENT_READY:
-            handleParentReady(message);
-            break;
-            
-        case PARENT_MESSAGE_TYPES.SESSION_DATA:
-            handleSecureSessionData(message);
-            break;
-            
-        case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
-            handleSessionUpdate(message.data);
-            break;
-            
-        case PARENT_MESSAGE_TYPES.LOGOUT:
-            handleParentLogout();
-            break;
-            
-        case PARENT_MESSAGE_TYPES.REFRESH_UI:
-            handleRefreshUI();
-            break;
-            
-        case PARENT_MESSAGE_TYPES.FORCE_RELOAD:
-            handleForceReload();
-            break;
-            
-        // SECURE HANDSHAKE MESSAGES - NEW
-        case 'SESSION_DATA':
-            if (message.source === 'parent') {
+    try {
+        // Basic security checks
+        if (!validateMessageOrigin(event)) {
+            return;
+        }
+        
+        const message = event.data;
+        
+        if (!message || typeof message !== 'object') {
+            return;
+        }
+        
+        // Handle different message types
+        switch (message?.type) {
+            // PARENT AUTHORITY MESSAGES
+            case PARENT_MESSAGE_TYPES.PARENT_READY:
+                handleParentReady(message);
+                break;
+                
+            case PARENT_MESSAGE_TYPES.SESSION_DATA:
                 handleSecureSessionData(message);
-            }
-            break;
-            
-        // LEGACY MESSAGE SUPPORT (for backward compatibility)
-        case 'user_data':
-            migrateLegacyUserData(message.data);
-            break;
-            
-        case 'user_profile_updated':
-            if (message.data) {
+                break;
+                
+            case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
                 handleSessionUpdate(message.data);
-            }
-            break;
-            
-        case 'user_logged_in':
-            sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, { force: true });
-            break;
-            
-        case 'user_logged_out':
-            handleParentLogout();
-            break;
-            
-        case 'session_expired':
-            handleSessionExpired();
-            break;
-            
-        case 'iframe_response':
-            if (message.requestId === parentCommunicationId) {
-                if (message.data && message.data.session) {
-                    handleSessionDataFromParent(message.data.session);
+                break;
+                
+            case PARENT_MESSAGE_TYPES.LOGOUT:
+                handleParentLogout();
+                break;
+                
+            case PARENT_MESSAGE_TYPES.REFRESH_UI:
+                handleRefreshUI();
+                break;
+                
+            case PARENT_MESSAGE_TYPES.FORCE_RELOAD:
+                handleForceReload();
+                break;
+                
+            // SECURE HANDSHAKE MESSAGES - NEW
+            case 'SESSION_DATA':
+                if (message.source === 'parent') {
+                    handleSecureSessionData(message);
                 }
-            }
-            break;
-            
-        case 'ping':
-            sendMessageToParent('pong', {
-                id: parentCommunicationId,
-                timestamp: Date.now(),
-                sessionStatus: !!sessionData
-            });
-            break;
+                break;
+                
+            // LEGACY MESSAGE SUPPORT (for backward compatibility)
+            case 'user_data':
+                migrateLegacyUserData(message.data);
+                break;
+                
+            case 'user_profile_updated':
+                if (message.data) {
+                    handleSessionUpdate(message.data);
+                }
+                break;
+                
+            case 'user_logged_in':
+                sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, { force: true });
+                break;
+                
+            case 'user_logged_out':
+                handleParentLogout();
+                break;
+                
+            case 'session_expired':
+                handleSessionExpired();
+                break;
+                
+            case 'iframe_response':
+                if (message.requestId === parentCommunicationId) {
+                    if (message.data && message.data.session) {
+                        handleSessionDataFromParent(message.data.session);
+                    }
+                }
+                break;
+                
+            case 'ping':
+                sendMessageToParent('pong', {
+                    id: parentCommunicationId,
+                    timestamp: Date.now(),
+                    sessionStatus: !!sessionData
+                });
+                break;
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'handleSecureParentMessage', error, true);
     }
 }
 
@@ -465,44 +550,49 @@ export function handleSecureParentMessage(event) {
  * Handle secure session data from parent
  */
 export function handleSecureSessionData(message) {
-    const data = message.data || message;
-    
-    // Only accept from parent, dynamically accept current origin
-    const validOrigin = validateParentOrigin(message, event);
-    if (!validOrigin) {
-        console.log('❌ [Secure Handshake] Received message from invalid origin');
-        return;
-    }
-    
-    if (!data.token || !data.user) {
-        console.log('❌ [Secure Handshake] Received invalid session from parent');
-        handshakeInProgress = false;
-        return;
-    }
+    try {
+        const data = message.data || message;
+        
+        // Only accept from parent, dynamically accept current origin
+        const validOrigin = validateParentOrigin(message, event);
+        if (!validOrigin) {
+            console.log('❌ [Secure Handshake] Received message from invalid origin');
+            return;
+        }
+        
+        if (!data.token || !data.user) {
+            console.log('❌ [Secure Handshake] Received invalid session from parent');
+            handshakeInProgress = false;
+            return;
+        }
 
-    sessionValid = true;
-    handshakeInProgress = false;
-    clearTimeout(handshakeTimeout);
-    console.log('✅ [Secure Handshake] Session received successfully');
-    
-    // Convert to session data format
-    const sessionDataFromParent = {
-        userId: data.user.id || data.user.userId,
-        userToken: data.token,
-        expiresAt: data.expiresAt || new Date(Date.now() + 3600000).toISOString(),
-        displayName: data.user.displayName || data.user.name,
-        email: data.user.email,
-        photoURL: data.user.photoURL || data.user.avatar,
-        isPremium: data.user.isPremium || false,
-        subscription: data.user.subscription,
-        trustLevel: data.user.trustLevel || 'new',
-        groups: data.user.groups || [],
-        friends: data.user.friends || [],
-        source: 'parent_handshake'
-    };
-    
-    // Process the session data
-    handleSessionDataFromParent(sessionDataFromParent);
+        sessionValid = true;
+        handshakeInProgress = false;
+        clearTimeout(handshakeTimeout);
+        console.log('✅ [Secure Handshake] Session received successfully');
+        
+        // Convert to session data format
+        const sessionDataFromParent = {
+            userId: data.user.id || data.user.userId,
+            userToken: data.token,
+            expiresAt: data.expiresAt || new Date(Date.now() + 3600000).toISOString(),
+            displayName: data.user.displayName || data.user.name,
+            email: data.user.email,
+            photoURL: data.user.photoURL || data.user.avatar,
+            isPremium: data.user.isPremium || false,
+            subscription: data.user.subscription,
+            trustLevel: data.user.trustLevel || 'new',
+            groups: data.user.groups || [],
+            friends: data.user.friends || [],
+            source: 'parent_handshake'
+        };
+        
+        // Process the session data
+        handleSessionDataFromParent(sessionDataFromParent);
+    } catch (error) {
+        safeLogError('Marketplace', 'handleSecureSessionData', error);
+        handshakeInProgress = false;
+    }
 }
 
 /**
@@ -548,7 +638,7 @@ export function validateParentOrigin(message, event) {
         return true;
         
     } catch (error) {
-        console.error('Error validating parent origin:', error);
+        safeLogError('Marketplace', 'validateParentOrigin', error, true);
         return false;
     }
 }
@@ -557,30 +647,39 @@ export function validateParentOrigin(message, event) {
  * Validate message origin for security
  */
 export function validateMessageOrigin(event) {
-    // Ensure message is from parent window
-    if (event.source !== window.parent) {
+    try {
+        // Ensure message is from parent window
+        if (event.source !== window.parent) {
+            return false;
+        }
+        
+        // Additional origin validation
+        return validateParentOrigin(null, event);
+    } catch (error) {
+        safeLogError('Marketplace', 'validateMessageOrigin', error, true);
         return false;
     }
-    
-    // Additional origin validation
-    return validateParentOrigin(null, event);
 }
 
 /**
  * 2. Handshake Protocol with Exponential Backoff
  */
 export function startHandshakeProtocol() {
-    // Send CHILD_READY signal
-    sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
-        id: parentCommunicationId,
-        type: 'marketplace',
-        version: '2.1',
-        features: ['session_authority', 'centralized_auth', 'ui_coordination', 'secure_handshake'],
-        timestamp: Date.now()
-    });
-    
-    // Start handshake retry mechanism
-    initiateHandshakeRetry();
+    try {
+        // Send CHILD_READY signal
+        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
+            id: parentCommunicationId,
+            type: 'marketplace',
+            version: '2.1',
+            features: ['session_authority', 'centralized_auth', 'ui_coordination', 'secure_handshake'],
+            timestamp: Date.now()
+        });
+        
+        // Start handshake retry mechanism
+        initiateHandshakeRetry();
+    } catch (error) {
+        safeLogError('Marketplace', 'startHandshakeProtocol', error);
+    }
 }
 
 /**
@@ -596,48 +695,56 @@ export function initiateHandshakeRetry() {
         return;
     }
     
-    // Calculate delay with exponential backoff
-    const delay = handshakeRetryDelay * Math.pow(1.5, handshakeRetryCount);
-    handshakeRetryCount++;
-    
-    setTimeout(() => {
-        if (!handshakeComplete) {
-            // Send REQUEST_SESSION
-            sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
-                id: parentCommunicationId,
-                retryCount: handshakeRetryCount,
-                lastAttempt: Date.now()
-            });
-            
-            // Schedule next retry if still not complete
+    try {
+        // Calculate delay with exponential backoff
+        const delay = handshakeRetryDelay * Math.pow(1.5, handshakeRetryCount);
+        handshakeRetryCount++;
+        
+        setTimeout(() => {
             if (!handshakeComplete) {
-                initiateHandshakeRetry();
+                // Send REQUEST_SESSION
+                sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+                    id: parentCommunicationId,
+                    retryCount: handshakeRetryCount,
+                    lastAttempt: Date.now()
+                });
+                
+                // Schedule next retry if still not complete
+                if (!handshakeComplete) {
+                    initiateHandshakeRetry();
+                }
             }
-        }
-    }, delay);
+        }, delay);
+    } catch (error) {
+        safeLogError('Marketplace', 'initiateHandshakeRetry', error);
+    }
 }
 
 /**
  * Handle parent ready signal
  */
 export function handleParentReady(message) {
-    parentSessionAuthority = {
-        ready: true,
-        version: message.version || '1.0',
-        capabilities: message.capabilities || [],
-        timestamp: Date.now()
-    };
-    
-    // Immediately request session data using secure handshake
-    sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
-        id: parentCommunicationId,
-        urgent: true,
-        requireValidation: true,
-        handshake: true
-    });
-    
-    // Reset retry counter since we made contact
-    handshakeRetryCount = 0;
+    try {
+        parentSessionAuthority = {
+            ready: true,
+            version: message.version || '1.0',
+            capabilities: message.capabilities || [],
+            timestamp: Date.now()
+        };
+        
+        // Immediately request session data using secure handshake
+        sendMessageToParent(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+            id: parentCommunicationId,
+            urgent: true,
+            requireValidation: true,
+            handshake: true
+        });
+        
+        // Reset retry counter since we made contact
+        handshakeRetryCount = 0;
+    } catch (error) {
+        safeLogError('Marketplace', 'handleParentReady', error);
+    }
 }
 
 /**
@@ -648,19 +755,19 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         return;
     }
     
-    // Validate session schema
-    if (!validateSessionSchema(sessionDataFromParent)) {
-        sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
-            error: 'INVALID_SESSION_SCHEMA',
-            received: Object.keys(sessionDataFromParent || {})
-        });
-        return;
-    }
-    
-    // Mark validation in progress
-    sessionValidationInProgress = true;
-    
     try {
+        // Validate session schema
+        if (!validateSessionSchema(sessionDataFromParent)) {
+            sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+                error: 'INVALID_SESSION_SCHEMA',
+                received: Object.keys(sessionDataFromParent || {})
+            });
+            return;
+        }
+        
+        // Mark validation in progress
+        sessionValidationInProgress = true;
+        
         // Process the session data
         processSessionData(sessionDataFromParent);
         
@@ -696,6 +803,7 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         bindUIAfterSession();
         
     } catch (error) {
+        safeLogError('Marketplace', 'handleSessionDataFromParent', error);
         sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
             error: 'SESSION_PROCESSING_FAILED',
             message: error.message
@@ -709,23 +817,27 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
  * Bind UI after session is validated
  */
 export function bindUIAfterSession() {
-    console.log('✅ [UI Binding] Binding UI components after session validation');
-    
-    // This function should be called by the UI layer
-    // For now, we'll trigger a custom event that the UI can listen to
-    const event = new CustomEvent('marketplaceSessionReady', {
-        detail: {
-            user: currentUser,
-            session: sessionData,
-            timestamp: Date.now()
+    try {
+        console.log('✅ [UI Binding] Binding UI components after session validation');
+        
+        // This function should be called by the UI layer
+        // For now, we'll trigger a custom event that the UI can listen to
+        const event = new CustomEvent('marketplaceSessionReady', {
+            detail: {
+                user: currentUser,
+                session: sessionData,
+                timestamp: Date.now()
+            }
+        });
+        window.dispatchEvent(event);
+        
+        // Also update any UI elements that might be waiting for session
+        const marketplaceContainer = safeGetElement('marketplaceContainer');
+        if (marketplaceContainer) {
+            marketplaceContainer.classList.add('session-ready');
         }
-    });
-    window.dispatchEvent(event);
-    
-    // Also update any UI elements that might be waiting for session
-    const marketplaceContainer = document.getElementById('marketplaceContainer');
-    if (marketplaceContainer) {
-        marketplaceContainer.classList.add('session-ready');
+    } catch (error) {
+        safeLogError('Marketplace', 'bindUIAfterSession', error, true);
     }
 }
 
@@ -733,92 +845,109 @@ export function bindUIAfterSession() {
  * Validate session schema
  */
 export function validateSessionSchema(session) {
-    if (!session || typeof session !== 'object') {
-        return false;
-    }
-    
-    // Check required fields
-    for (const field of SESSION_SCHEMA.required) {
-        if (!session.hasOwnProperty(field) || session[field] === undefined || session[field] === null) {
+    try {
+        if (!session || typeof session !== 'object') {
             return false;
         }
-    }
-    
-    // Validate userToken
-    if (!session.userToken || typeof session.userToken !== 'string' || session.userToken.length < 10) {
-        return false;
-    }
-    
-    // Validate expiresAt if present
-    if (session.expiresAt) {
-        const expiresDate = new Date(session.expiresAt);
-        if (isNaN(expiresDate.getTime())) {
+        
+        // Check required fields
+        for (const field of SESSION_SCHEMA.required) {
+            if (!session.hasOwnProperty(field) || session[field] === undefined || session[field] === null) {
+                return false;
+            }
+        }
+        
+        // Validate userToken
+        if (!session.userToken || typeof session.userToken !== 'string' || session.userToken.length < 10) {
             return false;
         }
+        
+        // Validate expiresAt if present
+        if (session.expiresAt) {
+            const expiresDate = new Date(session.expiresAt);
+            if (isNaN(expiresDate.getTime())) {
+                return false;
+            }
+        }
+        
+        return true;
+    } catch (error) {
+        safeLogError('Marketplace', 'validateSessionSchema', error, true);
+        return false;
     }
-    
-    return true;
 }
 
 /**
  * Process session data from parent
  */
 export function processSessionData(sessionDataFromParent) {
-    // Extract user data from session
-    const userDataFromSession = {
-        id: sessionDataFromParent.userId,
-        displayName: sessionDataFromParent.displayName || 'User',
-        email: sessionDataFromParent.email || '',
-        photoURL: sessionDataFromParent.photoURL || '',
-        isPremium: sessionDataFromParent.isPremium || false,
-        subscription: sessionDataFromParent.subscription || null,
-        trustLevel: sessionDataFromParent.trustLevel || 'new',
-        groups: sessionDataFromParent.groups || [],
-        friends: sessionDataFromParent.friends || []
-    };
-    
-    // Set current user
-    currentUser = userDataFromSession;
-    userData = userDataFromSession;
-    
-    // Store user token in centralized location (for API integration)
-    if (sessionDataFromParent.userToken) {
-        storeCentralizedToken(sessionDataFromParent.userToken);
+    try {
+        // Extract user data from session
+        const userDataFromSession = {
+            id: sessionDataFromParent.userId,
+            displayName: sessionDataFromParent.displayName || 'User',
+            email: sessionDataFromParent.email || '',
+            photoURL: sessionDataFromParent.photoURL || '',
+            isPremium: sessionDataFromParent.isPremium || false,
+            subscription: sessionDataFromParent.subscription || null,
+            trustLevel: sessionDataFromParent.trustLevel || 'new',
+            groups: sessionDataFromParent.groups || [],
+            friends: sessionDataFromParent.friends || []
+        };
+        
+        // Set current user
+        currentUser = userDataFromSession;
+        userData = userDataFromSession;
+        
+        // Store user token in centralized location (for API integration)
+        if (sessionDataFromParent.userToken) {
+            storeCentralizedToken(sessionDataFromParent.userToken);
+        }
+        
+        // Mark parent data as loaded
+        parentDataLoaded = true;
+        dataFetchInProgress = false;
+    } catch (error) {
+        safeLogError('Marketplace', 'processSessionData', error);
     }
-    
-    // Mark parent data as loaded
-    parentDataLoaded = true;
-    dataFetchInProgress = false;
 }
 
 /**
  * Store token in centralized location
  */
 export function storeCentralizedToken(token) {
-    // Store in localStorage for backward compatibility
-    localStorage.setItem('USER_TOKEN', token);
+    try {
+        // Store in localStorage for backward compatibility
+        localStorage.setItem('USER_TOKEN', token);
+    } catch (error) {
+        safeLogError('Marketplace', 'storeCentralizedToken', error, true);
+    }
 }
 
 /**
  * Update local state from session
  */
 export function updateLocalStateFromSession(session) {
-    // Update user groups if provided
-    if (session.groups && Array.isArray(session.groups)) {
-        userGroups = session.groups;
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
-    }
-    
-    // Update user friends if provided
-    if (session.friends && Array.isArray(session.friends)) {
-        userFriends = session.friends;
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
-    }
-    
-    // Update subscription if provided
-    if (session.subscription) {
-        userSubscription = session.subscription;
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
+    try {
+        // Update user groups if provided
+        if (session.groups && Array.isArray(session.groups)) {
+            userGroups = session.groups;
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
+        }
+        
+        // Update user friends if provided
+        if (session.friends && Array.isArray(session.friends)) {
+            userFriends = session.friends;
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
+        }
+        
+        // Update subscription if provided
+        if (session.subscription) {
+            userSubscription = session.subscription;
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'updateLocalStateFromSession', error, true);
     }
 }
 
@@ -826,18 +955,22 @@ export function updateLocalStateFromSession(session) {
  * 4. Authentication Enforcement & UI Blocking
  */
 export function showMarketplaceUI() {
-    // Ensure marketplace UI is visible
-    const marketplaceContainer = document.getElementById('marketplaceContainer');
-    if (marketplaceContainer) {
-        marketplaceContainer.style.display = 'block';
-        marketplaceContainer.style.opacity = '1';
-        marketplaceContainer.style.visibility = 'visible';
-    }
-    
-    // Hide any loading indicators
-    const loadingIndicator = document.getElementById('loadingIndicator');
-    if (loadingIndicator) {
-        loadingIndicator.style.display = 'none';
+    try {
+        // Ensure marketplace UI is visible
+        const marketplaceContainer = safeGetElement('marketplaceContainer');
+        if (marketplaceContainer) {
+            marketplaceContainer.style.display = 'block';
+            marketplaceContainer.style.opacity = '1';
+            marketplaceContainer.style.visibility = 'visible';
+        }
+        
+        // Hide any loading indicators
+        const loadingIndicator = safeGetElement('loadingIndicator');
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'showMarketplaceUI', error, true);
     }
 }
 
@@ -846,26 +979,31 @@ export function showMarketplaceUI() {
  */
 export async function waitForSessionData() {
     return new Promise((resolve) => {
-        // Check if we already have session data
-        if (sessionData) {
-            resolve();
-            return;
-        }
-        
-        // Set timeout for session wait (30 seconds max)
-        const sessionWaitTimeout = setTimeout(() => {
-            handleSessionTimeout();
-            resolve();
-        }, 30000);
-        
-        // Check periodically if session is loaded
-        const checkInterval = setInterval(() => {
-            if (sessionData || !uiBlockedForSession) {
-                clearInterval(checkInterval);
-                clearTimeout(sessionWaitTimeout);
+        try {
+            // Check if we already have session data
+            if (sessionData) {
                 resolve();
+                return;
             }
-        }, 100);
+            
+            // Set timeout for session wait (30 seconds max)
+            const sessionWaitTimeout = setTimeout(() => {
+                handleSessionTimeout();
+                resolve();
+            }, 30000);
+            
+            // Check periodically if session is loaded
+            const checkInterval = setInterval(() => {
+                if (sessionData || !uiBlockedForSession) {
+                    clearInterval(checkInterval);
+                    clearTimeout(sessionWaitTimeout);
+                    resolve();
+                }
+            }, 100);
+        } catch (error) {
+            safeLogError('Marketplace', 'waitForSessionData', error, true);
+            resolve();
+        }
     });
 }
 
@@ -873,22 +1011,26 @@ export async function waitForSessionData() {
  * Handle session timeout
  */
 export function handleSessionTimeout() {
-    // Show notification to user
-    showNotification('Waiting for authentication. Some features may be limited.', 'warning');
-    
-    // Unblock UI but with limited functionality
-    uiBlockedForSession = false;
-    
-    // Use cached data if available
-    const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-    if (cachedUser) {
-        try {
-            const parsedUser = JSON.parse(cachedUser);
-            currentUser = parsedUser;
-            userData = parsedUser;
-        } catch (e) {
-            // Failed to parse cached user data
+    try {
+        // Show notification to user
+        showNotification('Waiting for authentication. Some features may be limited.', 'warning');
+        
+        // Unblock UI but with limited functionality
+        uiBlockedForSession = false;
+        
+        // Use cached data if available
+        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        if (cachedUser) {
+            try {
+                const parsedUser = JSON.parse(cachedUser);
+                currentUser = parsedUser;
+                userData = parsedUser;
+            } catch (e) {
+                // Failed to parse cached user data
+            }
         }
+    } catch (error) {
+        safeLogError('Marketplace', 'handleSessionTimeout', error, true);
     }
 }
 
@@ -896,33 +1038,37 @@ export function handleSessionTimeout() {
  * Handle session updates from parent
  */
 export function handleSessionUpdate(updatedData) {
-    // Validate update data
-    if (!updatedData || typeof updatedData !== 'object') {
-        return;
-    }
-    
-    // Merge with existing session data
-    if (sessionData) {
-        sessionData = { ...sessionData, ...updatedData };
-    } else {
-        sessionData = updatedData;
-    }
-    
-    // Update local state
-    if (updatedData.userId && currentUser) {
-        currentUser = { ...currentUser, ...updatedData };
-        userData = { ...userData, ...updatedData };
-        
-        // Save to localStorage (non-sensitive data only)
-        if (updatedData.displayName || updatedData.photoURL || updatedData.isPremium) {
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+    try {
+        // Validate update data
+        if (!updatedData || typeof updatedData !== 'object') {
+            return;
         }
         
-        // Update premium status if subscription changed
-        if (updatedData.subscription) {
-            userSubscription = updatedData.subscription;
+        // Merge with existing session data
+        if (sessionData) {
+            sessionData = { ...sessionData, ...updatedData };
+        } else {
+            sessionData = updatedData;
         }
+        
+        // Update local state
+        if (updatedData.userId && currentUser) {
+            currentUser = { ...currentUser, ...updatedData };
+            userData = { ...userData, ...updatedData };
+            
+            // Save to localStorage (non-sensitive data only)
+            if (updatedData.displayName || updatedData.photoURL || updatedData.isPremium) {
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+            }
+            
+            // Update premium status if subscription changed
+            if (updatedData.subscription) {
+                userSubscription = updatedData.subscription;
+            }
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'handleSessionUpdate', error, true);
     }
 }
 
@@ -930,59 +1076,76 @@ export function handleSessionUpdate(updatedData) {
  * Handle parent logout command
  */
 export function handleParentLogout() {
-    // Clear all session data
-    clearSessionData();
-    
-    // Show notification
-    showNotification('You have been logged out.', 'warning');
+    try {
+        // Clear all session data
+        clearSessionData();
+        
+        // Show notification
+        showNotification('You have been logged out.', 'warning');
+    } catch (error) {
+        safeLogError('Marketplace', 'handleParentLogout', error);
+    }
 }
 
 /**
  * Clear all session data
  */
 export function clearSessionData() {
-    // Clear session data
-    sessionData = null;
-    currentUser = null;
-    userData = null;
-    userSubscription = null;
-    handshakeComplete = false;
-    sessionValid = false;
-    handshakeInProgress = false;
-    
-    // Clear secure handshake state
-    clearTimeout(handshakeTimeout);
-    handshakeTimeout = null;
-    handshakeRequestSent = false;
-    sessionRetryAttempt = 0;
-    
-    // Clear sensitive data from localStorage
-    localStorage.removeItem('USER_TOKEN');
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
-    
-    // Reset parent communication flags
-    parentDataLoaded = false;
-    directAPILoaded = false;
+    try {
+        // Clear session data
+        sessionData = null;
+        currentUser = null;
+        userData = null;
+        userSubscription = null;
+        handshakeComplete = false;
+        sessionValid = false;
+        handshakeInProgress = false;
+        
+        // Clear secure handshake state
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = null;
+        handshakeRequestSent = false;
+        sessionRetryAttempt = 0;
+        
+        // Clear sensitive data from localStorage
+        localStorage.removeItem('USER_TOKEN');
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
+        
+        // Reset parent communication flags
+        parentDataLoaded = false;
+        directAPILoaded = false;
+    } catch (error) {
+        safeLogError('Marketplace', 'clearSessionData', error, true);
+    }
 }
 
 /**
  * Handle refresh UI command
  */
 export function handleRefreshUI() {
-    // UI refresh logic would be implemented here
+    try {
+        // UI refresh logic would be implemented here
+        console.log('[Marketplace] UI refresh requested');
+    } catch (error) {
+        safeLogError('Marketplace', 'handleRefreshUI', error, true);
+    }
 }
 
 /**
  * Handle force reload command
  */
 export function handleForceReload() {
-    // Save any unsaved data
-    saveAllMarketplaceData();
-    
-    // Reload the iframe
-    window.location.reload();
+    try {
+        // Save any unsaved data
+        saveAllMarketplaceData();
+        
+        // Reload the iframe
+        window.location.reload();
+    } catch (error) {
+        safeLogError('Marketplace', 'handleForceReload', error);
+    }
 }
 
 /**
@@ -993,8 +1156,8 @@ export function handleForceReload() {
  * Enhanced secure API call that uses parent session authority
  */
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
-    // Check if we have valid session
-    if (!sessionData || !sessionData.userToken) {
+    // Safety: Check if we have valid session
+    if (!hasValidSession()) {
         // If this is a critical call, request session refresh
         if (method !== 'GET' || endpoint.includes('/auth/')) {
             sendMessageToParent(PARENT_MESSAGE_TYPES.NEED_REFRESH, {
@@ -1025,41 +1188,51 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
  * Handle API errors with parent notification
  */
 export async function handleApiError(error, method, endpoint) {
-    // Notify parent of API error
-    sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
-        error: 'API_CALL_FAILED',
-        endpoint: endpoint,
-        method: method,
-        message: error.message
-    });
-    
-    // If auth error, handle it
-    if (error.status === 401 || error.status === 403) {
-        return handleUnauthorized();
+    try {
+        // Notify parent of API error
+        sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+            error: 'API_CALL_FAILED',
+            endpoint: endpoint,
+            method: method,
+            message: error.message
+        });
+        
+        // If auth error, handle it
+        if (error.status === 401 || error.status === 403) {
+            return handleUnauthorized();
+        }
+        
+        // Re-throw other errors
+        throw error;
+    } catch (error) {
+        safeLogError('Marketplace', 'handleApiError', error);
+        throw error;
     }
-    
-    // Re-throw other errors
-    throw error;
 }
 
 /**
  * Handle unauthorized responses with parent coordination
  */
 export async function handleUnauthorized() {
-    // Notify parent immediately
-    sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
-        error: 'UNAUTHORIZED_API_CALL',
-        timestamp: Date.now()
-    });
-    
-    // Clear local token
-    localStorage.removeItem('USER_TOKEN');
-    
-    // Show user notification
-    showNotification('Session expired. Please log in again.', 'error');
-    
-    // Wait for parent to handle session refresh
-    return null;
+    try {
+        // Notify parent immediately
+        sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+            error: 'UNAUTHORIZED_API_CALL',
+            timestamp: Date.now()
+        });
+        
+        // Clear local token
+        localStorage.removeItem('USER_TOKEN');
+        
+        // Show user notification
+        showNotification('Session expired. Please log in again.', 'error');
+        
+        // Wait for parent to handle session refresh
+        return null;
+    } catch (error) {
+        safeLogError('Marketplace', 'handleUnauthorized', error);
+        return null;
+    }
 }
 
 /**
@@ -1069,6 +1242,7 @@ export async function safeApiCall(method, endpoint, data = null) {
     try {
         return await secureApiCall(method, endpoint, data);
     } catch (error) {
+        safeLogError('Marketplace', 'safeApiCall', error, true);
         return null;
     }
 }
@@ -1077,86 +1251,102 @@ export async function safeApiCall(method, endpoint, data = null) {
  * 6. Fallback Handling & Reconnection
  */
 export function handleParentUnavailable() {
-    // Show reconnection UI
-    showReconnectionState();
-    
-    // Periodically attempt to reconnect
-    startReconnectionAttempts();
+    try {
+        // Show reconnection UI
+        showReconnectionState();
+        
+        // Periodically attempt to reconnect
+        startReconnectionAttempts();
+    } catch (error) {
+        safeLogError('Marketplace', 'handleParentUnavailable', error);
+    }
 }
 
 /**
  * Show reconnection state UI
  */
 export function showReconnectionState() {
-    // Create or show reconnection message
-    let reconnectMsg = document.getElementById('reconnectionMessage');
-    if (!reconnectMsg) {
-        reconnectMsg = document.createElement('div');
-        reconnectMsg.id = 'reconnectionMessage';
-        reconnectMsg.style.cssText = `
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: rgba(255, 193, 7, 0.9);
-            color: #000;
-            padding: 10px 15px;
-            border-radius: 8px;
-            font-size: 14px;
-            z-index: 9999;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        `;
-        reconnectMsg.innerHTML = `
-            <i class="fas fa-sync-alt fa-spin"></i>
-            <span>Reconnecting to parent session...</span>
-        `;
-        document.body.appendChild(reconnectMsg);
+    try {
+        // Create or show reconnection message
+        let reconnectMsg = safeGetElement('reconnectionMessage');
+        if (!reconnectMsg) {
+            reconnectMsg = document.createElement('div');
+            reconnectMsg.id = 'reconnectionMessage';
+            reconnectMsg.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: rgba(255, 193, 7, 0.9);
+                color: #000;
+                padding: 10px 15px;
+                border-radius: 8px;
+                font-size: 14px;
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            `;
+            reconnectMsg.innerHTML = `
+                <i class="fas fa-sync-alt fa-spin"></i>
+                <span>Reconnecting to parent session...</span>
+            `;
+            document.body.appendChild(reconnectMsg);
+        }
+        
+        reconnectMsg.style.display = 'flex';
+    } catch (error) {
+        safeLogError('Marketplace', 'showReconnectionState', error, true);
     }
-    
-    reconnectMsg.style.display = 'flex';
 }
 
 /**
  * Start reconnection attempts
  */
 export function startReconnectionAttempts() {
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 20;
-    
-    const attemptReconnection = () => {
-        if (handshakeComplete || reconnectAttempts >= maxReconnectAttempts) {
-            return;
-        }
+    try {
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 20;
         
-        reconnectAttempts++;
+        const attemptReconnection = () => {
+            if (handshakeComplete || reconnectAttempts >= maxReconnectAttempts) {
+                return;
+            }
+            
+            reconnectAttempts++;
+            
+            // Send handshake request
+            sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
+                id: parentCommunicationId,
+                type: 'marketplace',
+                reconnection: true,
+                attempt: reconnectAttempts,
+                timestamp: Date.now()
+            });
+            
+            // Schedule next attempt with exponential backoff
+            const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 30000);
+            setTimeout(attemptReconnection, delay);
+        };
         
-        // Send handshake request
-        sendMessageToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
-            id: parentCommunicationId,
-            type: 'marketplace',
-            reconnection: true,
-            attempt: reconnectAttempts,
-            timestamp: Date.now()
-        });
-        
-        // Schedule next attempt with exponential backoff
-        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 30000);
-        setTimeout(attemptReconnection, delay);
-    };
-    
-    // Start first attempt after 2 seconds
-    setTimeout(attemptReconnection, 2000);
+        // Start first attempt after 2 seconds
+        setTimeout(attemptReconnection, 2000);
+    } catch (error) {
+        safeLogError('Marketplace', 'startReconnectionAttempts', error, true);
+    }
 }
 
 /**
  * Hide reconnection state
  */
 export function hideReconnectionState() {
-    const reconnectMsg = document.getElementById('reconnectionMessage');
-    if (reconnectMsg) {
-        reconnectMsg.style.display = 'none';
+    try {
+        const reconnectMsg = safeGetElement('reconnectionMessage');
+        if (reconnectMsg) {
+            reconnectMsg.style.display = 'none';
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'hideReconnectionState', error, true);
     }
 }
 
@@ -1168,13 +1358,17 @@ export function hideReconnectionState() {
  * Setup connectivity listeners
  */
 export function setupConnectivityListeners() {
-    window.addEventListener('online', () => {
-        sendMessageToParent('ping', { type: 'connectivity_check' });
-    });
-    
-    window.addEventListener('offline', () => {
-        showNotification('Working offline - changes will sync when back online', 'info');
-    });
+    try {
+        window.addEventListener('online', () => {
+            sendMessageToParent('ping', { type: 'connectivity_check' });
+        });
+        
+        window.addEventListener('offline', () => {
+            showNotification('Working offline - changes will sync when back online', 'info');
+        });
+    } catch (error) {
+        safeLogError('Marketplace', 'setupConnectivityListeners', error, true);
+    }
 }
 
 /**
@@ -1193,7 +1387,7 @@ export function initializeTokenSystem() {
     tokenInitializationPromise = new Promise(async (resolve, reject) => {
         try {
             // Wait for session data
-            if (!sessionData || !sessionData.userToken) {
+            if (!hasValidSession()) {
                 throw new Error('No session data available for token initialization');
             }
             
@@ -1212,6 +1406,7 @@ export function initializeTokenSystem() {
             
         } catch (error) {
             isAuthReady = true; // Allow offline mode
+            safeLogError('Marketplace', 'initializeTokenSystem', error, true);
             reject(error);
         }
     });
@@ -1223,11 +1418,16 @@ export function initializeTokenSystem() {
  * Check if token is valid
  */
 export function isValidToken(token) {
-    if (!token || typeof token !== 'string') return false;
-    if (token === 'undefined' || token === 'null' || token === '') return false;
-    if (token.length < 10) return false;
-    
-    return true;
+    try {
+        if (!token || typeof token !== 'string') return false;
+        if (token === 'undefined' || token === 'null' || token === '') return false;
+        if (token.length < 10) return false;
+        
+        return true;
+    } catch (error) {
+        safeLogError('Marketplace', 'isValidToken', error, true);
+        return false;
+    }
 }
 
 /**
@@ -1236,19 +1436,30 @@ export function isValidToken(token) {
 export async function waitForApiJs() {
     return new Promise((resolve) => {
         const checkApiJs = () => {
-            if (typeof callApi === 'function' && typeof getUserToken === 'function') {
-                resolve();
-            } else {
+            try {
+                if (typeof callApi === 'function' && typeof getUserToken === 'function') {
+                    resolve();
+                } else {
+                    setTimeout(checkApiJs, 100);
+                }
+            } catch (error) {
+                safeLogError('Marketplace', 'waitForApiJs', error, true);
                 setTimeout(checkApiJs, 100);
             }
         };
         
         // Timeout after 5 seconds
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            safeLogError('Marketplace', 'waitForApiJs', new Error('Timeout waiting for api.core.js'), true);
             resolve();
         }, 5000);
         
         checkApiJs();
+        
+        // Clean up timeout
+        setTimeout(() => {
+            clearTimeout(timeoutId);
+        }, 6000);
     });
 }
 
@@ -1260,25 +1471,38 @@ export async function waitForApiJs() {
  * Handle initialization failure
  */
 export function handleInitializationFailure(error) {
-    // Report to parent
-    sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
-        error: 'INITIALIZATION_FAILED',
-        component: 'marketplace',
-        message: error.message,
-        stack: error.stack
-    });
-    
-    // Show user-friendly error
-    showNotification('Failed to load marketplace. Some features may be limited.', 'error');
-    
-    // Still show UI with limited functionality
-    showMarketplaceUI();
+    try {
+        // Report to parent
+        sendMessageToParent(PARENT_MESSAGE_TYPES.AUTH_ERROR, {
+            error: 'INITIALIZATION_FAILED',
+            component: 'marketplace',
+            message: error.message,
+            stack: error.stack
+        });
+        
+        // Show user-friendly error
+        showNotification('Failed to load marketplace. Some features may be limited.', 'error');
+        
+        // Still show UI with limited functionality
+        showMarketplaceUI();
+    } catch (reportError) {
+        safeLogError('Marketplace', 'handleInitializationFailure', reportError);
+    }
 }
 
 /**
  * Send message to parent with enhanced error handling
  */
 export function sendMessageToParent(type, data = {}) {
+    // Safety: Prevent duplicate message resend
+    const messageKey = `${type}:${JSON.stringify(data)}`;
+    const now = Date.now();
+    const lastSent = messageResendCache.get(messageKey);
+    
+    if (lastSent && (now - lastSent) < 1000) { // 1 second cooldown
+        return false;
+    }
+    
     if (!window.parent || window.parent === window) {
         return false;
     }
@@ -1288,7 +1512,7 @@ export function sendMessageToParent(type, data = {}) {
             type: type,
             source: 'marketplace_iframe',
             id: parentCommunicationId,
-            timestamp: Date.now(),
+            timestamp: now,
             version: '2.1',
             data: data
         };
@@ -1300,8 +1524,22 @@ export function sendMessageToParent(type, data = {}) {
         
         window.parent.postMessage(message, targetOrigin);
         
+        // Cache message to prevent rapid resend
+        messageResendCache.set(messageKey, now);
+        
+        // Clean old cache entries
+        if (messageResendCache.size > 100) {
+            const oneMinuteAgo = now - 60000;
+            for (const [key, timestamp] of messageResendCache.entries()) {
+                if (timestamp < oneMinuteAgo) {
+                    messageResendCache.delete(key);
+                }
+            }
+        }
+        
         return true;
     } catch (error) {
+        safeLogError('Marketplace', 'sendMessageToParent', error, true);
         return false;
     }
 }
@@ -1314,83 +1552,96 @@ export function sendMessageToParent(type, data = {}) {
  * Migrate legacy user data to session system
  */
 export function migrateLegacyUserData(legacyData) {
-    // Convert legacy format to session format
-    const sessionData = {
-        userId: legacyData.id || legacyData._id || 'unknown',
-        userToken: getCentralToken() || '',
-        expiresAt: new Date(Date.now() + 3600000).toISOString(),
-        displayName: legacyData.displayName || '',
-        email: legacyData.email || '',
-        photoURL: legacyData.photoURL || '',
-        isPremium: legacyData.isPremium || false,
-        subscription: legacyData.subscription || null,
-        trustLevel: legacyData.trustLevel || 'new'
-    };
-    
-    // Process as session data
-    handleSessionDataFromParent(sessionData);
+    try {
+        // Convert legacy format to session format
+        const sessionData = {
+            userId: legacyData.id || legacyData._id || 'unknown',
+            userToken: getCentralToken() || '',
+            expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            displayName: legacyData.displayName || '',
+            email: legacyData.email || '',
+            photoURL: legacyData.photoURL || '',
+            isPremium: legacyData.isPremium || false,
+            subscription: legacyData.subscription || null,
+            trustLevel: legacyData.trustLevel || 'new'
+        };
+        
+        // Process as session data
+        handleSessionDataFromParent(sessionData);
+    } catch (error) {
+        safeLogError('Marketplace', 'migrateLegacyUserData', error);
+    }
 }
 
 /**
  * Get centralized token with legacy support
  */
 export function getCentralToken() {
-    // Priority 1: Use session data if available
-    if (sessionData && sessionData.userToken) {
-        return sessionData.userToken;
-    }
-    
-    // Priority 2: Use imported getUserToken() if available
-    if (typeof getUserToken === 'function') {
-        try {
-            const token = getUserToken();
-            if (token) {
-                return token;
+    try {
+        // Priority 1: Use session data if available
+        if (sessionData && sessionData.userToken) {
+            return sessionData.userToken;
+        }
+        
+        // Priority 2: Use imported getUserToken() if available
+        if (typeof getUserToken === 'function') {
+            try {
+                const token = getUserToken();
+                if (token) {
+                    return token;
+                }
+            } catch (e) {
+                // Failed to get token from getUserToken()
             }
-        } catch (e) {
-            // Failed to get token from getUserToken()
         }
-    }
-    
-    // Priority 3: Check for legacy tokens
-    const legacyTokens = [
-        'accessToken',
-        'moodchat_token', 
-        'authToken',
-        'knecta_auth_token',
-        'USER_TOKEN'
-    ];
-    
-    for (const tokenKey of legacyTokens) {
-        const legacyToken = localStorage.getItem(tokenKey);
-        if (legacyToken) {
-            return legacyToken;
+        
+        // Priority 3: Check for legacy tokens
+        const legacyTokens = [
+            'accessToken',
+            'moodchat_token', 
+            'authToken',
+            'knecta_auth_token',
+            'USER_TOKEN'
+        ];
+        
+        for (const tokenKey of legacyTokens) {
+            const legacyToken = localStorage.getItem(tokenKey);
+            if (legacyToken) {
+                return legacyToken;
+            }
         }
+        
+        return null;
+    } catch (error) {
+        safeLogError('Marketplace', 'getCentralToken', error, true);
+        return null;
     }
-    
-    return null;
 }
 
 /**
  * Handle standalone mode (not in iframe)
  */
 export function handleStandaloneMode() {
-    // Show notification
-    showNotification('Running in standalone mode. Parent coordination disabled.', 'warning');
-    
-    // Unblock UI
-    uiBlockedForSession = false;
-    
-    // Try to load user data from localStorage
-    const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
-    if (cachedUser) {
-        try {
-            const parsedUser = JSON.parse(cachedUser);
-            currentUser = parsedUser;
-            userData = parsedUser;
-        } catch (e) {
-            // Failed to parse cached user data
+    try {
+        // Show notification
+        showNotification('Running in standalone mode. Parent coordination disabled.', 'warning');
+        
+        // Unblock UI
+        uiBlockedForSession = false;
+        
+        // Try to load user data from localStorage
+        const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        if (cachedUser) {
+            try {
+                const parsedUser = JSON.parse(cachedUser);
+                currentUser = parsedUser;
+                userData = parsedUser;
+            } catch (e) {
+                // Failed to parse cached user data
+            }
         }
+    } catch (error) {
+        safeLogError('Marketplace', 'handleStandaloneMode', error, true);
     }
 }
 
@@ -1402,39 +1653,46 @@ export async function bootstrapIframe() {
         return;
     }
     
-    // Start secure handshake protocol
-    await startSecureHandshakeProtocol();
-    
-    // Wait for session data
-    if (!sessionData) {
-        // Wait a bit for handshake to complete
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    // Wait for token system initialization
     try {
-        await tokenInitializationPromise;
-    } catch (error) {
-        // Continue offline
-    }
-    
-    // Load cached data for immediate UI
-    loadCachedDataInstantly();
-    
-    // Verify auth if we have a token
-    if (sessionData && sessionData.userToken) {
-        try {
-            // Try to validate via secure API call
-            const userResponse = await secureApiCall('GET', '/api/auth/verify');
-            if (userResponse && userResponse.valid) {
-                // Session verified
-            }
-        } catch (error) {
-            // Continue with cached user
+        // Start secure handshake protocol
+        await startSecureHandshakeProtocol();
+        
+        // Wait for session data
+        if (!sessionData) {
+            // Wait a bit for handshake to complete
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
+        
+        // Wait for token system initialization
+        if (tokenInitializationPromise) {
+            try {
+                await tokenInitializationPromise;
+            } catch (error) {
+                // Continue offline
+            }
+        }
+        
+        // Load cached data for immediate UI
+        loadCachedDataInstantly();
+        
+        // Verify auth if we have a token
+        if (hasValidSession()) {
+            try {
+                // Try to validate via secure API call
+                const userResponse = await secureApiCall('GET', '/api/auth/verify');
+                if (userResponse && userResponse.valid) {
+                    // Session verified
+                }
+            } catch (error) {
+                // Continue with cached user
+            }
+        }
+        
+        isBootstrapped = true;
+    } catch (error) {
+        safeLogError('Marketplace', 'bootstrapIframe', error);
+        isBootstrapped = true; // Mark as bootstrapped anyway to prevent loops
     }
-    
-    isBootstrapped = true;
 }
 
 // Load cached data for instant display
@@ -1614,15 +1872,19 @@ export function loadCachedDataInstantly() {
         }
         
     } catch (error) {
-        // Error in instant cache load
+        safeLogError('Marketplace', 'loadCachedDataInstantly', error, true);
     }
 }
 
 export async function initializeEnhancedMarketplace() {
-    checkDarkMode();
-    await checkUserPremiumStatus();
-    await loadEnhancedMarketplaceData();
-    cleanupExpiredListings();
+    try {
+        checkDarkMode();
+        await checkUserPremiumStatus();
+        await loadEnhancedMarketplaceData();
+        cleanupExpiredListings();
+    } catch (error) {
+        safeLogError('Marketplace', 'initializeEnhancedMarketplace', error);
+    }
 }
 
 export async function checkUserPremiumStatus() {
@@ -1646,7 +1908,7 @@ export async function checkUserPremiumStatus() {
         }
         
     } catch (error) {
-        // Error checking premium status
+        safeLogError('Marketplace', 'checkUserPremiumStatus', error, true);
     }
 }
 
@@ -1668,6 +1930,7 @@ export async function loadEnhancedMarketplaceData() {
         updateListingCounts();
         
     } catch (error) {
+        safeLogError('Marketplace', 'loadEnhancedMarketplaceData', error);
         generateSampleMarketplaceData();
     }
 }
@@ -1684,6 +1947,7 @@ export async function loadListingsFromBackend() {
         }
         
     } catch (error) {
+        safeLogError('Marketplace', 'loadListingsFromBackend', error, true);
         throw error;
     }
 }
@@ -1698,7 +1962,7 @@ export async function loadUserGroups() {
         }
         
     } catch (error) {
-        // Error loading user groups
+        safeLogError('Marketplace', 'loadUserGroups', error, true);
     }
 }
 
@@ -1712,7 +1976,7 @@ export async function loadUserFriends() {
         }
         
     } catch (error) {
-        // Error loading user friends
+        safeLogError('Marketplace', 'loadUserFriends', error, true);
     }
 }
 
@@ -1728,7 +1992,7 @@ export async function loadTeamMembers() {
         }
         
     } catch (error) {
-        // Error loading team members
+        safeLogError('Marketplace', 'loadTeamMembers', error, true);
     }
 }
 
@@ -1753,6 +2017,7 @@ export async function inviteTeamMemberWrapper(email, role = 'member') {
         return false;
         
     } catch (error) {
+        safeLogError('Marketplace', 'inviteTeamMemberWrapper', error);
         showNotification(`Failed to invite team member: ${error.message}`, 'error');
         return false;
     }
@@ -1768,7 +2033,7 @@ export async function loadLeaderboard() {
         }
         
     } catch (error) {
-        // Error loading leaderboard
+        safeLogError('Marketplace', 'loadLeaderboard', error, true);
     }
 }
 
@@ -1784,7 +2049,7 @@ export async function loadAnalyticsData() {
         }
         
     } catch (error) {
-        // Error loading analytics
+        safeLogError('Marketplace', 'loadAnalyticsData', error, true);
     }
 }
 
@@ -1798,7 +2063,7 @@ export async function loadPremiumFeatures() {
         }
         
     } catch (error) {
-        // Error loading premium features
+        safeLogError('Marketplace', 'loadPremiumFeatures', error, true);
     }
 }
 
@@ -1811,257 +2076,315 @@ export async function loadSpotlightListingsFromBackend() {
         }
         
     } catch (error) {
-        // Error loading spotlight listings
+        safeLogError('Marketplace', 'loadSpotlightListingsFromBackend', error, true);
     }
 }
 
 export function updateListingCounts() {
-    updateAvailableListingsCount();
+    try {
+        updateAvailableListingsCount();
+    } catch (error) {
+        safeLogError('Marketplace', 'updateListingCounts', error, true);
+    }
 }
 
 export function updateAvailableListingsCount() {
-    // Implementation would go here
+    try {
+        // Implementation would go here
+        // For now, just a stub
+    } catch (error) {
+        safeLogError('Marketplace', 'updateAvailableListingsCount', error, true);
+    }
 }
 
 export function isUserPremium() {
-    return userSubscription && userSubscription.status === 'active';
+    try {
+        return userSubscription && userSubscription.status === 'active';
+    } catch (error) {
+        safeLogError('Marketplace', 'isUserPremium', error, true);
+        return false;
+    }
 }
 
 export function isListingVisibleToUser(listing) {
-    if (isListingExpired(listing)) {
+    try {
+        if (!listing) return false;
+        
+        if (isListingExpired(listing)) {
+            return false;
+        }
+        
+        const currentUserId = currentUser?.id || currentUser?._id;
+        if (!currentUserId) return false;
+        
+        if (listing.visibility === TRUST_CIRCLES.FRIENDS) {
+            return userFriends.some(friend => friend.id === listing.userId) || listing.userId === currentUserId;
+        } else if (listing.visibility === TRUST_CIRCLES.GROUPS) {
+            return listing.allowedGroups && listing.allowedGroups.some(groupId => 
+                userGroups.some(group => group.id === groupId)
+            ) || listing.userId === currentUserId;
+        } else if (listing.visibility === TRUST_CIRCLES.SELECTED) {
+            return listing.allowedUsers && listing.allowedUsers.includes(currentUserId) || listing.userId === currentUserId;
+        } else if (listing.visibility === TRUST_CIRCLES.PREMIUM) {
+            return isUserPremium() || listing.userId === currentUserId;
+        } else if (listing.visibility === TRUST_CIRCLES.MICRO) {
+            return (isUserPremium() && listing.allowedUsers && listing.allowedUsers.includes(currentUserId)) || listing.userId === currentUserId;
+        }
+        
+        return true;
+    } catch (error) {
+        safeLogError('Marketplace', 'isListingVisibleToUser', error, true);
         return false;
     }
-    
-    if (listing.visibility === TRUST_CIRCLES.FRIENDS) {
-        return userFriends.some(friend => friend.id === listing.userId) || listing.userId === currentUser?.id;
-    } else if (listing.visibility === TRUST_CIRCLES.GROUPS) {
-        return listing.allowedGroups && listing.allowedGroups.some(groupId => 
-            userGroups.some(group => group.id === groupId)
-        ) || listing.userId === currentUser?.id;
-    } else if (listing.visibility === TRUST_CIRCLES.SELECTED) {
-        return listing.allowedUsers && listing.allowedUsers.includes(currentUser?.id) || listing.userId === currentUser?.id;
-    } else if (listing.visibility === TRUST_CIRCLES.PREMIUM) {
-        return isUserPremium() || listing.userId === currentUser?.id;
-    } else if (listing.visibility === TRUST_CIRCLES.MICRO) {
-        return (isUserPremium() && listing.allowedUsers && listing.allowedUsers.includes(currentUser?.id)) || listing.userId === currentUser?.id;
-    }
-    
-    return true;
 }
 
 export function filterListingsByMood(listings, mood) {
-    switch (mood) {
-        case MOOD_CONTEXTS.HELP:
-            return listings.filter(listing => 
-                listing.availability === AVAILABILITY.URGENT || 
-                listing.moodContext === MOOD_CONTEXTS.URGENT
-            );
-        case MOOD_CONTEXTS.LEARN:
-            return listings.filter(listing => 
-                listing.type === LISTING_TYPES.DIGITAL ||
-                listing.category?.toLowerCase().includes('tutor') ||
-                listing.category?.toLowerCase().includes('lesson') ||
-                listing.title?.toLowerCase().includes('learn')
-            );
-        case MOOD_CONTEXTS.URGENT:
-            return listings.filter(listing => 
-                listing.availability === AVAILABILITY.URGENT ||
-                listing.expiresSoon
-            );
-        case MOOD_CONTEXTS.CREATIVE:
-            return listings.filter(listing => 
-                listing.category?.toLowerCase().includes('art') ||
-                listing.category?.toLowerCase().includes('design') ||
-                listing.category?.toLowerCase().includes('creative') ||
-                listing.template === 'creative'
-            );
-        case MOOD_CONTEXTS.BUSINESS:
-            return listings.filter(listing => 
-                listing.category?.toLowerCase().includes('business') ||
-                listing.category?.toLowerCase().includes('consult') ||
-                listing.template === 'business' ||
-                listing.template === 'vip' ||
-                listing.premium === true
-            );
-        default:
-            return listings;
+    try {
+        if (!Array.isArray(listings)) return [];
+        
+        switch (mood) {
+            case MOOD_CONTEXTS.HELP:
+                return listings.filter(listing => 
+                    listing.availability === AVAILABILITY.URGENT || 
+                    listing.moodContext === MOOD_CONTEXTS.URGENT
+                );
+            case MOOD_CONTEXTS.LEARN:
+                return listings.filter(listing => 
+                    listing.type === LISTING_TYPES.DIGITAL ||
+                    (listing.category && listing.category.toLowerCase().includes('tutor')) ||
+                    (listing.category && listing.category.toLowerCase().includes('lesson')) ||
+                    (listing.title && listing.title.toLowerCase().includes('learn'))
+                );
+            case MOOD_CONTEXTS.URGENT:
+                return listings.filter(listing => 
+                    listing.availability === AVAILABILITY.URGENT ||
+                    listing.expiresSoon
+                );
+            case MOOD_CONTEXTS.CREATIVE:
+                return listings.filter(listing => 
+                    (listing.category && listing.category.toLowerCase().includes('art')) ||
+                    (listing.category && listing.category.toLowerCase().includes('design')) ||
+                    (listing.category && listing.category.toLowerCase().includes('creative')) ||
+                    listing.template === 'creative'
+                );
+            case MOOD_CONTEXTS.BUSINESS:
+                return listings.filter(listing => 
+                    (listing.category && listing.category.toLowerCase().includes('business')) ||
+                    (listing.category && listing.category.toLowerCase().includes('consult')) ||
+                    listing.template === 'business' ||
+                    listing.template === 'vip' ||
+                    listing.premium === true
+                );
+            default:
+                return listings;
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'filterListingsByMood', error, true);
+        return listings || [];
     }
 }
 
 export function getTrustIndicator(userId, trustLevel) {
-    if (trustLevel) {
-        return `<span class="trust-indicator ${TRUST_INDICATORS[trustLevel.toUpperCase()]?.class || 'trust-new'}">${TRUST_INDICATORS[trustLevel.toUpperCase()]?.text || 'New'}</span>`;
+    try {
+        if (trustLevel) {
+            return `<span class="trust-indicator ${TRUST_INDICATORS[trustLevel.toUpperCase()]?.class || 'trust-new'}">${TRUST_INDICATORS[trustLevel.toUpperCase()]?.text || 'New'}</span>`;
+        }
+        
+        return '<span class="trust-indicator trust-new">New</span>';
+    } catch (error) {
+        safeLogError('Marketplace', 'getTrustIndicator', error, true);
+        return '<span class="trust-indicator trust-new">New</span>';
     }
-    
-    return '<span class="trust-indicator trust-new">New</span>';
 }
 
 export async function trackListingView(listingId) {
-    if (!analyticsData.views) analyticsData.views = 0;
-    analyticsData.views++;
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
-    
     try {
-        safeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
+        if (!analyticsData.views) analyticsData.views = 0;
+        analyticsData.views++;
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
+        
+        await safeApiCall('POST', `/api/marketplace/listings/${listingId}/view`);
     } catch (error) {
-        // Error tracking view
+        safeLogError('Marketplace', 'trackListingView', error, true);
     }
 }
 
 export function updateTrustStats(action) {
-    if (!trustStats[action]) trustStats[action] = 0;
-    trustStats[action]++;
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
+    try {
+        if (!trustStats[action]) trustStats[action] = 0;
+        trustStats[action]++;
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
+    } catch (error) {
+        safeLogError('Marketplace', 'updateTrustStats', error, true);
+    }
 }
 
 // Premium Listing Creation Functions
 export async function createPremiumServiceListing(title, description, premiumOptions = {}) {
-    const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    
-    const listing = {
-        id: listingId,
-        userId: currentUser?.id || currentUser?._id,
-        user: userData,
-        type: LISTING_TYPES.SERVICE,
-        title: title,
-        description: description,
-        price: premiumOptions.price,
-        availability: premiumOptions.availability || AVAILABILITY.FREE,
-        visibility: premiumOptions.visibility || TRUST_CIRCLES.FRIENDS,
-        moodContext: premiumOptions.moodContext,
-        template: premiumOptions.template,
-        featured: premiumOptions.featured || false,
-        boosted: premiumOptions.boosted || false,
-        verified: premiumOptions.verified || false,
-        videoIntro: premiumOptions.videoIntro,
-        acceptsTips: premiumOptions.acceptsTips || false,
-        autoRenew: premiumOptions.autoRenew || false,
-        teamMembers: premiumOptions.teamMembers || [],
-        allowedGroups: premiumOptions.allowedGroups,
-        allowedUsers: premiumOptions.allowedUsers,
-        visibilitySchedule: premiumOptions.visibilitySchedule,
-        expiresAt: premiumOptions.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
-        privateNotes: premiumOptions.privateNotes,
-        teamNotes: premiumOptions.teamNotes,
-        premium: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-    };
-    
-    if (premiumOptions.featured) {
-        await processFeaturedListing(listing);
-    }
-    
-    if (premiumOptions.boosted) {
-        await processBoostedListing(listing);
-    }
-    
-    myListings.unshift(listing);
-    
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-    
-    const premiumListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || '[]');
-    premiumListings.unshift(listing);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
-    
-    allListings.unshift(listing);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-    
     try {
-        const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
-        if (response && response.listing) {
-            listing.id = response.listing.id || listingId;
+        if (!hasValidUser()) {
+            throw new Error('User not authenticated');
         }
+        
+        const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        const listing = {
+            id: listingId,
+            userId: currentUser?.id || currentUser?._id,
+            user: userData,
+            type: LISTING_TYPES.SERVICE,
+            title: title,
+            description: description,
+            price: premiumOptions.price,
+            availability: premiumOptions.availability || AVAILABILITY.FREE,
+            visibility: premiumOptions.visibility || TRUST_CIRCLES.FRIENDS,
+            moodContext: premiumOptions.moodContext,
+            template: premiumOptions.template,
+            featured: premiumOptions.featured || false,
+            boosted: premiumOptions.boosted || false,
+            verified: premiumOptions.verified || false,
+            videoIntro: premiumOptions.videoIntro,
+            acceptsTips: premiumOptions.acceptsTips || false,
+            autoRenew: premiumOptions.autoRenew || false,
+            teamMembers: premiumOptions.teamMembers || [],
+            allowedGroups: premiumOptions.allowedGroups,
+            allowedUsers: premiumOptions.allowedUsers,
+            visibilitySchedule: premiumOptions.visibilitySchedule,
+            expiresAt: premiumOptions.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
+            privateNotes: premiumOptions.privateNotes,
+            teamNotes: premiumOptions.teamNotes,
+            premium: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        
+        if (premiumOptions.featured) {
+            await processFeaturedListing(listing);
+        }
+        
+        if (premiumOptions.boosted) {
+            await processBoostedListing(listing);
+        }
+        
+        myListings.unshift(listing);
+        
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+        
+        const premiumListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || '[]');
+        premiumListings.unshift(listing);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
+        
+        allListings.unshift(listing);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+        
+        try {
+            const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
+            if (response && response.listing) {
+                listing.id = response.listing.id || listingId;
+            }
+        } catch (error) {
+            queueForSync(listing, 'premium_listing');
+        }
+        
+        updateListingStreak();
+        
+        updateTrustStats('listingCreated');
+        
+        if (premiumOptions.featured || premiumOptions.boosted) {
+            processPremiumPayment(listing, premiumOptions);
+        }
+        
+        return listing;
     } catch (error) {
-        queueForSync(listing, 'premium_listing');
+        safeLogError('Marketplace', 'createPremiumServiceListing', error);
+        return null;
     }
-    
-    updateListingStreak();
-    
-    updateTrustStats('listingCreated');
-    
-    if (premiumOptions.featured || premiumOptions.boosted) {
-        processPremiumPayment(listing, premiumOptions);
-    }
-    
-    return listing;
 }
 
 export async function createPremiumDigitalListing(title, description, fileData, premiumOptions = {}) {
-    const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    
-    const listing = {
-        id: listingId,
-        userId: currentUser?.id || currentUser?._id,
-        user: userData,
-        type: LISTING_TYPES.DIGITAL,
-        title: title,
-        description: description,
-        price: premiumOptions.price,
-        mediaUrl: fileData.url,
-        fileUrl: fileData.url,
-        fileName: fileData.name,
-        fileSize: fileData.size,
-        fileType: fileData.type,
-        visibility: premiumOptions.visibility || TRUST_CIRCLES.FRIENDS,
-        moodContext: premiumOptions.moodContext,
-        template: premiumOptions.template,
-        featured: premiumOptions.featured || false,
-        boosted: premiumOptions.boosted || false,
-        verified: premiumOptions.verified || false,
-        arPreview: premiumOptions.arPreview,
-        videoIntro: premiumOptions.videoIntro,
-        acceptsTips: premiumOptions.acceptsTips || false,
-        autoRenew: premiumOptions.autoRenew || false,
-        teamMembers: premiumOptions.teamMembers || [],
-        allowedGroups: premiumOptions.allowedGroups,
-        allowedUsers: premiumOptions.allowedUsers,
-        visibilitySchedule: premiumOptions.visibilitySchedule,
-        expiresAt: premiumOptions.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
-        privateNotes: premiumOptions.privateNotes,
-        teamNotes: premiumOptions.teamNotes,
-        premium: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-    };
-    
-    if (premiumOptions.featured) {
-        await processFeaturedListing(listing);
-    }
-    
-    if (premiumOptions.boosted) {
-        await processBoostedListing(listing);
-    }
-    
-    myListings.unshift(listing);
-    
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-    
-    const premiumListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || '[]');
-    premiumListings.unshift(listing);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
-    
-    allListings.unshift(listing);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-    
     try {
-        const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
-        if (response && response.listing) {
-            listing.id = response.listing.id || listingId;
+        if (!hasValidUser()) {
+            throw new Error('User not authenticated');
         }
+        
+        const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        const listing = {
+            id: listingId,
+            userId: currentUser?.id || currentUser?._id,
+            user: userData,
+            type: LISTING_TYPES.DIGITAL,
+            title: title,
+            description: description,
+            price: premiumOptions.price,
+            mediaUrl: fileData?.url || '',
+            fileUrl: fileData?.url || '',
+            fileName: fileData?.name || '',
+            fileSize: fileData?.size || 0,
+            fileType: fileData?.type || '',
+            visibility: premiumOptions.visibility || TRUST_CIRCLES.FRIENDS,
+            moodContext: premiumOptions.moodContext,
+            template: premiumOptions.template,
+            featured: premiumOptions.featured || false,
+            boosted: premiumOptions.boosted || false,
+            verified: premiumOptions.verified || false,
+            arPreview: premiumOptions.arPreview,
+            videoIntro: premiumOptions.videoIntro,
+            acceptsTips: premiumOptions.acceptsTips || false,
+            autoRenew: premiumOptions.autoRenew || false,
+            teamMembers: premiumOptions.teamMembers || [],
+            allowedGroups: premiumOptions.allowedGroups,
+            allowedUsers: premiumOptions.allowedUsers,
+            visibilitySchedule: premiumOptions.visibilitySchedule,
+            expiresAt: premiumOptions.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
+            privateNotes: premiumOptions.privateNotes,
+            teamNotes: premiumOptions.teamNotes,
+            premium: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        
+        if (premiumOptions.featured) {
+            await processFeaturedListing(listing);
+        }
+        
+        if (premiumOptions.boosted) {
+            await processBoostedListing(listing);
+        }
+        
+        myListings.unshift(listing);
+        
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+        
+        const premiumListings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS) || '[]');
+        premiumListings.unshift(listing);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.PREMIUM_LISTINGS, JSON.stringify(premiumListings));
+        
+        allListings.unshift(listing);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+        
+        try {
+            const response = await safeApiCall('POST', '/api/marketplace/listings/premium', listing);
+            if (response && response.listing) {
+                listing.id = response.listing.id || listingId;
+            }
+        } catch (error) {
+            queueForSync(listing, 'premium_listing');
+        }
+        
+        updateListingStreak();
+        
+        updateTrustStats('listingCreated');
+        
+        if (premiumOptions.featured || premiumOptions.boosted) {
+            processPremiumPayment(listing, premiumOptions);
+        }
+        
+        return listing;
     } catch (error) {
-        queueForSync(listing, 'premium_listing');
+        safeLogError('Marketplace', 'createPremiumDigitalListing', error);
+        return null;
     }
-    
-    updateListingStreak();
-    
-    updateTrustStats('listingCreated');
-    
-    if (premiumOptions.featured || premiumOptions.boosted) {
-        processPremiumPayment(listing, premiumOptions);
-    }
-    
-    return listing;
 }
 
 export async function processFeaturedListing(listing) {
@@ -2073,7 +2396,7 @@ export async function processFeaturedListing(listing) {
         await safeApiCall('POST', '/api/marketplace/spotlight', { listingId: listing.id });
         
     } catch (error) {
-        // Error processing featured listing
+        safeLogError('Marketplace', 'processFeaturedListing', error, true);
     }
 }
 
@@ -2085,14 +2408,14 @@ export async function processBoostedListing(listing) {
         });
         
     } catch (error) {
-        // Error processing boosted listing
+        safeLogError('Marketplace', 'processBoostedListing', error, true);
     }
 }
 
 export async function processPremiumPayment(listing, options) {
-    const paymentAmount = calculatePremiumCost(options);
-    
     try {
+        const paymentAmount = calculatePremiumCost(options);
+        
         const paymentData = {
             amount: paymentAmount,
             currency: 'USD',
@@ -2112,28 +2435,33 @@ export async function processPremiumPayment(listing, options) {
         }
         
     } catch (error) {
-        // Payment processing failed
+        safeLogError('Marketplace', 'processPremiumPayment', error, true);
     }
     
     return false;
 }
 
 export function calculatePremiumCost(options) {
-    let cost = 0;
-    
-    if (options.featured) cost += 5;
-    if (options.boosted) cost += 3;
-    if (options.verified) cost += 10;
-    if (options.autoRenew) cost += 1;
-    
-    return cost;
+    try {
+        let cost = 0;
+        
+        if (options.featured) cost += 5;
+        if (options.boosted) cost += 3;
+        if (options.verified) cost += 10;
+        if (options.autoRenew) cost += 1;
+        
+        return cost;
+    } catch (error) {
+        safeLogError('Marketplace', 'calculatePremiumCost', error, true);
+        return 0;
+    }
 }
 
 // Tip System
 export async function sendTip(listingId, amount, customAmount = null) {
-    const finalAmount = customAmount || amount;
-    
     try {
+        const finalAmount = customAmount || amount;
+        
         const tipData = {
             listingId: listingId,
             amount: finalAmount,
@@ -2150,7 +2478,7 @@ export async function sendTip(listingId, amount, customAmount = null) {
         }
         
     } catch (error) {
-        // Error sending tip
+        safeLogError('Marketplace', 'sendTip', error, true);
     }
     
     return false;
@@ -2158,139 +2486,174 @@ export async function sendTip(listingId, amount, customAmount = null) {
 
 // Analytics Functions
 export function updateAnalyticsData(type, value) {
-    if (!analyticsData[type]) {
-        analyticsData[type] = 0;
+    try {
+        if (!analyticsData[type]) {
+            analyticsData[type] = 0;
+        }
+        
+        analyticsData[type] += value;
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
+    } catch (error) {
+        safeLogError('Marketplace', 'updateAnalyticsData', error, true);
     }
-    
-    analyticsData[type] += value;
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
 }
 
 // Streak System
 export function updateListingStreak() {
-    const today = new Date().toDateString();
-    const yesterday = new Date(Date.now() - 86400000).toDateString();
-    
-    if (!streakData.lastListingDate) {
-        streakData = {
-            currentStreak: 1,
-            longestStreak: 1,
-            lastListingDate: today,
-            totalListings: 1
-        };
-    } else if (streakData.lastListingDate === today) {
-        streakData.totalListings++;
-    } else if (streakData.lastListingDate === yesterday) {
-        streakData.currentStreak++;
-        streakData.totalListings++;
-        streakData.lastListingDate = today;
+    try {
+        const today = new Date().toDateString();
+        const yesterday = new Date(Date.now() - 86400000).toDateString();
         
-        if (streakData.currentStreak > streakData.longestStreak) {
-            streakData.longestStreak = streakData.currentStreak;
+        if (!streakData.lastListingDate) {
+            streakData = {
+                currentStreak: 1,
+                longestStreak: 1,
+                lastListingDate: today,
+                totalListings: 1
+            };
+        } else if (streakData.lastListingDate === today) {
+            streakData.totalListings++;
+        } else if (streakData.lastListingDate === yesterday) {
+            streakData.currentStreak++;
+            streakData.totalListings++;
+            streakData.lastListingDate = today;
+            
+            if (streakData.currentStreak > streakData.longestStreak) {
+                streakData.longestStreak = streakData.currentStreak;
+            }
+        } else {
+            streakData.currentStreak = 1;
+            streakData.totalListings++;
+            streakData.lastListingDate = today;
         }
-    } else {
-        streakData.currentStreak = 1;
-        streakData.totalListings++;
-        streakData.lastListingDate = today;
+        
+        localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK_DATA, JSON.stringify(streakData));
+        
+        checkStreakRewards();
+    } catch (error) {
+        safeLogError('Marketplace', 'updateListingStreak', error, true);
     }
-    
-    localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK_DATA, JSON.stringify(streakData));
-    
-    checkStreakRewards();
 }
 
 export function checkStreakRewards() {
-    const rewards = {
-        3: '🎉 3-day streak! Keep going!',
-        7: '🏆 Weekly streak! You earned a badge!',
-        30: '👑 Monthly streak! Premium features unlocked for a week!'
-    };
-    
-    if (rewards[streakData.currentStreak]) {
-        showNotification(rewards[streakData.currentStreak], 'success');
+    try {
+        const rewards = {
+            3: '🎉 3-day streak! Keep going!',
+            7: '🏆 Weekly streak! You earned a badge!',
+            30: '👑 Monthly streak! Premium features unlocked for a week!'
+        };
         
-        if (streakData.currentStreak === 30) {
-            awardTemporaryPremium(7);
+        if (rewards[streakData.currentStreak]) {
+            showNotification(rewards[streakData.currentStreak], 'success');
+            
+            if (streakData.currentStreak === 30) {
+                awardTemporaryPremium(7);
+            }
         }
+    } catch (error) {
+        safeLogError('Marketplace', 'checkStreakRewards', error, true);
     }
 }
 
 export function awardTemporaryPremium(days) {
-    const tempPremium = {
-        status: 'active',
-        plan: 'temporary',
-        expiresAt: new Date(Date.now() + days * 86400000).toISOString(),
-        features: ['featured_listings', 'advanced_analytics']
-    };
-    
-    userSubscription = tempPremium;
-    localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(tempPremium));
+    try {
+        const tempPremium = {
+            status: 'active',
+            plan: 'temporary',
+            expiresAt: new Date(Date.now() + days * 86400000).toISOString(),
+            features: ['featured_listings', 'advanced_analytics']
+        };
+        
+        userSubscription = tempPremium;
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, JSON.stringify(tempPremium));
+    } catch (error) {
+        safeLogError('Marketplace', 'awardTemporaryPremium', error, true);
+    }
 }
 
 // Bulk Upload Functions
 export async function processBulkUpload(file) {
-    const reader = new FileReader();
-    
-    reader.onload = async function(e) {
-        const content = e.target.result;
-        let listings = [];
+    try {
+        const reader = new FileReader();
+        
+        reader.onload = async function(e) {
+            try {
+                const content = e.target.result;
+                let listings = [];
+                
+                if (file.type === 'application/json') {
+                    listings = JSON.parse(content);
+                } else if (file.type === 'text/csv') {
+                    listings = parseCSV(content);
+                }
+                
+                if (listings.length > 0) {
+                    await uploadBulkListings(listings);
+                }
+            } catch (error) {
+                safeLogError('Marketplace', 'processBulkUpload.reader', error);
+            }
+        };
         
         if (file.type === 'application/json') {
-            listings = JSON.parse(content);
+            reader.readAsText(file);
         } else if (file.type === 'text/csv') {
-            listings = parseCSV(content);
+            reader.readAsText(file);
         }
-        
-        if (listings.length > 0) {
-            await uploadBulkListings(listings);
-        }
-    };
-    
-    if (file.type === 'application/json') {
-        reader.readAsText(file);
-    } else if (file.type === 'text/csv') {
-        reader.readAsText(file);
+    } catch (error) {
+        safeLogError('Marketplace', 'processBulkUpload', error);
     }
 }
 
 export function parseCSV(content) {
-    const lines = content.split('\n');
-    const headers = lines[0].split(',');
-    const listings = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
+    try {
+        const lines = content.split('\n');
+        if (lines.length < 2) return [];
         
-        const values = lines[i].split(',');
-        const listing = {};
+        const headers = lines[0].split(',');
+        const listings = [];
         
-        for (let j = 0; j < headers.length; j++) {
-            listing[headers[j].trim()] = values[j] ? values[j].trim() : '';
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            
+            const values = lines[i].split(',');
+            const listing = {};
+            
+            for (let j = 0; j < headers.length; j++) {
+                listing[headers[j].trim()] = values[j] ? values[j].trim() : '';
+            }
+            
+            listings.push(listing);
         }
         
-        listings.push(listing);
+        return listings;
+    } catch (error) {
+        safeLogError('Marketplace', 'parseCSV', error);
+        return [];
     }
-    
-    return listings;
 }
 
 export async function uploadBulkListings(listings) {
-    for (let i = 0; i < listings.length; i++) {
-        const listing = listings[i];
-        
-        try {
-            const response = await safeApiCall('POST', '/api/marketplace/listings/bulk', listing);
+    try {
+        for (let i = 0; i < listings.length; i++) {
+            const listing = listings[i];
             
-            if (response && response.success) {
-                // Success handling
+            try {
+                const response = await safeApiCall('POST', '/api/marketplace/listings/bulk', listing);
+                
+                if (response && response.success) {
+                    // Success handling
+                }
+            } catch (error) {
+                safeLogError('Marketplace', 'uploadBulkListings.item', error, true);
             }
-        } catch (error) {
-            // Error handling
         }
+        
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+    } catch (error) {
+        safeLogError('Marketplace', 'uploadBulkListings', error);
     }
-    
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
 }
 
 // Export Functions
@@ -2307,7 +2670,7 @@ export async function exportAnalyticsData(format) {
             document.body.removeChild(link);
         }
     } catch (error) {
-        // Export failed
+        safeLogError('Marketplace', 'exportAnalyticsData', error);
     }
 }
 
@@ -2338,7 +2701,7 @@ export async function backupMarketplaceData() {
         URL.revokeObjectURL(url);
         
     } catch (error) {
-        // Backup failed
+        safeLogError('Marketplace', 'backupMarketplaceData', error);
     }
 }
 
@@ -2347,239 +2710,314 @@ export async function restoreMarketplaceData(file) {
         const reader = new FileReader();
         
         reader.onload = async function(e) {
-            const backupData = JSON.parse(e.target.result);
-            
-            if (!backupData.timestamp || !backupData.myListings) {
-                throw new Error('Invalid backup file');
+            try {
+                const backupData = JSON.parse(e.target.result);
+                
+                if (!backupData.timestamp || !backupData.myListings) {
+                    throw new Error('Invalid backup file');
+                }
+                
+                myListings = backupData.myListings || [];
+                savedItems = backupData.savedItems || [];
+                privateNotes = backupData.privateNotes || [];
+                offlineDrafts = backupData.offlineDrafts || [];
+                trustStats = backupData.trustStats || {};
+                analyticsData = backupData.analyticsData || {};
+                premiumFeatures = backupData.premiumFeatures || {};
+                
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS, offlineDrafts);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
+                saveToLocalStorage(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, premiumFeatures);
+            } catch (error) {
+                safeLogError('Marketplace', 'restoreMarketplaceData.reader', error);
+                showNotification('Failed to restore backup: Invalid file format', 'error');
             }
-            
-            myListings = backupData.myListings || [];
-            savedItems = backupData.savedItems || [];
-            privateNotes = backupData.privateNotes || [];
-            offlineDrafts = backupData.offlineDrafts || [];
-            trustStats = backupData.trustStats || {};
-            analyticsData = backupData.analyticsData || {};
-            premiumFeatures = backupData.premiumFeatures || {};
-            
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS, offlineDrafts);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, premiumFeatures);
+        };
+        
+        reader.onerror = function() {
+            showNotification('Failed to read backup file', 'error');
         };
         
         reader.readAsText(file);
         
     } catch (error) {
-        // Restore failed
+        safeLogError('Marketplace', 'restoreMarketplaceData', error);
     }
 }
 
 // Helper Functions
 export function isListingExpired(listing) {
-    if (!listing.expiresAt) return false;
-    return new Date(listing.expiresAt) < new Date();
+    try {
+        if (!listing || !listing.expiresAt) return false;
+        return new Date(listing.expiresAt) < new Date();
+    } catch (error) {
+        safeLogError('Marketplace', 'isListingExpired', error, true);
+        return false;
+    }
 }
 
 export function cleanupExpiredListings() {
-    const expiredListings = allListings.filter(listing => isListingExpired(listing));
-    if (expiredListings.length > 0) {
-        allListings = allListings.filter(listing => !isListingExpired(listing));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-        
-        myListings = myListings.filter(listing => !isListingExpired(listing));
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+    try {
+        const expiredListings = allListings.filter(listing => isListingExpired(listing));
+        if (expiredListings.length > 0) {
+            allListings = allListings.filter(listing => !isListingExpired(listing));
+            localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+            
+            myListings = myListings.filter(listing => !isListingExpired(listing));
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'cleanupExpiredListings', error, true);
     }
 }
 
 export function formatTimeAgo(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return `${Math.floor(diffDays / 7)}w ago`;
+    try {
+        if (!(date instanceof Date)) {
+            date = new Date(date);
+        }
+        
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return `${Math.floor(diffDays / 7)}w ago`;
+    } catch (error) {
+        safeLogError('Marketplace', 'formatTimeAgo', error, true);
+        return 'Unknown time';
+    }
 }
 
 export function showNotification(message, type = 'success') {
-    const notificationText = document.getElementById('notificationText');
-    if (!notificationText) return;
-    
-    notificationText.textContent = message;
-    
-    const notification = document.getElementById('notification');
-    if (!notification) return;
-    
-    notification.className = 'notification';
-    notification.classList.add(type);
-    
-    notification.classList.add('active');
-    
-    setTimeout(() => {
-        notification.classList.remove('active');
-    }, 3000);
+    try {
+        const notificationText = safeGetElement('notificationText');
+        if (!notificationText) return;
+        
+        notificationText.textContent = message;
+        
+        const notification = safeGetElement('notification');
+        if (!notification) return;
+        
+        notification.className = 'notification';
+        notification.classList.add(type);
+        
+        notification.classList.add('active');
+        
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.classList.remove('active');
+            }
+        }, 3000);
+    } catch (error) {
+        safeLogError('Marketplace', 'showNotification', error, true);
+    }
 }
 
 export function saveToLocalStorage(key, data) {
     try {
         localStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
-        // Error saving to localStorage
+        safeLogError('Marketplace', 'saveToLocalStorage', error, true);
     }
 }
 
 export function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    try {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    } catch (error) {
+        safeLogError('Marketplace', 'escapeHtml', error, true);
+        return text || '';
+    }
 }
 
 export function checkDarkMode() {
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.body.setAttribute('data-theme', 'dark');
+    try {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.body.setAttribute('data-theme', 'dark');
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'checkDarkMode', error, true);
     }
 }
 
 export function queueForSync(data, type) {
-    const syncQueue = JSON.parse(localStorage.getItem('knecta_sync_queue') || '[]');
-    syncQueue.push({
-        type: 'marketplace_' + type,
-        data: data,
-        timestamp: Date.now(),
-        retryCount: 0
-    });
-    localStorage.setItem('knecta_sync_queue', JSON.stringify(syncQueue));
+    try {
+        const syncQueue = JSON.parse(localStorage.getItem('knecta_sync_queue') || '[]');
+        syncQueue.push({
+            type: 'marketplace_' + type,
+            data: data,
+            timestamp: Date.now(),
+            retryCount: 0
+        });
+        localStorage.setItem('knecta_sync_queue', JSON.stringify(syncQueue));
+    } catch (error) {
+        safeLogError('Marketplace', 'queueForSync', error, true);
+    }
 }
 
 export function formatTimeRemaining(date) {
-    const now = new Date();
-    const diffMs = date - now;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    
-    if (diffDays > 0) return `in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
-    if (diffHours > 0) return `in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
-    return 'soon';
+    try {
+        const now = new Date();
+        const targetDate = new Date(date);
+        const diffMs = targetDate - now;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        
+        if (diffDays > 0) return `in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
+        if (diffHours > 0) return `in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
+        return 'soon';
+    } catch (error) {
+        safeLogError('Marketplace', 'formatTimeRemaining', error, true);
+        return 'soon';
+    }
 }
 
 export function formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + ' bytes';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    try {
+        if (bytes < 1024) return bytes + ' bytes';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    } catch (error) {
+        safeLogError('Marketplace', 'formatFileSize', error, true);
+        return 'Unknown size';
+    }
 }
 
 export function createServiceListing(title, description, options = {}) {
-    const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    
-    const listing = {
-        id: listingId,
-        userId: currentUser?.id || currentUser?._id,
-        user: userData,
-        type: LISTING_TYPES.SERVICE,
-        title: title,
-        description: description,
-        price: options.price,
-        availability: options.availability || AVAILABILITY.FREE,
-        visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
-        moodContext: options.moodContext,
-        template: options.template,
-        allowedGroups: options.allowedGroups,
-        allowedUsers: options.allowedUsers,
-        visibilitySchedule: options.visibilitySchedule,
-        expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
-        privateNotes: options.privateNotes,
-        teamNotes: options.teamNotes,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-    };
-    
-    myListings.unshift(listing);
-    
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-    
-    allListings.unshift(listing);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-    
     try {
-        safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
-            if (response && response.listing) {
-                listing.id = response.listing.id || listingId;
-            }
-        }).catch(error => {
+        if (!hasValidUser()) {
+            throw new Error('User not authenticated');
+        }
+        
+        const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        const listing = {
+            id: listingId,
+            userId: currentUser?.id || currentUser?._id,
+            user: userData,
+            type: LISTING_TYPES.SERVICE,
+            title: title,
+            description: description,
+            price: options.price,
+            availability: options.availability || AVAILABILITY.FREE,
+            visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
+            moodContext: options.moodContext,
+            template: options.template,
+            allowedGroups: options.allowedGroups,
+            allowedUsers: options.allowedUsers,
+            visibilitySchedule: options.visibilitySchedule,
+            expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
+            privateNotes: options.privateNotes,
+            teamNotes: options.teamNotes,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        
+        myListings.unshift(listing);
+        
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+        
+        allListings.unshift(listing);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+        
+        try {
+            safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
+                if (response && response.listing) {
+                    listing.id = response.listing.id || listingId;
+                }
+            }).catch(error => {
+                queueForSync(listing, 'listing');
+            });
+        } catch (error) {
             queueForSync(listing, 'listing');
-        });
+        }
+        
+        updateListingStreak();
+        
+        updateTrustStats('listingCreated');
+        
+        return listing;
     } catch (error) {
-        queueForSync(listing, 'listing');
+        safeLogError('Marketplace', 'createServiceListing', error);
+        return null;
     }
-    
-    updateListingStreak();
-    
-    updateTrustStats('listingCreated');
-    
-    return listing;
 }
 
 export function createDigitalListing(title, description, fileData, options = {}) {
-    const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    
-    const listing = {
-        id: listingId,
-        userId: currentUser?.id || currentUser?._id,
-        user: userData,
-        type: LISTING_TYPES.DIGITAL,
-        title: title,
-        description: description,
-        price: options.price,
-        mediaUrl: fileData.url,
-        fileUrl: fileData.url,
-        fileName: fileData.name,
-        fileSize: fileData.size,
-        fileType: fileData.type,
-        visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
-        moodContext: options.moodContext,
-        template: options.template,
-        allowedGroups: options.allowedGroups,
-        allowedUsers: options.allowedUsers,
-        visibilitySchedule: options.visibilitySchedule,
-        expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
-        privateNotes: options.privateNotes,
-        teamNotes: options.teamNotes,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-    };
-    
-    myListings.unshift(listing);
-    
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-    
-    allListings.unshift(listing);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
-    
     try {
-        safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
-            if (response && response.listing) {
-                listing.id = response.listing.id || listingId;
-            }
-        }).catch(error => {
+        if (!hasValidUser()) {
+            throw new Error('User not authenticated');
+        }
+        
+        const listingId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        const listing = {
+            id: listingId,
+            userId: currentUser?.id || currentUser?._id,
+            user: userData,
+            type: LISTING_TYPES.DIGITAL,
+            title: title,
+            description: description,
+            price: options.price,
+            mediaUrl: fileData?.url || '',
+            fileUrl: fileData?.url || '',
+            fileName: fileData?.name || '',
+            fileSize: fileData?.size || 0,
+            fileType: fileData?.type || '',
+            visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
+            moodContext: options.moodContext,
+            template: options.template,
+            allowedGroups: options.allowedGroups,
+            allowedUsers: options.allowedUsers,
+            visibilitySchedule: options.visibilitySchedule,
+            expiresAt: options.expiresAt || new Date(Date.now() + DURATION_OPTIONS['7d']).toISOString(),
+            privateNotes: options.privateNotes,
+            teamNotes: options.teamNotes,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        
+        myListings.unshift(listing);
+        
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+        
+        allListings.unshift(listing);
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+        
+        try {
+            safeApiCall('POST', '/api/marketplace/listings', listing).then(response => {
+                if (response && response.listing) {
+                    listing.id = response.listing.id || listingId;
+                }
+            }).catch(error => {
+                queueForSync(listing, 'listing');
+            });
+        } catch (error) {
             queueForSync(listing, 'listing');
-        });
+        }
+        
+        updateListingStreak();
+        
+        updateTrustStats('listingCreated');
+        
+        return listing;
     } catch (error) {
-        queueForSync(listing, 'listing');
+        safeLogError('Marketplace', 'createDigitalListing', error);
+        return null;
     }
-    
-    updateListingStreak();
-    
-    updateTrustStats('listingCreated');
-    
-    return listing;
 }
 
 // Digital File Download Function - FIXED
@@ -2675,7 +3113,7 @@ export async function downloadDigitalFile(listingId, fileUrl, fileName) {
                 }
             } catch (apiError) {
                 // Fall back to direct URL if API fails
-                console.warn('API download failed, using direct URL:', apiError.message);
+                safeLogError('Marketplace', 'downloadDigitalFile.api', apiError, true);
             }
         }
         
@@ -2728,10 +3166,7 @@ export async function downloadDigitalFile(listingId, fileUrl, fileName) {
         // Show error notification
         showNotification(`Download failed: ${error.message}`, 'error');
         
-        // Minimal console logging
-        if (console && console.error) {
-            console.error('Download error:', error.message);
-        }
+        safeLogError('Marketplace', 'downloadDigitalFile', error);
         
         return false;
     }
@@ -2739,245 +3174,262 @@ export async function downloadDigitalFile(listingId, fileUrl, fileName) {
 
 // Sample data generation for demo/offline mode
 export function generateSampleMarketplaceData() {
-    const sampleUsers = [
-        { id: 'user_1', displayName: 'Alex Johnson', photoURL: '', trustLevel: 'reliable', isPremium: true },
-        { id: 'user_2', displayName: 'Maria Garcia', photoURL: '', trustLevel: 'verified', isPremium: true },
-        { id: 'user_3', displayName: 'David Smith', photoURL: '', trustLevel: 'responsive' },
-        { id: 'user_4', displayName: 'Sarah Wilson', photoURL: '', trustLevel: 'pro', isPremium: true },
-        { id: 'user_5', displayName: 'James Brown', photoURL: '', trustLevel: 'new' },
-        { id: 'user_6', displayName: 'Emma Davis', photoURL: '', trustLevel: 'reliable' },
-        { id: 'user_7', displayName: 'Michael Lee', photoURL: '', trustLevel: 'responsive', isPremium: true },
-        { id: 'user_8', displayName: 'Sophia Taylor', photoURL: '', trustLevel: 'verified', isPremium: true }
-    ];
-    
-    localStorage.setItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS, JSON.stringify(sampleUsers));
-    
-    if (allListings.length === 0) {
-        const sampleListings = [
-            {
-                id: 'listing_1',
-                userId: 'user_1',
-                user: sampleUsers[0],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Professional Graphic Design',
-                description: 'Creating stunning logos, banners, and social media graphics. Fast delivery and unlimited revisions.',
-                price: '$50',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.PUBLIC,
-                moodContext: MOOD_CONTEXTS.CREATIVE,
-                template: TEMPLATE_TYPES.CREATIVE,
-                featured: true,
-                boosted: true,
-                verified: true,
-                premium: true,
-                createdAt: new Date(Date.now() - 3600000).toISOString(),
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_2',
-                userId: 'user_2',
-                user: sampleUsers[1],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Math Tutoring - All Levels',
-                description: 'Experienced math tutor specializing in algebra, calculus, and statistics. Online sessions available.',
-                price: '$30/hour',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.FRIENDS,
-                moodContext: MOOD_CONTEXTS.LEARN,
-                template: TEMPLATE_TYPES.COACHING,
-                premium: true,
-                createdAt: new Date(Date.now() - 7200000).toISOString(),
-                expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_3',
-                userId: 'user_3',
-                user: sampleUsers[2],
-                type: LISTING_TYPES.DIGITAL,
-                title: 'Resume Template Pack',
-                description: '10 professionally designed resume templates in Word and PDF format. ATS-friendly and customizable.',
-                price: '$15',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.PUBLIC,
-                moodContext: MOOD_CONTEXTS.BUSINESS,
-                template: TEMPLATE_TYPES.BUSINESS,
-                fileUrl: '#',
-                fileName: 'resume_templates.zip',
-                fileSize: '2.5 MB',
-                fileType: 'application/zip',
-                createdAt: new Date(Date.now() - 10800000).toISOString(),
-                expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_4',
-                userId: 'user_4',
-                user: sampleUsers[3],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Website Development',
-                description: 'Full-stack web development with React, Node.js, and MongoDB. Responsive design and SEO optimized.',
-                price: '$500+',
-                availability: AVAILABILITY.BUSY,
-                visibility: TRUST_CIRCLES.PREMIUM,
-                moodContext: MOOD_CONTEXTS.BUSINESS,
-                template: TEMPLATE_TYPES.BUSINESS,
-                featured: true,
-                premium: true,
-                createdAt: new Date(Date.now() - 14400000).toISOString(),
-                expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_5',
-                userId: 'user_5',
-                user: sampleUsers[4],
-                type: LISTING_TYPES.SERVICE,
-                title: 'Phone Repair Services',
-                description: 'Screen replacement, battery change, and software issues for all major smartphone brands.',
-                price: 'Starting at $40',
-                availability: AVAILABILITY.URGENT,
-                visibility: TRUST_CIRCLES.PUBLIC,
-                moodContext: MOOD_CONTEXTS.HELP,
-                template: TEMPLATE_TYPES.BASIC,
-                createdAt: new Date(Date.now() - 18000000).toISOString(),
-                expiresAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString()
-            },
-            {
-                id: 'listing_6',
-                userId: 'user_6',
-                user: sampleUsers[5],
-                type: LISTING_TYPES.DIGITAL,
-                title: 'Study Notes - Organic Chemistry',
-                description: 'Comprehensive notes covering all major topics in organic chemistry. Perfect for exam preparation.',
-                price: 'Free',
-                availability: AVAILABILITY.FREE,
-                visibility: TRUST_CIRCLES.GROUPS,
-                moodContext: MOOD_CONTEXTS.LEARN,
-                template: TEMPLATE_TYPES.DIGITAL,
-                fileUrl: '#',
-                fileName: 'organic_chemistry_notes.pdf',
-                fileSize: '3.2 MB',
-                fileType: 'application/pdf',
-                createdAt: new Date(Date.now() - 21600000).toISOString(),
-                expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
-            }
+    try {
+        const sampleUsers = [
+            { id: 'user_1', displayName: 'Alex Johnson', photoURL: '', trustLevel: 'reliable', isPremium: true },
+            { id: 'user_2', displayName: 'Maria Garcia', photoURL: '', trustLevel: 'verified', isPremium: true },
+            { id: 'user_3', displayName: 'David Smith', photoURL: '', trustLevel: 'responsive' },
+            { id: 'user_4', displayName: 'Sarah Wilson', photoURL: '', trustLevel: 'pro', isPremium: true },
+            { id: 'user_5', displayName: 'James Brown', photoURL: '', trustLevel: 'new' },
+            { id: 'user_6', displayName: 'Emma Davis', photoURL: '', trustLevel: 'reliable' },
+            { id: 'user_7', displayName: 'Michael Lee', photoURL: '', trustLevel: 'responsive', isPremium: true },
+            { id: 'user_8', displayName: 'Sophia Taylor', photoURL: '', trustLevel: 'verified', isPremium: true }
         ];
         
-        allListings = sampleListings;
-        localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.MARKETPLACE_USERS, JSON.stringify(sampleUsers));
         
-        const spotlightListings = sampleListings.filter(l => l.featured);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, JSON.stringify(spotlightListings));
-        
-        if (userFriends.length === 0) {
-            userFriends = sampleUsers.slice(0, 4);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_FRIENDS, JSON.stringify(userFriends));
-        }
-        
-        if (userGroups.length === 0) {
-            userGroups = [
-                { id: 'group_1', name: 'Students Union', memberCount: 45 },
-                { id: 'group_2', name: 'Freelancers Network', memberCount: 23 },
-                { id: 'group_3', name: 'Tech Enthusiasts', memberCount: 67 }
+        if (allListings.length === 0) {
+            const sampleListings = [
+                {
+                    id: 'listing_1',
+                    userId: 'user_1',
+                    user: sampleUsers[0],
+                    type: LISTING_TYPES.SERVICE,
+                    title: 'Professional Graphic Design',
+                    description: 'Creating stunning logos, banners, and social media graphics. Fast delivery and unlimited revisions.',
+                    price: '$50',
+                    availability: AVAILABILITY.FREE,
+                    visibility: TRUST_CIRCLES.PUBLIC,
+                    moodContext: MOOD_CONTEXTS.CREATIVE,
+                    template: TEMPLATE_TYPES.CREATIVE,
+                    featured: true,
+                    boosted: true,
+                    verified: true,
+                    premium: true,
+                    createdAt: new Date(Date.now() - 3600000).toISOString(),
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+                },
+                {
+                    id: 'listing_2',
+                    userId: 'user_2',
+                    user: sampleUsers[1],
+                    type: LISTING_TYPES.SERVICE,
+                    title: 'Math Tutoring - All Levels',
+                    description: 'Experienced math tutor specializing in algebra, calculus, and statistics. Online sessions available.',
+                    price: '$30/hour',
+                    availability: AVAILABILITY.FREE,
+                    visibility: TRUST_CIRCLES.FRIENDS,
+                    moodContext: MOOD_CONTEXTS.LEARN,
+                    template: TEMPLATE_TYPES.COACHING,
+                    premium: true,
+                    createdAt: new Date(Date.now() - 7200000).toISOString(),
+                    expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+                },
+                {
+                    id: 'listing_3',
+                    userId: 'user_3',
+                    user: sampleUsers[2],
+                    type: LISTING_TYPES.DIGITAL,
+                    title: 'Resume Template Pack',
+                    description: '10 professionally designed resume templates in Word and PDF format. ATS-friendly and customizable.',
+                    price: '$15',
+                    availability: AVAILABILITY.FREE,
+                    visibility: TRUST_CIRCLES.PUBLIC,
+                    moodContext: MOOD_CONTEXTS.BUSINESS,
+                    template: TEMPLATE_TYPES.BUSINESS,
+                    fileUrl: '#',
+                    fileName: 'resume_templates.zip',
+                    fileSize: '2.5 MB',
+                    fileType: 'application/zip',
+                    createdAt: new Date(Date.now() - 10800000).toISOString(),
+                    expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+                },
+                {
+                    id: 'listing_4',
+                    userId: 'user_4',
+                    user: sampleUsers[3],
+                    type: LISTING_TYPES.SERVICE,
+                    title: 'Website Development',
+                    description: 'Full-stack web development with React, Node.js, and MongoDB. Responsive design and SEO optimized.',
+                    price: '$500+',
+                    availability: AVAILABILITY.BUSY,
+                    visibility: TRUST_CIRCLES.PREMIUM,
+                    moodContext: MOOD_CONTEXTS.BUSINESS,
+                    template: TEMPLATE_TYPES.BUSINESS,
+                    featured: true,
+                    premium: true,
+                    createdAt: new Date(Date.now() - 14400000).toISOString(),
+                    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+                },
+                {
+                    id: 'listing_5',
+                    userId: 'user_5',
+                    user: sampleUsers[4],
+                    type: LISTING_TYPES.SERVICE,
+                    title: 'Phone Repair Services',
+                    description: 'Screen replacement, battery change, and software issues for all major smartphone brands.',
+                    price: 'Starting at $40',
+                    availability: AVAILABILITY.URGENT,
+                    visibility: TRUST_CIRCLES.PUBLIC,
+                    moodContext: MOOD_CONTEXTS.HELP,
+                    template: TEMPLATE_TYPES.BASIC,
+                    createdAt: new Date(Date.now() - 18000000).toISOString(),
+                    expiresAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString()
+                },
+                {
+                    id: 'listing_6',
+                    userId: 'user_6',
+                    user: sampleUsers[5],
+                    type: LISTING_TYPES.DIGITAL,
+                    title: 'Study Notes - Organic Chemistry',
+                    description: 'Comprehensive notes covering all major topics in organic chemistry. Perfect for exam preparation.',
+                    price: 'Free',
+                    availability: AVAILABILITY.FREE,
+                    visibility: TRUST_CIRCLES.GROUPS,
+                    moodContext: MOOD_CONTEXTS.LEARN,
+                    template: TEMPLATE_TYPES.DIGITAL,
+                    fileUrl: '#',
+                    fileName: 'organic_chemistry_notes.pdf',
+                    fileSize: '3.2 MB',
+                    fileType: 'application/pdf',
+                    createdAt: new Date(Date.now() - 21600000).toISOString(),
+                    expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+                }
             ];
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(userGroups));
-        }
-        
-        if (Object.keys(analyticsData).length === 0) {
-            analyticsData = {
-                views: 245,
-                saves: 42,
-                shares: 18,
-                messages: 56,
-                conversionRate: 12.5,
-                avgEngagement: 45,
-                viewsChange: 15,
-                savesChange: 8,
-                sharesChange: 22,
-                messagesChange: 5,
-                conversionChange: 3,
-                engagementChange: 10
-            };
-            localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
-        }
-        
-        if (leaderboardData.length === 0) {
-            leaderboardData = sampleUsers.map((user, index) => ({
-                ...user,
-                listingsCount: Math.floor(Math.random() * 20) + 5,
-                rating: (Math.random() * 2 + 3).toFixed(1),
-                successfulTransactions: Math.floor(Math.random() * 100) + 20,
-                points: Math.floor(Math.random() * 1000) + 500
-            })).sort((a, b) => b.points - a.points);
             
-            localStorage.setItem(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
+            allListings = sampleListings;
+            localStorage.setItem(LOCAL_STORAGE_KEYS.ALL_LISTINGS, JSON.stringify(allListings));
+            
+            const spotlightListings = sampleListings.filter(l => l.featured);
+            localStorage.setItem(LOCAL_STORAGE_KEYS.SPOTLIGHT_LISTINGS, JSON.stringify(spotlightListings));
+            
+            if (userFriends.length === 0) {
+                userFriends = sampleUsers.slice(0, 4);
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_FRIENDS, JSON.stringify(userFriends));
+            }
+            
+            if (userGroups.length === 0) {
+                userGroups = [
+                    { id: 'group_1', name: 'Students Union', memberCount: 45 },
+                    { id: 'group_2', name: 'Freelancers Network', memberCount: 23 },
+                    { id: 'group_3', name: 'Tech Enthusiasts', memberCount: 67 }
+                ];
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(userGroups));
+            }
+            
+            if (Object.keys(analyticsData).length === 0) {
+                analyticsData = {
+                    views: 245,
+                    saves: 42,
+                    shares: 18,
+                    messages: 56,
+                    conversionRate: 12.5,
+                    avgEngagement: 45,
+                    viewsChange: 15,
+                    savesChange: 8,
+                    sharesChange: 22,
+                    messagesChange: 5,
+                    conversionChange: 3,
+                    engagementChange: 10
+                };
+                localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
+            }
+            
+            if (leaderboardData.length === 0) {
+                leaderboardData = sampleUsers.map((user, index) => ({
+                    ...user,
+                    listingsCount: Math.floor(Math.random() * 20) + 5,
+                    rating: (Math.random() * 2 + 3).toFixed(1),
+                    successfulTransactions: Math.floor(Math.random() * 100) + 20,
+                    points: Math.floor(Math.random() * 1000) + 500
+                })).sort((a, b) => b.points - a.points);
+                
+                localStorage.setItem(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
+            }
         }
+    } catch (error) {
+        safeLogError('Marketplace', 'generateSampleMarketplaceData', error);
     }
 }
 
 export async function syncOfflineMarketplaceData() {
-    const syncQueue = JSON.parse(localStorage.getItem('knecta_sync_queue') || '[]');
-    const marketplaceItems = syncQueue.filter(item => item.type.startsWith('marketplace_'));
-    
-    if (marketplaceItems.length === 0) return;
-    
-    showNotification(`Syncing ${marketplaceItems.length} marketplace items...`, 'info');
-    
-    for (let i = 0; i < marketplaceItems.length; i++) {
-        const item = marketplaceItems[i];
-        try {
-            if (item.type === 'marketplace_listing') {
-                await safeApiCall('POST', '/api/marketplace/listings', item.data);
-                syncQueue.splice(syncQueue.indexOf(item), 1);
-            } else if (item.type === 'marketplace_premium_listing') {
-                await safeApiCall('POST', '/api/marketplace/listings/premium', item.data);
-                syncQueue.splice(syncQueue.indexOf(item), 1);
-            }
-        } catch (error) {
-            item.retryCount = (item.retryCount || 0) + 1;
-            
-            if (item.retryCount > 3) {
-                syncQueue.splice(syncQueue.indexOf(item), 1);
+    try {
+        const syncQueue = JSON.parse(localStorage.getItem('knecta_sync_queue') || '[]');
+        const marketplaceItems = syncQueue.filter(item => item.type.startsWith('marketplace_'));
+        
+        if (marketplaceItems.length === 0) return;
+        
+        showNotification(`Syncing ${marketplaceItems.length} marketplace items...`, 'info');
+        
+        for (let i = 0; i < marketplaceItems.length; i++) {
+            const item = marketplaceItems[i];
+            try {
+                if (item.type === 'marketplace_listing') {
+                    await safeApiCall('POST', '/api/marketplace/listings', item.data);
+                    syncQueue.splice(syncQueue.indexOf(item), 1);
+                } else if (item.type === 'marketplace_premium_listing') {
+                    await safeApiCall('POST', '/api/marketplace/listings/premium', item.data);
+                    syncQueue.splice(syncQueue.indexOf(item), 1);
+                }
+            } catch (error) {
+                item.retryCount = (item.retryCount || 0) + 1;
+                
+                if (item.retryCount > 3) {
+                    syncQueue.splice(syncQueue.indexOf(item), 1);
+                }
             }
         }
-    }
-    
-    localStorage.setItem('knecta_sync_queue', JSON.stringify(syncQueue));
-    
-    if (marketplaceItems.length > 0) {
-        showNotification('Marketplace data synced', 'success');
+        
+        localStorage.setItem('knecta_sync_queue', JSON.stringify(syncQueue));
+        
+        if (marketplaceItems.length > 0) {
+            showNotification('Marketplace data synced', 'success');
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'syncOfflineMarketplaceData', error);
     }
 }
 
 export function saveAllMarketplaceData() {
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS, offlineDrafts);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.STREAK_DATA, streakData);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, premiumFeatures);
-    
-    if (userSubscription) {
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
+    try {
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS, offlineDrafts);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.TRUST_STATS, trustStats);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.ANALYTICS, analyticsData);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.STREAK_DATA, streakData);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, premiumFeatures);
+        
+        if (userSubscription) {
+            saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'saveAllMarketplaceData', error, true);
     }
 }
 
 export function queueApiCall(method, endpoint, data, options) {
     return new Promise((resolve, reject) => {
-        apiCallQueue.push({
-            method,
-            endpoint,
-            data,
-            options,
-            resolve,
-            reject,
-            timestamp: Date.now()
-        });
-        
-        // Start processing queue if not already doing so
-        if (!isProcessingQueue) {
-            processApiCallQueue();
+        try {
+            apiCallQueue.push({
+                method,
+                endpoint,
+                data,
+                options,
+                resolve,
+                reject,
+                timestamp: Date.now()
+            });
+            
+            // Start processing queue if not already doing so
+            if (!isProcessingQueue) {
+                processApiCallQueue();
+            }
+        } catch (error) {
+            safeLogError('Marketplace', 'queueApiCall', error, true);
+            reject(error);
         }
     });
 }
@@ -2989,45 +3441,61 @@ export async function processApiCallQueue() {
     
     isProcessingQueue = true;
     
-    // Wait for token to be ready
     try {
-        await tokenInitializationPromise;
-    } catch (error) {
-        // Reject all queued calls
-        apiCallQueue.forEach(call => {
-            call.reject(new Error('Token initialization failed'));
-        });
-        apiCallQueue.length = 0;
-        isProcessingQueue = false;
-        return;
-    }
-    
-    // Process each call in the queue
-    while (apiCallQueue.length > 0) {
-        const call = apiCallQueue.shift();
-        
-        try {
-            const result = await secureApiCall(call.method, call.endpoint, call.data, call.options);
-            call.resolve(result);
-        } catch (error) {
-            call.reject(error);
+        // Wait for token to be ready
+        if (tokenInitializationPromise) {
+            try {
+                await tokenInitializationPromise;
+            } catch (error) {
+                // Reject all queued calls
+                apiCallQueue.forEach(call => {
+                    call.reject(new Error('Token initialization failed'));
+                });
+                apiCallQueue.length = 0;
+                isProcessingQueue = false;
+                return;
+            }
         }
         
-        // Small delay between calls to avoid overwhelming
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Process each call in the queue
+        while (apiCallQueue.length > 0) {
+            const call = apiCallQueue.shift();
+            
+            try {
+                const result = await secureApiCall(call.method, call.endpoint, call.data, call.options);
+                call.resolve(result);
+            } catch (error) {
+                call.reject(error);
+            }
+            
+            // Small delay between calls to avoid overwhelming
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'processApiCallQueue', error);
+    } finally {
+        isProcessingQueue = false;
     }
-    
-    isProcessingQueue = false;
 }
 
 // Authenticated API call wrapper for backward compatibility
 export async function authenticatedApiCall(method, endpoint, data = null) {
-    return await safeApiCall(method, endpoint, data);
+    try {
+        return await safeApiCall(method, endpoint, data);
+    } catch (error) {
+        safeLogError('Marketplace', 'authenticatedApiCall', error, true);
+        return null;
+    }
 }
 
 // Backward compatibility for existing code
 export async function makeApiCall(method, endpoint, data = null) {
-    return await secureApiCall(method, endpoint, data);
+    try {
+        return await secureApiCall(method, endpoint, data);
+    } catch (error) {
+        safeLogError('Marketplace', 'makeApiCall', error, true);
+        return null;
+    }
 }
 
 // Start background jobs only once
@@ -3038,55 +3506,68 @@ export function startBackgroundJobs() {
     
     backgroundJobsStarted = true;
     
-    // Start background data loading
-    setTimeout(() => {
-        loadEnhancedMarketplaceData().catch(() => {
-            // Background data load failed
-        });
-    }, 1000);
-    
-    // Check premium status in background
-    setTimeout(() => {
-        checkUserPremiumStatus().catch(() => {
-            // Premium status check failed
-        });
-    }, 1500);
+    try {
+        // Start background data loading
+        setTimeout(() => {
+            loadEnhancedMarketplaceData().catch((error) => {
+                safeLogError('Marketplace', 'startBackgroundJobs.loadEnhanced', error, true);
+            });
+        }, 1000);
+        
+        // Check premium status in background
+        setTimeout(() => {
+            checkUserPremiumStatus().catch((error) => {
+                safeLogError('Marketplace', 'startBackgroundJobs.checkPremium', error, true);
+            });
+        }, 1500);
+    } catch (error) {
+        safeLogError('Marketplace', 'startBackgroundJobs', error, true);
+    }
 }
 
 // Handle session expired
 export function handleSessionExpired() {
-    // Clear authentication token
-    localStorage.removeItem('USER_TOKEN');
-    
-    // Show session expired message
-    showNotification('Your session has expired. Please log in again.', 'error');
-    
-    // Try to refresh token if possible
-    if (typeof refreshToken === 'function') {
-        refreshToken().catch(() => {
-            // If refresh fails, trigger logout
+    try {
+        // Clear authentication token
+        localStorage.removeItem('USER_TOKEN');
+        
+        // Show session expired message
+        showNotification('Your session has expired. Please log in again.', 'error');
+        
+        // Try to refresh token if possible
+        if (typeof refreshToken === 'function') {
+            refreshToken().catch(() => {
+                // If refresh fails, trigger logout
+                handleParentLogout();
+            });
+        } else {
+            // If no refresh function, trigger logout
             handleParentLogout();
-        });
-    } else {
-        // If no refresh function, trigger logout
-        handleParentLogout();
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'handleSessionExpired', error);
     }
 }
 
 // Request user data from parent (legacy function)
 export function requestParentUserData() {
-    const requestSent = sendMessageToParent('get_user_data', {
-        fields: ['id', 'displayName', 'email', 'photoURL', 'isPremium', 'subscription', 'trustLevel']
-    });
-    
-    if (requestSent) {
-        // Set timeout for parent response
-        setTimeout(() => {
-            if (!parentDataLoaded && !dataFetchInProgress) {
-                fetchUserDataDirectly();
-            }
-        }, parentDataTimeout);
-    } else {
+    try {
+        const requestSent = sendMessageToParent('get_user_data', {
+            fields: ['id', 'displayName', 'email', 'photoURL', 'isPremium', 'subscription', 'trustLevel']
+        });
+        
+        if (requestSent) {
+            // Set timeout for parent response
+            setTimeout(() => {
+                if (!parentDataLoaded && !dataFetchInProgress) {
+                    fetchUserDataDirectly();
+                }
+            }, parentDataTimeout);
+        } else {
+            fetchUserDataDirectly();
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'requestParentUserData', error, true);
         fetchUserDataDirectly();
     }
 }
@@ -3138,6 +3619,7 @@ export async function fetchUserDataDirectly() {
         
     } catch (error) {
         dataFetchInProgress = false;
+        safeLogError('Marketplace', 'fetchUserDataDirectly', error, true);
         
         // If we're in an iframe and haven't received parent data yet, wait a bit longer
         if (window.parent !== window && !parentDataLoaded) {
@@ -3157,94 +3639,171 @@ export async function fetchUserDataDirectly() {
 
 // Process user data from any source (legacy function)
 export function processUserData(userDataFromSource, source) {
-    // Set current user
-    currentUser = userDataFromSource;
-    userData = userDataFromSource;
-    
-    // Save to localStorage for offline use
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+    try {
+        // Set current user
+        currentUser = userDataFromSource;
+        userData = userDataFromSource;
+        
+        // Save to localStorage for offline use
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+    } catch (error) {
+        safeLogError('Marketplace', 'processUserData', error, true);
+    }
 }
 
 // Handle user data received from parent (legacy function)
 export function handleParentUserData(userDataFromParent) {
-    if (parentDataLoaded || dataFetchInProgress) {
-        return;
-    }
-    
-    // Validate the data
-    if (!userDataFromParent || (!userDataFromParent.id && !userDataFromParent.email)) {
-        // If we got invalid data from parent, try direct API
-        if (!dataFetchInProgress) {
-            fetchUserDataDirectly();
+    try {
+        if (parentDataLoaded || dataFetchInProgress) {
+            return;
         }
-        return;
+        
+        // Validate the data
+        if (!userDataFromParent || (!userDataFromParent.id && !userDataFromParent.email)) {
+            // If we got invalid data from parent, try direct API
+            if (!dataFetchInProgress) {
+                fetchUserDataDirectly();
+            }
+            return;
+        }
+        
+        // Mark that parent data is loaded
+        parentDataLoaded = true;
+        dataFetchInProgress = false;
+        
+        // Process the user data
+        processUserData(userDataFromParent, 'parent');
+    } catch (error) {
+        safeLogError('Marketplace', 'handleParentUserData', error, true);
     }
-    
-    // Mark that parent data is loaded
-    parentDataLoaded = true;
-    dataFetchInProgress = false;
-    
-    // Process the user data
-    processUserData(userDataFromParent, 'parent');
 }
 
 // Update user data when parent sends updates (legacy function)
 export function updateUserDataFromParent(updatedData) {
-    // Merge with existing data
-    if (currentUser) {
-        currentUser = { ...currentUser, ...updatedData };
-    } else {
-        currentUser = updatedData;
-    }
-    
-    if (userData) {
-        userData = { ...userData, ...updatedData };
-    } else {
-        userData = updatedData;
-    }
-    
-    // Save to localStorage
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
-    saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
-    
-    // Check premium status if subscription data was updated
-    if (updatedData.subscription) {
-        userSubscription = updatedData.subscription;
+    try {
+        // Merge with existing data
+        if (currentUser) {
+            currentUser = { ...currentUser, ...updatedData };
+        } else {
+            currentUser = updatedData;
+        }
+        
+        if (userData) {
+            userData = { ...userData, ...updatedData };
+        } else {
+            userData = updatedData;
+        }
+        
+        // Save to localStorage
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER, currentUser);
+        saveToLocalStorage(LOCAL_STORAGE_KEYS.USER_PROFILE, userData);
+        
+        // Check premium status if subscription data was updated
+        if (updatedData.subscription) {
+            userSubscription = updatedData.subscription;
+        }
+    } catch (error) {
+        safeLogError('Marketplace', 'updateUserDataFromParent', error, true);
     }
 }
 
 // Handle user logout (legacy function)
 export function handleUserLogout() {
-    // Clear user data
-    currentUser = null;
-    userData = null;
-    userSubscription = null;
-    
-    // Clear localStorage (but keep some cached data for re-login)
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
-    
-    showNotification('You have been logged out.', 'warning');
+    try {
+        // Clear user data
+        currentUser = null;
+        userData = null;
+        userSubscription = null;
+        
+        // Clear localStorage (but keep some cached data for re-login)
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_PROFILE);
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
+        
+        showNotification('You have been logged out.', 'warning');
+    } catch (error) {
+        safeLogError('Marketplace', 'handleUserLogout', error);
+    }
+}
+
+// ADDITIONAL SAFETY EXPORTS FOR MISSING FUNCTIONS
+
+// Safety: Export wrapper for missing functions
+export function getMarketplaceStats() {
+    try {
+        return {
+            totalListings: allListings.length,
+            myListings: myListings.length,
+            savedItems: savedItems.length,
+            premiumUsers: sampleUsers ? sampleUsers.filter(u => u.isPremium).length : 0
+        };
+    } catch (error) {
+        safeLogError('Marketplace', 'getMarketplaceStats', error, true);
+        return { totalListings: 0, myListings: 0, savedItems: 0, premiumUsers: 0 };
+    }
+}
+
+// Safety: Export wrapper for missing analytics function
+export function getMarketplaceAnalytics() {
+    try {
+        return analyticsData || {};
+    } catch (error) {
+        safeLogError('Marketplace', 'getMarketplaceAnalytics', error, true);
+        return {};
+    }
+}
+
+// Safety: Export wrapper for missing user function
+export function getMarketplaceUser() {
+    try {
+        return currentUser || {};
+    } catch (error) {
+        safeLogError('Marketplace', 'getMarketplaceUser', error, true);
+        return {};
+    }
+}
+
+// Safety: Export wrapper for missing session check
+export function isMarketplaceReady() {
+    try {
+        return isBootstrapped && (hasValidSession() || currentUser);
+    } catch (error) {
+        safeLogError('Marketplace', 'isMarketplaceReady', error, true);
+        return false;
+    }
 }
 
 // Ensure module exports are available globally for parent coordination
 if (typeof window !== 'undefined') {
-    window.marketplaceCore = {
-        initializeMarketplaceCore,
-        bootstrapIframe,
-        secureApiCall,
-        safeApiCall,
-        sendMessageToParent,
-        getCentralToken,
-        handleSessionExpired,
-        downloadDigitalFile, // Added to exports
-        inviteTeamMember: inviteTeamMemberWrapper, // Added wrapper function to exports
-        // Secure handshake protocol exports
-        startSecureHandshakeProtocol,
-        requestSessionFromParent,
-        handleSecureSessionData,
-        bindUIAfterSession
-    };
+    try {
+        window.marketplaceCore = {
+            initializeMarketplaceCore,
+            bootstrapIframe,
+            secureApiCall,
+            safeApiCall,
+            sendMessageToParent,
+            getCentralToken,
+            handleSessionExpired,
+            downloadDigitalFile,
+            inviteTeamMember: inviteTeamMemberWrapper,
+            // Secure handshake protocol exports
+            startSecureHandshakeProtocol,
+            requestSessionFromParent,
+            handleSecureSessionData,
+            bindUIAfterSession,
+            // Safety exports
+            getMarketplaceStats,
+            getMarketplaceAnalytics,
+            getMarketplaceUser,
+            isMarketplaceReady,
+            // Core state
+            currentUser,
+            sessionData,
+            isBootstrapped,
+            isAuthReady
+        };
+    } catch (error) {
+        console.error('Failed to setup marketplaceCore global:', error);
+    }
 }

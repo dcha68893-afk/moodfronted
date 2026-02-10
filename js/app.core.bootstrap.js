@@ -4,6 +4,7 @@
 // UPDATED: Maintains backward compatibility with all existing features
 // UPDATED: Preserves execution order and timing
 // UPDATED: Includes all recovery and resilience mechanisms
+// UPDATED: Added comprehensive error safety and failure isolation
 
 // Import API modules (used for authentication and requests)
 import './api.core.js';
@@ -16,12 +17,262 @@ import './app.core.ui.js';
 
 (function () {
   // ============================================================================
+  // GLOBAL ERROR SAFETY LAYER - ADDED FOR FAILURE ISOLATION
+  // ============================================================================
+  
+  // Global error tracking to prevent duplicate logging
+  const ERROR_TRACKER = {
+    loggedErrors: new Set(),
+    loggedPromises: new Set(),
+    maxAttempts: 3,
+    
+    shouldLog: function(errorKey, context = '') {
+      const key = `${errorKey}:${context}`;
+      if (this.loggedErrors.has(key)) {
+        return false;
+      }
+      this.loggedErrors.add(key);
+      return true;
+    },
+    
+    clear: function() {
+      this.loggedErrors.clear();
+      this.loggedPromises.clear();
+    }
+  };
+  
+  // Global error handler for uncaught exceptions
+  const originalOnerror = window.onerror;
+  window.onerror = function(message, source, lineno, colno, error) {
+    const errorKey = `window-error:${source}:${lineno}`;
+    if (ERROR_TRACKER.shouldLog(errorKey, message)) {
+      console.error(`🚨 [Global Error] ${message} at ${source}:${lineno}:${colno}`, error || '');
+    }
+    
+    // Call original handler if it exists
+    if (typeof originalOnerror === 'function') {
+      return originalOnerror(message, source, lineno, colno, error);
+    }
+    
+    return true; // Prevent default browser error handling
+  };
+  
+  // Global promise rejection handler
+  const originalOnunhandledrejection = window.onunhandledrejection;
+  window.onunhandledrejection = function(event) {
+    const error = event.reason;
+    const errorKey = `promise-rejection:${error?.message || 'unknown'}`;
+    if (ERROR_TRACKER.shouldLog(errorKey, 'unhandledrejection')) {
+      console.error('🚨 [Unhandled Promise Rejection]', error);
+    }
+    
+    // Call original handler if it exists
+    if (typeof originalOnunhandledrejection === 'function') {
+      return originalOnunhandledrejection(event);
+    }
+    
+    event.preventDefault(); // Prevent browser console warning
+    return false;
+  };
+  
+  // Safe wrapper for any function execution
+  function safeExecute(fn, context = 'anonymous', maxRetries = 1) {
+    let attempts = 0;
+    
+    function execute() {
+      try {
+        return fn();
+      } catch (error) {
+        attempts++;
+        const errorKey = `safe-execute:${context}:${attempts}`;
+        if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+          console.error(`⚠️ [${context}] Execution attempt ${attempts} failed:`, error.message);
+        }
+        
+        if (attempts < maxRetries) {
+          return execute(); // Retry
+        }
+        
+        // Return null to prevent crashes
+        console.warn(`⚠️ [${context}] All attempts failed, returning null`);
+        return null;
+      }
+    }
+    
+    return execute();
+  }
+  
+  // Safe async wrapper
+  async function safeExecuteAsync(fn, context = 'anonymous', maxRetries = 1) {
+    let attempts = 0;
+    
+    async function execute() {
+      try {
+        return await fn();
+      } catch (error) {
+        attempts++;
+        const errorKey = `safe-execute-async:${context}:${attempts}`;
+        if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+          console.error(`⚠️ [${context}] Async execution attempt ${attempts} failed:`, error.message);
+        }
+        
+        if (attempts < maxRetries) {
+          return await execute(); // Retry
+        }
+        
+        // Return null to prevent crashes
+        console.warn(`⚠️ [${context}] All async attempts failed, returning null`);
+        return null;
+      }
+    }
+    
+    return await execute();
+  }
+  
+  // Safe module initialization wrapper
+  function safeModuleInit(moduleName, initFunction) {
+    try {
+      console.log(`🔧 Initializing module: ${moduleName}`);
+      const result = initFunction();
+      console.log(`✅ Module initialized: ${moduleName}`);
+      return result;
+    } catch (error) {
+      const errorKey = `module-init:${moduleName}`;
+      if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+        console.error(`❌ Module ${moduleName} initialization failed:`, error.message);
+      }
+      // Return a stub module to prevent crashes
+      return {
+        _moduleFailed: true,
+        _moduleName: moduleName,
+        _error: error.message,
+        // Safe stub methods
+        isAvailable: () => false,
+        safeCall: (methodName, ...args) => {
+          console.warn(`⚠️ Module ${moduleName}.${methodName} called but module failed`);
+          return null;
+        }
+      };
+    }
+  }
+  
+  // Safe import wrapper for dynamic imports (if needed elsewhere)
+  async function safeImport(modulePath, moduleName) {
+    try {
+      console.log(`📦 Loading module: ${moduleName || modulePath}`);
+      await import(modulePath);
+      console.log(`✅ Module loaded: ${moduleName || modulePath}`);
+      return true;
+    } catch (error) {
+      const errorKey = `import-failed:${modulePath}`;
+      if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+        console.error(`❌ Failed to load module ${moduleName || modulePath}:`, error.message);
+      }
+      return false;
+    }
+  }
+  
+  // ============================================================================
+  // PRE-LOGIN CHECK - PHASE 0: VERIFY USER AUTHENTICATION BEFORE ANY LOADING
+  // ============================================================================
+  
+  // Function to check if user is logged in
+  function userLoggedIn() {
+    try {
+      // Check multiple authentication sources
+      if (window.currentUser) return true;
+      
+      if (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated()) {
+        return true;
+      }
+      
+      if (window.api && window.api.auth && window.api.auth.getUser) {
+        const user = window.api.auth.getUser();
+        if (user) return true;
+      }
+      
+      // Check localStorage for token
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+      return !!token;
+    } catch (error) {
+      console.warn('⚠️ userLoggedIn check failed:', error);
+      return false;
+    }
+  }
+  
+  // Safe page resource loader with try/catch
+  function safeLoadPageResources(pageName) {
+    try {
+      // Check if loadPageResources function exists
+      if (typeof window.loadPageResources === 'function') {
+        console.log(`📦 Loading resources for page: ${pageName}`);
+        window.loadPageResources(pageName);
+      }
+      
+      // Check if preloadPageResources function exists
+      if (typeof window.preloadPageResources === 'function') {
+        console.log(`📦 Preloading resources for page: ${pageName}`);
+        window.preloadPageResources(pageName);
+      }
+      
+      return true;
+    } catch (error) {
+      const errorKey = `page-resources:${pageName}`;
+      if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+        console.warn(`⚠️ Failed to load resources for page ${pageName}:`, error.message);
+      }
+      return false;
+    }
+  }
+  
+  // Function to redirect to login if not authenticated
+  function ensureUserLoggedIn() {
+    const isLoggedIn = userLoggedIn();
+    const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+    
+    console.log(`🔐 Auth check: loggedIn=${isLoggedIn}, publicPage=${isPublicPage}`);
+    
+    // If not logged in and not on a public page, redirect to login
+    if (!isLoggedIn && !isPublicPage) {
+      console.log('🔐 User not logged in, redirecting to login');
+      
+      // Store current path for return after login
+      const returnPath = window.location.pathname + window.location.search;
+      try {
+        sessionStorage.setItem('moodchat_return_path', returnPath);
+      } catch (error) {
+        console.warn('⚠️ Failed to store return path:', error);
+      }
+      
+      // Redirect to login page
+      if (!window.location.pathname.includes('login.html') && 
+          !window.location.pathname.includes('index.html') &&
+          !window.location.pathname.includes('/')) {
+        setTimeout(() => {
+          window.location.href = '/index.html';
+        }, 100);
+      }
+      
+      return false;
+    }
+    
+    return isLoggedIn || isPublicPage;
+  }
+  
+  // ============================================================================
   // GLOBAL NAMESPACE GOVERNANCE - PHASE 1: DEFENSIVE NAMESPACE ESTABLISHMENT
   // ============================================================================
   
   // Create safe shims for undefined variables
   function ensureGlobalDependencies() {
     console.log('🔍 Ensuring global dependencies...');
+    
+    // Check user authentication BEFORE any other initialization
+    const authCheckPassed = ensureUserLoggedIn();
+    if (!authCheckPassed) {
+      console.log('⏳ Authentication check failed, pausing further initialization');
+      return false;
+    }
     
     // GLOBAL NAMESPACE GOVERNANCE: Ensure window.app exists and is properly structured
     // This must happen BEFORE any other dependency checks to establish namespace authority
@@ -366,10 +617,11 @@ import './app.core.ui.js';
     }
     
     console.log('✅ Global dependencies ensured with namespace governance');
+    return true;
   }
   
   // Run dependency checker immediately
-  ensureGlobalDependencies();
+  safeExecute(ensureGlobalDependencies, 'ensureGlobalDependencies');
 
   // ============================================================================
   // CORE MODULE REGISTRATION - PHASE 2: SINGLE-INSTANTIATION GUARANTEE
@@ -395,6 +647,15 @@ import './app.core.ui.js';
     },
     
     initialize: function() {
+      // Check authentication before starting bootstrap
+      const isLoggedIn = userLoggedIn();
+      const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+      
+      if (!isLoggedIn && !isPublicPage) {
+        console.log('⏳ Authentication required, pausing bootstrap');
+        return this;
+      }
+      
       this.startTime = Date.now();
       this.currentPhase = this.PHASES.INITIALIZING;
       console.log(`🚀 Application bootstrap started at ${new Date().toISOString()}`);
@@ -543,7 +804,7 @@ import './app.core.ui.js';
   };
   
   // Initialize bootstrap tracker immediately
-  BOOTSTRAP_STATE.initialize();
+  safeExecute(() => BOOTSTRAP_STATE.initialize(), 'BOOTSTRAP_STATE.initialize');
 
   // ============================================================================
   // DEPENDENCY RESOLUTION INTEGRITY - PHASE 3: MODULE REGISTRATION CONTROLLER
@@ -557,9 +818,19 @@ import './app.core.ui.js';
     bootstrapPromise: null,
     registeredCallbacks: [],
     pendingOperations: [],
+    moduleFailures: new Set(),
     
     // Main bootstrap function
     bootstrap: async function() {
+      // Check authentication before starting bootstrap
+      const isLoggedIn = userLoggedIn();
+      const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+      
+      if (!isLoggedIn && !isPublicPage) {
+        console.log('⏳ Authentication required, pausing bootstrap until login');
+        return Promise.reject(new Error('Authentication required'));
+      }
+      
       if (this.isBootstrapping) {
         console.log('⚠️ Bootstrap already in progress, returning existing promise');
         return this.bootstrapPromise;
@@ -622,6 +893,12 @@ import './app.core.ui.js';
           
           // Execute pending operations
           this.executePendingOperations();
+          
+          // Log module failures summary
+          if (this.moduleFailures.size > 0) {
+            console.warn(`⚠️ Bootstrap completed with ${this.moduleFailures.size} module failures:`, 
+              Array.from(this.moduleFailures));
+          }
           
           console.log('✅ Enhanced application bootstrap completed');
           resolve(true);
@@ -1205,75 +1482,84 @@ import './app.core.ui.js';
       
       // Use centralized auth state if available
       if (typeof AUTH_STATE !== 'undefined') {
-        authState.hasToken = AUTH_STATE.hasToken();
-        
-        if (authState.hasToken) {
-          authState.user = AUTH_STATE.getUser();
+        try {
+          authState.hasToken = AUTH_STATE.hasToken();
           
-          // Check if token is already validated
-          if (AUTH_STATE.isAuthenticated()) {
-            authState.tokenValid = true;
-            console.log('✅ Token already validated in auth state');
+          if (authState.hasToken) {
+            authState.user = AUTH_STATE.getUser();
             
-            // DEPENDENCY RESOLUTION INTEGRITY: Record auth state success
+            // Check if token is already validated
+            if (AUTH_STATE.isAuthenticated()) {
+              authState.tokenValid = true;
+              console.log('✅ Token already validated in auth state');
+              
+              // DEPENDENCY RESOLUTION INTEGRITY: Record auth state success
+              if (window.app && window.app._dependencyGraph) {
+                window.app._dependencyGraph.authCheck.methodsAttempted.push({
+                  method: 'auth_state',
+                  success: true,
+                  timestamp: new Date().toISOString()
+                });
+              }
+            } else {
+              console.log('🔐 Token exists but needs validation');
+              
+              // DEPENDENCY RESOLUTION INTEGRITY: Record auth state partial
+              if (window.app && window.app._dependencyGraph) {
+                window.app._dependencyGraph.authCheck.methodsAttempted.push({
+                  method: 'auth_state',
+                  success: true,
+                  tokenValid: false,
+                  timestamp: new Date().toISOString()
+                });
+              }
+            }
+          } else {
+            // DEPENDENCY RESOLUTION INTEGRITY: Record no token
             if (window.app && window.app._dependencyGraph) {
               window.app._dependencyGraph.authCheck.methodsAttempted.push({
                 method: 'auth_state',
                 success: true,
+                hasToken: false,
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ AUTH_STATE check failed:', error);
+          this.moduleFailures.add('AUTH_STATE');
+        }
+      } else {
+        // Fallback to localStorage check
+        try {
+          const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+          authState.hasToken = !!token;
+          
+          if (authState.hasToken) {
+            console.log('🔐 Token found in localStorage');
+            
+            // DEPENDENCY RESOLUTION INTEGRITY: Record localStorage check
+            if (window.app && window.app._dependencyGraph) {
+              window.app._dependencyGraph.authCheck.methodsAttempted.push({
+                method: 'local_storage',
+                success: true,
+                hasToken: true,
                 timestamp: new Date().toISOString()
               });
             }
           } else {
-            console.log('🔐 Token exists but needs validation');
-            
-            // DEPENDENCY RESOLUTION INTEGRITY: Record auth state partial
+            // DEPENDENCY RESOLUTION INTEGRITY: Record no token in localStorage
             if (window.app && window.app._dependencyGraph) {
               window.app._dependencyGraph.authCheck.methodsAttempted.push({
-                method: 'auth_state',
+                method: 'local_storage',
                 success: true,
-                tokenValid: false,
+                hasToken: false,
                 timestamp: new Date().toISOString()
               });
             }
           }
-        } else {
-          // DEPENDENCY RESOLUTION INTEGRITY: Record no token
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.authCheck.methodsAttempted.push({
-              method: 'auth_state',
-              success: true,
-              hasToken: false,
-              timestamp: new Date().toISOString()
-            });
-          }
-        }
-      } else {
-        // Fallback to localStorage check
-        const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
-        authState.hasToken = !!token;
-        
-        if (authState.hasToken) {
-          console.log('🔐 Token found in localStorage');
-          
-          // DEPENDENCY RESOLUTION INTEGRITY: Record localStorage check
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.authCheck.methodsAttempted.push({
-              method: 'local_storage',
-              success: true,
-              hasToken: true,
-              timestamp: new Date().toISOString()
-            });
-          }
-        } else {
-          // DEPENDENCY RESOLUTION INTEGRITY: Record no token in localStorage
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.authCheck.methodsAttempted.push({
-              method: 'local_storage',
-              success: true,
-              hasToken: false,
-              timestamp: new Date().toISOString()
-            });
-          }
+        } catch (error) {
+          console.log('⚠️ localStorage access failed:', error);
         }
       }
       
@@ -1617,8 +1903,8 @@ import './app.core.ui.js';
           };
         }
         
-        // Re-throw to maintain failure propagation
-        throw error;
+        // Don't re-throw - core module failure shouldn't stop bootstrap
+        this.moduleFailures.add('app.core');
       }
     },
     
@@ -1707,34 +1993,54 @@ import './app.core.ui.js';
         state: {
           // Get authentication state
           getAuthState: function() {
-            return {
-              isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
-              user: window.currentUser || (AUTH_STATE && AUTH_STATE.getUser()),
-              hasToken: !!(AUTH_STATE && AUTH_STATE.hasToken()),
-              tokenValid: !!(AUTH_STATE && AUTH_STATE.isAuthenticated())
-            };
+            try {
+              return {
+                isAuthenticated: !!(window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
+                user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null),
+                hasToken: !!(typeof AUTH_STATE !== 'undefined' && AUTH_STATE.hasToken && AUTH_STATE.hasToken()),
+                tokenValid: !!(typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())
+              };
+            } catch (error) {
+              console.warn('⚠️ Failed to get auth state:', error);
+              return { isAuthenticated: false, user: null, hasToken: false, tokenValid: false };
+            }
           },
           
           // Get UI state
           getUIState: function() {
-            if (typeof UI_ORCHESTRATOR !== 'undefined') {
-              return UI_ORCHESTRATOR.getState();
+            try {
+              if (typeof UI_ORCHESTRATOR !== 'undefined') {
+                return UI_ORCHESTRATOR.getState();
+              }
+            } catch (error) {
+              console.warn('⚠️ Failed to get UI state:', error);
             }
             return null;
           },
           
           // Get network state
           getNetworkState: function() {
-            return {
-              status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-              isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
-            };
+            try {
+              return {
+                status: typeof API_COORDINATION !== 'undefined' && API_COORDINATION.getNetworkStatus ? 
+                        API_COORDINATION.getNetworkStatus() : 'unknown',
+                isOnline: typeof API_COORDINATION !== 'undefined' && API_COORDINATION.getNetworkStatus ? 
+                         API_COORDINATION.getNetworkStatus() === 'online' : false
+              };
+            } catch (error) {
+              console.warn('⚠️ Failed to get network state:', error);
+              return { status: 'unknown', isOnline: false };
+            }
           },
           
           // Get session state
           getSessionState: function() {
-            if (typeof SESSION_COORDINATOR !== 'undefined') {
-              return SESSION_COORDINATOR.getStatus();
+            try {
+              if (typeof SESSION_COORDINATOR !== 'undefined') {
+                return SESSION_COORDINATOR.getStatus();
+              }
+            } catch (error) {
+              console.warn('⚠️ Failed to get session state:', error);
             }
             return null;
           }
@@ -1744,48 +2050,64 @@ import './app.core.ui.js';
         events: {
           // Listen for event
           on: function(eventName, callback) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.on(eventName, callback);
-            } else {
-              window.addEventListener(eventName, (event) => {
-                callback(event.detail);
-              });
+            try {
+              if (typeof MoodChatEvents !== 'undefined') {
+                MoodChatEvents.on(eventName, callback);
+              } else {
+                window.addEventListener(eventName, (event) => {
+                  callback(event.detail);
+                });
+              }
+            } catch (error) {
+              console.error(`⚠️ Failed to add event listener for ${eventName}:`, error);
             }
           },
           
           // Remove event listener
           off: function(eventName, callback) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.off(eventName, callback);
-            } else {
-              window.removeEventListener(eventName, callback);
+            try {
+              if (typeof MoodChatEvents !== 'undefined') {
+                MoodChatEvents.off(eventName, callback);
+              } else {
+                window.removeEventListener(eventName, callback);
+              }
+            } catch (error) {
+              console.error(`⚠️ Failed to remove event listener for ${eventName}:`, error);
             }
           },
           
           // Emit event
           emit: function(eventName, data) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.emit(eventName, data);
-            } else {
-              const event = new CustomEvent(eventName, {
-                detail: data,
-                bubbles: true,
-                cancelable: true
-              });
-              window.dispatchEvent(event);
+            try {
+              if (typeof MoodChatEvents !== 'undefined') {
+                MoodChatEvents.emit(eventName, data);
+              } else {
+                const event = new CustomEvent(eventName, {
+                  detail: data,
+                  bubbles: true,
+                  cancelable: true
+                });
+                window.dispatchEvent(event);
+              }
+            } catch (error) {
+              console.error(`⚠️ Failed to emit event ${eventName}:`, error);
             }
           },
           
           // Listen for event once
           once: function(eventName, callback) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.once(eventName, callback);
-            } else {
-              const onceCallback = (event) => {
-                callback(event.detail);
-                window.removeEventListener(eventName, onceCallback);
-              };
-              window.addEventListener(eventName, onceCallback);
+            try {
+              if (typeof MoodChatEvents !== 'undefined') {
+                MoodChatEvents.once(eventName, callback);
+              } else {
+                const onceCallback = (event) => {
+                  callback(event.detail);
+                  window.removeEventListener(eventName, onceCallback);
+                };
+                window.addEventListener(eventName, onceCallback);
+              }
+            } catch (error) {
+              console.error(`⚠️ Failed to add once listener for ${eventName}:`, error);
             }
           }
         },
@@ -1794,23 +2116,38 @@ import './app.core.ui.js';
         errors: {
           // Get error stats
           getStats: function() {
-            if (typeof ERROR_HANDLER !== 'undefined') {
-              return ERROR_HANDLER.getStats();
+            try {
+              if (typeof ERROR_HANDLER !== 'undefined') {
+                return ERROR_HANDLER.getStats();
+              }
+            } catch (error) {
+              console.warn('⚠️ Failed to get error stats:', error);
             }
             return null;
           },
           
           // Register error handler
           onError: function(callback) {
-            if (typeof ERROR_HANDLER !== 'undefined') {
-              ERROR_HANDLER.onError(callback);
+            try {
+              if (typeof ERROR_HANDLER !== 'undefined') {
+                ERROR_HANDLER.onError(callback);
+              }
+            } catch (error) {
+              console.warn('⚠️ Failed to register error handler:', error);
             }
           },
           
           // Show error to user
           showError: function(message, type = 'error') {
-            if (typeof ERROR_HANDLER !== 'undefined') {
-              ERROR_HANDLER.showErrorToUser(message, type);
+            try {
+              if (typeof ERROR_HANDLER !== 'undefined') {
+                ERROR_HANDLER.showErrorToUser(message, type);
+              } else {
+                // Fallback
+                console.error(`[${type.toUpperCase()}] ${message}`);
+              }
+            } catch (error) {
+              console.warn('⚠️ Failed to show error:', error);
             }
           }
         },
@@ -1976,6 +2313,13 @@ import './app.core.ui.js';
     showDashboardUI: function() {
       console.log('🏠 Showing dashboard UI');
       
+      // Check authentication before showing dashboard
+      if (!userLoggedIn()) {
+        console.log('🔐 User not logged in, redirecting to login instead of showing dashboard');
+        this.redirectToAuth('User not logged in');
+        return;
+      }
+      
       // Hide loading screen if present
       this.hideLoadingScreen();
       
@@ -1992,7 +2336,7 @@ import './app.core.ui.js';
       const event = new CustomEvent('moodchat-dashboard-ui-required', {
         detail: {
           timestamp: new Date().toISOString(),
-          user: window.currentUser || AUTH_STATE?.getUser()
+          user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null)
         }
       });
       window.dispatchEvent(event);
@@ -2013,7 +2357,11 @@ import './app.core.ui.js';
       if (!isAuthPage) {
         // Store redirect path for after login
         const returnPath = currentPath + window.location.search;
-        sessionStorage.setItem('moodchat_return_path', returnPath);
+        try {
+          sessionStorage.setItem('moodchat_return_path', returnPath);
+        } catch (error) {
+          console.warn('⚠️ Failed to store return path:', error);
+        }
         
         // Small delay to allow event processing
         setTimeout(() => {
@@ -2041,19 +2389,19 @@ import './app.core.ui.js';
       
       try {
         // 1. Initialize sidebar if present
-        await this.initializeSidebar();
+        await safeExecuteAsync(() => this.initializeSidebar(), 'initializeSidebar', 1);
         
         // 2. Initialize navigation
-        await this.initializeNavigation();
+        await safeExecuteAsync(() => this.initializeNavigation(), 'initializeNavigation', 1);
         
         // 3. Initialize theme
-        await this.initializeTheme();
+        await safeExecuteAsync(() => this.initializeTheme(), 'initializeTheme', 1);
         
         // 4. Initialize notification system
-        await this.initializeNotifications();
+        await safeExecuteAsync(() => this.initializeNotifications(), 'initializeNotifications', 1);
         
         // 5. Initialize responsive behaviors
-        await this.initializeResponsiveBehaviors();
+        await safeExecuteAsync(() => this.initializeResponsiveBehaviors(), 'initializeResponsiveBehaviors', 1);
         
         console.log('✅ Global UI components initialized');
         
@@ -2207,6 +2555,13 @@ import './app.core.ui.js';
     navigateTo: function(page, pushState = true) {
       console.log(`🧭 Navigating to: ${page}`);
       
+      // Check authentication before navigating to any page
+      if (!userLoggedIn() && page !== 'login' && page !== 'index') {
+        console.log('🔐 Authentication required, redirecting to login');
+        this.redirectToAuth('Authentication required for page navigation');
+        return;
+      }
+      
       // Update URL if needed
       if (pushState) {
         window.history.pushState({ page: page }, '', page);
@@ -2237,8 +2592,54 @@ import './app.core.ui.js';
       
       // Use settings service if available
       if (typeof SETTINGS_SERVICE !== 'undefined') {
-        SETTINGS_SERVICE.applyTheme();
-        console.log('✅ Theme initialized via settings service');
+        try {
+          SETTINGS_SERVICE.applyTheme();
+          console.log('✅ Theme initialized via settings service');
+          
+          // Record theme completion
+          if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.uiInitialization) {
+            const themeIndex = window.app._dependencyGraph.uiInitialization.components.findIndex(c => c.name === 'theme');
+            if (themeIndex !== -1) {
+              window.app._dependencyGraph.uiInitialization.components[themeIndex].completed = true;
+              window.app._dependencyGraph.uiInitialization.components[themeIndex].completionTime = new Date().toISOString();
+              window.app._dependencyGraph.uiInitialization.components[themeIndex].success = true;
+              window.app._dependencyGraph.uiInitialization.components[themeIndex].method = 'settings_service';
+            }
+          }
+          
+          return Promise.resolve();
+        } catch (error) {
+          console.warn('⚠️ Settings service theme application failed:', error);
+          this.moduleFailures.add('SETTINGS_SERVICE.applyTheme');
+        }
+      }
+      
+      // Fallback theme initialization
+      try {
+        const html = document.documentElement;
+        const savedTheme = localStorage.getItem('moodchat_theme') || 'dark';
+        
+        // Remove all theme classes
+        html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
+        
+        // Apply saved theme
+        if (savedTheme === 'auto') {
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          html.classList.add(prefersDark ? 'theme-dark' : 'theme-light');
+          html.classList.add('theme-auto');
+        } else {
+          html.classList.add(`theme-${savedTheme}`);
+        }
+        
+        // Listen for theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+          if (savedTheme === 'auto') {
+            html.classList.remove('theme-dark', 'theme-light');
+            html.classList.add(e.matches ? 'theme-dark' : 'theme-light');
+          }
+        });
+        
+        console.log(`✅ Theme initialized: ${savedTheme}`);
         
         // Record theme completion
         if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.uiInitialization) {
@@ -2247,49 +2648,12 @@ import './app.core.ui.js';
             window.app._dependencyGraph.uiInitialization.components[themeIndex].completed = true;
             window.app._dependencyGraph.uiInitialization.components[themeIndex].completionTime = new Date().toISOString();
             window.app._dependencyGraph.uiInitialization.components[themeIndex].success = true;
-            window.app._dependencyGraph.uiInitialization.components[themeIndex].method = 'settings_service';
+            window.app._dependencyGraph.uiInitialization.components[themeIndex].method = 'fallback';
+            window.app._dependencyGraph.uiInitialization.components[themeIndex].theme = savedTheme;
           }
         }
-        
-        return Promise.resolve();
-      }
-      
-      // Fallback theme initialization
-      const html = document.documentElement;
-      const savedTheme = localStorage.getItem('moodchat_theme') || 'dark';
-      
-      // Remove all theme classes
-      html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
-      
-      // Apply saved theme
-      if (savedTheme === 'auto') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        html.classList.add(prefersDark ? 'theme-dark' : 'theme-light');
-        html.classList.add('theme-auto');
-      } else {
-        html.classList.add(`theme-${savedTheme}`);
-      }
-      
-      // Listen for theme changes
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-        if (savedTheme === 'auto') {
-          html.classList.remove('theme-dark', 'theme-light');
-          html.classList.add(e.matches ? 'theme-dark' : 'theme-light');
-        }
-      });
-      
-      console.log(`✅ Theme initialized: ${savedTheme}`);
-      
-      // Record theme completion
-      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.uiInitialization) {
-        const themeIndex = window.app._dependencyGraph.uiInitialization.components.findIndex(c => c.name === 'theme');
-        if (themeIndex !== -1) {
-          window.app._dependencyGraph.uiInitialization.components[themeIndex].completed = true;
-          window.app._dependencyGraph.uiInitialization.components[themeIndex].completionTime = new Date().toISOString();
-          window.app._dependencyGraph.uiInitialization.components[themeIndex].success = true;
-          window.app._dependencyGraph.uiInitialization.components[themeIndex].method = 'fallback';
-          window.app._dependencyGraph.uiInitialization.components[themeIndex].theme = savedTheme;
-        }
+      } catch (error) {
+        console.warn('⚠️ Fallback theme initialization failed:', error);
       }
       
       return Promise.resolve();
@@ -2327,72 +2691,77 @@ import './app.core.ui.js';
       
       // Expose notification method
       window.showNotification = function(message, type = 'info', duration = 5000) {
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        notification.style.cssText = `
-          background: ${type === 'error' ? '#f87171' : 
-                      type === 'success' ? '#10b981' : 
-                      type === 'warning' ? '#f59e0b' : 
-                      '#3b82f6'};
-          color: white;
-          padding: 12px 16px;
-          border-radius: 8px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-          animation: slideInRight 0.3s ease-out;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          max-width: 400px;
-        `;
-        
-        notification.innerHTML = `
-          <span>${message}</span>
-          <button class="notification-close" style="
-            background: transparent;
-            border: none;
+        try {
+          const notification = document.createElement('div');
+          notification.className = `notification notification-${type}`;
+          notification.style.cssText = `
+            background: ${type === 'error' ? '#f87171' : 
+                        type === 'success' ? '#10b981' : 
+                        type === 'warning' ? '#f59e0b' : 
+                        '#3b82f6'};
             color: white;
-            cursor: pointer;
-            margin-left: 10px;
-            font-size: 18px;
-          ">&times;</button>
-        `;
-        
-        container.appendChild(notification);
-        
-        // Close button handler
-        notification.querySelector('.notification-close').addEventListener('click', () => {
-          notification.style.animation = 'slideOutRight 0.3s ease-in';
-          setTimeout(() => notification.remove(), 300);
-        });
-        
-        // Auto-remove after duration
-        if (duration > 0) {
-          setTimeout(() => {
-            if (notification.parentNode) {
-              notification.style.animation = 'slideOutRight 0.3s ease-in';
-              setTimeout(() => notification.remove(), 300);
-            }
-          }, duration);
-        }
-        
-        // Add CSS animation if not already added
-        if (!document.getElementById('notification-animations')) {
-          const style = document.createElement('style');
-          style.id = 'notification-animations';
-          style.textContent = `
-            @keyframes slideInRight {
-              from { transform: translateX(100%); opacity: 0; }
-              to { transform: translateX(0); opacity: 1; }
-            }
-            @keyframes slideOutRight {
-              from { transform: translateX(0); opacity: 1; }
-              to { transform: translateX(100%); opacity: 0; }
-            }
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            animation: slideInRight 0.3s ease-out;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 400px;
           `;
-          document.head.appendChild(style);
+          
+          notification.innerHTML = `
+            <span>${message}</span>
+            <button class="notification-close" style="
+              background: transparent;
+              border: none;
+              color: white;
+              cursor: pointer;
+              margin-left: 10px;
+              font-size: 18px;
+            ">&times;</button>
+          `;
+          
+          container.appendChild(notification);
+          
+          // Close button handler
+          notification.querySelector('.notification-close').addEventListener('click', () => {
+            notification.style.animation = 'slideOutRight 0.3s ease-in';
+            setTimeout(() => notification.remove(), 300);
+          });
+          
+          // Auto-remove after duration
+          if (duration > 0) {
+            setTimeout(() => {
+              if (notification.parentNode) {
+                notification.style.animation = 'slideOutRight 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+              }
+            }, duration);
+          }
+          
+          // Add CSS animation if not already added
+          if (!document.getElementById('notification-animations')) {
+            const style = document.createElement('style');
+            style.id = 'notification-animations';
+            style.textContent = `
+              @keyframes slideInRight {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+              }
+              @keyframes slideOutRight {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+              }
+            `;
+            document.head.appendChild(style);
+          }
+          
+          return notification;
+        } catch (error) {
+          console.error('⚠️ Failed to create notification:', error);
+          return null;
         }
-        
-        return notification;
       };
       
       console.log('✅ Notification system initialized');
@@ -2451,40 +2820,44 @@ import './app.core.ui.js';
     
     // Handle responsive changes
     handleResponsiveChange: function() {
-      const isMobile = window.innerWidth < 768;
-      const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
-      const isDesktop = window.innerWidth >= 1024;
-      
-      // Update body classes
-      document.body.classList.remove('mobile-view', 'tablet-view', 'desktop-view');
-      document.body.classList.add(
-        isMobile ? 'mobile-view' :
-        isTablet ? 'tablet-view' :
-        'desktop-view'
-      );
-      
-      // Handle sidebar state
-      const sidebar = document.querySelector('.sidebar');
-      if (sidebar) {
-        if (isMobile) {
-          sidebar.classList.add('mobile-collapsed');
-        } else {
-          sidebar.classList.remove('mobile-collapsed');
+      try {
+        const isMobile = window.innerWidth < 768;
+        const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
+        const isDesktop = window.innerWidth >= 1024;
+        
+        // Update body classes
+        document.body.classList.remove('mobile-view', 'tablet-view', 'desktop-view');
+        document.body.classList.add(
+          isMobile ? 'mobile-view' :
+          isTablet ? 'tablet-view' :
+          'desktop-view'
+        );
+        
+        // Handle sidebar state
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) {
+          if (isMobile) {
+            sidebar.classList.add('mobile-collapsed');
+          } else {
+            sidebar.classList.remove('mobile-collapsed');
+          }
         }
+        
+        // Dispatch responsive change event
+        const event = new CustomEvent('moodchat-responsive-change', {
+          detail: {
+            isMobile: isMobile,
+            isTablet: isTablet,
+            isDesktop: isDesktop,
+            width: window.innerWidth,
+            height: window.innerHeight,
+            timestamp: new Date().toISOString()
+          }
+        });
+        window.dispatchEvent(event);
+      } catch (error) {
+        console.warn('⚠️ Responsive change handler failed:', error);
       }
-      
-      // Dispatch responsive change event
-      const event = new CustomEvent('moodchat-responsive-change', {
-        detail: {
-          isMobile: isMobile,
-          isTablet: isTablet,
-          isDesktop: isDesktop,
-          width: window.innerWidth,
-          height: window.innerHeight,
-          timestamp: new Date().toISOString()
-        }
-      });
-      window.dispatchEvent(event);
     },
     
     // Load app content
@@ -2495,26 +2868,44 @@ import './app.core.ui.js';
     loadAppContent: function() {
       console.log('📦 Loading app content with session-aware sequencing...');
       
+      // Check authentication before loading any content
+      if (!userLoggedIn()) {
+        console.log('🔐 User not logged in, redirecting to login instead of loading content');
+        this.redirectToAuth('User not logged in');
+        return;
+      }
+      
       // Validate session is ready before proceeding
       const validateSession = () => {
         if (window.currentUser) return true;
-        if (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser()) {
-          window.currentUser = AUTH_STATE.getUser();
-          return true;
+        if (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser) {
+          try {
+            const user = AUTH_STATE.getUser();
+            if (user) {
+              window.currentUser = user;
+              return true;
+            }
+          } catch (error) {
+            console.warn('⚠️ Failed to get user from AUTH_STATE:', error);
+          }
         }
         return false;
       };
       
       // Step 1: Dispatch content loading event with session info
-      const user = window.currentUser || (AUTH_STATE && AUTH_STATE.getUser());
-      const event = new CustomEvent('moodchat-content-loading', {
-        detail: {
-          timestamp: new Date().toISOString(),
-          user: user,
-          sessionReady: !!user
-        }
-      });
-      window.dispatchEvent(event);
+      try {
+        const user = window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null);
+        const event = new CustomEvent('moodchat-content-loading', {
+          detail: {
+            timestamp: new Date().toISOString(),
+            user: user,
+            sessionReady: !!user
+          }
+        });
+        window.dispatchEvent(event);
+      } catch (error) {
+        console.warn('⚠️ Failed to dispatch content loading event:', error);
+      }
       
       // Step 2: Validate session first (CRITICAL FIX)
       if (!validateSession()) {
@@ -2561,13 +2952,13 @@ import './app.core.ui.js';
       console.log('🔄 Executing session-aware content loading sequence');
       
       // Step 1: Initialize navigation first (before any pages load)
-      this.initializeNavigationContainer().then(() => {
+      safeExecuteAsync(() => this.initializeNavigationContainer(), 'initializeNavigationContainer', 1).then(() => {
         
         // Step 2: Determine which page to load
         const pageToLoad = this.determinePageToLoad();
         
         // Step 3: Load the parent shell (chat.html) if not already loaded
-        this.ensureParentShellLoaded().then(() => {
+        safeExecuteAsync(() => this.ensureParentShellLoaded(), 'ensureParentShellLoaded', 1).then(() => {
           
           // Step 4: Load the determined page
           this.loadPageSafely(pageToLoad);
@@ -2778,6 +3169,13 @@ import './app.core.ui.js';
     loadPageSafely: function(pageKey) {
       console.log(`🚀 Loading page: ${pageKey}`);
       
+      // Check authentication before loading any page
+      if (!userLoggedIn() && pageKey !== 'login' && pageKey !== 'index') {
+        console.log(`🔐 Authentication required for page ${pageKey}, redirecting to login`);
+        this.redirectToAuth(`Authentication required for page ${pageKey}`);
+        return;
+      }
+      
       // Validate page exists
       if (!APP_CONFIG.pages || !APP_CONFIG.pages[pageKey]) {
         console.error(`❌ Page "${pageKey}" not found in config`);
@@ -2785,6 +3183,9 @@ import './app.core.ui.js';
       }
       
       const pageConfig = APP_CONFIG.pages[pageKey];
+      
+      // Safe load page resources with try/catch
+      safeLoadPageResources(pageKey);
       
       // Save to session storage safely
       try {
@@ -2928,9 +3329,9 @@ import './app.core.ui.js';
           if (iframe.contentWindow) {
             const sessionData = {
               type: 'moodchat-session-data',
-              user: window.currentUser || (AUTH_STATE && AUTH_STATE.getUser()),
-              isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
-              token: AUTH_STATE ? AUTH_STATE.getToken() : null,
+              user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null),
+              isAuthenticated: !!(window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
+              token: typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getToken ? AUTH_STATE.getToken() : null,
               timestamp: new Date().toISOString(),
               pageConfig: pageConfig
             };
@@ -3024,12 +3425,20 @@ import './app.core.ui.js';
       
       if (typeof IFRAME_COORDINATOR !== 'undefined' && IFRAME_COORDINATOR.initialize) {
         setTimeout(() => {
-          IFRAME_COORDINATOR.initialize();
+          try {
+            IFRAME_COORDINATOR.initialize();
+          } catch (error) {
+            console.warn('⚠️ IFRAME_COORDINATOR initialization failed:', error);
+          }
         }, 1000); // Delay to ensure session is fully propagated
       }
     },
 
-    // Setup coordination systems
+    // ============================================================================
+    // SAFE PARENT ↔ IFRAME COMMUNICATION WITH MAX RETRIES
+    // ============================================================================
+    
+    // Setup coordination systems with safe error handling
     setupCoordinationSystems: async function() {
       console.log('🔗 Setting up coordination systems...');
       
@@ -3043,23 +3452,23 @@ import './app.core.ui.js';
       }
       
       try {
-        // 1. Setup event coordination
-        this.setupEventCoordination();
+        // 1. Setup event coordination with safety wrapper
+        await safeExecuteAsync(() => this.setupEventCoordination(), 'setupEventCoordination', 1);
         
-        // 2. Setup iframe coordination
-        this.setupIframeCoordination();
+        // 2. Setup iframe coordination with max retries
+        await this.setupIframeCoordinationWithRetry();
         
         // 3. Setup error handling
-        this.setupErrorHandling();
+        await safeExecuteAsync(() => this.setupErrorHandling(), 'setupErrorHandling', 1);
         
         // 4. Setup session monitoring
-        this.setupSessionMonitoring();
+        await safeExecuteAsync(() => this.setupSessionMonitoring(), 'setupSessionMonitoring', 1);
         
         // 5. Setup performance monitoring
-        this.setupPerformanceMonitoring();
+        await safeExecuteAsync(() => this.setupPerformanceMonitoring(), 'setupPerformanceMonitoring', 1);
         
         // 6. Trigger background sync if available
-        this.triggerBackgroundSync();
+        await safeExecuteAsync(() => this.triggerBackgroundSync(), 'triggerBackgroundSync', 1);
         
         console.log('✅ Coordination systems setup complete');
         
@@ -3081,7 +3490,384 @@ import './app.core.ui.js';
           window.app._dependencyGraph.coordinationSetup.error = error.message;
         }
         
-        // Continue anyway
+        // Continue anyway - coordination is important but not critical
+      }
+    },
+    
+    // Setup iframe coordination with retry logic
+    setupIframeCoordinationWithRetry: async function() {
+      let attempts = 0;
+      const maxAttempts = 3;
+      
+      while (attempts < maxAttempts) {
+        attempts++;
+        try {
+          console.log(`🖼️ Setting up iframe coordination (attempt ${attempts}/${maxAttempts})...`);
+          await this.setupIframeCoordinationInternal();
+          console.log('✅ Iframe coordination setup successful');
+          return;
+        } catch (error) {
+          console.error(`⚠️ Iframe coordination attempt ${attempts} failed:`, error.message);
+          
+          if (attempts >= maxAttempts) {
+            console.warn('⚠️ Max iframe coordination attempts reached, continuing without full iframe support');
+            // Create a minimal iframe API stub to prevent crashes
+            this.createMinimalIframeAPI();
+            break;
+          }
+          
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+        }
+      }
+    },
+    
+    // Internal iframe coordination setup
+    setupIframeCoordinationInternal: async function() {
+      console.log('🖼️ Setting up iframe coordination...');
+      
+      // Record iframe coordination setup
+      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
+        window.app._dependencyGraph.coordinationSetup.systems.push({
+          name: 'iframe_coordination',
+          startTime: new Date().toISOString()
+        });
+      }
+      
+      // Store iframe references
+      window.MoodChatIframes = new Map();
+      
+      // SAFE SESSION & TOKEN VALIDATION BEFORE MESSAGING
+      const safeGetAuthData = () => {
+        try {
+          return {
+            user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null),
+            isAuthenticated: !!(window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
+            token: typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getToken ? AUTH_STATE.getToken() : null
+          };
+        } catch (error) {
+          console.warn('⚠️ Failed to get auth data for iframe:', error.message);
+          return { user: null, isAuthenticated: false, token: null };
+        }
+      };
+      
+      // Listen for iframe messages with safety wrapper
+      const messageHandler = (event) => {
+        try {
+          // Security check
+          if (event.origin !== window.location.origin && 
+              !event.origin.includes('localhost') && 
+              !event.origin.includes('127.0.0.1')) {
+            return;
+          }
+          
+          const data = event.data;
+          if (!data || typeof data !== 'object') return;
+          
+          // Handle different message types
+          switch(data?.type) {
+            case 'moodchat-iframe-ready':
+              this.handleIframeReady(event.source, data);
+              break;
+              
+            case 'moodchat-iframe-auth-request':
+              this.handleIframeAuthRequest(event.source, data);
+              break;
+              
+            case 'moodchat-iframe-data-request':
+              this.handleIframeDataRequest(event.source, data);
+              break;
+              
+            case 'moodchat-iframe-action':
+              this.handleIframeAction(event.source, data);
+              break;
+              
+            case 'moodchat-iframe-navigate':
+              this.handleIframeNavigate(data);
+              break;
+          }
+        } catch (error) {
+          console.error('⚠️ Error in iframe message handler:', error);
+        }
+      };
+      
+      window.addEventListener('message', messageHandler);
+      
+      // Provide API for iframes to communicate
+      window.MoodChatIframeAPI = {
+        sendToParent: function(type, data) {
+          try {
+            window.parent.postMessage({
+              type: type,
+              data: data,
+              source: 'moodchat-iframe',
+              timestamp: new Date().toISOString()
+            }, '*');
+          } catch (error) {
+            console.error('⚠️ Failed to send message to parent:', error);
+          }
+        },
+        
+        requestAuthState: function() {
+          return new Promise((resolve) => {
+            const listener = (event) => {
+              try {
+                if (event.data?.type === 'moodchat-auth-state-response') {
+                  window.removeEventListener('message', listener);
+                  resolve(event.data.data);
+                }
+              } catch (error) {
+                console.error('⚠️ Error in auth state response:', error);
+                resolve({ user: null, isAuthenticated: false });
+              }
+            };
+            window.addEventListener('message', listener);
+            
+            this.sendToParent('moodchat-iframe-auth-request');
+            
+            // Timeout after 5 seconds
+            setTimeout(() => {
+              window.removeEventListener('message', listener);
+              console.warn('⚠️ Auth state request timeout');
+              resolve({ user: null, isAuthenticated: false });
+            }, 5000);
+          });
+        },
+        
+        requestData: function(key) {
+          return new Promise((resolve) => {
+            const listener = (event) => {
+              try {
+                if (event.data?.type === 'moodchat-data-response' && event.data.key === key) {
+                  window.removeEventListener('message', listener);
+                  resolve(event.data.data);
+                }
+              } catch (error) {
+                console.error('⚠️ Error in data response:', error);
+                resolve(null);
+              }
+            };
+            window.addEventListener('message', listener);
+            
+            this.sendToParent('moodchat-iframe-data-request', { key: key });
+            
+            // Timeout after 5 seconds
+            setTimeout(() => {
+              window.removeEventListener('message', listener);
+              console.warn(`⚠️ Data request timeout for key: ${key}`);
+              resolve(null);
+            }, 5000);
+          });
+        }
+      };
+      
+      console.log('✅ Iframe coordination setup complete');
+      
+      // Record iframe coordination completion
+      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
+        const iframeIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(s => s.name === 'iframe_coordination');
+        if (iframeIndex !== -1) {
+          window.app._dependencyGraph.coordinationSetup.systems[iframeIndex].completed = true;
+          window.app._dependencyGraph.coordinationSetup.systems[iframeIndex].completionTime = new Date().toISOString();
+          window.app._dependencyGraph.coordinationSetup.systems[iframeIndex].success = true;
+        }
+      }
+    },
+    
+    // Create minimal iframe API when full setup fails
+    createMinimalIframeAPI: function() {
+      console.log('🛠️ Creating minimal iframe API stub...');
+      
+      window.MoodChatIframes = new Map();
+      window.MoodChatIframeAPI = {
+        sendToParent: function() {
+          console.warn('⚠️ Iframe API limited - sendToParent not available');
+        },
+        requestAuthState: function() {
+          return Promise.resolve({ user: null, isAuthenticated: false });
+        },
+        requestData: function() {
+          return Promise.resolve(null);
+        }
+      };
+    },
+    
+    // Handle iframe ready
+    handleIframeReady: function(iframeWindow, data) {
+      try {
+        console.log('🖼️ Iframe ready:', data.iframeId);
+        
+        // Store iframe reference
+        window.MoodChatIframes.set(data.iframeId, {
+          window: iframeWindow,
+          id: data.iframeId,
+          ready: true,
+          lastActive: Date.now()
+        });
+        
+        // Send initial state to iframe
+        this.sendInitialStateToIframe(iframeWindow);
+      } catch (error) {
+        console.error('⚠️ Error handling iframe ready:', error);
+      }
+    },
+    
+    // Handle iframe auth request
+    handleIframeAuthRequest: function(iframeWindow, data) {
+      try {
+        console.log('🔐 Iframe auth request');
+        
+        const authData = this.safeGetAuthData();
+        
+        // Send auth state to iframe
+        iframeWindow.postMessage({
+          type: 'moodchat-auth-state-response',
+          data: {
+            user: authData.user,
+            isAuthenticated: authData.isAuthenticated,
+            validated: authData.user?.validated || false,
+            timestamp: new Date().toISOString()
+          }
+        }, '*');
+      } catch (error) {
+        console.error('⚠️ Error handling iframe auth request:', error);
+      }
+    },
+    
+    // Handle iframe data request
+    handleIframeDataRequest: function(iframeWindow, data) {
+      try {
+        console.log('📊 Iframe data request:', data.key);
+        
+        let responseData = null;
+        
+        // Get requested data with safety checks
+        switch(data.key) {
+          case 'userProfile':
+            responseData = window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null);
+            break;
+          case 'settings':
+            responseData = typeof SETTINGS_SERVICE !== 'undefined' && SETTINGS_SERVICE.current ? SETTINGS_SERVICE.current : {};
+            break;
+          case 'networkStatus':
+            responseData = {
+              status: typeof API_COORDINATION !== 'undefined' && API_COORDINATION.getNetworkStatus ? 
+                      API_COORDINATION.getNetworkStatus() : 'unknown',
+              backendReachable: window.MoodChatConfig?.backendReachable,
+              isOnline: typeof API_COORDINATION !== 'undefined' && API_COORDINATION.getNetworkStatus ? 
+                       API_COORDINATION.getNetworkStatus() === 'online' : false
+            };
+            break;
+          default:
+            // Try to get from cache
+            if (typeof DATA_CACHE !== 'undefined' && DATA_CACHE.getInstant) {
+              responseData = DATA_CACHE.getInstant(data.key);
+            }
+        }
+        
+        // Send response
+        iframeWindow.postMessage({
+          type: 'moodchat-data-response',
+          key: data.key,
+          data: responseData,
+          timestamp: new Date().toISOString()
+        }, '*');
+      } catch (error) {
+        console.error('⚠️ Error handling iframe data request:', error);
+      }
+    },
+    
+    // Handle iframe action
+    handleIframeAction: function(iframeWindow, data) {
+      try {
+        console.log('⚡ Iframe action:', data.action);
+        
+        // Handle different actions
+        switch(data.action) {
+          case 'logout':
+            if (typeof window.logout === 'function') {
+              window.logout();
+            }
+            break;
+            
+          case 'refresh':
+            if (typeof window.location !== 'undefined') {
+              window.location.reload();
+            }
+            break;
+            
+          case 'navigate':
+            if (data.target) {
+              this.navigateTo(data.target);
+            }
+            break;
+            
+          case 'showNotification':
+            if (typeof window.showNotification === 'function' && data.message) {
+              window.showNotification(data.message, data.type || 'info', data.duration);
+            }
+            break;
+        }
+      } catch (error) {
+        console.error('⚠️ Error handling iframe action:', error);
+      }
+    },
+    
+    // Handle iframe navigation
+    handleIframeNavigate: function(data) {
+      try {
+        console.log('🧭 Iframe navigation request:', data.target);
+        
+        if (data.target) {
+          this.navigateTo(data.target);
+        }
+      } catch (error) {
+        console.error('⚠️ Error handling iframe navigation:', error);
+      }
+    },
+    
+    // Send initial state to iframe
+    sendInitialStateToIframe: function(iframeWindow) {
+      try {
+        const authData = this.safeGetAuthData();
+        
+        const initialState = {
+          type: 'moodchat-initial-state',
+          auth: {
+            user: authData.user,
+            isAuthenticated: authData.isAuthenticated,
+            validated: authData.user?.validated || false
+          },
+          network: {
+            status: typeof API_COORDINATION !== 'undefined' && API_COORDINATION.getNetworkStatus ? 
+                    API_COORDINATION.getNetworkStatus() : 'unknown',
+            backendReachable: window.MoodChatConfig?.backendReachable,
+            isOnline: typeof API_COORDINATION !== 'undefined' && API_COORDINATION.getNetworkStatus ? 
+                     API_COORDINATION.getNetworkStatus() === 'online' : false
+          },
+          settings: typeof SETTINGS_SERVICE !== 'undefined' && SETTINGS_SERVICE.current ? 
+                   SETTINGS_SERVICE.current : {},
+          bootstrap: BOOTSTRAP_STATE.getStatusReport(),
+          timestamp: new Date().toISOString()
+        };
+        
+        iframeWindow.postMessage(initialState, '*');
+      } catch (error) {
+        console.error('⚠️ Error sending initial state to iframe:', error);
+      }
+    },
+    
+    // Safe get auth data method
+    safeGetAuthData: function() {
+      try {
+        return {
+          user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null),
+          isAuthenticated: !!(window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
+          token: typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getToken ? AUTH_STATE.getToken() : null
+        };
+      } catch (error) {
+        console.warn('⚠️ Failed to get auth data:', error.message);
+        return { user: null, isAuthenticated: false, token: null };
       }
     },
     
@@ -3102,54 +3888,74 @@ import './app.core.ui.js';
         listeners: new Map(),
         
         on: function(eventName, callback) {
-          if (!this.listeners.has(eventName)) {
-            this.listeners.set(eventName, []);
+          try {
+            if (!this.listeners.has(eventName)) {
+              this.listeners.set(eventName, []);
+            }
+            this.listeners.get(eventName).push(callback);
+            
+            // Also add to window event listener for backward compatibility
+            window.addEventListener(eventName, callback);
+          } catch (error) {
+            console.error(`⚠️ Failed to add event listener for ${eventName}:`, error);
           }
-          this.listeners.get(eventName).push(callback);
-          
-          // Also add to window event listener for backward compatibility
-          window.addEventListener(eventName, callback);
         },
         
         off: function(eventName, callback) {
-          if (this.listeners.has(eventName)) {
-            const callbacks = this.listeners.get(eventName);
-            const index = callbacks.indexOf(callback);
-            if (index > -1) {
-              callbacks.splice(index, 1);
+          try {
+            if (this.listeners.has(eventName)) {
+              const callbacks = this.listeners.get(eventName);
+              const index = callbacks.indexOf(callback);
+              if (index > -1) {
+                callbacks.splice(index, 1);
+              }
             }
+            
+            window.removeEventListener(eventName, callback);
+          } catch (error) {
+            console.error(`⚠️ Failed to remove event listener for ${eventName}:`, error);
           }
-          
-          window.removeEventListener(eventName, callback);
         },
         
         emit: function(eventName, data) {
-          const event = new CustomEvent(eventName, {
-            detail: data,
-            bubbles: true,
-            cancelable: true
-          });
-          window.dispatchEvent(event);
+          try {
+            const event = new CustomEvent(eventName, {
+              detail: data,
+              bubbles: true,
+              cancelable: true
+            });
+            window.dispatchEvent(event);
+          } catch (error) {
+            console.error(`⚠️ Failed to emit event ${eventName}:`, error);
+          }
         },
         
         once: function(eventName, callback) {
-          const onceCallback = (event) => {
-            callback(event.detail);
-            this.off(eventName, onceCallback);
-          };
-          this.on(eventName, onceCallback);
+          try {
+            const onceCallback = (event) => {
+              callback(event.detail);
+              this.off(eventName, onceCallback);
+            };
+            this.on(eventName, onceCallback);
+          } catch (error) {
+            console.error(`⚠️ Failed to add once listener for ${eventName}:`, error);
+          }
         }
       };
       
       // Setup global event logger (development only)
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        const originalDispatch = window.dispatchEvent;
-        window.dispatchEvent = function(event) {
-          if (event.type.startsWith('moodchat-')) {
-            console.log(`📡 Event: ${event.type}`, event.detail || '');
-          }
-          return originalDispatch.call(this, event);
-        };
+        try {
+          const originalDispatch = window.dispatchEvent;
+          window.dispatchEvent = function(event) {
+            if (event.type.startsWith('moodchat-')) {
+              console.log(`📡 Event: ${event.type}`, event.detail || '');
+            }
+            return originalDispatch.call(this, event);
+          };
+        } catch (error) {
+          console.error('⚠️ Failed to setup event logger:', error);
+        }
       }
       
       console.log('✅ Event coordination setup complete');
@@ -3165,273 +3971,38 @@ import './app.core.ui.js';
       }
     },
     
-    // Setup iframe coordination
-    setupIframeCoordination: function() {
-      console.log('🖼️ Setting up iframe coordination...');
-      
-      // Record iframe coordination setup
-      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
-        window.app._dependencyGraph.coordinationSetup.systems.push({
-          name: 'iframe_coordination',
-          startTime: new Date().toISOString()
-        });
-      }
-      
-      // Store iframe references
-      window.MoodChatIframes = new Map();
-      
-      // Listen for iframe messages
-      window.addEventListener('message', (event) => {
-        // Security check
-        if (event.origin !== window.location.origin && 
-            !event.origin.includes('localhost') && 
-            !event.origin.includes('127.0.0.1')) {
-          return;
-        }
-        
-        const data = event.data;
-        
-        // Handle different message types
-        switch(data?.type) {
-          case 'moodchat-iframe-ready':
-            this.handleIframeReady(event.source, data);
-            break;
-            
-          case 'moodchat-iframe-auth-request':
-            this.handleIframeAuthRequest(event.source, data);
-            break;
-            
-          case 'moodchat-iframe-data-request':
-            this.handleIframeDataRequest(event.source, data);
-            break;
-            
-          case 'moodchat-iframe-action':
-            this.handleIframeAction(event.source, data);
-            break;
-            
-          case 'moodchat-iframe-navigate':
-            this.handleIframeNavigate(data);
-            break;
-        }
-      });
-      
-      // Provide API for iframes to communicate
-      window.MoodChatIframeAPI = {
-        sendToParent: function(type, data) {
-          window.parent.postMessage({
-            type: type,
-            data: data,
-            source: 'moodchat-iframe',
-            timestamp: new Date().toISOString()
-          }, '*');
-        },
-        
-        requestAuthState: function() {
-          return new Promise((resolve) => {
-            const listener = (event) => {
-              if (event.data?.type === 'moodchat-auth-state-response') {
-                window.removeEventListener('message', listener);
-                resolve(event.data.data);
-              }
-            };
-            window.addEventListener('message', listener);
-            
-            this.sendToParent('moodchat-iframe-auth-request');
-          });
-        },
-        
-        requestData: function(key) {
-          return new Promise((resolve) => {
-            const listener = (event) => {
-              if (event.data?.type === 'moodchat-data-response' && event.data.key === key) {
-                window.removeEventListener('message', listener);
-                resolve(event.data.data);
-              }
-            };
-            window.addEventListener('message', listener);
-            
-            this.sendToParent('moodchat-iframe-data-request', { key: key });
-          });
-        }
-      };
-      
-      console.log('✅ Iframe coordination setup complete');
-      
-      // Record iframe coordination completion
-      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
-        const iframeIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(s => s.name === 'iframe_coordination');
-        if (iframeIndex !== -1) {
-          window.app._dependencyGraph.coordinationSetup.systems[iframeIndex].completed = true;
-          window.app._dependencyGraph.coordinationSetup.systems[iframeIndex].completionTime = new Date().toISOString();
-          window.app._dependencyGraph.coordinationSetup.systems[iframeIndex].success = true;
-        }
-      }
-    },
-    
-    // Handle iframe ready
-    handleIframeReady: function(iframeWindow, data) {
-      console.log('🖼️ Iframe ready:', data.iframeId);
-      
-      // Store iframe reference
-      window.MoodChatIframes.set(data.iframeId, {
-        window: iframeWindow,
-        id: data.iframeId,
-        ready: true,
-        lastActive: Date.now()
-      });
-      
-      // Send initial state to iframe
-      this.sendInitialStateToIframe(iframeWindow);
-    },
-    
-    // Handle iframe auth request
-    handleIframeAuthRequest: function(iframeWindow, data) {
-      console.log('🔐 Iframe auth request');
-      
-      // Send auth state to iframe
-      iframeWindow.postMessage({
-        type: 'moodchat-auth-state-response',
-        data: {
-          user: window.currentUser || AUTH_STATE?.getUser(),
-          isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
-          validated: window.currentUser?.validated || false,
-          timestamp: new Date().toISOString()
-        }
-      }, '*');
-    },
-    
-    // Handle iframe data request
-    handleIframeDataRequest: function(iframeWindow, data) {
-      console.log('📊 Iframe data request:', data.key);
-      
-      let responseData = null;
-      
-      // Get requested data
-      switch(data.key) {
-        case 'userProfile':
-          responseData = window.currentUser || AUTH_STATE?.getUser();
-          break;
-        case 'settings':
-          responseData = SETTINGS_SERVICE?.current || {};
-          break;
-        case 'networkStatus':
-          responseData = {
-            status: API_COORDINATION?.getNetworkStatus() || 'unknown',
-            backendReachable: window.MoodChatConfig?.backendReachable,
-            isOnline: API_COORDINATION?.getNetworkStatus() === 'online'
-          };
-          break;
-        default:
-          // Try to get from cache
-          if (typeof DATA_CACHE !== 'undefined') {
-            responseData = DATA_CACHE.getInstant(data.key);
-          }
-      }
-      
-      // Send response
-      iframeWindow.postMessage({
-        type: 'moodchat-data-response',
-        key: data.key,
-        data: responseData,
-        timestamp: new Date().toISOString()
-      }, '*');
-    },
-    
-    // Handle iframe action
-    handleIframeAction: function(iframeWindow, data) {
-      console.log('⚡ Iframe action:', data.action);
-      
-      // Handle different actions
-      switch(data.action) {
-        case 'logout':
-          if (typeof window.logout === 'function') {
-            window.logout();
-          }
-          break;
-          
-        case 'refresh':
-          if (typeof window.location !== 'undefined') {
-            window.location.reload();
-          }
-          break;
-          
-        case 'navigate':
-          if (data.target) {
-            this.navigateTo(data.target);
-          }
-          break;
-          
-        case 'showNotification':
-          if (typeof window.showNotification === 'function' && data.message) {
-            window.showNotification(data.message, data.type || 'info', data.duration);
-          }
-          break;
-      }
-    },
-    
-    // Handle iframe navigation
-    handleIframeNavigate: function(data) {
-      console.log('🧭 Iframe navigation request:', data.target);
-      
-      if (data.target) {
-        this.navigateTo(data.target);
-      }
-    },
-    
-    // Send initial state to iframe
-    sendInitialStateToIframe: function(iframeWindow) {
-      const initialState = {
-        type: 'moodchat-initial-state',
-        auth: {
-          user: window.currentUser || AUTH_STATE?.getUser(),
-          isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
-          validated: window.currentUser?.validated || false
-        },
-        network: {
-          status: API_COORDINATION?.getNetworkStatus() || 'unknown',
-          backendReachable: window.MoodChatConfig?.backendReachable,
-          isOnline: API_COORDINATION?.getNetworkStatus() === 'online'
-        },
-        settings: SETTINGS_SERVICE?.current || {},
-        bootstrap: BOOTSTRAP_STATE.getStatusReport(),
-        timestamp: new Date().toISOString()
-      };
-      
-      iframeWindow.postMessage(initialState, '*');
-    },
-    
     // Trigger background sync
     triggerBackgroundSync: function() {
       console.log('🔄 Triggering background sync if available...');
       
-      // Check for modular API background sync
-      if (window.api && window.api.core && window.api.core.syncBackgroundTasks) {
-        try {
+      try {
+        // Check for modular API background sync
+        if (window.api && window.api.core && window.api.core.syncBackgroundTasks) {
           window.api.core.syncBackgroundTasks();
           console.log('✅ Background sync triggered');
-        } catch (error) {
-          console.log('⚠️ Background sync failed:', error);
         }
+      } catch (error) {
+        console.log('⚠️ Background sync failed:', error);
       }
       
-      // Check for request queue processing
-      if (window.api && window.api.request && window.api.request.processQueue) {
-        try {
+      try {
+        // Check for request queue processing
+        if (window.api && window.api.request && window.api.request.processQueue) {
           window.api.request.processQueue();
           console.log('✅ Request queue processing triggered');
-        } catch (error) {
-          console.log('⚠️ Request queue processing failed:', error);
         }
+      } catch (error) {
+        console.log('⚠️ Request queue processing failed:', error);
       }
       
-      // Check for caching features
-      if (window.api && window.api.request && window.api.request.prefetchCriticalResources) {
-        try {
+      try {
+        // Check for caching features
+        if (window.api && window.api.request && window.api.request.prefetchCriticalResources) {
           window.api.request.prefetchCriticalResources();
           console.log('✅ Resource prefetch triggered');
-        } catch (error) {
-          console.log('⚠️ Resource prefetch failed:', error);
         }
+      } catch (error) {
+        console.log('⚠️ Resource prefetch failed:', error);
       }
     },
     
@@ -3449,46 +4020,52 @@ import './app.core.ui.js';
       
       // Global error handler
       window.addEventListener('error', (event) => {
-        console.error('🚨 Global error caught:', event.error);
-        
-        // Don't show error for missing resources
-        if (event.target && (event.target.tagName === 'IMG' || event.target.tagName === 'SCRIPT')) {
-          return;
-        }
-        
-        // Show user-friendly error
-        this.showErrorToUser('An unexpected error occurred. The app will continue to work in limited mode.');
-        
-        // Dispatch error event for other components
-        const errorEvent = new CustomEvent('moodchat-global-error', {
-          detail: {
-            error: event.error,
-            message: event.message,
-            filename: event.filename,
-            lineno: event.lineno,
-            colno: event.colno,
-            timestamp: new Date().toISOString()
+        const errorKey = `global-error:${event.filename}:${event.lineno}`;
+        if (ERROR_TRACKER.shouldLog(errorKey, event.message)) {
+          console.error('🚨 Global error caught:', event.error);
+          
+          // Don't show error for missing resources
+          if (event.target && (event.target.tagName === 'IMG' || event.target.tagName === 'SCRIPT')) {
+            return;
           }
-        });
-        window.dispatchEvent(errorEvent);
+          
+          // Show user-friendly error
+          this.showErrorToUser('An unexpected error occurred. The app will continue to work in limited mode.');
+          
+          // Dispatch error event for other components
+          const errorEvent = new CustomEvent('moodchat-global-error', {
+            detail: {
+              error: event.error,
+              message: event.message,
+              filename: event.filename,
+              lineno: event.lineno,
+              colno: event.colno,
+              timestamp: new Date().toISOString()
+            }
+          });
+          window.dispatchEvent(errorEvent);
+        }
       });
       
       // Unhandled promise rejection handler
       window.addEventListener('unhandledrejection', (event) => {
-        console.error('🚨 Unhandled promise rejection:', event.reason);
-        
-        // Show user-friendly error
-        this.showErrorToUser('An operation failed. Please try again.');
-        
-        // Dispatch error event
-        const errorEvent = new CustomEvent('moodchat-unhandled-rejection', {
-          detail: {
-            reason: event.reason,
-            promise: event.promise,
-            timestamp: new Date().toISOString()
-          }
-        });
-        window.dispatchEvent(errorEvent);
+        const errorKey = `promise-rejection:${event.reason?.message || 'unknown'}`;
+        if (ERROR_TRACKER.shouldLog(errorKey, 'unhandledrejection')) {
+          console.error('🚨 Unhandled promise rejection:', event.reason);
+          
+          // Show user-friendly error
+          this.showErrorToUser('An operation failed. Please try again.');
+          
+          // Dispatch error event
+          const errorEvent = new CustomEvent('moodchat-unhandled-rejection', {
+            detail: {
+              reason: event.reason,
+              promise: event.promise,
+              timestamp: new Date().toISOString()
+            }
+          });
+          window.dispatchEvent(errorEvent);
+        }
       });
       
       // Network error handler
@@ -3511,33 +4088,37 @@ import './app.core.ui.js';
     
     // Show error to user
     showErrorToUser: function(message, type = 'error') {
-      if (typeof window.showNotification === 'function') {
-        window.showNotification(message, type, 10000);
-      } else {
-        // Fallback error display
-        const errorDiv = document.createElement('div');
-        errorDiv.style.cssText = `
-          position: fixed;
-          top: 20px;
-          right: 20px;
-          background: ${type === 'error' ? '#f87171' : '#f59e0b'};
-          color: white;
-          padding: 12px 16px;
-          border-radius: 8px;
-          z-index: 9999;
-          max-width: 300px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-          animation: slideInRight 0.3s ease-out;
-        `;
-        errorDiv.textContent = message;
-        document.body.appendChild(errorDiv);
-        
-        setTimeout(() => {
-          if (errorDiv.parentNode) {
-            errorDiv.style.animation = 'slideOutRight 0.3s ease-in';
-            setTimeout(() => errorDiv.remove(), 300);
-          }
-        }, 10000);
+      try {
+        if (typeof window.showNotification === 'function') {
+          window.showNotification(message, type, 10000);
+        } else {
+          // Fallback error display
+          const errorDiv = document.createElement('div');
+          errorDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'error' ? '#f87171' : '#f59e0b'};
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            z-index: 9999;
+            max-width: 300px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            animation: slideInRight 0.3s ease-out;
+          `;
+          errorDiv.textContent = message;
+          document.body.appendChild(errorDiv);
+          
+          setTimeout(() => {
+            if (errorDiv.parentNode) {
+              errorDiv.style.animation = 'slideOutRight 0.3s ease-in';
+              setTimeout(() => errorDiv.remove(), 300);
+            }
+          }, 10000);
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to show error to user:', error);
       }
     },
     
@@ -3553,85 +4134,104 @@ import './app.core.ui.js';
         });
       }
       
-      // Check session validity periodically
-      setInterval(() => {
-        this.checkSessionValidity();
-      }, 5 * 60 * 1000); // Every 5 minutes
-      
-      // Monitor user activity
-      let activityTimeout;
-      const resetActivityTimeout = () => {
-        clearTimeout(activityTimeout);
-        // Set timeout for 30 minutes of inactivity
-        activityTimeout = setTimeout(() => {
-          this.handleUserInactivity();
-        }, 30 * 60 * 1000);
-      };
-      
-      // Reset on user activity
-      ['mousedown', 'keydown', 'touchstart', 'mousemove'].forEach(event => {
-        window.addEventListener(event, resetActivityTimeout, { passive: true });
-      });
-      
-      resetActivityTimeout(); // Start monitoring
-      
-      console.log('✅ Session monitoring setup complete');
-      
-      // Record session monitoring completion
-      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
-        const sessionIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(s => s.name === 'session_monitoring');
-        if (sessionIndex !== -1) {
-          window.app._dependencyGraph.coordinationSetup.systems[sessionIndex].completed = true;
-          window.app._dependencyGraph.coordinationSetup.systems[sessionIndex].completionTime = new Date().toISOString();
-          window.app._dependencyGraph.coordinationSetup.systems[sessionIndex].success = true;
+      try {
+        // Check session validity periodically
+        setInterval(() => {
+          this.checkSessionValidity();
+        }, 5 * 60 * 1000); // Every 5 minutes
+        
+        // Monitor user activity
+        let activityTimeout;
+        const resetActivityTimeout = () => {
+          clearTimeout(activityTimeout);
+          // Set timeout for 30 minutes of inactivity
+          activityTimeout = setTimeout(() => {
+            this.handleUserInactivity();
+          }, 30 * 60 * 1000);
+        };
+        
+        // Reset on user activity
+        ['mousedown', 'keydown', 'touchstart', 'mousemove'].forEach(event => {
+          window.addEventListener(event, resetActivityTimeout, { passive: true });
+        });
+        
+        resetActivityTimeout(); // Start monitoring
+        
+        console.log('✅ Session monitoring setup complete');
+        
+        // Record session monitoring completion
+        if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
+          const sessionIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(s => s.name === 'session_monitoring');
+          if (sessionIndex !== -1) {
+            window.app._dependencyGraph.coordinationSetup.systems[sessionIndex].completed = true;
+            window.app._dependencyGraph.coordinationSetup.systems[sessionIndex].completionTime = new Date().toISOString();
+            window.app._dependencyGraph.coordinationSetup.systems[sessionIndex].success = true;
+          }
         }
+      } catch (error) {
+        console.error('⚠️ Session monitoring setup failed:', error);
       }
     },
     
     // Check session validity
     checkSessionValidity: function() {
-      if (typeof AUTH_STATE === 'undefined' || !AUTH_STATE.hasToken()) {
-        return;
-      }
-      
-      // Check if token is expired
-      if (AUTH_STATE._tokenExpiry) {
-        const expiryDate = new Date(AUTH_STATE._tokenExpiry);
-        const now = new Date();
-        const timeUntilExpiry = expiryDate - now;
+      try {
+        if (typeof AUTH_STATE === 'undefined' || !AUTH_STATE.hasToken) {
+          return;
+        }
         
-        // If token expires in less than 5 minutes, try to refresh
-        if (timeUntilExpiry < (5 * 60 * 1000)) {
-          console.log('🔐 Token expires soon, attempting refresh...');
+        const hasToken = AUTH_STATE.hasToken();
+        if (!hasToken) {
+          return;
+        }
+        
+        // Check if token is expired
+        if (AUTH_STATE._tokenExpiry) {
+          const expiryDate = new Date(AUTH_STATE._tokenExpiry);
+          const now = new Date();
+          const timeUntilExpiry = expiryDate - now;
           
-          if (typeof TOKEN_VALIDATION !== 'undefined' && TOKEN_VALIDATION.refreshToken) {
-            TOKEN_VALIDATION.refreshToken().then(result => {
-              if (!result.success) {
-                console.log('⚠️ Token refresh failed, user will need to re-authenticate soon');
-              }
-            });
+          // If token expires in less than 5 minutes, try to refresh
+          if (timeUntilExpiry < (5 * 60 * 1000)) {
+            console.log('🔐 Token expires soon, attempting refresh...');
+            
+            if (typeof TOKEN_VALIDATION !== 'undefined' && TOKEN_VALIDATION.refreshToken) {
+              TOKEN_VALIDATION.refreshToken().then(result => {
+                if (!result.success) {
+                  console.log('⚠️ Token refresh failed, user will need to re-authenticate soon');
+                }
+              }).catch(error => {
+                console.error('⚠️ Token refresh error:', error);
+              });
+            }
           }
         }
+      } catch (error) {
+        console.error('⚠️ Session validity check failed:', error);
       }
     },
     
     // Handle user inactivity
     handleUserInactivity: function() {
-      console.log('⏰ User inactive for 30 minutes');
-      
-      // Show inactivity warning
-      if (typeof window.showNotification === 'function') {
-        window.showNotification('You have been inactive for 30 minutes. Session will expire soon.', 'warning', 10000);
-      }
-      
-      // Dispatch inactivity event
-      const event = new CustomEvent('moodchat-user-inactivity', {
-        detail: {
-          duration: '30m',
-          timestamp: new Date().toISOString()
+      try {
+        console.log('⏰ User inactive for 30 minutes');
+        
+        // Show inactivity warning
+        if (typeof window.showNotification === 'function') {
+          window.showNotification('You have been inactive for 30 minutes. Session will expire soon.', 'warning', 10000);
         }
-      });
-      window.dispatchEvent(event);
+        
+        // Dispatch inactivity event
+        const event = new CustomEvent('moodchat-user-inactivity', {
+          detail: {
+            duration: '30m',
+            timestamp: new Date().toISOString()
+          }
+        });
+        window.dispatchEvent(event);
+      } catch (error) {
+        console.error('⚠️ User inactivity handler failed:', error);
+      }
     },
     
     // Setup performance monitoring
@@ -3646,48 +4246,60 @@ import './app.core.ui.js';
         });
       }
       
-      // Only in development
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        // Monitor load times
-        window.addEventListener('load', () => {
-          const timing = performance.timing;
-          const loadTime = timing.loadEventEnd - timing.navigationStart;
-          const domReadyTime = timing.domContentLoadedEventEnd - timing.navigationStart;
+      try {
+        // Only in development
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          // Monitor load times
+          window.addEventListener('load', () => {
+            try {
+              const timing = performance.timing;
+              const loadTime = timing.loadEventEnd - timing.navigationStart;
+              const domReadyTime = timing.domContentLoadedEventEnd - timing.navigationStart;
+              
+              console.log(`📊 Performance metrics:
+                - Load time: ${loadTime}ms
+                - DOM ready: ${domReadyTime}ms
+                - Redirects: ${timing.redirectEnd - timing.redirectStart}ms
+                - DNS: ${timing.domainLookupEnd - timing.domainLookupStart}ms
+                - TCP: ${timing.connectEnd - timing.connectStart}ms
+                - Request: ${timing.responseStart - timing.requestStart}ms
+                - Response: ${timing.responseEnd - timing.responseStart}ms
+              `);
+            } catch (error) {
+              console.error('⚠️ Performance metrics collection failed:', error);
+            }
+          });
           
-          console.log(`📊 Performance metrics:
-            - Load time: ${loadTime}ms
-            - DOM ready: ${domReadyTime}ms
-            - Redirects: ${timing.redirectEnd - timing.redirectStart}ms
-            - DNS: ${timing.domainLookupEnd - timing.domainLookupStart}ms
-            - TCP: ${timing.connectEnd - timing.connectStart}ms
-            - Request: ${timing.responseStart - timing.requestStart}ms
-            - Response: ${timing.responseEnd - timing.responseStart}ms
-          `);
-        });
+          // Monitor memory usage (if supported)
+          if (performance.memory) {
+            setInterval(() => {
+              try {
+                const memory = performance.memory;
+                console.log(`📊 Memory usage:
+                  - Used JS heap: ${Math.round(memory.usedJSHeapSize / 1024 / 1024)}MB
+                  - Total JS heap: ${Math.round(memory.totalJSHeapSize / 1024 / 1024)}MB
+                  - Heap limit: ${Math.round(memory.jsHeapSizeLimit / 1024 / 1024)}MB
+                `);
+              } catch (error) {
+                console.error('⚠️ Memory monitoring failed:', error);
+              }
+            }, 30000);
+          }
+        }
         
-        // Monitor memory usage (if supported)
-        if (performance.memory) {
-          setInterval(() => {
-            const memory = performance.memory;
-            console.log(`📊 Memory usage:
-              - Used JS heap: ${Math.round(memory.usedJSHeapSize / 1024 / 1024)}MB
-              - Total JS heap: ${Math.round(memory.totalJSHeapSize / 1024 / 1024)}MB
-              - Heap limit: ${Math.round(memory.jsHeapSizeLimit / 1024 / 1024)}MB
-            `);
-          }, 30000);
+        console.log('✅ Performance monitoring setup complete');
+        
+        // Record performance monitoring completion
+        if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
+          const perfIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(s => s.name === 'performance_monitoring');
+          if (perfIndex !== -1) {
+            window.app._dependencyGraph.coordinationSetup.systems[perfIndex].completed = true;
+            window.app._dependencyGraph.coordinationSetup.systems[perfIndex].completionTime = new Date().toISOString();
+            window.app._dependencyGraph.coordinationSetup.systems[perfIndex].success = true;
+          }
         }
-      }
-      
-      console.log('✅ Performance monitoring setup complete');
-      
-      // Record performance monitoring completion
-      if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
-        const perfIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(s => s.name === 'performance_monitoring');
-        if (perfIndex !== -1) {
-          window.app._dependencyGraph.coordinationSetup.systems[perfIndex].completed = true;
-          window.app._dependencyGraph.coordinationSetup.systems[perfIndex].completionTime = new Date().toISOString();
-          window.app._dependencyGraph.coordinationSetup.systems[perfIndex].success = true;
-        }
+      } catch (error) {
+        console.error('⚠️ Performance monitoring setup failed:', error);
       }
     },
     
@@ -3735,94 +4347,103 @@ import './app.core.ui.js';
     
     // Show fatal error
     showFatalError: function(error) {
-      // Hide everything
-      document.body.innerHTML = '';
-      
-      // Show error screen
-      const errorScreen = document.createElement('div');
-      errorScreen.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: #1f2937;
-        color: white;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-        text-align: center;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      `;
-      
-      errorScreen.innerHTML = `
-        <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-        <h1 style="font-size: 24px; margin-bottom: 16px;">Application Failed to Start</h1>
-        <p style="margin-bottom: 24px; max-width: 500px; opacity: 0.8;">
-          The application encountered a critical error and cannot continue.
-          Please try refreshing the page or contact support if the problem persists.
-        </p>
-        <div style="background: rgba(255,255,255,0.1); padding: 16px; border-radius: 8px; margin-bottom: 24px; max-width: 500px; text-align: left;">
-          <div style="font-size: 12px; opacity: 0.6; margin-bottom: 8px;">Error Details:</div>
-          <div style="font-family: monospace; font-size: 12px;">${error.message}</div>
-        </div>
-        <div style="display: flex; gap: 12px;">
-          <button id="retryButton" style="
-            background: #8b5cf6;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-          ">Try Again</button>
-          <button id="reportButton" style="
-            background: transparent;
-            color: #8b5cf6;
-            border: 1px solid #8b5cf6;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-          ">Report Issue</button>
-        </div>
-      `;
-      
-      document.body.appendChild(errorScreen);
-      
-      // Add button handlers
-      document.getElementById('retryButton').addEventListener('click', () => {
-        window.location.reload();
-      });
-      
-      document.getElementById('reportButton').addEventListener('click', () => {
-        const errorReport = {
-          error: error.toString(),
-          message: error.message,
-          stack: error.stack,
-          url: window.location.href,
-          userAgent: navigator.userAgent,
-          timestamp: new Date().toISOString(),
-          bootstrap: BOOTSTRAP_STATE.getStatusReport()
-        };
+      try {
+        // Hide everything
+        document.body.innerHTML = '';
         
-        console.error('Error report:', errorReport);
-        alert('Error details have been logged to the console. Please provide this information to support.');
-      });
+        // Show error screen
+        const errorScreen = document.createElement('div');
+        errorScreen.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: #1f2937;
+          color: white;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          text-align: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        `;
+        
+        errorScreen.innerHTML = `
+          <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+          <h1 style="font-size: 24px; margin-bottom: 16px;">Application Failed to Start</h1>
+          <p style="margin-bottom: 24px; max-width: 500px; opacity: 0.8;">
+            The application encountered a critical error and cannot continue.
+            Please try refreshing the page or contact support if the problem persists.
+          </p>
+          <div style="background: rgba(255,255,255,0.1); padding: 16px; border-radius: 8px; margin-bottom: 24px; max-width: 500px; text-align: left;">
+            <div style="font-size: 12px; opacity: 0.6; margin-bottom: 8px;">Error Details:</div>
+            <div style="font-family: monospace; font-size: 12px;">${error.message}</div>
+          </div>
+          <div style="display: flex; gap: 12px;">
+            <button id="retryButton" style="
+              background: #8b5cf6;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 16px;
+            ">Try Again</button>
+            <button id="reportButton" style="
+              background: transparent;
+              color: #8b5cf6;
+              border: 1px solid #8b5cf6;
+              padding: 12px 24px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 16px;
+            ">Report Issue</button>
+          </div>
+        `;
+        
+        document.body.appendChild(errorScreen);
+        
+        // Add button handlers
+        document.getElementById('retryButton').addEventListener('click', () => {
+          window.location.reload();
+        });
+        
+        document.getElementById('reportButton').addEventListener('click', () => {
+          const errorReport = {
+            error: error.toString(),
+            message: error.message,
+            stack: error.stack,
+            url: window.location.href,
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString(),
+            bootstrap: BOOTSTRAP_STATE.getStatusReport()
+          };
+          
+          console.error('Error report:', errorReport);
+          alert('Error details have been logged to the console. Please provide this information to support.');
+        });
+      } catch (fatalError) {
+        console.error('❌ Even fatal error screen failed:', fatalError);
+        document.body.innerHTML = '<h1>Critical Error</h1><p>Please refresh the page.</p>';
+      }
     },
     
     // Hide loading screen
     hideLoadingScreen: function() {
-      const loadingScreen = document.getElementById('loadingScreen');
-      if (loadingScreen) {
-        loadingScreen.classList.add('hidden');
-        setTimeout(() => {
-          if (loadingScreen.parentNode) {
-            loadingScreen.parentNode.removeChild(loadingScreen);
-          }
-        }, 300);
+      try {
+        const loadingScreen = document.getElementById('loadingScreen');
+        if (loadingScreen) {
+          loadingScreen.classList.add('hidden');
+          setTimeout(() => {
+            if (loadingScreen.parentNode) {
+              loadingScreen.parentNode.removeChild(loadingScreen);
+            }
+          }, 300);
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to hide loading screen:', error);
       }
     },
     
@@ -4006,45 +4627,59 @@ import './app.core.ui.js';
   function ensureBackwardCompatibility() {
     console.log('🔄 Ensuring backward compatibility...');
     
-    // Legacy function fallbacks
-    if (typeof window.toggleSidebar === 'undefined') {
-      window.toggleSidebar = function() {
-        console.log('📐 Legacy toggleSidebar called');
-        const sidebar = document.querySelector('.sidebar');
-        if (sidebar) {
-          sidebar.classList.toggle('collapsed');
-        }
-      };
+    try {
+      // Legacy function fallbacks
+      if (typeof window.toggleSidebar === 'undefined') {
+        window.toggleSidebar = function() {
+          console.log('📐 Legacy toggleSidebar called');
+          const sidebar = document.querySelector('.sidebar');
+          if (sidebar) {
+            sidebar.classList.toggle('collapsed');
+          }
+        };
+      }
+      
+      if (typeof window.switchTab === 'undefined') {
+        window.switchTab = function(tabName) {
+          console.log('🧭 Legacy switchTab called:', tabName);
+          APP_BOOTSTRAP.loadPageSafely(tabName);
+        };
+      }
+      
+      if (typeof window.loadExternalTab === 'undefined') {
+        window.loadExternalTab = function(tabName, filePath) {
+          console.log('📄 Legacy loadExternalTab called:', tabName, filePath);
+          APP_BOOTSTRAP.loadPageSafely(tabName);
+        };
+      }
+      
+      // Ensure showNotification exists
+      if (typeof window.showNotification === 'undefined') {
+        window.showNotification = function(message, type = 'info', duration = 5000) {
+          console.log(`🔔 Legacy showNotification called: ${message}`);
+          return APP_BOOTSTRAP.showErrorToUser(message, type, duration);
+        };
+      }
+      
+      console.log('✅ Backward compatibility ensured');
+    } catch (error) {
+      console.error('⚠️ Backward compatibility setup failed:', error);
     }
-    
-    if (typeof window.switchTab === 'undefined') {
-      window.switchTab = function(tabName) {
-        console.log('🧭 Legacy switchTab called:', tabName);
-        APP_BOOTSTRAP.loadPageSafely(tabName);
-      };
-    }
-    
-    if (typeof window.loadExternalTab === 'undefined') {
-      window.loadExternalTab = function(tabName, filePath) {
-        console.log('📄 Legacy loadExternalTab called:', tabName, filePath);
-        APP_BOOTSTRAP.loadPageSafely(tabName);
-      };
-    }
-    
-    // Ensure showNotification exists
-    if (typeof window.showNotification === 'undefined') {
-      window.showNotification = function(message, type = 'info', duration = 5000) {
-        console.log(`🔔 Legacy showNotification called: ${message}`);
-        return APP_BOOTSTRAP.showErrorToUser(message, type, duration);
-      };
-    }
-    
-    console.log('✅ Backward compatibility ensured');
   }
   
   // Initialize enhanced app
   window.initializeEnhancedApp = function() {
     console.log('🚀 Initializing enhanced application...');
+    
+    // Check authentication before starting
+    const isLoggedIn = userLoggedIn();
+    const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+    
+    if (!isLoggedIn && !isPublicPage) {
+      console.log('🔐 Authentication required, redirecting to login before initializing app');
+      APP_BOOTSTRAP.redirectToAuth('Authentication required');
+      return Promise.reject(new Error('Authentication required'));
+    }
     
     // Ensure backward compatibility first
     ensureBackwardCompatibility();
@@ -4099,5 +4734,27 @@ import './app.core.ui.js';
     return null;
   };
   
-  console.log('✅ app.core.bootstrap.js loaded successfully');
+  // ============================================================================
+  // OPTIONAL MODULE SAFETY HANDLING
+  // ============================================================================
+  
+  // Safe wrapper for optional UI modules
+  function safeLoadOptionalModule(moduleName, loadFunction) {
+    try {
+      console.log(`🔧 Loading optional module: ${moduleName}`);
+      loadFunction();
+      console.log(`✅ Optional module loaded: ${moduleName}`);
+    } catch (error) {
+      const errorKey = `optional-module:${moduleName}`;
+      if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+        console.warn(`⚠️ Optional module ${moduleName} failed to load:`, error.message);
+      }
+      // Continue without this optional module
+    }
+  }
+  
+  // Example usage for optional modules (to be called by other parts of the app)
+  window.safeLoadOptionalModule = safeLoadOptionalModule;
+  
+  console.log('✅ app.core.bootstrap.js loaded successfully with enhanced safety features');
 })();

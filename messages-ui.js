@@ -42,7 +42,7 @@ import {
     formatFileSize, escapeHtml, viewMedia, playVideo, playAudio,
     downloadFile, openLocation, retryConnection, initChildSession,
     getCurrentSession, requestSessionUpdate, showReconnectState, hideReconnectState
-} from 'messages.core.js';
+} from './messages.core.js';
 
 console.log('[UI] Initializing messages UI');
 

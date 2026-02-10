@@ -5,6 +5,7 @@
 // 🔧 COMPATIBILITY: Added legacy API support, metadata fields, ready signaling, and integration fixes
 // 🔧 PATCHED: Added payload normalization layer for login/register with full legacy support
 // 🔧 FIXED: Login payload now uses 'identifier' field for backend compatibility
+// 🔧 SAFETY: Added comprehensive safety guards to prevent crashes and infinite loops
 
 (function() {
     // ============================================================================
@@ -82,6 +83,12 @@
         // Max bootstrap poll attempts
         MAX_BOOTSTRAP_POLLS: 300, // 30 seconds total
         
+        // Handshake max attempts
+        HANDSHAKE_MAX_ATTEMPTS: 3,
+        
+        // Handshake retry delay (seconds)
+        HANDSHAKE_RETRY_DELAY: 2000,
+        
         // API endpoint configuration
         API_ENDPOINTS: {
             LOGIN: '/api/auth/login',
@@ -121,7 +128,15 @@
         apiCoreAvailable: false,
         apiRequestAvailable: false,
         appCoreAvailable: false,
-        endpointPrefix: '/api' // Default API prefix
+        endpointPrefix: '/api', // Default API prefix
+        // Safety state tracking
+        handshakeAttempts: 0,
+        lastHandshakeAttempt: 0,
+        handshakeComplete: false,
+        sessionErrorLogged: false,
+        tokenErrorLogged: false,
+        apiCallFailures: {},
+        errorSuppression: {}
     };
     
     // Private event listeners storage with namespace
@@ -144,13 +159,62 @@
     // ============================================================================
     
     /**
+     * SAFETY: Check if value exists and is valid
+     */
+    function _isValid(value) {
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'string' && (value.trim() === '' || value === 'undefined' || value === 'null')) return false;
+        if (typeof value === 'object' && Object.keys(value).length === 0) return false;
+        return true;
+    }
+    
+    /**
+     * SAFETY: Safe value retrieval with fallback
+     */
+    function _safeGet(value, fallback = null) {
+        return _isValid(value) ? value : fallback;
+    }
+    
+    /**
+     * SAFETY: Error logging with suppression
+     */
+    function _safeLogError(errorType, message, data = {}, forceLog = false) {
+        const errorKey = `${errorType}:${message}`;
+        const now = Date.now();
+        
+        // Check if we should suppress this error
+        if (!forceLog && _moduleState.errorSuppression[errorKey]) {
+            const lastLog = _moduleState.errorSuppression[errorKey];
+            if (now - lastLog < 30000) { // 30 second suppression
+                return false;
+            }
+        }
+        
+        // Log the error
+        console.error(`❌ [AUTH-SAFETY] ${errorType}: ${message}`, data);
+        
+        // Update suppression tracking
+        _moduleState.errorSuppression[errorKey] = now;
+        
+        // Clean up old suppression entries
+        for (const key in _moduleState.errorSuppression) {
+            if (now - _moduleState.errorSuppression[key] > 300000) { // 5 minutes
+                delete _moduleState.errorSuppression[key];
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
      * PRIVATE: Safe localStorage access with error handling
      */
     function _safeStorageGet(key) {
         try {
-            return localStorage.getItem(key);
+            const value = localStorage.getItem(key);
+            return _isValid(value) ? value : null;
         } catch (error) {
-            console.warn(`⚠️ [AUTH] localStorage access failed for key "${key}":`, error.message);
+            _safeLogError('STORAGE', `localStorage access failed for key "${key}"`, { error: error.message });
             return null;
         }
     }
@@ -160,10 +224,14 @@
      */
     function _safeStorageSet(key, value) {
         try {
+            if (!_isValid(value)) {
+                console.warn(`⚠️ [AUTH-SAFETY] Attempted to set invalid value for key "${key}"`);
+                return false;
+            }
             localStorage.setItem(key, value);
             return true;
         } catch (error) {
-            console.warn(`⚠️ [AUTH] localStorage set failed for key "${key}":`, error.message);
+            _safeLogError('STORAGE', `localStorage set failed for key "${key}"`, { error: error.message });
             return false;
         }
     }
@@ -176,7 +244,7 @@
             localStorage.removeItem(key);
             return true;
         } catch (error) {
-            console.warn(`⚠️ [AUTH] localStorage remove failed for key "${key}":`, error.message);
+            _safeLogError('STORAGE', `localStorage remove failed for key "${key}"`, { error: error.message });
             return false;
         }
     }
@@ -228,7 +296,11 @@
             return window.MoodChatRequest;
         }
         
-        console.warn('⚠️ [AUTH] No API request module found');
+        if (!_moduleState.apiRequestAvailable) {
+            _safeLogError('MODULE', 'No API request module found', {}, true);
+            _moduleState.apiRequestAvailable = false;
+        }
+        
         return null;
     }
     
@@ -237,6 +309,12 @@
      * FIX: Prevents double /api/api prefix issues
      */
     function _getApiEndpoint(endpoint) {
+        // SAFETY: Check endpoint validity
+        if (!endpoint || typeof endpoint !== 'string') {
+            _safeLogError('ENDPOINT', 'Invalid endpoint provided', { endpoint });
+            return '/api/auth/validate'; // Default fallback
+        }
+        
         // Check if endpoint already has correct prefix
         if (endpoint.startsWith('/api/')) {
             return endpoint;
@@ -249,6 +327,31 @@
         
         // Otherwise, prepend the API prefix
         return `${_moduleState.endpointPrefix}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+    }
+    
+    /**
+     * SAFETY: Validate API endpoint safety
+     */
+    function _validateEndpointSafety(endpoint) {
+        if (!endpoint || typeof endpoint !== 'string') {
+            _safeLogError('ENDPOINT-SAFETY', 'Endpoint is invalid', { endpoint });
+            return false;
+        }
+        
+        // Check for suspicious patterns
+        const suspiciousPatterns = [
+            'javascript:', 'data:', 'vbscript:', 'file:', 'ftp:',
+            '//', '..', '~', '../'
+        ];
+        
+        for (const pattern of suspiciousPatterns) {
+            if (endpoint.includes(pattern)) {
+                _safeLogError('ENDPOINT-SAFETY', 'Endpoint contains suspicious pattern', { endpoint, pattern });
+                return false;
+            }
+        }
+        
+        return true;
     }
     
     /**
@@ -273,16 +376,20 @@
             try {
                 listener(eventDetail);
             } catch (error) {
-                console.error(`❌ [AUTH] Error in event listener for ${eventName}:`, error);
+                _safeLogError('EVENT', `Error in event listener for ${eventName}`, { error: error.message });
             }
         });
         
         // Also dispatch as custom event on window for external listeners
         if (eventName === 'token-expired' || eventName === 'session-refreshed' || 
             eventName === 'login' || eventName === 'logout' || eventName === 'ready') {
-            window.dispatchEvent(new CustomEvent(`auth-${eventName}`, {
-                detail: eventDetail
-            }));
+            try {
+                window.dispatchEvent(new CustomEvent(`auth-${eventName}`, {
+                    detail: eventDetail
+                }));
+            } catch (error) {
+                _safeLogError('EVENT', `Failed to dispatch window event: auth-${eventName}`, { error: error.message });
+            }
         }
     }
     
@@ -311,8 +418,8 @@
         _moduleState.apiRequestAvailable = hasApiRequest;
         _moduleState.appCoreAvailable = hasAppCore;
         
-        // Log dependency status
-        if (_moduleState.dependencyCheckAttempts <= 1 || _moduleState.dependencyCheckAttempts % 10 === 0) {
+        // Log dependency status (limited logging)
+        if (_moduleState.dependencyCheckAttempts <= 1 || _moduleState.dependencyCheckAttempts % 20 === 0) {
             console.log(`🔍 [AUTH] Dependency check #${_moduleState.dependencyCheckAttempts}:`, {
                 apiCore: hasApiCore ? '✓' : '✗',
                 apiRequest: hasApiRequest ? '✓' : '✗',
@@ -454,10 +561,23 @@
                 configurable: false
             });
             
+            // Safety tracking properties
+            Object.defineProperty(authObject, 'safetyStatus', {
+                get: () => ({
+                    handshakeAttempts: _moduleState.handshakeAttempts,
+                    handshakeComplete: _moduleState.handshakeComplete,
+                    sessionErrorLogged: _moduleState.sessionErrorLogged,
+                    tokenErrorLogged: _moduleState.tokenErrorLogged,
+                    apiCallFailures: Object.keys(_moduleState.apiCallFailures).length
+                }),
+                enumerable: true,
+                configurable: false
+            });
+            
             _moduleState.metadataFieldsSet = true;
             console.log('✅ [AUTH] Metadata fields set');
         } catch (error) {
-            console.error('❌ [AUTH] Failed to set metadata fields:', error);
+            _safeLogError('METADATA', 'Failed to set metadata fields', { error: error.message });
         }
     }
     
@@ -480,7 +600,7 @@
             try {
                 callback();
             } catch (error) {
-                console.error('❌ [AUTH] Error in ready callback:', error);
+                _safeLogError('READY-CALLBACK', 'Error in ready callback', { error: error.message });
             }
         });
         _moduleState.readyCallbacks = [];
@@ -570,6 +690,12 @@
         let methodUsed = '';
         
         try {
+            // SAFETY: Validate token first
+            if (!_isValid(token)) {
+                _safeLogError('TOKEN-REGISTRY', 'Invalid token provided for registration', { token });
+                return false;
+            }
+            
             // Priority 1: api.core.setAccessToken
             if (window.api && window.api.core && typeof window.api.core.setAccessToken === 'function') {
                 window.api.core.setAccessToken(token);
@@ -624,46 +750,57 @@
                 console.log('✅ [AUTH] Token registered via AppCore.tokenManager.setToken()');
             }
             else {
-                console.warn('⚠️ [AUTH] No compatible token registration method found in api.core');
+                if (!_moduleState.tokenErrorLogged) {
+                    console.warn('⚠️ [AUTH] No compatible token registration method found in api.core');
+                    _moduleState.tokenErrorLogged = true;
+                }
             }
             
             // CRITICAL: Dispatch token-ready event to unblock UI
             if (registered) {
                 console.log('🔐 [AUTH] Dispatching api-auth-token-ready event');
+                try {
+                    window.dispatchEvent(new CustomEvent("api-auth-token-ready", {
+                        detail: {
+                            token: token,
+                            registered: true,
+                            method: methodUsed,
+                            timestamp: Date.now(),
+                            source: 'api.auth.js',
+                            version: '21.0.2'
+                        }
+                    }));
+                    
+                    // Also dispatch legacy event for backward compatibility
+                    window.dispatchEvent(new CustomEvent("token-system-ready", {
+                        detail: {
+                            token: token,
+                            timestamp: Date.now()
+                        }
+                    }));
+                } catch (error) {
+                    _safeLogError('EVENT-DISPATCH', 'Failed to dispatch token-ready events', { error: error.message });
+                }
+            }
+            
+        } catch (error) {
+            _safeLogError('TOKEN-REGISTRY', 'Error registering token with core system', { error: error.message });
+            
+            // Still dispatch event with error flag to unblock UI
+            try {
                 window.dispatchEvent(new CustomEvent("api-auth-token-ready", {
                     detail: {
                         token: token,
-                        registered: true,
-                        method: methodUsed,
+                        registered: false,
+                        error: error.message,
                         timestamp: Date.now(),
                         source: 'api.auth.js',
                         version: '21.0.2'
                     }
                 }));
-                
-                // Also dispatch legacy event for backward compatibility
-                window.dispatchEvent(new CustomEvent("token-system-ready", {
-                    detail: {
-                        token: token,
-                        timestamp: Date.now()
-                    }
-                }));
+            } catch (e) {
+                _safeLogError('EVENT-DISPATCH', 'Failed to dispatch error token-ready event', { error: e.message });
             }
-            
-        } catch (error) {
-            console.error('❌ [AUTH] Error registering token with core system:', error);
-            
-            // Still dispatch event with error flag to unblock UI
-            window.dispatchEvent(new CustomEvent("api-auth-token-ready", {
-                detail: {
-                    token: token,
-                    registered: false,
-                    error: error.message,
-                    timestamp: Date.now(),
-                    source: 'api.auth.js',
-                    version: '21.0.2'
-                }
-            }));
         }
         
         return registered;
@@ -1258,7 +1395,7 @@
     }
     
     // ============================================================================
-    // PRIVATE TOKEN MANAGEMENT
+    // PRIVATE TOKEN MANAGEMENT (WITH SAFETY GUARDS)
     // ============================================================================
     
     /**
@@ -1269,7 +1406,7 @@
             // Priority 1: Use core token system if available (api.core.js integration)
             if (window.__API_CORE && typeof window.__API_CORE.getUserToken === 'function') {
                 const coreToken = window.__API_CORE.getUserToken();
-                if (coreToken) {
+                if (_isValid(coreToken)) {
                     console.debug('🔐 [AUTH] Token retrieved from __API_CORE');
                     return coreToken;
                 }
@@ -1278,12 +1415,12 @@
             // Priority 2: Check all possible token storage locations
             for (const key of CONFIG.TOKEN_KEYS) {
                 const token = _safeStorageGet(key);
-                if (token) {
+                if (_isValid(token)) {
                     console.debug(`🔐 [AUTH] Token retrieved from ${key}`);
                     
                     // Verify token is not empty or undefined
                     if (token.trim() === '' || token === 'undefined' || token === 'null') {
-                        console.warn(`⚠️ [AUTH] Invalid token found in ${key}, clearing`);
+                        console.warn(`⚠️ [AUTH-SAFETY] Invalid token found in ${key}, clearing`);
                         _safeStorageRemove(key);
                         continue;
                     }
@@ -1291,7 +1428,7 @@
                     // Check token expiry if available
                     const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
                     if (expiry && Date.now() > parseInt(expiry, 10)) {
-                        console.warn('⚠️ [AUTH] Token expired, clearing');
+                        console.warn('⚠️ [AUTH-SAFETY] Token expired, clearing');
                         clearUserToken();
                         return null;
                     }
@@ -1302,9 +1439,40 @@
             
             return null;
         } catch (error) {
-            console.error('❌ [AUTH] Critical error getting token:', error);
+            _safeLogError('TOKEN-GET', 'Critical error getting token', { error: error.message });
             return null;
         }
+    }
+    
+    /**
+     * PRIVATE: Validate token format and safety
+     */
+    function _validateTokenSafety(token) {
+        if (!token || typeof token !== 'string') {
+            _safeLogError('TOKEN-VALIDATION', 'Token is missing or not a string', { token });
+            return false;
+        }
+        
+        // Basic JWT format check (optional)
+        if (token.split('.').length !== 3) {
+            console.warn('⚠️ [AUTH-SAFETY] Token does not appear to be a valid JWT format');
+            // Don't fail - could be a custom token format
+        }
+        
+        // Check for suspicious patterns
+        const suspiciousPatterns = [
+            'script:', 'eval', 'function', 'constructor',
+            'proto', '__proto__', 'alert', 'document.cookie'
+        ];
+        
+        for (const pattern of suspiciousPatterns) {
+            if (token.toLowerCase().includes(pattern)) {
+                _safeLogError('TOKEN-VALIDATION', 'Token contains suspicious pattern', { pattern, token: token.substring(0, 20) + '...' });
+                return false;
+            }
+        }
+        
+        return true;
     }
     
     /**
@@ -1312,14 +1480,10 @@
      */
     function setUserToken(token, expiryMs = CONFIG.DEFAULT_TOKEN_EXPIRY) {
         try {
-            if (!token || typeof token !== 'string') {
-                console.error('❌ [AUTH] Invalid token provided');
+            // SAFETY: Validate token first
+            if (!_validateTokenSafety(token)) {
+                _safeLogError('TOKEN-SET', 'Invalid token provided for setting', { token: token ? 'present' : 'missing' });
                 return false;
-            }
-            
-            // Validate token format (basic JWT check)
-            if (token.split('.').length !== 3) {
-                console.warn('⚠️ [AUTH] Token does not appear to be a valid JWT format');
             }
             
             // CRITICAL PATCH: Register token with core system first
@@ -1328,7 +1492,11 @@
             
             // Set in core system if available (legacy)
             if (window.__API_CORE && typeof window.__API_CORE.setUserToken === 'function') {
-                window.__API_CORE.setUserToken(token);
+                try {
+                    window.__API_CORE.setUserToken(token);
+                } catch (error) {
+                    _safeLogError('TOKEN-CORE-SET', 'Failed to set token in core system', { error: error.message });
+                }
             }
             
             // Store in all token locations for backward compatibility
@@ -1353,7 +1521,7 @@
             console.log('✅ [AUTH] Token set successfully across all storage locations');
             return true;
         } catch (error) {
-            console.error('❌ [AUTH] Error setting token:', error);
+            _safeLogError('TOKEN-SET', 'Error setting token', { error: error.message });
             return false;
         }
     }
@@ -1365,7 +1533,11 @@
         try {
             // Clear from core system if available
             if (window.__API_CORE && typeof window.__API_CORE.clearAllAuthData === 'function') {
-                window.__API_CORE.clearAllAuthData();
+                try {
+                    window.__API_CORE.clearAllAuthData();
+                } catch (error) {
+                    _safeLogError('TOKEN-CLEAR-CORE', 'Failed to clear token from core system', { error: error.message });
+                }
             }
             
             // Clear all token storage locations
@@ -1383,8 +1555,98 @@
             console.log(`✅ [AUTH] Cleared tokens from ${clearedCount} locations`);
             return true;
         } catch (error) {
-            console.error('❌ [AUTH] Error clearing token:', error);
+            _safeLogError('TOKEN-CLEAR', 'Error clearing token', { error: error.message });
             return false;
+        }
+    }
+    
+    /**
+     * SAFETY: Track API call failures to prevent infinite loops
+     */
+    function _trackApiCallFailure(endpoint, error) {
+        const key = `${endpoint}:${error}`;
+        _moduleState.apiCallFailures[key] = (_moduleState.apiCallFailures[key] || 0) + 1;
+        
+        // Clean up old entries
+        const now = Date.now();
+        for (const failureKey in _moduleState.apiCallFailures) {
+            if (now - (_moduleState.apiCallFailures[failureKey + '_time'] || 0) > 300000) { // 5 minutes
+                delete _moduleState.apiCallFailures[failureKey];
+                delete _moduleState.apiCallFailures[failureKey + '_time'];
+            }
+        }
+        
+        _moduleState.apiCallFailures[key + '_time'] = now;
+        
+        // Check if we should suppress this endpoint
+        if (_moduleState.apiCallFailures[key] > 3) {
+            _safeLogError('API-LOOP-PROTECTION', `Too many failures for endpoint ${endpoint}`, { 
+                endpoint, 
+                failures: _moduleState.apiCallFailures[key],
+                error 
+            });
+            return false; // Should suppress
+        }
+        
+        return true; // Should continue
+    }
+    
+    /**
+     * SAFETY: Make safe API call with error handling
+     */
+    async function _safeApiCall(apiRequestFunc, endpoint, payload, options = {}) {
+        // SAFETY: Validate endpoint
+        if (!_validateEndpointSafety(endpoint)) {
+            return {
+                success: false,
+                error: 'Invalid endpoint',
+                code: 'ENDPOINT_INVALID',
+                status: 400
+            };
+        }
+        
+        // SAFETY: Check if we should suppress this endpoint due to previous failures
+        const failureKey = `${endpoint}:suppressed`;
+        if (_moduleState.apiCallFailures[failureKey] > 5) {
+            _safeLogError('API-SUPPRESSED', `Endpoint ${endpoint} is suppressed due to repeated failures`, {
+                endpoint,
+                failures: _moduleState.apiCallFailures[failureKey]
+            });
+            return {
+                success: false,
+                error: 'Endpoint temporarily unavailable',
+                code: 'ENDPOINT_SUPPRESSED',
+                status: 503
+            };
+        }
+        
+        try {
+            const result = await apiRequestFunc(endpoint, payload, options);
+            
+            // Reset failure count on success
+            delete _moduleState.apiCallFailures[`${endpoint}:suppressed`];
+            
+            return result;
+        } catch (error) {
+            // Track this failure
+            const shouldContinue = _trackApiCallFailure(endpoint, error.message);
+            
+            if (!shouldContinue) {
+                _moduleState.apiCallFailures[failureKey] = (_moduleState.apiCallFailures[failureKey] || 0) + 1;
+            }
+            
+            _safeLogError('API-CALL', `API call failed for ${endpoint}`, {
+                endpoint,
+                error: error.message,
+                shouldContinue
+            });
+            
+            return {
+                success: false,
+                error: error.message || 'API call failed',
+                code: 'NETWORK_ERROR',
+                status: 0
+            };
         }
     }
     
@@ -1392,7 +1654,7 @@
      * PRIVATE: Refresh token using refresh token with queue management
      */
     async function refreshToken() {
-        // If refresh already in progress, queue this request
+        // SAFETY: Check if refresh already in progress to prevent loops
         if (_moduleState.tokenRefreshInProgress) {
             console.log('🔐 [AUTH] Token refresh already in progress, adding to queue');
             return new Promise((resolve, reject) => {
@@ -1400,9 +1662,12 @@
             });
         }
         
-        // Check max attempts
+        // SAFETY: Check max attempts
         if (_moduleState.refreshAttempts >= CONFIG.MAX_REFRESH_ATTEMPTS) {
-            console.error('❌ [AUTH] Max refresh attempts reached, logging out');
+            _safeLogError('TOKEN-REFRESH', 'Max refresh attempts reached, logging out', {
+                attempts: _moduleState.refreshAttempts,
+                maxAttempts: CONFIG.MAX_REFRESH_ATTEMPTS
+            });
             _emitEvent('token-expired', { reason: 'Max refresh attempts reached' });
             _performLogout(false);
             return false;
@@ -1419,19 +1684,23 @@
             }
             
             const apiRequest = _getApiRequest();
-            if (!apiRequest) {
+            if (!apiRequest || !apiRequest.post) {
                 throw new Error('API request module not available');
             }
             
             // Use corrected endpoint path
             const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.REFRESH_TOKEN);
             
-            const response = await apiRequest.post(endpoint, {
-                refreshToken: refreshTokenValue
-            }, {
-                skipAuth: true, // Don't use current token for refresh request
-                retryCount: 0   // Don't retry refresh requests to avoid loops
-            });
+            // Use safe API call wrapper
+            const response = await _safeApiCall(
+                apiRequest.post.bind(apiRequest),
+                endpoint,
+                { refreshToken: refreshTokenValue },
+                {
+                    skipAuth: true, // Don't use current token for refresh request
+                    retryCount: 0   // Don't retry refresh requests to avoid loops
+                }
+            );
             
             if (response.success && response.data?.accessToken) {
                 // Store new tokens
@@ -1454,7 +1723,13 @@
                 console.log('✅ [AUTH] Token refreshed successfully');
                 
                 // Resolve all pending requests
-                _moduleState.pendingAuthRequests.forEach(({ resolve }) => resolve(true));
+                _moduleState.pendingAuthRequests.forEach(({ resolve }) => {
+                    try {
+                        resolve(true);
+                    } catch (error) {
+                        _safeLogError('PENDING-REQUEST', 'Error resolving pending request', { error: error.message });
+                    }
+                });
                 _moduleState.pendingAuthRequests = [];
                 
                 return true;
@@ -1462,7 +1737,10 @@
                 throw new Error(response.data?.message || 'Token refresh failed');
             }
         } catch (error) {
-            console.error('❌ [AUTH] Token refresh failed:', error);
+            _safeLogError('TOKEN-REFRESH', 'Token refresh failed', {
+                error: error.message,
+                refreshAttempts: _moduleState.refreshAttempts
+            });
             
             // Clear tokens on failure
             clearUserToken();
@@ -1475,7 +1753,13 @@
             });
             
             // Reject all pending requests
-            _moduleState.pendingAuthRequests.forEach(({ reject }) => reject(false));
+            _moduleState.pendingAuthRequests.forEach(({ reject }) => {
+                try {
+                    reject(false);
+                } catch (error) {
+                    _safeLogError('PENDING-REQUEST', 'Error rejecting pending request', { error: error.message });
+                }
+            });
             _moduleState.pendingAuthRequests = [];
             
             return false;
@@ -1485,7 +1769,7 @@
     }
     
     // ============================================================================
-    // PRIVATE SESSION VALIDATION
+    // PRIVATE SESSION VALIDATION (WITH SAFETY GUARDS)
     // ============================================================================
     
     /**
@@ -1514,7 +1798,7 @@
                 }
                 
                 const apiRequest = _getApiRequest();
-                if (!apiRequest) {
+                if (!apiRequest || !apiRequest.get) {
                     console.warn('⚠️ [AUTH] No API request module, falling back to token existence check');
                     return !!token;
                 }
@@ -1522,11 +1806,16 @@
                 // Use corrected endpoint path
                 const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.VALIDATE);
                 
-                // Perform validation request
-                const response = await apiRequest.get(endpoint, null, {
-                    timeout: 10000, // 10 second timeout for validation
-                    retryCount: 1   // One retry for validation
-                });
+                // Perform validation request with safety wrapper
+                const response = await _safeApiCall(
+                    apiRequest.get.bind(apiRequest),
+                    endpoint,
+                    null,
+                    {
+                        timeout: 10000, // 10 second timeout for validation
+                        retryCount: 1   // One retry for validation
+                    }
+                );
                 
                 if (response.success) {
                     console.debug('✅ [AUTH] Session validation successful');
@@ -1545,11 +1834,14 @@
                     return false;
                 } else {
                     // For non-401 errors, preserve session (could be server issue)
-                    console.warn(`⚠️ [AUTH] Session validation returned ${response.status}, preserving session`);
+                    if (!_moduleState.sessionErrorLogged) {
+                        console.warn(`⚠️ [AUTH] Session validation returned ${response.status}, preserving session`);
+                        _moduleState.sessionErrorLogged = true;
+                    }
                     return true;
                 }
             } catch (error) {
-                console.error('❌ [AUTH] Session validation error:', error);
+                _safeLogError('SESSION-VALIDATION', 'Session validation error', { error: error.message });
                 
                 // On network errors, preserve existing session if we have a token
                 const token = getUserToken();
@@ -1573,8 +1865,42 @@
     }
     
     // ============================================================================
-    // PRIVATE CROSS-TAB SYNCHRONIZATION
+    // PRIVATE CROSS-TAB SYNCHRONIZATION (WITH SAFETY GUARDS)
     // ============================================================================
+    
+    /**
+     * SAFETY: Validate cross-tab message origin and content
+     */
+    function _validateCrossTabMessage(event) {
+        // Check if event has required properties
+        if (!event || !event.key) {
+            return false;
+        }
+        
+        // Check if this is a token-related change
+        const isTokenChange = CONFIG.TOKEN_KEYS.includes(event.key) ||
+                             event.key === CONFIG.TOKEN_EXPIRY_KEY ||
+                             event.key === CONFIG.REFRESH_TOKEN_KEY;
+        
+        if (!isTokenChange) {
+            return false;
+        }
+        
+        // Check for duplicate messages (prevent loops)
+        const messageId = `${event.key}:${event.newValue || 'null'}`;
+        const now = Date.now();
+        
+        if (_moduleState.lastCrossTabMessage === messageId && 
+            now - _moduleState.lastCrossTabMessageTime < 1000) {
+            console.debug('🔐 [AUTH-SAFETY] Duplicate cross-tab message ignored');
+            return false;
+        }
+        
+        _moduleState.lastCrossTabMessage = messageId;
+        _moduleState.lastCrossTabMessageTime = now;
+        
+        return true;
+    }
     
     /**
      * PRIVATE: Initialize cross-tab synchronization
@@ -1587,12 +1913,8 @@
         try {
             // Listen for storage events from other tabs
             window.addEventListener('storage', (event) => {
-                // Check if this is a token-related change
-                const isTokenChange = CONFIG.TOKEN_KEYS.includes(event.key) ||
-                                     event.key === CONFIG.TOKEN_EXPIRY_KEY ||
-                                     event.key === CONFIG.REFRESH_TOKEN_KEY;
-                
-                if (!isTokenChange) {
+                // SAFETY: Validate message
+                if (!_validateCrossTabMessage(event)) {
                     return;
                 }
                 
@@ -1615,13 +1937,17 @@
                 // Token was set in another tab (login happened elsewhere)
                 if (event.newValue && !event.oldValue && CONFIG.TOKEN_KEYS.includes(event.key)) {
                     console.log('🔐 [AUTH] Token set in another tab, syncing auth state');
-                    window.dispatchEvent(new CustomEvent('auth-tab-sync', {
-                        detail: {
-                            action: 'login',
-                            timestamp: Date.now(),
-                            key: event.key
-                        }
-                    }));
+                    try {
+                        window.dispatchEvent(new CustomEvent('auth-tab-sync', {
+                            detail: {
+                                action: 'login',
+                                timestamp: Date.now(),
+                                key: event.key
+                            }
+                        }));
+                    } catch (error) {
+                        _safeLogError('CROSS-TAB-SYNC', 'Failed to dispatch auth-tab-sync event', { error: error.message });
+                    }
                 }
                 
                 // Auth state changed
@@ -1644,7 +1970,7 @@
             _moduleState.crossTabSyncInitialized = true;
             console.log('✅ [AUTH] Cross-tab synchronization initialized');
         } catch (error) {
-            console.error('❌ [AUTH] Failed to initialize cross-tab sync:', error);
+            _safeLogError('CROSS-TAB-INIT', 'Failed to initialize cross-tab sync', { error: error.message });
         }
     }
     
@@ -1652,39 +1978,192 @@
      * PRIVATE: Setup cross-tab heartbeat for state synchronization
      */
     function _setupCrossTabHeartbeat() {
+        // SAFETY: Clear any existing interval
+        if (_moduleState.crossTabHeartbeatInterval) {
+            clearInterval(_moduleState.crossTabHeartbeatInterval);
+        }
+        
         // Update sync timestamp every 30 seconds
-        setInterval(() => {
-            const authState = {
-                hasToken: !!getUserToken(),
-                timestamp: Date.now(),
-                tabId: window._API_AUTH_V21_LOADED_.instanceId
-            };
-            
-            _safeStorageSet(CONFIG.CROSS_TAB_SYNC_KEY, JSON.stringify(authState));
+        _moduleState.crossTabHeartbeatInterval = setInterval(() => {
+            try {
+                const authState = {
+                    hasToken: !!getUserToken(),
+                    timestamp: Date.now(),
+                    tabId: window._API_AUTH_V21_LOADED_.instanceId
+                };
+                
+                _safeStorageSet(CONFIG.CROSS_TAB_SYNC_KEY, JSON.stringify(authState));
+            } catch (error) {
+                _safeLogError('CROSS-TAB-HEARTBEAT', 'Failed to update heartbeat', { error: error.message });
+            }
         }, 30000);
         
         // Check for other tab states every minute
-        setInterval(() => {
-            const syncData = _safeStorageGet(CONFIG.CROSS_TAB_SYNC_KEY);
-            if (syncData) {
-                try {
-                    const otherTabState = JSON.parse(syncData);
-                    const timeDiff = Date.now() - otherTabState.timestamp;
-                    
-                    // If other tab hasn't updated in 2 minutes, it might have crashed
-                    if (timeDiff > 120000 && otherTabState.hasToken) {
-                        console.log('🔐 [AUTH] Other tab may have crashed with active session');
+        _moduleState.crossTabCheckInterval = setInterval(() => {
+            try {
+                const syncData = _safeStorageGet(CONFIG.CROSS_TAB_SYNC_KEY);
+                if (syncData) {
+                    try {
+                        const otherTabState = JSON.parse(syncData);
+                        const timeDiff = Date.now() - otherTabState.timestamp;
+                        
+                        // If other tab hasn't updated in 2 minutes, it might have crashed
+                        if (timeDiff > 120000 && otherTabState.hasToken) {
+                            console.log('🔐 [AUTH] Other tab may have crashed with active session');
+                        }
+                    } catch (e) {
+                        // Ignore parse errors
                     }
-                } catch (e) {
-                    // Ignore parse errors
                 }
+            } catch (error) {
+                _safeLogError('CROSS-TAB-CHECK', 'Failed to check other tabs', { error: error.message });
             }
         }, 60000);
     }
     
     // ============================================================================
-    // PRIVATE IFRAME SYNCHRONIZATION
+    // PRIVATE IFRAME SYNCHRONIZATION (WITH SAFETY GUARDS)
     // ============================================================================
+    
+    /**
+     * SAFETY: Validate iframe message origin and content
+     */
+    function _validateIframeMessage(event, expectedOrigin = null) {
+        // Check if event has required properties
+        if (!event || !event.data || typeof event.data !== 'object') {
+            return false;
+        }
+        
+        // Check source (in production, use specific origin)
+        if (expectedOrigin && event.origin !== expectedOrigin) {
+            _safeLogError('IFRAME-SECURITY', 'Message from unexpected origin', {
+                expectedOrigin,
+                actualOrigin: event.origin,
+                source: event.source === window.parent ? 'parent' : 'other'
+            });
+            return false;
+        }
+        
+        // Check message type
+        if (!event.data.type || typeof event.data.type !== 'string') {
+            return false;
+        }
+        
+        // Check for duplicate messages
+        const messageId = `${event.data.type}:${JSON.stringify(event.data.payload || {})}`;
+        const now = Date.now();
+        
+        if (_moduleState.lastIframeMessage === messageId && 
+            now - _moduleState.lastIframeMessageTime < 1000) {
+            console.debug('🔐 [AUTH-SAFETY] Duplicate iframe message ignored');
+            return false;
+        }
+        
+        _moduleState.lastIframeMessage = messageId;
+        _moduleState.lastIframeMessageTime = now;
+        
+        return true;
+    }
+    
+    /**
+     * SAFETY: Send iframe message with error handling
+     */
+    function _safePostMessage(target, message, targetOrigin = '*') {
+        try {
+            if (!target || !message) {
+                _safeLogError('POST-MESSAGE', 'Invalid target or message', { target, message });
+                return false;
+            }
+            
+            target.postMessage(message, targetOrigin);
+            return true;
+        } catch (error) {
+            _safeLogError('POST-MESSAGE', 'Failed to post message', {
+                error: error.message,
+                targetOrigin,
+                messageType: message.type
+            });
+            return false;
+        }
+    }
+    
+    /**
+     * SAFETY: Perform handshake with parent window
+     */
+    function _performHandshake() {
+        if (_moduleState.handshakeComplete) {
+            console.debug('🔐 [AUTH] Handshake already complete');
+            return true;
+        }
+        
+        // SAFETY: Check max attempts
+        if (_moduleState.handshakeAttempts >= CONFIG.HANDSHAKE_MAX_ATTEMPTS) {
+            _safeLogError('HANDSHAKE', 'Max handshake attempts reached', {
+                attempts: _moduleState.handshakeAttempts,
+                maxAttempts: CONFIG.HANDSHAKE_MAX_ATTEMPTS
+            });
+            return false;
+        }
+        
+        // SAFETY: Check retry delay
+        const now = Date.now();
+        if (now - _moduleState.lastHandshakeAttempt < CONFIG.HANDSHAKE_RETRY_DELAY) {
+            console.debug('🔐 [AUTH] Handshake retry too soon, waiting');
+            return false;
+        }
+        
+        _moduleState.handshakeAttempts++;
+        _moduleState.lastHandshakeAttempt = now;
+        
+        console.log(`🔐 [AUTH] Performing handshake (attempt ${_moduleState.handshakeAttempts})`);
+        
+        try {
+            const token = getUserToken();
+            const authState = {
+                type: 'AUTH_HANDSHAKE',
+                payload: {
+                    authenticated: !!token,
+                    timestamp: Date.now(),
+                    source: 'iframe-auth-handshake',
+                    version: '21.0.2',
+                    iframeUrl: window.location.href,
+                    handshakeId: Math.random().toString(36).substring(7),
+                    attempt: _moduleState.handshakeAttempts
+                }
+            };
+            
+            if (token) {
+                authState.payload.hasToken = true;
+                // Don't send actual token for security
+            }
+            
+            const success = _safePostMessage(window.parent, authState, '*');
+            
+            if (success) {
+                console.log('✅ [AUTH] Handshake sent to parent');
+                
+                // Set timeout to mark handshake as failed if no response
+                setTimeout(() => {
+                    if (!_moduleState.handshakeComplete) {
+                        console.warn(`⚠️ [AUTH] Handshake timeout (attempt ${_moduleState.handshakeAttempts})`);
+                        
+                        // Try again if under max attempts
+                        if (_moduleState.handshakeAttempts < CONFIG.HANDSHAKE_MAX_ATTEMPTS) {
+                            setTimeout(() => _performHandshake(), CONFIG.HANDSHAKE_RETRY_DELAY);
+                        }
+                    }
+                }, 5000); // 5 second timeout
+            }
+            
+            return success;
+        } catch (error) {
+            _safeLogError('HANDSHAKE', 'Handshake failed', {
+                error: error.message,
+                attempt: _moduleState.handshakeAttempts
+            });
+            return false;
+        }
+    }
     
     /**
      * PRIVATE: Initialize iframe synchronization
@@ -1711,31 +2190,48 @@
                     }
                 };
                 
-                window.parent.postMessage(authState, '*');
+                _safePostMessage(window.parent, authState, '*');
                 console.debug('🔐 [AUTH] Sent auth state to parent window');
             };
             
             // Send initial state
             sendAuthState();
             
+            // Perform initial handshake
+            _performHandshake();
+            
             // Listen for messages from parent
             window.addEventListener('message', (event) => {
+                // SAFETY: Validate message
+                if (!_validateIframeMessage(event)) {
+                    return;
+                }
+                
                 // Basic origin validation (in production, use specific origin)
                 if (event.source !== window.parent) {
+                    console.warn('⚠️ [AUTH-SAFETY] Message from non-parent source ignored');
                     return;
                 }
                 
                 const data = event.data;
-                if (!data || typeof data !== 'object') {
-                    return;
-                }
                 
                 switch (data.type) {
+                    case 'AUTH_HANDSHAKE_RESPONSE':
+                        console.log('🔐 [AUTH] Received handshake response from parent');
+                        _moduleState.handshakeComplete = true;
+                        _moduleState.handshakeAttempts = 0; // Reset attempts on success
+                        
+                        // Process any pending actions
+                        if (data.payload && data.payload.action) {
+                            _handleParentAction(data.payload.action, data.payload.data);
+                        }
+                        break;
+                        
                     case 'AUTH_UPDATE':
                         console.log('🔐 [AUTH] Received auth update from parent window');
                         if (!data.payload.authenticated) {
                             _performLogout(false);
-                        } else if (data.payload.token) {
+                        } else if (data.payload.token && _validateTokenSafety(data.payload.token)) {
                             // Parent sent a token (e.g., after login in parent)
                             setUserToken(data.payload.token, data.payload.expiresIn);
                         }
@@ -1750,6 +2246,11 @@
                         console.log('🔐 [AUTH] Received logout command from parent');
                         _performLogout(false);
                         break;
+                        
+                    case 'AUTH_ACTION':
+                        // Generic action from parent
+                        _handleParentAction(data.payload.action, data.payload.data);
+                        break;
                 }
             });
             
@@ -1763,12 +2264,71 @@
             _moduleState.iframeSyncInitialized = true;
             console.log('✅ [AUTH] Iframe synchronization initialized');
         } catch (error) {
-            console.error('❌ [AUTH] Failed to initialize iframe sync:', error);
+            _safeLogError('IFRAME-INIT', 'Failed to initialize iframe sync', { error: error.message });
+        }
+    }
+    
+    /**
+     * SAFETY: Handle parent actions with error protection
+     */
+    function _handleParentAction(action, data) {
+        try {
+            console.log(`🔐 [AUTH] Processing parent action: ${action}`);
+            
+            switch (action) {
+                case 'VALIDATE_SESSION':
+                    validateSession().then(isValid => {
+                        _safePostMessage(window.parent, {
+                            type: 'AUTH_ACTION_RESPONSE',
+                            payload: {
+                                action: 'VALIDATE_SESSION',
+                                success: isValid,
+                                timestamp: Date.now()
+                            }
+                        }, '*');
+                    });
+                    break;
+                    
+                case 'GET_AUTH_STATE':
+                    getAuthState().then(state => {
+                        _safePostMessage(window.parent, {
+                            type: 'AUTH_ACTION_RESPONSE',
+                            payload: {
+                                action: 'GET_AUTH_STATE',
+                                state: state,
+                                timestamp: Date.now()
+                            }
+                        }, '*');
+                    });
+                    break;
+                    
+                case 'REFRESH_TOKEN':
+                    refreshToken().then(success => {
+                        _safePostMessage(window.parent, {
+                            type: 'AUTH_ACTION_RESPONSE',
+                            payload: {
+                                action: 'REFRESH_TOKEN',
+                                success: success,
+                                timestamp: Date.now()
+                            }
+                        }, '*');
+                    });
+                    break;
+                    
+                default:
+                    console.warn(`⚠️ [AUTH] Unknown parent action: ${action}`);
+            }
+        } catch (error) {
+            _safeLogError('PARENT-ACTION', `Failed to handle parent action: ${action}`, {
+                error: error.message,
+                action,
+                data
+            });
         }
     }
     
     // ============================================================================
-    // PRIVATE LOGOUT HANDLER
+    // PRIVATE LOGOUT HANDLER (WITH SAFETY GUARDS)
     // ============================================================================
     
     /**
@@ -1799,6 +2359,8 @@
             _moduleState.refreshAttempts = 0;
             _moduleState.sessionValidationPromise = null;
             _moduleState.pendingAuthRequests = [];
+            _moduleState.handshakeComplete = false;
+            _moduleState.handshakeAttempts = 0;
             
             // Notify other tabs if requested
             if (notifyUI) {
@@ -1821,7 +2383,7 @@
                     
                     console.log('🔐 [AUTH] Dispatched user-logged-out event');
                 } catch (e) {
-                    console.log('🔐 [AUTH] Could not set cross-tab trigger:', e.message);
+                    _safeLogError('LOGOUT-NOTIFY', 'Could not set cross-tab trigger', { error: e.message });
                 }
             }
             
@@ -1832,13 +2394,13 @@
             console.log('✅ [AUTH] Logout completed successfully');
             return true;
         } catch (error) {
-            console.error('❌ [AUTH] Error during logout:', error);
+            _safeLogError('LOGOUT', 'Error during logout', { error: error.message });
             return false;
         }
     }
     
     // ============================================================================
-    // PUBLIC API FUNCTIONS (ENHANCED WITH IDENTIFIER FIELD FIX)
+    // PUBLIC API FUNCTIONS (ENHANCED WITH IDENTIFIER FIELD FIX & SAFETY GUARDS)
     // ============================================================================
     
     /**
@@ -1866,7 +2428,7 @@
             console.log('🔧 [AUTH] Final login payload (with identifier field):', payload);
             
             const apiRequest = _getApiRequest();
-            if (!apiRequest) {
+            if (!apiRequest || !apiRequest.post) {
                 return {
                     success: false,
                     error: 'API request module not available',
@@ -1877,10 +2439,15 @@
             // Use corrected endpoint path
             const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.LOGIN);
             
-            // Make login request with identifier field
-            const response = await apiRequest.post(endpoint, payload, {
-                skipAuth: true // Don't use existing token for login
-            });
+            // Make login request with identifier field using safe wrapper
+            const response = await _safeApiCall(
+                apiRequest.post.bind(apiRequest),
+                endpoint,
+                payload,
+                {
+                    skipAuth: true // Don't use existing token for login
+                }
+            );
             
             if (response.success && response.data?.accessToken) {
                 // Store tokens
@@ -1910,15 +2477,19 @@
                     backendPayload: payload // Log what was sent to backend
                 });
                 
-                window.dispatchEvent(new CustomEvent('user-logged-in', {
-                    detail: {
-                        user: response.data.user,
-                        timestamp: new Date().toISOString(),
-                        source: 'api.auth.js',
-                        version: '21.0.2',
-                        payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                    }
-                }));
+                try {
+                    window.dispatchEvent(new CustomEvent('user-logged-in', {
+                        detail: {
+                            user: response.data.user,
+                            timestamp: new Date().toISOString(),
+                            source: 'api.auth.js',
+                            version: '21.0.2',
+                            payloadType: args.length > 1 ? 'legacy-args' : 'object'
+                        }
+                    }));
+                } catch (error) {
+                    _safeLogError('LOGIN-EVENT', 'Failed to dispatch user-logged-in event', { error: error.message });
+                }
                 
                 console.log('✅ [AUTH] Login successful with identifier field');
                 
@@ -1942,7 +2513,10 @@
                 };
             }
         } catch (error) {
-            console.error('❌ [AUTH] Login error:', error);
+            _safeLogError('LOGIN', 'Login error', {
+                error: error.message,
+                argsCount: args.length
+            });
             return {
                 success: false,
                 error: error.message || 'Login failed',
@@ -1977,7 +2551,7 @@
             console.log('🔧 [AUTH] Final registration payload:', payload);
             
             const apiRequest = _getApiRequest();
-            if (!apiRequest) {
+            if (!apiRequest || !apiRequest.post) {
                 return {
                     success: false,
                     error: 'API request module not available',
@@ -1988,10 +2562,15 @@
             // Use corrected endpoint path
             const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.REGISTER);
             
-            // Make registration request
-            const response = await apiRequest.post(endpoint, payload, {
-                skipAuth: true
-            });
+            // Make registration request using safe wrapper
+            const response = await _safeApiCall(
+                apiRequest.post.bind(apiRequest),
+                endpoint,
+                payload,
+                {
+                    skipAuth: true
+                }
+            );
             
             if (response.success && response.data?.accessToken) {
                 // Store tokens
@@ -2020,15 +2599,19 @@
                     payloadType: args.length > 1 ? 'legacy-args' : 'object'
                 });
                 
-                window.dispatchEvent(new CustomEvent('user-registered', {
-                    detail: {
-                        user: response.data.user,
-                        timestamp: new Date().toISOString(),
-                        source: 'api.auth.js',
-                        version: '21.0.2',
-                        payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                    }
-                }));
+                try {
+                    window.dispatchEvent(new CustomEvent('user-registered', {
+                        detail: {
+                            user: response.data.user,
+                            timestamp: new Date().toISOString(),
+                            source: 'api.auth.js',
+                            version: '21.0.2',
+                            payloadType: args.length > 1 ? 'legacy-args' : 'object'
+                        }
+                    }));
+                } catch (error) {
+                    _safeLogError('REGISTER-EVENT', 'Failed to dispatch user-registered event', { error: error.message });
+                }
                 
                 console.log('✅ [AUTH] Registration successful with normalized payload');
                 
@@ -2049,7 +2632,10 @@
                 };
             }
         } catch (error) {
-            console.error('❌ [AUTH] Registration error:', error);
+            _safeLogError('REGISTER', 'Registration error', {
+                error: error.message,
+                argsCount: args.length
+            });
             return {
                 success: false,
                 error: error.message || 'Registration failed',
@@ -2069,13 +2655,19 @@
             // Call logout endpoint if online
             if (_isOnline()) {
                 const apiRequest = _getApiRequest();
-                if (apiRequest) {
+                if (apiRequest && apiRequest.post) {
                     // Use corrected endpoint path
                     const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.LOGOUT);
                     
-                    await apiRequest.post(endpoint, {}, {
-                        timeout: 5000 // Short timeout for logout
-                    }).catch(error => {
+                    // Use safe API call wrapper
+                    await _safeApiCall(
+                        apiRequest.post.bind(apiRequest),
+                        endpoint,
+                        {},
+                        {
+                            timeout: 5000 // Short timeout for logout
+                        }
+                    ).catch(error => {
                         // Log but don't fail on logout API errors
                         console.warn('⚠️ [AUTH] Logout API call failed, continuing with local logout:', error.message);
                     });
@@ -2090,7 +2682,7 @@
                 message: 'Logged out successfully'
             };
         } catch (error) {
-            console.error('❌ [AUTH] Logout error:', error);
+            _safeLogError('LOGOUT-PUBLIC', 'Logout error', { error: error.message });
             // Still perform local logout even if API call fails
             _performLogout(true);
             return {
@@ -2120,7 +2712,7 @@
             }
             
             const apiRequest = _getApiRequest();
-            if (!apiRequest) {
+            if (!apiRequest || !apiRequest.post) {
                 return {
                     success: false,
                     error: 'API request module not available',
@@ -2131,11 +2723,17 @@
             // Use corrected endpoint path
             const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.FORGOT_PASSWORD);
             
-            const response = await apiRequest.post(endpoint, {
-                email: email.trim()
-            }, {
-                skipAuth: true
-            });
+            // Use safe API call wrapper
+            const response = await _safeApiCall(
+                apiRequest.post.bind(apiRequest),
+                endpoint,
+                {
+                    email: email.trim()
+                },
+                {
+                    skipAuth: true
+                }
+            );
             
             // Always return success for security (don't reveal if email exists)
             return {
@@ -2145,7 +2743,10 @@
                 email: email
             };
         } catch (error) {
-            console.error('❌ [AUTH] Forgot password error:', error);
+            _safeLogError('FORGOT-PASSWORD', 'Forgot password error', {
+                error: error.message,
+                argsCount: args.length
+            });
             return {
                 success: false,
                 error: 'Failed to process reset request',
@@ -2185,7 +2786,7 @@
             }
             
             const apiRequest = _getApiRequest();
-            if (!apiRequest) {
+            if (!apiRequest || !apiRequest.post) {
                 return {
                     success: false,
                     error: 'API request module not available',
@@ -2196,12 +2797,18 @@
             // Use corrected endpoint path
             const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.RESET_PASSWORD);
             
-            const response = await apiRequest.post(endpoint, {
-                token,
-                newPassword
-            }, {
-                skipAuth: true
-            });
+            // Use safe API call wrapper
+            const response = await _safeApiCall(
+                apiRequest.post.bind(apiRequest),
+                endpoint,
+                {
+                    token,
+                    newPassword
+                },
+                {
+                    skipAuth: true
+                }
+            );
             
             return {
                 success: response.success,
@@ -2211,7 +2818,10 @@
                 passwordLength: newPassword.length
             };
         } catch (error) {
-            console.error('❌ [AUTH] Reset password error:', error);
+            _safeLogError('RESET-PASSWORD', 'Reset password error', {
+                error: error.message,
+                argsCount: args.length
+            });
             return {
                 success: false,
                 error: 'Password reset failed',
@@ -2286,7 +2896,7 @@
                 token: getUserToken()
             };
         } catch (error) {
-            console.error('❌ [AUTH] Auto-login error:', error);
+            _safeLogError('AUTO-LOGIN', 'Auto-login error', { error: error.message });
             return {
                 success: false,
                 error: error.message || 'Auto-login failed',
@@ -2326,11 +2936,18 @@
             const token = getUserToken();
             if (token && _isOnline()) {
                 const apiRequest = _getApiRequest();
-                if (apiRequest) {
+                if (apiRequest && apiRequest.get) {
                     // Use corrected endpoint path
                     const endpoint = _getApiEndpoint(CONFIG.API_ENDPOINTS.GET_USER);
                     
-                    const response = await apiRequest.get(endpoint);
+                    // Use safe API call wrapper
+                    const response = await _safeApiCall(
+                        apiRequest.get.bind(apiRequest),
+                        endpoint,
+                        null,
+                        {}
+                    );
+                    
                     if (response.success && response.data) {
                         const userData = JSON.stringify(response.data);
                         _safeStorageSet('USER_DATA', userData);
@@ -2342,7 +2959,7 @@
             
             return null;
         } catch (error) {
-            console.error('❌ [AUTH] Error getting current user:', error);
+            _safeLogError('GET-USER', 'Error getting current user', { error: error.message });
             return null;
         }
     }
@@ -2399,6 +3016,13 @@
             bootstrapComplete: _moduleState.bootstrapComplete,
             dependenciesReady: _moduleState.dependenciesReady,
             ready: _moduleState.initialized && _moduleState.bootstrapComplete,
+            safetyStatus: {
+                handshakeAttempts: _moduleState.handshakeAttempts,
+                handshakeComplete: _moduleState.handshakeComplete,
+                sessionErrorLogged: _moduleState.sessionErrorLogged,
+                tokenErrorLogged: _moduleState.tokenErrorLogged,
+                apiCallFailures: Object.keys(_moduleState.apiCallFailures).length
+            },
             payloadNormalization: {
                 login: 'identifier_field',
                 register: 'enhanced',
@@ -2426,8 +3050,52 @@
     }
     
     // ============================================================================
-    // MODULE INITIALIZATION
+    // MODULE INITIALIZATION (WITH SAFETY GUARDS)
     // ============================================================================
+    
+    /**
+     * SAFETY: Handle session expiration gracefully
+     */
+    function _handleSessionExpiration() {
+        if (_moduleState.sessionExpirationHandled) {
+            return;
+        }
+        
+        _moduleState.sessionExpirationHandled = true;
+        
+        console.log('🔐 [AUTH-SAFETY] Handling session expiration');
+        
+        // Clear tokens
+        clearUserToken();
+        
+        // Notify parent if in iframe
+        if (window.self !== window.top) {
+            try {
+                _safePostMessage(window.parent, {
+                    type: 'AUTH_SESSION_EXPIRED',
+                    payload: {
+                        timestamp: Date.now(),
+                        source: 'api.auth.js'
+                    }
+                }, '*');
+            } catch (error) {
+                _safeLogError('SESSION-EXPIRY', 'Failed to notify parent of session expiration', { error: error.message });
+            }
+        }
+        
+        // Notify internal listeners
+        _emitEvent('token-expired', {
+            reason: 'session_expired',
+            source: 'safety_handler'
+        });
+        
+        // Stop further token-dependent requests
+        _moduleState.sessionValidationPromise = null;
+        _moduleState.pendingAuthRequests = [];
+        _moduleState.tokenRefreshInProgress = false;
+        
+        console.log('✅ [AUTH-SAFETY] Session expiration handled');
+    }
     
     /**
      * Initialize the authentication module
@@ -2455,19 +3123,23 @@
             
             // Set up token expiry monitoring
             const expiryCheckInterval = setInterval(() => {
-                const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
-                if (expiry) {
-                    const timeUntilExpiry = parseInt(expiry, 10) - Date.now();
-                    
-                    if (timeUntilExpiry < CONFIG.TOKEN_REFRESH_BUFFER && timeUntilExpiry > 0) {
-                        console.log(`🔐 [AUTH] Token expiring in ${Math.round(timeUntilExpiry/1000)}s, refreshing...`);
-                        refreshToken().catch(error => {
-                            console.warn('⚠️ [AUTH] Background token refresh failed:', error.message);
-                        });
-                    } else if (timeUntilExpiry <= 0) {
-                        console.warn('⚠️ [AUTH] Token expired, clearing');
-                        clearUserToken();
+                try {
+                    const expiry = _safeStorageGet(CONFIG.TOKEN_EXPIRY_KEY);
+                    if (expiry) {
+                        const timeUntilExpiry = parseInt(expiry, 10) - Date.now();
+                        
+                        if (timeUntilExpiry < CONFIG.TOKEN_REFRESH_BUFFER && timeUntilExpiry > 0) {
+                            console.log(`🔐 [AUTH] Token expiring in ${Math.round(timeUntilExpiry/1000)}s, refreshing...`);
+                            refreshToken().catch(error => {
+                                console.warn('⚠️ [AUTH] Background token refresh failed:', error.message);
+                            });
+                        } else if (timeUntilExpiry <= 0) {
+                            console.warn('⚠️ [AUTH] Token expired, clearing');
+                            _handleSessionExpiration();
+                        }
                     }
+                } catch (error) {
+                    _safeLogError('TOKEN-EXPIRY-CHECK', 'Error in token expiry check', { error: error.message });
                 }
             }, 30000); // Check every 30 seconds
             
@@ -2516,7 +3188,7 @@
             
             return true;
         } catch (error) {
-            console.error('❌ [API-AUTH] Failed to initialize auth module:', error);
+            _safeLogError('MODULE-INIT', 'Failed to initialize auth module', { error: error.message });
             _moduleState.lifecycleState = 'error';
             _emitEvent('error', { error: error.message, stage: 'initialization' });
             return false;
@@ -2569,6 +3241,15 @@
                     return true;
                 }
                 return false;
+            },
+            
+            // Safety utilities
+            getSafetyStatus: () => _moduleState.safetyStatus,
+            resetSafetyCounters: () => {
+                _moduleState.handshakeAttempts = 0;
+                _moduleState.apiCallFailures = {};
+                _moduleState.errorSuppression = {};
+                console.log('✅ [AUTH-SAFETY] Safety counters reset');
             }
         };
         
@@ -2620,30 +3301,124 @@
                 appCoreAvailable: _moduleState.appCoreAvailable,
                 payloadNormalization: 'identifier_field',
                 loginBackendFormat: 'identifier: <email_or_username>, password: <password>',
-                registerBackendFormat: 'email, username, password, confirmPassword, name, avatar'
+                registerBackendFormat: 'email, username, password, confirmPassword, name, avatar',
+                safetyEnabled: true,
+                handshakeAttempts: _moduleState.handshakeAttempts,
+                handshakeComplete: _moduleState.handshakeComplete
             };
             
-            window.dispatchEvent(new CustomEvent("api-auth-ready", {
-                detail: authState
-            }));
+            try {
+                window.dispatchEvent(new CustomEvent("api-auth-ready", {
+                    detail: authState
+                }));
+            } catch (error) {
+                _safeLogError('READY-EVENT', 'Failed to dispatch api-auth-ready event', { error: error.message });
+            }
             
-            console.log("✅ api.auth.js v21.0.2 initialized with identifier field fix", authState);
+            console.log("✅ api.auth.js v21.0.2 initialized with identifier field fix and safety guards", authState);
         }, 100);
         
         return window.api.auth;
     }
     
     // ============================================================================
-    // BOOTSTRAP & MAIN ENTRY POINT
+    // BOOTSTRAP & MAIN ENTRY POINT (WITH SAFETY GUARDS)
     // ============================================================================
+    
+    /**
+     * SAFETY: Cleanup function for module unload
+     */
+    function _cleanup() {
+        console.log('🧹 [AUTH-SAFETY] Performing cleanup');
+        
+        // Clear all intervals
+        if (window._API_AUTH_INTERVALS) {
+            window._API_AUTH_INTERVALS.forEach(intervalId => {
+                try {
+                    clearInterval(intervalId);
+                } catch (error) {
+                    // Ignore cleanup errors
+                }
+            });
+            window._API_AUTH_INTERVALS = [];
+        }
+        
+        // Clear module-specific intervals
+        if (_moduleState.crossTabHeartbeatInterval) {
+            clearInterval(_moduleState.crossTabHeartbeatInterval);
+            _moduleState.crossTabHeartbeatInterval = null;
+        }
+        
+        if (_moduleState.crossTabCheckInterval) {
+            clearInterval(_moduleState.crossTabCheckInterval);
+            _moduleState.crossTabCheckInterval = null;
+        }
+        
+        // Reset state
+        _moduleState.pendingAuthRequests = [];
+        _moduleState.sessionValidationPromise = null;
+        _moduleState.tokenRefreshInProgress = false;
+        
+        console.log('✅ [AUTH-SAFETY] Cleanup complete');
+    }
+    
+    /**
+     * SAFETY: Global error handler for auth module
+     */
+    function _setupGlobalErrorHandler() {
+        // Store original error handler
+        const originalErrorHandler = window.onerror;
+        
+        window.onerror = function(message, source, lineno, colno, error) {
+            // Check if error is related to auth module
+            const isAuthError = (message && message.includes('auth')) || 
+                               (source && source.includes('auth')) ||
+                               (error && error.message && error.message.includes('auth'));
+            
+            if (isAuthError) {
+                _safeLogError('GLOBAL', 'Global error in auth module', {
+                    message,
+                    source,
+                    lineno,
+                    colno,
+                    error: error ? error.message : 'none'
+                });
+                
+                // Don't prevent default error handling
+                if (originalErrorHandler) {
+                    return originalErrorHandler(message, source, lineno, colno, error);
+                }
+            }
+            
+            return false; // Let other error handlers run
+        };
+        
+        // Also handle unhandled promise rejections
+        window.addEventListener('unhandledrejection', (event) => {
+            const error = event.reason;
+            const errorString = error ? error.toString() : 'Unknown error';
+            
+            if (errorString.includes('auth') || errorString.includes('token') || errorString.includes('session')) {
+                _safeLogError('UNHANDLED-REJECTION', 'Unhandled promise rejection in auth module', {
+                    error: errorString
+                });
+                
+                // Prevent default logging to avoid duplicates
+                event.preventDefault();
+            }
+        });
+    }
     
     /**
      * Main bootstrap function
      */
     async function _bootstrap() {
         try {
-            console.log('🚀 [AUTH] Bootstrap started with identifier field fix');
+            console.log('🚀 [AUTH] Bootstrap started with identifier field fix and safety guards');
             window._API_AUTH_V21_LOADED_.loadingStage = 'bootstrap_started';
+            
+            // Setup global error handler
+            _setupGlobalErrorHandler();
             
             // Initial dependency check
             _checkDependencies();
@@ -2676,35 +3451,34 @@
             
             // Handle module cleanup on page unload
             window.addEventListener('beforeunload', () => {
-                // Cleanup intervals
-                if (window._API_AUTH_INTERVALS) {
-                    window._API_AUTH_INTERVALS.forEach(intervalId => {
-                        clearInterval(intervalId);
-                    });
-                    window._API_AUTH_INTERVALS = [];
-                }
+                _cleanup();
             });
             
-            // Global error handler for auth module
-            window.addEventListener('error', (event) => {
-                if ((event.message && event.message.includes('auth')) || 
-                    (event.filename && event.filename.includes('auth'))) {
-                    console.error('❌ [API-AUTH] Global error in auth module:', event);
-                    _emitEvent('error', { 
-                        error: event.message,
-                        filename: event.filename,
-                        lineno: event.lineno,
-                        colno: event.colno 
-                    });
+            // Setup periodic safety check
+            setInterval(() => {
+                // Reset error counters periodically
+                const now = Date.now();
+                for (const key in _moduleState.errorSuppression) {
+                    if (now - _moduleState.errorSuppression[key] > 300000) { // 5 minutes
+                        delete _moduleState.errorSuppression[key];
+                    }
                 }
-            });
+                
+                // Reset API failure counters
+                for (const key in _moduleState.apiCallFailures) {
+                    if (now - (_moduleState.apiCallFailures[key + '_time'] || 0) > 600000) { // 10 minutes
+                        delete _moduleState.apiCallFailures[key];
+                        delete _moduleState.apiCallFailures[key + '_time'];
+                    }
+                }
+            }, 60000); // Check every minute
             
             window._API_AUTH_V21_LOADED_.loadingStage = 'bootstrap_complete';
-            console.log('🚀 [AUTH] Bootstrap completed successfully with identifier field fix');
+            console.log('🚀 [AUTH] Bootstrap completed successfully with identifier field fix and safety guards');
             
             return authApi;
         } catch (error) {
-            console.error('❌ [AUTH] Bootstrap failed:', error);
+            _safeLogError('BOOTSTRAP', 'Bootstrap failed', { error: error.message }, true);
             window._API_AUTH_V21_LOADED_.loadingStage = 'bootstrap_failed';
             _moduleState.lifecycleState = 'error';
             
@@ -2713,8 +3487,19 @@
                 if (!window.api) window.api = {};
                 if (!window.api.auth) window.api.auth = {};
                 _setMetadataFields(window.api.auth);
+                
+                // Add minimal safety methods
+                window.api.auth.getSafeAuthState = () => ({
+                    initialized: false,
+                    error: error.message,
+                    bootstrapFailed: true,
+                    safetyMode: true
+                });
+                
+                window.api.auth.isSafeMode = () => true;
+                
             } catch (e) {
-                console.error('❌ [AUTH] Failed to setup error recovery API:', e);
+                _safeLogError('BOOTSTRAP-RECOVERY', 'Failed to setup error recovery API', { error: e.message });
             }
             
             throw error;
@@ -2725,10 +3510,10 @@
     // Use setTimeout to allow other scripts to load
     setTimeout(() => {
         _bootstrap().catch(error => {
-            console.error('❌ [AUTH] Critical bootstrap error:', error);
+            _safeLogError('CRITICAL', 'Critical bootstrap error', { error: error.message }, true);
         });
     }, 0);
     
 })(); // End of IIFE
 
-console.log('✅ [API-AUTH] Modular authentication service v21.0.2 loaded with identifier field fix (IIFE Protected)');
+console.log('✅ [API-AUTH] Modular authentication service v21.0.2 loaded with identifier field fix and safety guards (IIFE Protected)');

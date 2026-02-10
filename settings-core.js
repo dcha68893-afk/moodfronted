@@ -67,6 +67,38 @@ let sessionValid = false;
 let retryAttempted = false;
 const HANDSHAKE_TIMEOUT = 5000;
 
+// Safety guard variables
+let handshakeRetryCount = 0;
+const MAX_HANDSHAKE_RETRIES = 3;
+let processedMessageIds = new Set();
+let untrustedOriginLogged = false;
+let sessionRequestLogged = false;
+let handshakeFailureLogged = false;
+let trustedOrigins = new Set();
+
+// Initialize trusted origins
+(function initTrustedOrigins() {
+    try {
+        // Add current origin
+        trustedOrigins.add(window.location.origin);
+        
+        // Add local development environments
+        trustedOrigins.add('http://127.0.0.1:5500');
+        trustedOrigins.add('http://localhost:5500');
+        trustedOrigins.add('http://localhost:3000');
+        trustedOrigins.add('http://127.0.0.1:3000');
+        
+        // Add VPS/Production domains (update as needed)
+        const hostname = window.location.hostname;
+        if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+            trustedOrigins.add(`https://${hostname}`);
+            trustedOrigins.add(`http://${hostname}`);
+        }
+    } catch (error) {
+        // Silent initialization
+    }
+})();
+
 // Default settings structure
 export const DEFAULT_SETTINGS = {
     profile: {
@@ -857,75 +889,126 @@ function showUnsavedChangesWarning(nextSectionId) {
  * - UI binding only after session validation
  */
 function requestSessionFromParent() {
-    if (handshakeInProgress) {
-        return;
-    }
-    
-    handshakeInProgress = true;
-    retryAttempted = false;
-    console.log('⏳ [Handshake] Waiting for session from parent...');
-    
-    sendMessageToParent({
-        type: 'REQUEST_SESSION',
-        source: 'settings-core',
-        childId: 'settings',
-        timestamp: Date.now(),
-        version: '1.0'
-    });
-    
-    // Set timeout for handshake response
-    handshakeTimeout = setTimeout(() => {
-        if (!sessionValid) {
-            handshakeInProgress = false;
-            console.log('❌ [Handshake] Session request timed out');
-            
-            // Single retry if not attempted yet
-            if (!retryAttempted) {
-                retryAttempted = true;
-                console.log('🔄 [Handshake] Attempting single retry...');
-                setTimeout(requestSessionFromParent, 1000);
-            } else {
-                showReconnectionState();
-            }
+    try {
+        if (handshakeInProgress) {
+            return;
         }
-    }, HANDSHAKE_TIMEOUT);
+        
+        // Safety: Check retry count
+        if (handshakeRetryCount >= MAX_HANDSHAKE_RETRIES) {
+            if (!handshakeFailureLogged) {
+                console.log('❌ [Handshake] Max retries reached, stopping handshake attempts');
+                handshakeFailureLogged = true;
+            }
+            return;
+        }
+        
+        handshakeInProgress = true;
+        retryAttempted = false;
+        handshakeRetryCount++;
+        
+        console.log(`⏳ [Handshake] Attempt ${handshakeRetryCount}/${MAX_HANDSHAKE_RETRIES}: Waiting for session from parent...`);
+        
+        // Safety: Check if parent exists
+        if (!window.parent || window.parent === window) {
+            console.log('❌ [Handshake] No parent window found');
+            handshakeInProgress = false;
+            return;
+        }
+        
+        // Safety: Validate session before sending request
+        if (!hasValidSessionToRequest()) {
+            if (!sessionRequestLogged) {
+                console.log('⚠️ [Handshake] No valid session to request');
+                sessionRequestLogged = true;
+            }
+            handshakeInProgress = false;
+            return;
+        }
+        
+        sendMessageToParent({
+            type: 'REQUEST_SESSION',
+            source: 'settings-core',
+            childId: 'settings',
+            timestamp: Date.now(),
+            version: '1.0',
+            messageId: generateMessageId()
+        });
+        
+        // Set timeout for handshake response
+        handshakeTimeout = setTimeout(() => {
+            if (!sessionValid) {
+                handshakeInProgress = false;
+                console.log('❌ [Handshake] Session request timed out');
+                
+                // Single retry if not attempted yet
+                if (!retryAttempted && handshakeRetryCount < MAX_HANDSHAKE_RETRIES) {
+                    retryAttempted = true;
+                    console.log(`🔄 [Handshake] Attempting retry ${handshakeRetryCount + 1}/${MAX_HANDSHAKE_RETRIES}...`);
+                    setTimeout(requestSessionFromParent, 1000);
+                } else {
+                    showReconnectionState();
+                }
+            }
+        }, HANDSHAKE_TIMEOUT);
+    } catch (error) {
+        console.error('❌ [Handshake] Error in requestSessionFromParent:', error);
+        handshakeInProgress = false;
+        // Don't propagate error - allow other modules to continue
+    }
 }
 
 /**
- * Validates incoming message origin safely
+ * Check if we have a valid session to request
+ */
+function hasValidSessionToRequest() {
+    try {
+        // Check if parent exists
+        if (!window.parent || window.parent === window) {
+            return false;
+        }
+        
+        // Check if we're already authenticated
+        if (parentSessionReceived && sessionValidated) {
+            return false; // No need to request again
+        }
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Validate incoming message origin safely with caching
  */
 function validateMessageOrigin(event) {
     try {
+        // Cache trusted origin on first valid message
+        if (!parentOrigin && event.source === window.parent) {
+            parentOrigin = event.origin;
+            trustedOrigins.add(event.origin);
+        }
+        
         // Always accept messages from same origin
         if (event.origin === window.location.origin) {
             return true;
         }
         
-        // Accept from local development environments
-        const allowedOrigins = [
-            'http://127.0.0.1:5500',
-            'http://localhost:5500',
-            'http://localhost:3000',
-            'http://127.0.0.1:3000'
-        ];
-        
-        if (allowedOrigins.includes(event.origin)) {
+        // Check cached trusted origins
+        if (trustedOrigins.has(event.origin)) {
             return true;
         }
         
-        // For production, dynamically accept parent origin
-        if (parentOrigin && event.origin === parentOrigin) {
-            return true;
-        }
-        
-        // If parent origin not set yet, store it (first valid message)
-        if (!parentOrigin && event.source === window.parent) {
-            parentOrigin = event.origin;
-            return true;
+        // Log untrusted origin once
+        if (!untrustedOriginLogged) {
+            console.warn('⚠️ [Security] Untrusted origin attempted communication:', event.origin);
+            untrustedOriginLogged = true;
         }
         
         return false;
     } catch (error) {
+        // Don't crash on validation error
         return false;
     }
 }
@@ -955,156 +1038,266 @@ export function verifyParentPresence() {
 
 // Secure messaging channel setup
 export function setupSecureMessagingChannel() {
-    window.removeEventListener('message', handleParentMessage);
-    window.addEventListener('message', handleParentMessage, false);
-    
-    parentCommunicationReady = true;
+    try {
+        window.removeEventListener('message', handleParentMessage);
+        window.addEventListener('message', handleParentMessage, false);
+        
+        parentCommunicationReady = true;
+    } catch (error) {
+        console.error('❌ [Communication] Error setting up messaging channel:', error);
+        // Continue without messaging channel
+    }
 }
 
 // Handshake Protocol with exponential backoff
 export function startParentHandshake() {
-    if (handshakeInterval) {
-        clearInterval(handshakeInterval);
-        handshakeInterval = null;
+    try {
+        if (handshakeInterval) {
+            clearInterval(handshakeInterval);
+            handshakeInterval = null;
+        }
+        
+        handshakeAttempts = 0;
+        
+        // Use enhanced handshake protocol
+        requestSessionFromParent();
+        
+        // Keep legacy handshake for compatibility
+        sendMessageToParent({
+            type: 'CHILD_READY',
+            childId: 'settings',
+            timestamp: Date.now(),
+            version: '1.0',
+            source: 'settings-core',
+            messageId: generateMessageId()
+        });
+        
+        handshakeInterval = setInterval(() => {
+            try {
+                if (handshakeAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
+                    clearInterval(handshakeInterval);
+                    handshakeInterval = null;
+                    
+                    showReconnectionState();
+                    return;
+                }
+                
+                handshakeAttempts++;
+                
+                if (!parentSessionReceived) {
+                    const retryDelay = Math.min(1000 * Math.pow(2, handshakeAttempts - 1), 10000);
+                    
+                    setTimeout(() => {
+                        sendMessageToParent({
+                            type: 'REQUEST_SESSION',
+                            childId: 'settings',
+                            attempt: handshakeAttempts,
+                            timestamp: Date.now(),
+                            source: 'settings-core',
+                            messageId: generateMessageId()
+                        });
+                    }, retryDelay);
+                } else {
+                    clearInterval(handshakeInterval);
+                    handshakeInterval = null;
+                }
+            } catch (error) {
+                console.error('❌ [Handshake] Error in handshake interval:', error);
+                // Continue despite interval error
+            }
+        }, HANDSHAKE_RETRY_INTERVAL);
+    } catch (error) {
+        console.error('❌ [Handshake] Error starting parent handshake:', error);
+        // Don't crash - allow UI to show fallback state
     }
-    
-    handshakeAttempts = 0;
-    
-    // Use enhanced handshake protocol
-    requestSessionFromParent();
-    
-    // Keep legacy handshake for compatibility
-    sendMessageToParent({
-        type: 'CHILD_READY',
-        childId: 'settings',
-        timestamp: Date.now(),
-        version: '1.0',
-        source: 'settings-core'
-    });
-    
-    handshakeInterval = setInterval(() => {
-        if (handshakeAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
-            clearInterval(handshakeInterval);
-            handshakeInterval = null;
-            
-            showReconnectionState();
-            return;
-        }
-        
-        handshakeAttempts++;
-        
-        if (!parentSessionReceived) {
-            const retryDelay = Math.min(1000 * Math.pow(2, handshakeAttempts - 1), 10000);
-            
-            setTimeout(() => {
-                sendMessageToParent({
-                    type: 'REQUEST_SESSION',
-                    childId: 'settings',
-                    attempt: handshakeAttempts,
-                    timestamp: Date.now(),
-                    source: 'settings-core'
-                });
-            }, retryDelay);
-        } else {
-            clearInterval(handshakeInterval);
-            handshakeInterval = null;
-        }
-    }, HANDSHAKE_RETRY_INTERVAL);
 }
 
-// Send message to parent
+// Generate unique message ID to prevent duplicates
+function generateMessageId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Send message to parent with safety guards
 export function sendMessageToParent(message) {
     try {
-        if (window.parent && window.parent !== window) {
-            if (!message.source) {
-                message.source = 'settings-core';
-            }
-            window.parent.postMessage(message, parentOrigin || '*');
-            return true;
+        // Safety: Validate parent exists
+        if (!window.parent || window.parent === window) {
+            return false;
         }
+        
+        // Safety: Add required fields
+        if (!message.source) {
+            message.source = 'settings-core';
+        }
+        if (!message.messageId) {
+            message.messageId = generateMessageId();
+        }
+        if (!message.timestamp) {
+            message.timestamp = Date.now();
+        }
+        
+        // Safety: Validate session data before sending
+        if (message.type === 'SESSION_DATA' || message.type === 'SESSION_UPDATE') {
+            if (!hasValidSessionData(message)) {
+                console.warn('⚠️ [Security] Attempted to send invalid session data');
+                return false;
+            }
+        }
+        
+        window.parent.postMessage(message, parentOrigin || '*');
+        return true;
+    } catch (error) {
+        console.error('❌ [Communication] Error sending message to parent:', error);
         return false;
+    }
+}
+
+// Validate session data structure
+function hasValidSessionData(data) {
+    try {
+        const session = data.session || data;
+        
+        if (!session) {
+            return false;
+        }
+        
+        // Check for minimum required authentication data
+        const hasAuth = session.token || session.accessToken || session.authToken || 
+                       session.id_token || session.sessionId || session.userId || 
+                       session.id || session.isAuthenticated;
+        
+        if (!hasAuth) {
+            // Allow user-only data for certain message types
+            if (session.user && (session.user.id || session.user.email || session.user.username)) {
+                return true;
+            }
+            return false;
+        }
+        
+        return true;
     } catch (error) {
         return false;
     }
 }
 
-// Handle messages from parent
+// Handle messages from parent with comprehensive safety guards
 function handleParentMessage(event) {
-    // Validate origin first
-    if (!validateMessageOrigin(event)) {
-        return;
-    }
-    
-    if (!event.data || !event.data.type) return;
-    
-    // Prevent processing our own messages
-    if (event.data.source && event.data.source === 'settings-core') return;
-    
-    const now = Date.now();
-    if (now - lastMessageTime < 50) {
-        return;
-    }
-    lastMessageTime = now;
-    
-    if (processingMessage) {
-        return;
-    }
-    
-    processingMessage = true;
-    
+    // Safety: Wrap entire handler in try/catch
     try {
-        if (!validateIncomingMessage(event.data)) {
+        // Validate origin first
+        if (!validateMessageOrigin(event)) {
             return;
         }
         
-        switch (event.data.type) {
-            case 'SESSION_DATA':
-                handleEnhancedSessionData(event.data);
-                break;
-                
-            case 'SESSION_UPDATE':
-                handleSessionUpdate(event.data);
-                break;
-                
-            case 'LOGOUT':
-                handleLogout();
-                break;
-                
-            case 'HANDSHAKE_ACK':
-                handleHandshakeAck();
-                break;
-                
-            case 'PARENT_READY':
-                handleParentReady();
-                break;
-                
-            case 'AUTH_READY':
-                handleAuthReady();
-                break;
-                
-            case 'AUTH_LOST':
-                handleAuthLost();
-                break;
-                
-            case 'TOKEN_READY':
-                handleTokenReady();
-                break;
-                
-            case 'USER_UPDATED':
-                handleUserUpdated(event.data);
-                break;
-                
-            default:
-                // Check for enhanced handshake responses
-                if (event.data.type === 'SESSION_DATA' && event.data.source === 'parent') {
-                    handleEnhancedSessionData(event.data);
-                }
-                break;
+        if (!event.data || !event.data.type) return;
+        
+        // Prevent processing our own messages
+        if (event.data.source && event.data.source === 'settings-core') return;
+        
+        // Safety: Prevent duplicate message processing
+        if (event.data.messageId && processedMessageIds.has(event.data.messageId)) {
+            return;
         }
+        
+        // Safety: Validate message structure
+        if (!validateIncomingMessageStructure(event.data)) {
+            console.warn('⚠️ [Communication] Invalid message structure received');
+            return;
+        }
+        
+        const now = Date.now();
+        if (now - lastMessageTime < 50) {
+            return;
+        }
+        lastMessageTime = now;
+        
+        if (processingMessage) {
+            return;
+        }
+        
+        processingMessage = true;
+        
+        try {
+            // Add to processed messages set
+            if (event.data.messageId) {
+                processedMessageIds.add(event.data.messageId);
+                // Cleanup old message IDs to prevent memory leak
+                if (processedMessageIds.size > 100) {
+                    const ids = Array.from(processedMessageIds);
+                    processedMessageIds = new Set(ids.slice(-50));
+                }
+            }
+            
+            switch (event.data.type) {
+                case 'SESSION_DATA':
+                    handleEnhancedSessionData(event.data);
+                    break;
+                    
+                case 'SESSION_UPDATE':
+                    handleSessionUpdate(event.data);
+                    break;
+                    
+                case 'LOGOUT':
+                    handleLogout();
+                    break;
+                    
+                case 'HANDSHAKE_ACK':
+                    handleHandshakeAck();
+                    break;
+                    
+                case 'PARENT_READY':
+                    handleParentReady();
+                    break;
+                    
+                case 'AUTH_READY':
+                    handleAuthReady();
+                    break;
+                    
+                case 'AUTH_LOST':
+                    handleAuthLost();
+                    break;
+                    
+                case 'TOKEN_READY':
+                    handleTokenReady();
+                    break;
+                    
+                case 'USER_UPDATED':
+                    handleUserUpdated(event.data);
+                    break;
+                    
+                default:
+                    // Check for enhanced handshake responses
+                    if (event.data.type === 'SESSION_DATA' && event.data.source === 'parent') {
+                        handleEnhancedSessionData(event.data);
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('❌ [Communication] Error processing parent message:', {
+                type: event.data?.type,
+                error: error.message,
+                timestamp: Date.now()
+            });
+        } finally {
+            processingMessage = false;
+        }
+    } catch (outerError) {
+        console.error('❌ [Communication] Critical error in message handler:', outerError);
+        // Don't re-throw - allow other message handlers to continue
+    }
+}
+
+/**
+ * Validate incoming message structure
+ */
+function validateIncomingMessageStructure(data) {
+    try {
+        if (!data || typeof data !== 'object') return false;
+        if (!data.type || typeof data.type !== 'string') return false;
+        if (!data.timestamp || typeof data.timestamp !== 'number') return false;
+        return true;
     } catch (error) {
-        console.error('Error processing parent message:', error);
-    } finally {
-        processingMessage = false;
+        return false;
     }
 }
 
@@ -1112,43 +1305,51 @@ function handleParentMessage(event) {
  * Enhanced session data handler with validation
  */
 function handleEnhancedSessionData(data) {
-    // Clear handshake timeout
-    if (handshakeTimeout) {
-        clearTimeout(handshakeTimeout);
-        handshakeTimeout = null;
-    }
-    
-    // Validate session data
-    if (!data.token || !data.user) {
-        console.log('❌ [Handshake] Received invalid session from parent');
-        handshakeInProgress = false;
-        
-        // Single retry if not attempted yet
-        if (!retryAttempted) {
-            retryAttempted = true;
-            console.log('🔄 [Handshake] Retrying due to invalid session data...');
-            setTimeout(requestSessionFromParent, 1000);
+    try {
+        // Clear handshake timeout
+        if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            handshakeTimeout = null;
         }
-        return;
-    }
-    
-    // Validate source verification if provided
-    if (data.sourceVerification && !validateSourceVerification(data.sourceVerification)) {
-        console.log('❌ [Handshake] Source verification failed');
+        
+        // Validate session data
+        if (!data.token && !data.user && !data.session) {
+            console.log('❌ [Handshake] Received invalid session from parent');
+            handshakeInProgress = false;
+            
+            // Single retry if not attempted yet
+            if (!retryAttempted && handshakeRetryCount < MAX_HANDSHAKE_RETRIES) {
+                retryAttempted = true;
+                console.log('🔄 [Handshake] Retrying due to invalid session data...');
+                setTimeout(requestSessionFromParent, 1000);
+            }
+            return;
+        }
+        
+        // Validate source verification if provided
+        if (data.sourceVerification && !validateSourceVerification(data.sourceVerification)) {
+            console.log('❌ [Handshake] Source verification failed');
+            handshakeInProgress = false;
+            return;
+        }
+        
+        // Session is valid
+        sessionValid = true;
         handshakeInProgress = false;
-        return;
+        handshakeRetryCount = 0; // Reset on success
+        console.log('✅ [Handshake] Session received successfully');
+        
+        // Update global state from session
+        updateGlobalStateFromSession(data);
+        
+        // Bind UI only after session validation
+        bindUIAfterSession();
+    } catch (error) {
+        console.error('❌ [Handshake] Error handling enhanced session data:', error);
+        handshakeInProgress = false;
+        // Don't crash - show reconnection state
+        showReconnectionState();
     }
-    
-    // Session is valid
-    sessionValid = true;
-    handshakeInProgress = false;
-    console.log('✅ [Handshake] Session received successfully');
-    
-    // Update global state
-    updateGlobalStateFromSession(data);
-    
-    // Bind UI only after session validation
-    bindUIAfterSession();
 }
 
 /**
@@ -1183,56 +1384,68 @@ function validateSourceVerification(verification) {
  * Update global state from session data
  */
 function updateGlobalStateFromSession(sessionData) {
-    // Store session data
-    parentSessionData = sessionData.session || sessionData;
-    parentSessionReceived = true;
-    sessionValidated = true;
-    
-    // Extract user info
-    if (sessionData.user) {
-        currentUser = sessionData.user;
-    } else if (sessionData.session?.user) {
-        currentUser = sessionData.session.user;
-    }
-    
-    // Extract token
-    if (sessionData.token || sessionData.session?.token) {
-        const token = sessionData.token || sessionData.session.token;
-        tokenAvailable = true;
-        tokenReady = true;
-        authReady = true;
+    try {
+        // Store session data
+        parentSessionData = sessionData.session || sessionData;
+        parentSessionReceived = true;
+        sessionValidated = true;
         
-        // Store token in api.core.js system
-        if (token && token !== 'null' && token !== 'undefined') {
-            setUserToken(token);
+        // Extract user info
+        if (sessionData.user) {
+            currentUser = sessionData.user;
+        } else if (sessionData.session?.user) {
+            currentUser = sessionData.session.user;
         }
+        
+        // Extract token
+        if (sessionData.token || sessionData.session?.token) {
+            const token = sessionData.token || sessionData.session.token;
+            tokenAvailable = true;
+            tokenReady = true;
+            authReady = true;
+            
+            // Store token in api.core.js system
+            if (token && token !== 'null' && token !== 'undefined') {
+                setUserToken(token);
+            }
+        }
+        
+        // Confirm session to parent
+        sendMessageToParent({
+            type: 'SESSION_CONFIRMED',
+            childId: 'settings',
+            timestamp: Date.now(),
+            received: true,
+            validated: true,
+            source: 'settings-core',
+            messageId: generateMessageId()
+        });
+    } catch (error) {
+        console.error('❌ [Session] Error updating global state:', error);
+        // Continue with partial data if possible
     }
-    
-    // Confirm session to parent
-    sendMessageToParent({
-        type: 'SESSION_CONFIRMED',
-        childId: 'settings',
-        timestamp: Date.now(),
-        received: true,
-        validated: true,
-        source: 'settings-core'
-    });
 }
 
 /**
  * Bind UI only after session is validated
  */
 function bindUIAfterSession() {
-    // Initialize UI with session
-    initializeUIWithSession();
-    
-    // Start background tasks if token is ready
-    if (!backgroundTasksStarted && tokenReady) {
-        startBackgroundTasks();
+    try {
+        // Initialize UI with session
+        initializeUIWithSession();
+        
+        // Start background tasks if token is ready
+        if (!backgroundTasksStarted && tokenReady) {
+            startBackgroundTasks();
+        }
+        
+        // Show success notification
+        showNotification('Settings loaded successfully', 'success');
+    } catch (error) {
+        console.error('❌ [UI] Error binding UI after session:', error);
+        // Degrade gracefully - show basic UI
+        initializeBasicUI();
     }
-    
-    // Show success notification
-    showNotification('Settings loaded successfully', 'success');
 }
 
 // Validate incoming message structure
@@ -1248,7 +1461,8 @@ function handleHandshakeAck() {
         type: 'CHILD_ACKNOWLEDGED',
         childId: 'settings',
         timestamp: Date.now(),
-        source: 'settings-core'
+        source: 'settings-core',
+        messageId: generateMessageId()
     });
 }
 
@@ -1276,55 +1490,64 @@ function handleTokenReady() {
 
 // Handle USER_UPDATED
 function handleUserUpdated(data) {
-    if (data.user) {
-        currentUser = data.user;
-        updateUserUI();
-        localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
+    try {
+        if (data.user) {
+            currentUser = data.user;
+            updateUserUI();
+            localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
+        }
+    } catch (error) {
+        console.error('❌ [User] Error updating user data:', error);
     }
 }
 
 // Handle SESSION_DATA message (legacy)
 function handleSessionData(data) {
-    if (!validateSessionData(data)) {
-        return;
-    }
-    
-    parentSessionData = data.session || data;
-    parentSessionReceived = true;
-    sessionValidated = true;
-    
-    if (data.session?.user) {
-        currentUser = data.session.user;
-    } else if (data.user) {
-        currentUser = data.user;
-    } else if (data.session?.userId) {
-        currentUser = {
-            id: data.session.userId,
-            displayName: 'User',
-            username: 'user'
-        };
-    }
-    
-    const hasToken = data.session?.token || data.token || 
-                    data.session?.accessToken || data.accessToken;
-    if (hasToken) {
-        tokenAvailable = true;
-        tokenReady = true;
-        authReady = true;
-    }
-    
-    sendMessageToParent({
-        type: 'SESSION_CONFIRMED',
-        childId: 'settings',
-        timestamp: Date.now(),
-        received: true,
-        source: 'settings-core'
-    });
-    
-    initializeUIWithSession();
-    
-    if (!backgroundTasksStarted && tokenReady) {
-        startBackgroundTasks();
+    try {
+        if (!validateSessionData(data)) {
+            return;
+        }
+        
+        parentSessionData = data.session || data;
+        parentSessionReceived = true;
+        sessionValidated = true;
+        
+        if (data.session?.user) {
+            currentUser = data.session.user;
+        } else if (data.user) {
+            currentUser = data.user;
+        } else if (data.session?.userId) {
+            currentUser = {
+                id: data.session.userId,
+                displayName: 'User',
+                username: 'user'
+            };
+        }
+        
+        const hasToken = data.session?.token || data.token || 
+                        data.session?.accessToken || data.accessToken;
+        if (hasToken) {
+            tokenAvailable = true;
+            tokenReady = true;
+            authReady = true;
+        }
+        
+        sendMessageToParent({
+            type: 'SESSION_CONFIRMED',
+            childId: 'settings',
+            timestamp: Date.now(),
+            received: true,
+            source: 'settings-core',
+            messageId: generateMessageId()
+        });
+        
+        initializeUIWithSession();
+        
+        if (!backgroundTasksStarted && tokenReady) {
+            startBackgroundTasks();
+        }
+    } catch (error) {
+        console.error('❌ [Session] Error handling session data:', error);
     }
 }
 
@@ -1358,143 +1581,171 @@ function validateSessionData(data) {
 
 // Handle SESSION_UPDATE message
 function handleSessionUpdate(data) {
-    if (data.session && data.session.user) {
-        currentUser = data.session.user;
-        
-        updateUserUI();
-        
-        localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
-        
-        showNotification('Profile updated', 'success');
+    try {
+        if (data.session && data.session.user) {
+            currentUser = data.session.user;
+            
+            updateUserUI();
+            
+            localStorage.setItem('knecta_current_user', JSON.stringify(currentUser));
+            
+            showNotification('Profile updated', 'success');
+        }
+    } catch (error) {
+        console.error('❌ [Session] Error handling session update:', error);
     }
 }
 
 // Handle LOGOUT message
 function handleLogout() {
-    parentSessionData = null;
-    parentSessionReceived = false;
-    sessionValidated = false;
-    currentUser = null;
-    tokenReady = false;
-    tokenAvailable = false;
-    authReady = false;
-    backgroundTasksStarted = false;
-    sessionValid = false;
-    handshakeInProgress = false;
-    
-    resetUIForLogout();
-    
-    sendMessageToParent({
-        type: 'LOGOUT_CONFIRMED',
-        childId: 'settings',
-        timestamp: Date.now(),
-        source: 'settings-core'
-    });
+    try {
+        parentSessionData = null;
+        parentSessionReceived = false;
+        sessionValidated = false;
+        currentUser = null;
+        tokenReady = false;
+        tokenAvailable = false;
+        authReady = false;
+        backgroundTasksStarted = false;
+        sessionValid = false;
+        handshakeInProgress = false;
+        handshakeRetryCount = 0;
+        
+        resetUIForLogout();
+        
+        sendMessageToParent({
+            type: 'LOGOUT_CONFIRMED',
+            childId: 'settings',
+            timestamp: Date.now(),
+            source: 'settings-core',
+            messageId: generateMessageId()
+        });
+    } catch (error) {
+        console.error('❌ [Session] Error handling logout:', error);
+    }
 }
 
 // Initialize UI with session data
 function initializeUIWithSession() {
-    initializeUI();
-    
-    loadFromLocalStorage();
-    
-    loadSection(currentSection);
-    
-    startTokenMonitoring();
-    
-    setTimeout(async () => {
-        try {
-            await waitForToken(5000);
-            if (tokenReady) {
-                startBackgroundTasks();
+    try {
+        initializeUI();
+        
+        loadFromLocalStorage();
+        
+        loadSection(currentSection);
+        
+        startTokenMonitoring();
+        
+        setTimeout(async () => {
+            try {
+                await waitForToken(5000);
+                if (tokenReady) {
+                    startBackgroundTasks();
+                }
+            } catch (error) {
+                // Silent error
             }
-        } catch (error) {
-            // Silent error
-        }
-    }, 1000);
+        }, 1000);
+    } catch (error) {
+        console.error('❌ [UI] Error initializing UI with session:', error);
+        // Fall back to basic UI
+        initializeBasicUI();
+    }
 }
 
 // Reset UI for logout
 export function resetUIForLogout() {
-    const contentContainer = document.getElementById('settingsContent');
-    if (contentContainer) {
-        contentContainer.innerHTML = `
-            <div class="settings-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-sign-out-alt section-icon"></i> Session Ended</h3>
-                    <div class="section-description">
-                        Your session has ended. Waiting for re-authentication...
+    try {
+        const contentContainer = document.getElementById('settingsContent');
+        if (contentContainer) {
+            contentContainer.innerHTML = `
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-sign-out-alt section-icon"></i> Session Ended</h3>
+                        <div class="section-description">
+                            Your session has ended. Waiting for re-authentication...
+                        </div>
+                    </div>
+                    <div class="section-body">
+                        <div style="text-align: center; padding: 40px;">
+                            <i class="fas fa-user-clock" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 20px;"></i>
+                            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                                Please return to the main app to sign in again.
+                            </p>
+                            <button class="setting-button" onclick="window.location.href = '/'">
+                                <i class="fas fa-home"></i> Return to App
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div class="section-body">
-                    <div style="text-align: center; padding: 40px;">
-                        <i class="fas fa-user-clock" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 20px;"></i>
-                        <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                            Please return to the main app to sign in again.
-                        </p>
-                        <button class="setting-button" onclick="window.location.href = '/'">
-                            <i class="fas fa-home"></i> Return to App
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
+            `;
+        }
+        
+        const menuContainer = document.getElementById('settingsMenu');
+        if (menuContainer) {
+            menuContainer.innerHTML = '';
+        }
+        
+        const resetBtn = document.getElementById('resetSectionBtn');
+        const saveBtn = document.getElementById('saveSectionBtn');
+        if (resetBtn) resetBtn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
+    } catch (error) {
+        console.error('❌ [UI] Error resetting UI for logout:', error);
     }
-    
-    const menuContainer = document.getElementById('settingsMenu');
-    if (menuContainer) {
-        menuContainer.innerHTML = '';
-    }
-    
-    const resetBtn = document.getElementById('resetSectionBtn');
-    const saveBtn = document.getElementById('saveSectionBtn');
-    if (resetBtn) resetBtn.disabled = true;
-    if (saveBtn) saveBtn.disabled = true;
 }
 
 // Show reconnection state
 export function showReconnectionState() {
-    const contentContainer = document.getElementById('settingsContent');
-    if (contentContainer) {
-        contentContainer.innerHTML = `
-            <div class="settings-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-unlink section-icon"></i> Connection Lost</h3>
-                    <div class="section-description">
-                        Unable to establish connection with parent app
+    try {
+        const contentContainer = document.getElementById('settingsContent');
+        if (contentContainer) {
+            contentContainer.innerHTML = `
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-unlink section-icon"></i> Connection Lost</h3>
+                        <div class="section-description">
+                            Unable to establish connection with parent app
+                        </div>
+                    </div>
+                    <div class="section-body">
+                        <div style="text-align: center; padding: 40px;">
+                            <i class="fas fa-sync-alt" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 20px;"></i>
+                            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                                Attempting to reconnect...
+                            </p>
+                            <div class="loading-spinner" style="margin: 0 auto;"></div>
+                            <p style="color: var(--text-secondary); margin-top: 20px; font-size: 14px;">
+                                If this persists, try refreshing the page or returning to the main app.
+                            </p>
+                            <button class="setting-button" onclick="location.reload()" style="margin-top: 20px;">
+                                <i class="fas fa-redo"></i> Retry Connection
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div class="section-body">
-                    <div style="text-align: center; padding: 40px;">
-                        <i class="fas fa-sync-alt" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 20px;"></i>
-                        <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                            Attempting to reconnect...
-                        </p>
-                        <div class="loading-spinner" style="margin: 0 auto;"></div>
-                        <p style="color: var(--text-secondary); margin-top: 20px; font-size: 14px;">
-                            If this persists, try refreshing the page or returning to the main app.
-                        </p>
-                        <button class="setting-button" onclick="location.reload()" style="margin-top: 20px;">
-                            <i class="fas fa-redo"></i> Retry Connection
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
+            `;
+        }
+    } catch (error) {
+        console.error('❌ [UI] Error showing reconnection state:', error);
     }
 }
 
 // Authentication Enforcement - Check if protected UI should be shown
 export function checkAuthenticationState() {
-    if (!parentSessionReceived || !sessionValidated) {
+    try {
+        if (!parentSessionReceived || !sessionValidated) {
+            return false;
+        }
+        
+        if (!tokenReady && !authReady) {
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
         return false;
     }
-    
-    if (!tokenReady && !authReady) {
-        return false;
-    }
-    
-    return true;
 }
 
 // =============================================
@@ -1527,6 +1778,7 @@ export async function bootstrapIframe() {
         }
         
     } catch (error) {
+        console.error('❌ [Bootstrap] Error bootstrapping iframe:', error);
         initializeBasicUI();
         showReconnectionState();
         
@@ -1544,10 +1796,15 @@ export function waitForSession(timeout = 10000) {
         
         const startTime = Date.now();
         const checkInterval = setInterval(() => {
-            if (parentSessionReceived && sessionValidated) {
-                clearInterval(checkInterval);
-                resolve(true);
-            } else if (Date.now() - startTime > timeout) {
+            try {
+                if (parentSessionReceived && sessionValidated) {
+                    clearInterval(checkInterval);
+                    resolve(true);
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    resolve(false);
+                }
+            } catch (error) {
                 clearInterval(checkInterval);
                 resolve(false);
             }
@@ -1557,70 +1814,79 @@ export function waitForSession(timeout = 10000) {
 
 // Initialize basic UI (non-protected parts)
 export function initializeBasicUI() {
-    buildSettingsMenu();
-    
-    setupBasicEventListeners();
-    
-    const cachedSettings = localStorage.getItem('knecta_user_settings');
-    if (cachedSettings) {
-        try {
-            const settings = JSON.parse(cachedSettings);
-            if (settings.appearance && settings.appearance.theme) {
-                applyTheme(settings.appearance.theme);
+    try {
+        buildSettingsMenu();
+        
+        setupBasicEventListeners();
+        
+        const cachedSettings = localStorage.getItem('knecta_user_settings');
+        if (cachedSettings) {
+            try {
+                const settings = JSON.parse(cachedSettings);
+                if (settings.appearance && settings.appearance.theme) {
+                    applyTheme(settings.appearance.theme);
+                }
+                if (settings.appearance && settings.appearance.accentColor) {
+                    updateAccentColor(settings.appearance.accentColor);
+                }
+            } catch (e) {
+                // Silent error
             }
-            if (settings.appearance && settings.appearance.accentColor) {
-                updateAccentColor(settings.appearance.accentColor);
-            }
-        } catch (e) {
-            // Silent error
         }
+    } catch (error) {
+        console.error('❌ [UI] Error initializing basic UI:', error);
+        // Continue with minimal UI
     }
 }
 
 // Setup basic event listeners
 export function setupBasicEventListeners() {
-    const backToAppBtn = document.getElementById('backToAppBtn');
-    if (backToAppBtn) {
-        backToAppBtn.addEventListener('click', () => {
-            if (unsavedChanges) {
-                showConfirmation(
-                    'Unsaved Changes',
-                    'You have unsaved changes. Are you sure you want to leave?',
-                    () => {
-                        sendMessageToParent({
-                            type: 'CHILD_CLOSING',
-                            childId: 'settings',
-                            timestamp: Date.now(),
-                            source: 'settings-core'
-                        });
-                    }
-                );
-            } else {
-                sendMessageToParent({
-                    type: 'CHILD_CLOSING',
-                    childId: 'settings',
-                    timestamp: Date.now(),
-                    source: 'settings-core'
-                });
-            }
-        });
-    }
-    
-    const settingsSearch = document.getElementById('settingsSearch');
-    if (settingsSearch) {
-        settingsSearch.addEventListener('input', function(e) {
-            if (parentSessionReceived) {
-                searchSettings(e.target.value);
-            }
-        });
-    }
-    
-    window.addEventListener('beforeunload', (e) => {
-        if (unsavedChanges) {
-            e.preventDefault();
-            e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+    try {
+        const backToAppBtn = document.getElementById('backToAppBtn');
+        if (backToAppBtn) {
+            backToAppBtn.addEventListener('click', () => {
+                if (unsavedChanges) {
+                    showConfirmation(
+                        'Unsaved Changes',
+                        'You have unsaved changes. Are you sure you want to leave?',
+                        () => {
+                            sendMessageToParent({
+                                type: 'CHILD_CLOSING',
+                                childId: 'settings',
+                                timestamp: Date.now(),
+                                source: 'settings-core'
+                            });
+                        }
+                    );
+                } else {
+                    sendMessageToParent({
+                        type: 'CHILD_CLOSING',
+                        childId: 'settings',
+                        timestamp: Date.now(),
+                        source: 'settings-core'
+                    });
+                }
+            });
         }
-    });
+        
+        const settingsSearch = document.getElementById('settingsSearch');
+        if (settingsSearch) {
+            settingsSearch.addEventListener('input', function(e) {
+                if (parentSessionReceived) {
+                    searchSettings(e.target.value);
+                }
+            });
+        }
+        
+        window.addEventListener('beforeunload', (e) => {
+            if (unsavedChanges) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+            }
+        });
+    } catch (error) {
+        console.error('❌ [UI] Error setting up event listeners:', error);
+    }
 }
 
 // =============================================
@@ -1629,16 +1895,24 @@ export function setupBasicEventListeners() {
 
 // Start token monitoring system
 export function startTokenMonitoring() {
-    if (tokenCheckInterval) {
-        clearInterval(tokenCheckInterval);
-        tokenCheckInterval = null;
+    try {
+        if (tokenCheckInterval) {
+            clearInterval(tokenCheckInterval);
+            tokenCheckInterval = null;
+        }
+        
+        tokenCheckInterval = setInterval(() => {
+            try {
+                checkTokenAvailability();
+            } catch (error) {
+                // Silent error in interval
+            }
+        }, TOKEN_CHECK_INTERVAL);
+        
+        setTimeout(checkTokenAvailability, 500);
+    } catch (error) {
+        console.error('❌ [Token] Error starting token monitoring:', error);
     }
-    
-    tokenCheckInterval = setInterval(() => {
-        checkTokenAvailability();
-    }, TOKEN_CHECK_INTERVAL);
-    
-    setTimeout(checkTokenAvailability, 500);
 }
 
 // Check token availability from parent or api.core.js
@@ -1690,21 +1964,29 @@ export function checkTokenAvailability() {
 
 // Notify that token is ready
 export function notifyTokenReady() {
-    authReady = true;
-    
-    if (!backgroundTasksStarted) {
-        startBackgroundTasks();
+    try {
+        authReady = true;
+        
+        if (!backgroundTasksStarted) {
+            startBackgroundTasks();
+        }
+        
+        notifyParentAuthState(true);
+    } catch (error) {
+        console.error('❌ [Token] Error notifying token ready:', error);
     }
-    
-    notifyParentAuthState(true);
 }
 
 // Notify that token is lost
 export function notifyTokenLost() {
-    authReady = false;
-    backgroundTasksStarted = false;
-    
-    notifyParentAuthState(false);
+    try {
+        authReady = false;
+        backgroundTasksStarted = false;
+        
+        notifyParentAuthState(false);
+    } catch (error) {
+        console.error('❌ [Token] Error notifying token lost:', error);
+    }
 }
 
 // Get secure token from parent or api.core.js
@@ -1742,30 +2024,30 @@ export function getSecureToken() {
 
 // Secure API request using parent session or centralized token system
 export async function secureFetchWrapper(endpoint, method = 'GET', data = null) {
-    if (!tokenAvailable && !parentSessionReceived) {
-        throw new Error('Authentication not available');
-    }
-    
-    // Validate endpoint
-    if (!endpoint || typeof endpoint !== 'string') {
-        throw new Error('Invalid endpoint URL');
-    }
-    
-    // Ensure endpoint is properly formatted
-    let normalizedEndpoint = endpoint.trim();
-    if (!normalizedEndpoint.startsWith('/')) {
-        normalizedEndpoint = '/' + normalizedEndpoint;
-    }
-    
-    // Security: Validate endpoint doesn't contain suspicious patterns
-    const suspiciousPatterns = ['..', '//', '\\', 'javascript:', 'data:', 'vbscript:'];
-    for (const pattern of suspiciousPatterns) {
-        if (normalizedEndpoint.includes(pattern)) {
-            throw new Error(`Invalid endpoint format: ${pattern}`);
-        }
-    }
-    
     try {
+        if (!tokenAvailable && !parentSessionReceived) {
+            throw new Error('Authentication not available');
+        }
+        
+        // Validate endpoint
+        if (!endpoint || typeof endpoint !== 'string') {
+            throw new Error('Invalid endpoint URL');
+        }
+        
+        // Ensure endpoint is properly formatted
+        let normalizedEndpoint = endpoint.trim();
+        if (!normalizedEndpoint.startsWith('/')) {
+            normalizedEndpoint = '/' + normalizedEndpoint;
+        }
+        
+        // Security: Validate endpoint doesn't contain suspicious patterns
+        const suspiciousPatterns = ['..', '//', '\\', 'javascript:', 'data:', 'vbscript:'];
+        for (const pattern of suspiciousPatterns) {
+            if (normalizedEndpoint.includes(pattern)) {
+                throw new Error(`Invalid endpoint format: ${pattern}`);
+            }
+        }
+        
         // Get secure token with validation
         const token = getSecureToken();
         if (!token || token === 'null' || token === 'undefined') {
@@ -1821,7 +2103,7 @@ export async function secureFetchWrapper(endpoint, method = 'GET', data = null) 
         // Create enhanced error object
         const enhancedError = new Error(errorMessage);
         enhancedError.code = errorCode;
-        enhancedError.endpoint = normalizedEndpoint;
+        enhancedError.endpoint = endpoint;
         enhancedError.timestamp = Date.now();
         
         // Prevent silent failures by re-throwing
@@ -1839,10 +2121,15 @@ export function waitForToken(timeout = 10000) {
         
         const startTime = Date.now();
         const checkInterval = setInterval(() => {
-            if (tokenReady) {
-                clearInterval(checkInterval);
-                resolve(true);
-            } else if (Date.now() - startTime > timeout) {
+            try {
+                if (tokenReady) {
+                    clearInterval(checkInterval);
+                    resolve(true);
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    resolve(false);
+                }
+            } catch (error) {
                 clearInterval(checkInterval);
                 resolve(false);
             }
@@ -1856,16 +2143,24 @@ export function waitForToken(timeout = 10000) {
 
 // Start passive auth monitoring
 export function startPassiveAuthMonitoring() {
-    if (authCheckInterval) {
-        clearInterval(authCheckInterval);
-        authCheckInterval = null;
+    try {
+        if (authCheckInterval) {
+            clearInterval(authCheckInterval);
+            authCheckInterval = null;
+        }
+        
+        authCheckInterval = setInterval(() => {
+            try {
+                checkAuthStatePassively();
+            } catch (error) {
+                // Silent error in interval
+            }
+        }, AUTH_CHECK_INTERVAL);
+        
+        setTimeout(checkAuthStatePassively, 1000);
+    } catch (error) {
+        console.error('❌ [Auth] Error starting passive auth monitoring:', error);
     }
-    
-    authCheckInterval = setInterval(() => {
-        checkAuthStatePassively();
-    }, AUTH_CHECK_INTERVAL);
-    
-    setTimeout(checkAuthStatePassively, 1000);
 }
 
 // Check auth state passively
@@ -1879,28 +2174,33 @@ function checkAuthStatePassively() {
 
 // Start background tasks
 export function startBackgroundTasks() {
-    if (backgroundTasksStarted) {
-        return;
+    try {
+        if (backgroundTasksStarted) {
+            return;
+        }
+        
+        if (!tokenReady && !parentSessionReceived) {
+            return;
+        }
+        
+        backgroundTasksStarted = true;
+        
+        Promise.allSettled([
+            safeLoadUserData(),
+            safeLoadSettings(),
+            safeLoadBlockedUsers(),
+            safeLoadActiveSessions(),
+            safeLoadUserContacts(),
+            safeLoadUserGroups()
+        ]).then(results => {
+            showNotification('Settings synced with server', 'success');
+        }).catch(error => {
+            // Silent error
+        });
+    } catch (error) {
+        console.error('❌ [Background] Error starting background tasks:', error);
+        backgroundTasksStarted = false;
     }
-    
-    if (!tokenReady && !parentSessionReceived) {
-        return;
-    }
-    
-    backgroundTasksStarted = true;
-    
-    Promise.allSettled([
-        safeLoadUserData(),
-        safeLoadSettings(),
-        safeLoadBlockedUsers(),
-        safeLoadActiveSessions(),
-        safeLoadUserContacts(),
-        safeLoadUserGroups()
-    ]).then(results => {
-        showNotification('Settings synced with server', 'success');
-    }).catch(error => {
-        // Silent error
-    });
 }
 
 // Safe wrapper for user data loading
@@ -2060,7 +2360,8 @@ export function notifyParentAuthState(hasAuth) {
             iframeId: 'settings',
             tokenReady: tokenReady,
             timestamp: Date.now(),
-            source: 'settings-core'
+            source: 'settings-core',
+            messageId: generateMessageId()
         });
     } catch (error) {
         // Silent error
@@ -2079,7 +2380,8 @@ export function notifyParentAuthError() {
             message: 'Authentication required',
             tokenExpired: true,
             timestamp: Date.now(),
-            source: 'settings-core'
+            source: 'settings-core',
+            messageId: generateMessageId()
         });
         authErrorNotified = true;
     } catch (error) {
@@ -2093,96 +2395,113 @@ export function notifyParentAuthError() {
 
 // Load from localStorage as fallback
 export async function loadFromLocalStorage() {
-    const cachedUser = localStorage.getItem('knecta_current_user');
-    if (cachedUser) {
-        try {
-            currentUser = JSON.parse(cachedUser);
-            
-            updateUserUI();
-        } catch (e) {
+    try {
+        const cachedUser = localStorage.getItem('knecta_current_user');
+        if (cachedUser) {
+            try {
+                currentUser = JSON.parse(cachedUser);
+                
+                updateUserUI();
+            } catch (e) {
+                currentUser = { displayName: 'User' };
+            }
+        } else {
             currentUser = { displayName: 'User' };
         }
-    } else {
-        currentUser = { displayName: 'User' };
-    }
-    
-    const savedSettings = localStorage.getItem('knecta_user_settings');
-    if (savedSettings) {
-        try {
-            userSettings = JSON.parse(savedSettings);
-        } catch (e) {
+        
+        const savedSettings = localStorage.getItem('knecta_user_settings');
+        if (savedSettings) {
+            try {
+                userSettings = JSON.parse(savedSettings);
+            } catch (e) {
+                userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            }
+        } else {
             userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         }
-    } else {
+        
+        Object.keys(DEFAULT_SETTINGS).forEach(section => {
+            if (!userSettings[section]) {
+                userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
+            }
+        });
+        
+        calculateStorageUsage();
+    } catch (error) {
+        console.error('❌ [Storage] Error loading from localStorage:', error);
+        // Initialize with defaults
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        currentUser = { displayName: 'User' };
     }
-    
-    Object.keys(DEFAULT_SETTINGS).forEach(section => {
-        if (!userSettings[section]) {
-            userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
-        }
-    });
-    
-    calculateStorageUsage();
 }
 
 // Update user UI elements
 export function updateUserUI() {
-    if (!currentUser) return;
-    
-    const userNamePreview = document.getElementById('userNamePreview');
-    const userAvatarPreview = document.getElementById('userAvatarPreview');
-    
-    if (userNamePreview) {
-        userNamePreview.textContent = currentUser.displayName || 
-                                     currentUser.username || 
-                                     currentUser.email?.split('@')[0] || 
-                                     'User';
-    }
-    
-    if (userAvatarPreview) {
-        if (currentUser.photoURL || currentUser.avatar || currentUser.profilePicture) {
-            const photoUrl = currentUser.photoURL || currentUser.avatar || currentUser.profilePicture;
-            userAvatarPreview.style.backgroundImage = `url('${photoUrl}')`;
-            userAvatarPreview.innerHTML = '';
-        } else {
-            const displayName = currentUser.displayName || currentUser.username || currentUser.email || 'User';
-            const initials = displayName
-                .split(' ')
-                .map(word => word[0])
-                .join('')
-                .toUpperCase()
-                .substring(0, 2);
-            
-            userAvatarPreview.style.backgroundImage = '';
-            userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+    try {
+        if (!currentUser) return;
+        
+        const userNamePreview = document.getElementById('userNamePreview');
+        const userAvatarPreview = document.getElementById('userAvatarPreview');
+        
+        if (userNamePreview) {
+            userNamePreview.textContent = currentUser.displayName || 
+                                         currentUser.username || 
+                                         currentUser.email?.split('@')[0] || 
+                                         'User';
         }
+        
+        if (userAvatarPreview) {
+            if (currentUser.photoURL || currentUser.avatar || currentUser.profilePicture) {
+                const photoUrl = currentUser.photoURL || currentUser.avatar || currentUser.profilePicture;
+                userAvatarPreview.style.backgroundImage = `url('${photoUrl}')`;
+                userAvatarPreview.innerHTML = '';
+            } else {
+                const displayName = currentUser.displayName || currentUser.username || currentUser.email || 'User';
+                const initials = displayName
+                    .split(' ')
+                    .map(word => word[0])
+                    .join('')
+                    .toUpperCase()
+                    .substring(0, 2);
+                
+                userAvatarPreview.style.backgroundImage = '';
+                userAvatarPreview.innerHTML = `<span style="color: var(--text-secondary); font-size: 18px;">${initials}</span>`;
+            }
+        }
+    } catch (error) {
+        console.error('❌ [UI] Error updating user UI:', error);
     }
 }
 
 // Initialize UI
 export function initializeUI() {
-    buildSettingsMenu();
-    
-    setupEventListeners();
-    
-    updateUserStatus();
-    
-    initializeColorPicker();
-    
-    if (userSettings.appearance && userSettings.appearance.theme) {
-        applyTheme(userSettings.appearance.theme);
+    try {
+        buildSettingsMenu();
+        
+        setupEventListeners();
+        
+        updateUserStatus();
+        
+        initializeColorPicker();
+        
+        if (userSettings.appearance && userSettings.appearance.theme) {
+            applyTheme(userSettings.appearance.theme);
+        }
+        
+        if (userSettings.appearance && userSettings.appearance.accentColor) {
+            updateAccentColor(userSettings.appearance.accentColor);
+        }
+        
+        const resetBtn = document.getElementById('resetSectionBtn');
+        const saveBtn = document.getElementById('saveSectionBtn');
+        if (resetBtn) resetBtn.disabled = !(tokenReady || parentSessionReceived);
+        if (saveBtn) saveBtn.disabled = !(tokenReady || parentSessionReceived);
+        updateSaveButton();
+    } catch (error) {
+        console.error('❌ [UI] Error initializing UI:', error);
+        // Fall back to basic initialization
+        initializeBasicUI();
     }
-    
-    if (userSettings.appearance && userSettings.appearance.accentColor) {
-        updateAccentColor(userSettings.appearance.accentColor);
-    }
-    
-    const resetBtn = document.getElementById('resetSectionBtn');
-    const saveBtn = document.getElementById('saveSectionBtn');
-    if (resetBtn) resetBtn.disabled = !(tokenReady || parentSessionReceived);
-    if (saveBtn) saveBtn.disabled = !(tokenReady || parentSessionReceived);
-    updateSaveButton();
 }
 
 // =============================================
@@ -2191,98 +2510,94 @@ export function initializeUI() {
 
 // Setup event listeners
 export function setupEventListeners() {
-    const saveBtn = document.getElementById('saveSectionBtn');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
-            saveSettings();
-        });
-    }
-    
-    const resetBtn = document.getElementById('resetSectionBtn');
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            resetCurrentSection();
-        });
-    }
-    
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            toggleTheme();
-        });
-    }
-    
-    const fontSizeIncrease = document.getElementById('fontSizeIncrease');
-    const fontSizeDecrease = document.getElementById('fontSizeDecrease');
-    const fontSizeReset = document.getElementById('fontSizeReset');
-    
-    if (fontSizeIncrease) {
-        fontSizeIncrease.addEventListener('click', () => {
-            changeFontSize('increase');
-        });
-    }
-    
-    if (fontSizeDecrease) {
-        fontSizeDecrease.addEventListener('click', () => {
-            changeFontSize('decrease');
-        });
-    }
-    
-    if (fontSizeReset) {
-        fontSizeReset.addEventListener('click', () => {
-            changeFontSize('reset');
-        });
+    try {
+        const saveBtn = document.getElementById('saveSectionBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                saveSettings();
+            });
+        }
+        
+        const resetBtn = document.getElementById('resetSectionBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                resetCurrentSection();
+            });
+        }
+        
+        const themeToggle = document.getElementById('themeToggle');
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                toggleTheme();
+            });
+        }
+        
+        const fontSizeIncrease = document.getElementById('fontSizeIncrease');
+        const fontSizeDecrease = document.getElementById('fontSizeDecrease');
+        const fontSizeReset = document.getElementById('fontSizeReset');
+        
+        if (fontSizeIncrease) {
+            fontSizeIncrease.addEventListener('click', () => {
+                changeFontSize('increase');
+            });
+        }
+        
+        if (fontSizeDecrease) {
+            fontSizeDecrease.addEventListener('click', () => {
+                changeFontSize('decrease');
+            });
+        }
+        
+        if (fontSizeReset) {
+            fontSizeReset.addEventListener('click', () => {
+                changeFontSize('reset');
+            });
+        }
+    } catch (error) {
+        console.error('❌ [UI] Error setting up event listeners:', error);
     }
 }
 
 // Load section
 export function loadSection(sectionId) {
-    const contentContainer = document.getElementById('settingsContent');
-    if (contentContainer) {
-        contentContainer.innerHTML = `
-            <div class="settings-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-cog section-icon"></i> ${sectionId}</h3>
-                    <div class="section-description">
-                        Loading ${sectionId} settings...
+    try {
+        const contentContainer = document.getElementById('settingsContent');
+        if (contentContainer) {
+            contentContainer.innerHTML = `
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-cog section-icon"></i> ${sectionId}</h3>
+                        <div class="section-description">
+                            Loading ${sectionId} settings...
+                        </div>
                     </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
+    } catch (error) {
+        console.error('❌ [UI] Error loading section:', error);
     }
 }
 
 // Show notification
 export function showNotification(message, type = 'info') {
-    const notification = document.createElement('div');
-    notification.className = `settings-notification settings-notification-${type}`;
-    notification.innerHTML = `
-        <div class="notification-content">
-            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
-            <span>${message}</span>
-        </div>
-        <button class="notification-close">
-            <i class="fas fa-times"></i>
-        </button>
-    `;
-    
-    const container = document.getElementById('notificationContainer') || document.body;
-    container.appendChild(notification);
-    
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.classList.add('fade-out');
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            }, 300);
-        }
-    }, 5000);
-    
-    const closeBtn = notification.querySelector('.notification-close');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
+    try {
+        const notification = document.createElement('div');
+        notification.className = `settings-notification settings-notification-${type}`;
+        notification.innerHTML = `
+            <div class="notification-content">
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            </div>
+            <button class="notification-close">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        const container = document.getElementById('notificationContainer') || document.body;
+        container.appendChild(notification);
+        
+        setTimeout(() => {
             if (notification.parentNode) {
                 notification.classList.add('fade-out');
                 setTimeout(() => {
@@ -2291,77 +2606,101 @@ export function showNotification(message, type = 'info') {
                     }
                 }, 300);
             }
-        });
+        }, 5000);
+        
+        const closeBtn = notification.querySelector('.notification-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                if (notification.parentNode) {
+                    notification.classList.add('fade-out');
+                    setTimeout(() => {
+                        if (notification.parentNode) {
+                            notification.parentNode.removeChild(notification);
+                        }
+                    }, 300);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('❌ [UI] Error showing notification:', error);
     }
 }
 
 // Show confirmation dialog
 export function showConfirmation(title, message, onConfirm, onCancel, confirmText = 'Confirm', cancelText = 'Cancel') {
-    const modal = document.createElement('div');
-    modal.className = 'settings-confirmation-modal';
-    modal.innerHTML = `
-        <div class="modal-overlay"></div>
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>${title}</h3>
-                <button class="modal-close">
-                    <i class="fas fa-times"></i>
-                </button>
+    try {
+        const modal = document.createElement('div');
+        modal.className = 'settings-confirmation-modal';
+        modal.innerHTML = `
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>${title}</h3>
+                    <button class="modal-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>${message}</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-button cancel">${cancelText}</button>
+                    <button class="modal-button confirm">${confirmText}</button>
+                </div>
             </div>
-            <div class="modal-body">
-                <p>${message}</p>
-            </div>
-            <div class="modal-footer">
-                <button class="modal-button cancel">${cancelText}</button>
-                <button class="modal-button confirm">${confirmText}</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    const closeBtn = modal.querySelector('.modal-close');
-    const cancelBtn = modal.querySelector('.modal-button.cancel');
-    const confirmBtn = modal.querySelector('.modal-button.confirm');
-    const overlay = modal.querySelector('.modal-overlay');
-    
-    const closeModal = () => {
-        modal.classList.add('fade-out');
-        setTimeout(() => {
-            if (modal.parentNode) {
-                modal.parentNode.removeChild(modal);
-            }
-        }, 300);
-    };
-    
-    closeBtn.addEventListener('click', () => {
-        if (onCancel && typeof onCancel === 'function') onCancel();
-        closeModal();
-    });
-    
-    cancelBtn.addEventListener('click', () => {
-        if (onCancel && typeof onCancel === 'function') onCancel();
-        closeModal();
-    });
-    
-    confirmBtn.addEventListener('click', () => {
-        if (onConfirm && typeof onConfirm === 'function') onConfirm();
-        closeModal();
-    });
-    
-    overlay.addEventListener('click', () => {
-        if (onCancel && typeof onCancel === 'function') onCancel();
-        closeModal();
-    });
+        `;
+        
+        document.body.appendChild(modal);
+        
+        const closeBtn = modal.querySelector('.modal-close');
+        const cancelBtn = modal.querySelector('.modal-button.cancel');
+        const confirmBtn = modal.querySelector('.modal-button.confirm');
+        const overlay = modal.querySelector('.modal-overlay');
+        
+        const closeModal = () => {
+            modal.classList.add('fade-out');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
+        };
+        
+        closeBtn.addEventListener('click', () => {
+            if (onCancel && typeof onCancel === 'function') onCancel();
+            closeModal();
+        });
+        
+        cancelBtn.addEventListener('click', () => {
+            if (onCancel && typeof onCancel === 'function') onCancel();
+            closeModal();
+        });
+        
+        confirmBtn.addEventListener('click', () => {
+            if (onConfirm && typeof onConfirm === 'function') onConfirm();
+            closeModal();
+        });
+        
+        overlay.addEventListener('click', () => {
+            if (onCancel && typeof onCancel === 'function') onCancel();
+            closeModal();
+        });
+    } catch (error) {
+        console.error('❌ [UI] Error showing confirmation dialog:', error);
+    }
 }
 
 // Update save button
 export function updateSaveButton() {
-    const saveBtn = document.getElementById('saveSectionBtn');
-    if (saveBtn) {
-        saveBtn.disabled = !unsavedChanges;
-        saveBtn.textContent = unsavedChanges ? 'Save Changes' : 'No Changes';
-        saveBtn.title = unsavedChanges ? 'You have unsaved changes' : 'All changes are saved';
+    try {
+        const saveBtn = document.getElementById('saveSectionBtn');
+        if (saveBtn) {
+            saveBtn.disabled = !unsavedChanges;
+            saveBtn.textContent = unsavedChanges ? 'Save Changes' : 'No Changes';
+            saveBtn.title = unsavedChanges ? 'You have unsaved changes' : 'All changes are saved';
+        }
+    } catch (error) {
+        console.error('❌ [UI] Error updating save button:', error);
     }
 }
 
@@ -2372,12 +2711,20 @@ export function searchSettings(query) {
 
 // Apply theme
 export function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
+    try {
+        document.documentElement.setAttribute('data-theme', theme);
+    } catch (error) {
+        console.error('❌ [UI] Error applying theme:', error);
+    }
 }
 
 // Update accent color
 export function updateAccentColor(color) {
-    document.documentElement.style.setProperty('--accent-color', color);
+    try {
+        document.documentElement.style.setProperty('--accent-color', color);
+    } catch (error) {
+        console.error('❌ [UI] Error updating accent color:', error);
+    }
 }
 
 // Initialize color picker
@@ -2537,11 +2884,16 @@ export function showBlockedUsers() {
 
 // Auto-initialize handshake when document is ready
 document.addEventListener('DOMContentLoaded', function() {
-    if (window.parent !== window) {
-        // Small delay to ensure everything is loaded
-        setTimeout(() => {
-            requestSessionFromParent();
-        }, 100);
+    try {
+        if (window.parent !== window) {
+            // Small delay to ensure everything is loaded
+            setTimeout(() => {
+                requestSessionFromParent();
+            }, 100);
+        }
+    } catch (error) {
+        console.error('❌ [Handshake] Error in auto-start handshake:', error);
+        // Don't crash - allow page to load without handshake
     }
 });
 

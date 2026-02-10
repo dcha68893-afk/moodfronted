@@ -1,8 +1,9 @@
 // js/api.messages.js
 // ES Module for Message Handling - Contains ONLY functions missing from existing API modules
-// Version: 1.0.5
+// Version: 1.0.6
 // Date: 2024-01-02
 // Updated: Added strict schema validation, handshake guards, race condition prevention
+// Safety Update: Added safety guards for crash prevention, loop prevention, and error isolation
 
 /**
  * STRICT_MESSAGE_TYPES constant - Frozen object defining standardized message types
@@ -50,12 +51,26 @@ if (typeof window !== 'undefined' && window.MESSAGE_TYPES && typeof window.MESSA
 
 export { MESSAGE_TYPES };
 
-// Track sent messages to prevent duplicates
+// =============== SAFETY GUARDS ADDITION ===============
+// Track sent messages to prevent duplicates - ENHANCED with size limits
 const sentMessageRegistry = new Map();
+const receivedMessageRegistry = new Map(); // Added for incoming message deduplication
+const MAX_REGISTRY_SIZE = 1000; // Prevent memory leaks
 const RECEIVED_MESSAGE_TIMEOUT = 5000; // 5 seconds
 const DEBOUNCE_DELAY = 300; // 300ms debounce
 const INITIALIZATION_TIMEOUT = 10000; // 10 seconds max initialization
 const HANDSHAKE_TIMEOUT = 5000; // 5 seconds handshake timeout
+
+// Handshake safety guards
+let handshakeAttempts = 0;
+const MAX_HANDSHAKE_ATTEMPTS = 3;
+let handshakeComplete = false;
+let handshakeTimeoutId = null;
+
+// Module failure tracking
+const disabledModules = new Set();
+const errorLogCache = new Map(); // Cache errors to prevent spam
+const ERROR_CACHE_TIMEOUT = 60000; // 1 minute
 
 // Allowed origins for secure messaging
 const ALLOWED_ORIGINS = Object.freeze([
@@ -64,6 +79,9 @@ const ALLOWED_ORIGINS = Object.freeze([
     'http://localhost:8080',
     'https://*.yourdomain.com' // Replace with your actual domains
 ]);
+
+// Cached trusted origin to prevent repeated checks
+let cachedTrustedOrigin = null;
 
 // Schema definitions for strict validation
 const MESSAGE_SCHEMAS = Object.freeze({
@@ -106,8 +124,165 @@ const INIT_STATE = {
 
 let initializationState = INIT_STATE.NOT_STARTED;
 let initializationPromise = null;
-let handshakeComplete = false;
-let handshakeTimeoutId = null;
+
+/**
+ * Safety: Log error once per unique error to prevent spam
+ */
+function safeLogError(context, error, messageId = null) {
+    const errorKey = `${context}:${error.message}:${messageId}`;
+    const now = Date.now();
+    
+    // Clean old cache entries
+    for (const [key, timestamp] of errorLogCache.entries()) {
+        if (now - timestamp > ERROR_CACHE_TIMEOUT) {
+            errorLogCache.delete(key);
+        }
+    }
+    
+    // Log only if not recently logged
+    if (!errorLogCache.has(errorKey)) {
+        errorLogCache.set(errorKey, now);
+        console.warn(`⚠️ [Safety] ${context}: ${error.message}`, messageId ? `Message ID: ${messageId}` : '');
+    }
+}
+
+/**
+ * Safety: Check if module is disabled
+ */
+function isModuleDisabled(moduleName) {
+    return disabledModules.has(moduleName);
+}
+
+/**
+ * Safety: Disable a module to prevent crashes
+ */
+function disableModule(moduleName, reason) {
+    disabledModules.add(moduleName);
+    safeLogError(`Module ${moduleName} disabled`, new Error(reason));
+}
+
+/**
+ * Safety: Validate message structure before processing
+ */
+function validateIncomingMessageStructure(message) {
+    if (!message || typeof message !== 'object') {
+        return { isValid: false, reason: 'Message is not an object' };
+    }
+    
+    // Check required fields
+    const requiredFields = ['type', 'source', 'messageId'];
+    for (const field of requiredFields) {
+        if (message[field] === undefined || message[field] === null) {
+            return { isValid: false, reason: `Missing required field: ${field}` };
+        }
+    }
+    
+    // Check field types
+    if (typeof message.type !== 'string') {
+        return { isValid: false, reason: 'Field "type" must be a string' };
+    }
+    
+    if (typeof message.source !== 'string') {
+        return { isValid: false, reason: 'Field "source" must be a string' };
+    }
+    
+    if (typeof message.messageId !== 'string') {
+        return { isValid: false, reason: 'Field "messageId" must be a string' };
+    }
+    
+    // Check for circular references in data
+    if (message.data && typeof message.data === 'object') {
+        try {
+            JSON.stringify(message.data);
+        } catch (e) {
+            return { isValid: false, reason: 'Data field contains non-serializable values' };
+        }
+    }
+    
+    return { isValid: true, reason: null };
+}
+
+/**
+ * Safety: Check for duplicate incoming messages
+ */
+function isDuplicateIncomingMessage(message) {
+    if (!message || !message.messageId) {
+        return false;
+    }
+    
+    const messageId = message.messageId;
+    const now = Date.now();
+    
+    if (receivedMessageRegistry.has(messageId)) {
+        const receivedTime = receivedMessageRegistry.get(messageId);
+        
+        // Clean old entries
+        if (now - receivedTime > RECEIVED_MESSAGE_TIMEOUT) {
+            receivedMessageRegistry.delete(messageId);
+            return false;
+        }
+        
+        return true; // Duplicate detected
+    }
+    
+    // Store message with timestamp
+    receivedMessageRegistry.set(messageId, now);
+    
+    // Cleanup registry if too large
+    if (receivedMessageRegistry.size > MAX_REGISTRY_SIZE) {
+        // Remove oldest entries
+        const entries = Array.from(receivedMessageRegistry.entries());
+        entries.sort((a, b) => a[1] - b[1]);
+        const toRemove = entries.slice(0, Math.floor(MAX_REGISTRY_SIZE / 2));
+        for (const [id] of toRemove) {
+            receivedMessageRegistry.delete(id);
+        }
+    }
+    
+    // Auto-cleanup after timeout
+    setTimeout(() => {
+        receivedMessageRegistry.delete(messageId);
+    }, RECEIVED_MESSAGE_TIMEOUT);
+    
+    return false;
+}
+
+/**
+ * Safety: Validate and cache origin
+ */
+function validateAndCacheOrigin(origin) {
+    // Return cached result if available
+    if (cachedTrustedOrigin === origin) {
+        return true;
+    }
+    
+    if (!origin || typeof origin !== 'string') {
+        return false;
+    }
+    
+    // Check exact matches first
+    if (ALLOWED_ORIGINS.includes(origin)) {
+        cachedTrustedOrigin = origin;
+        return true;
+    }
+    
+    // Check wildcard patterns
+    for (const pattern of ALLOWED_ORIGINS) {
+        if (pattern.includes('*')) {
+            const regexPattern = pattern
+                .replace(/\./g, '\\.')
+                .replace(/\*/g, '.*');
+            const regex = new RegExp(`^${regexPattern}$`);
+            if (regex.test(origin)) {
+                cachedTrustedOrigin = origin;
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+// =============== END SAFETY GUARDS ===============
 
 /**
  * normalizeLegacyMessage() - Normalize legacy message format to strict format
@@ -189,7 +364,7 @@ function injectMissingFields(message, isOutgoing = true) {
     
     // Inject version for outgoing messages
     if (isOutgoing && (!fixed.version || typeof fixed.version !== 'string')) {
-        fixed.version = '1.0.5';
+        fixed.version = '1.0.6';
     }
     
     return fixed;
@@ -458,7 +633,7 @@ function initializeGlobalAPI() {
             if (!window.__API_MESSAGES) {
                 window.__API_MESSAGES = {
                     ready: false,
-                    version: '1.0.5',
+                    version: '1.0.6',
                     exports: {},
                     config: {
                         strictMode: true,
@@ -525,7 +700,7 @@ function initializeGlobalAPI() {
             // Dispatch ready event using strict protocol
             const readyEvent = new CustomEvent('api-messages-ready', {
                 detail: {
-                    version: '1.0.5',
+                    version: '1.0.6',
                     timestamp: Date.now(),
                     strictMode: window.__API_MESSAGES.config.strictMode,
                     state: 'ready'
@@ -564,6 +739,32 @@ async function ensureInitialized() {
 }
 
 /**
+ * Safety: Safe handshake with max attempts
+ */
+function performSafeHandshake() {
+    if (handshakeComplete || handshakeAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
+        return;
+    }
+    
+    handshakeAttempts++;
+    
+    if (handshakeAttempts > MAX_HANDSHAKE_ATTEMPTS) {
+        safeLogError('Handshake', new Error(`Maximum handshake attempts (${MAX_HANDSHAKE_ATTEMPTS}) exceeded`));
+        return;
+    }
+    
+    try {
+        // Send handshake message
+        sendParentMessage(STRICT_MESSAGE_TYPES.CHILD_READY, {
+            attempts: handshakeAttempts,
+            timestamp: Date.now()
+        });
+    } catch (error) {
+        safeLogError('Handshake', error);
+    }
+}
+
+/**
  * waitForHandshake() - Wait for handshake completion with timeout
  * @returns {Promise} Resolves when handshake is complete
  */
@@ -587,7 +788,9 @@ function waitForHandshake() {
         const checkInterval = setInterval(() => {
             if (handshakeComplete) {
                 clearInterval(checkInterval);
-                clearTimeout(handshakeTimeoutId);
+                if (handshakeTimeoutId) {
+                    clearTimeout(handshakeTimeoutId);
+                }
                 resolve();
             }
         }, 100);
@@ -627,6 +830,11 @@ function validateMessageType(type) {
  * @returns {boolean} True if message was sent successfully
  */
 export function sendParentMessage(type, data, targetOrigin = '*', options = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('sendParentMessage')) {
+        return false;
+    }
+    
     try {
         // Ensure API is initialized
         if (initializationState !== INIT_STATE.READY) {
@@ -667,9 +875,16 @@ export function sendParentMessage(type, data, targetOrigin = '*', options = {}) 
             data: data || {},
             timestamp: Date.now(),
             source: 'iframe',
-            version: '1.0.5',
+            version: '1.0.6',
             messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         };
+        
+        // Safety: Validate outgoing message structure
+        const structureCheck = validateIncomingMessageStructure(message);
+        if (!structureCheck.isValid) {
+            safeLogError('sendParentMessage', new Error(structureCheck.reason), message.messageId);
+            return false;
+        }
         
         // Strict validation if enabled
         if (window.__API_MESSAGES.config.strictMode && options.strict !== false) {
@@ -706,8 +921,24 @@ export function sendParentMessage(type, data, targetOrigin = '*', options = {}) 
             }
         }
         
+        // Safety: Serialize with error handling
+        let serializedMessage;
+        try {
+            serializedMessage = JSON.stringify(finalMessage);
+        } catch (serializeError) {
+            safeLogError('sendParentMessage', serializeError, finalMessage.messageId);
+            disableModule('sendParentMessage', 'Serialization failure');
+            return false;
+        }
+        
         // Send the message to parent
-        window.parent.postMessage(finalMessage, finalTargetOrigin);
+        try {
+            window.parent.postMessage(finalMessage, finalTargetOrigin);
+        } catch (postMessageError) {
+            safeLogError('sendParentMessage', postMessageError, finalMessage.messageId);
+            // Don't disable module for postMessage errors - they might be temporary
+            return false;
+        }
         
         // Update handshake state for CHILD_READY
         if (type === STRICT_MESSAGE_TYPES.CHILD_READY) {
@@ -728,7 +959,8 @@ export function sendParentMessage(type, data, targetOrigin = '*', options = {}) 
         return true;
         
     } catch (error) {
-        console.error('❌ sendParentMessage: Failed to send message', error);
+        safeLogError('sendParentMessage', error);
+        disableModule('sendParentMessage', 'Unhandled error');
         return false;
     }
 }
@@ -745,6 +977,114 @@ export function sendToParent(type, payload) {
 }
 
 /**
+ * Safety: Safe message handler wrapper
+ */
+function createSafeMessageHandler(callback, filterTypes, options) {
+    return function safeMessageHandler(event) {
+        // Safety: Skip if module is disabled
+        if (isModuleDisabled('listenToParentMessages')) {
+            return;
+        }
+        
+        try {
+            // Skip messages from self
+            if (event.source === window) {
+                return;
+            }
+            
+            // Safety: Validate and cache origin
+            if (options.validateOrigin && !validateAndCacheOrigin(event.origin)) {
+                safeLogError('listenToParentMessages', new Error(`Unauthorized origin: ${event.origin}`));
+                return;
+            }
+            
+            // Basic validation of the message
+            if (!event.data || typeof event.data !== 'object') {
+                return; // Ignore non-object messages
+            }
+            
+            const message = event.data;
+            
+            // Skip internal messages
+            if (message._internal) {
+                return;
+            }
+            
+            // Safety: Check for duplicate incoming messages
+            if (isDuplicateIncomingMessage(message)) {
+                return; // Skip duplicate
+            }
+            
+            // Safety: Validate incoming message structure
+            const structureCheck = validateIncomingMessageStructure(message);
+            if (!structureCheck.isValid) {
+                safeLogError('listenToParentMessages', new Error(structureCheck.reason), message.messageId);
+                return;
+            }
+            
+            // First normalize legacy messages
+            const normalizedMessage = normalizeLegacyMessage(message);
+            
+            // Then inject missing fields for incoming messages
+            const finalMessage = injectMissingFields(normalizedMessage, false);
+            
+            // Strict validation if enabled
+            if (options.strict) {
+                const validation = validateStrictMessage(finalMessage, false);
+                if (!validation.isValid) {
+                    safeLogError('listenToParentMessages', new Error(`Invalid message: ${validation.errors.join(', ')}`), finalMessage.messageId);
+                    return;
+                }
+                if (validation.warnings.length > 0) {
+                    console.warn('⚠️ listenToParentMessages: Validation warnings:', validation.warnings);
+                }
+            } else {
+                // Basic validation for backward compatibility
+                if (!finalMessage.type || typeof finalMessage.type !== 'string') {
+                    return; // Ignore messages without type
+                }
+            }
+            
+            // Apply type filtering if specified
+            if (filterTypes && Array.isArray(filterTypes)) {
+                if (!filterTypes.includes(finalMessage.type)) {
+                    return; // Skip if type not in filter
+                }
+            }
+            
+            // Check for handshake requirement
+            if (options.requireHandshake && !handshakeComplete) {
+                if (finalMessage.type === STRICT_MESSAGE_TYPES.FRAME_ID) {
+                    handshakeComplete = true;
+                    if (handshakeTimeoutId) {
+                        clearTimeout(handshakeTimeoutId);
+                    }
+                } else {
+                    safeLogError('listenToParentMessages', new Error(`Message received before handshake: ${finalMessage.type}`), finalMessage.messageId);
+                    return;
+                }
+            }
+            
+            // Log for debugging (sanitized)
+            console.log(`📥 listenToParentMessages: Received "${finalMessage.type}" from ${event.origin}`, {
+                type: finalMessage.type,
+                timestamp: finalMessage.timestamp,
+                source: finalMessage.source,
+                messageId: finalMessage.messageId,
+                data: typeof finalMessage.data === 'object' ? '[Object]' : finalMessage.data
+            });
+            
+            // Call the callback with the normalized message and event
+            callback(finalMessage, event);
+            
+        } catch (error) {
+            safeLogError('listenToParentMessages', error);
+            // Don't disable module for individual message errors
+        }
+    };
+}
+
+/**
  * listenToParentMessages() - Set up a strict listener for messages from parent window
  * This function was missing from all existing API modules and is required for in-frame pages
  * 
@@ -754,6 +1094,11 @@ export function sendToParent(type, payload) {
  * @returns {Function} Cleanup function to remove the event listener
  */
 export function listenToParentMessages(callback, filterTypes = null, options = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('listenToParentMessages')) {
+        return () => {};
+    }
+    
     // Validate callback
     if (typeof callback !== 'function') {
         console.error('❌ listenToParentMessages: Callback must be a function');
@@ -777,91 +1122,8 @@ export function listenToParentMessages(callback, filterTypes = null, options = {
         ...options
     };
     
-    // Message handler function with strict validation
-    const messageHandler = (event) => {
-        try {
-            // Skip messages from self
-            if (event.source === window) {
-                return;
-            }
-            
-            // Origin validation
-            if (listenerOptions.validateOrigin && !validateOrigin(event.origin)) {
-                console.warn('⚠️ listenToParentMessages: Message from unauthorized origin:', event.origin);
-                return;
-            }
-            
-            // Basic validation of the message
-            if (!event.data || typeof event.data !== 'object') {
-                return; // Ignore non-object messages
-            }
-            
-            const message = event.data;
-            
-            // Skip internal messages
-            if (message._internal) {
-                return;
-            }
-            
-            // First normalize legacy messages
-            const normalizedMessage = normalizeLegacyMessage(message);
-            
-            // Then inject missing fields for incoming messages
-            const finalMessage = injectMissingFields(normalizedMessage, false);
-            
-            // Strict validation if enabled
-            if (listenerOptions.strict) {
-                const validation = validateStrictMessage(finalMessage, false);
-                if (!validation.isValid) {
-                    console.warn('⚠️ listenToParentMessages: Invalid message structure:', validation.errors);
-                    return;
-                }
-                if (validation.warnings.length > 0) {
-                    console.warn('⚠️ listenToParentMessages: Validation warnings:', validation.warnings);
-                }
-            } else {
-                // Basic validation for backward compatibility
-                if (!finalMessage.type || typeof finalMessage.type !== 'string') {
-                    return; // Ignore messages without type
-                }
-            }
-            
-            // Apply type filtering if specified
-            if (filterTypes && Array.isArray(filterTypes)) {
-                if (!filterTypes.includes(finalMessage.type)) {
-                    return; // Skip if type not in filter
-                }
-            }
-            
-            // Check for handshake requirement
-            if (listenerOptions.requireHandshake && !handshakeComplete) {
-                if (finalMessage.type === STRICT_MESSAGE_TYPES.FRAME_ID) {
-                    handshakeComplete = true;
-                    if (handshakeTimeoutId) {
-                        clearTimeout(handshakeTimeoutId);
-                    }
-                } else {
-                    console.warn('⚠️ listenToParentMessages: Message received before handshake:', finalMessage.type);
-                    return;
-                }
-            }
-            
-            // Log for debugging (sanitized)
-            console.log(`📥 listenToParentMessages: Received "${finalMessage.type}" from ${event.origin}`, {
-                type: finalMessage.type,
-                timestamp: finalMessage.timestamp,
-                source: finalMessage.source,
-                messageId: finalMessage.messageId,
-                data: typeof finalMessage.data === 'object' ? '[Object]' : finalMessage.data
-            });
-            
-            // Call the callback with the normalized message and event
-            callback(finalMessage, event);
-            
-        } catch (error) {
-            console.error('❌ listenToParentMessages: Error processing message', error, event?.data);
-        }
-    };
+    // Create safe message handler
+    const messageHandler = createSafeMessageHandler(callback, filterTypes, listenerOptions);
     
     // Add the event listener
     window.addEventListener('message', messageHandler);
@@ -870,8 +1132,12 @@ export function listenToParentMessages(callback, filterTypes = null, options = {
     
     // Return cleanup function
     return () => {
-        window.removeEventListener('message', messageHandler);
-        console.log('✅ listenToParentMessages: Listener removed');
+        try {
+            window.removeEventListener('message', messageHandler);
+            console.log('✅ listenToParentMessages: Listener removed');
+        } catch (error) {
+            safeLogError('listenToParentMessages cleanup', error);
+        }
     };
 }
 
@@ -890,6 +1156,11 @@ export function listenToParentMessages(callback, filterTypes = null, options = {
  * @returns {boolean} True if message was sent successfully
  */
 export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('sendMessageToIframe')) {
+        return false;
+    }
+    
     try {
         if (!iframe || !iframe.contentWindow) {
             console.error('❌ sendMessageToIframe: Invalid iframe element');
@@ -906,9 +1177,16 @@ export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
             data: data || {},
             timestamp: Date.now(),
             source: 'parent',
-            version: '1.0.5',
+            version: '1.0.6',
             messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         };
+        
+        // Safety: Validate outgoing message structure
+        const structureCheck = validateIncomingMessageStructure(message);
+        if (!structureCheck.isValid) {
+            safeLogError('sendMessageToIframe', new Error(structureCheck.reason), message.messageId);
+            return false;
+        }
         
         // Strict validation
         const validation = validateStrictMessage(message, true);
@@ -939,7 +1217,21 @@ export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
             }
         }
         
-        iframe.contentWindow.postMessage(finalMessage, finalTargetOrigin);
+        // Safety: Serialize with error handling
+        try {
+            JSON.stringify(finalMessage);
+        } catch (serializeError) {
+            safeLogError('sendMessageToIframe', serializeError, finalMessage.messageId);
+            return false;
+        }
+        
+        // Send message
+        try {
+            iframe.contentWindow.postMessage(finalMessage, finalTargetOrigin);
+        } catch (postMessageError) {
+            safeLogError('sendMessageToIframe', postMessageError, finalMessage.messageId);
+            return false;
+        }
         
         console.log(`📤 sendMessageToIframe: Sent "${type}" to iframe`, {
             type: finalMessage.type,
@@ -952,7 +1244,8 @@ export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
         return true;
         
     } catch (error) {
-        console.error('❌ sendMessageToIframe: Failed to send message', error);
+        safeLogError('sendMessageToIframe', error);
+        disableModule('sendMessageToIframe', 'Unhandled error');
         return false;
     }
 }
@@ -965,15 +1258,20 @@ export function sendMessageToIframe(iframe, type, data, targetOrigin = '*') {
  * @returns {boolean} True if message is valid
  */
 export function validateMessage(message) {
-    // Normalize and inject missing fields first
-    const normalizedMessage = normalizeLegacyMessage(message);
-    const finalMessage = injectMissingFields(normalizedMessage, false);
-    
-    const validation = validateStrictMessage(finalMessage, false);
-    if (validation.warnings.length > 0) {
-        console.warn('⚠️ validateMessage: Validation warnings:', validation.warnings);
+    try {
+        // Normalize and inject missing fields first
+        const normalizedMessage = normalizeLegacyMessage(message);
+        const finalMessage = injectMissingFields(normalizedMessage, false);
+        
+        const validation = validateStrictMessage(finalMessage, false);
+        if (validation.warnings.length > 0) {
+            console.warn('⚠️ validateMessage: Validation warnings:', validation.warnings);
+        }
+        return validation.isValid;
+    } catch (error) {
+        safeLogError('validateMessage', error);
+        return false;
     }
-    return validation.isValid;
 }
 
 /**
@@ -987,31 +1285,54 @@ export function validateMessage(message) {
  * @returns {object} Standardized response message
  */
 export function messageResponse(originalType, data, success = true, error = null) {
-    const response = {
-        type: originalType + '_RESPONSE',
-        data: data || {},
-        success: success,
-        error: error,
-        timestamp: Date.now(),
-        source: 'response',
-        originalType: originalType,
-        version: '1.0.5',
-        messageId: `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    };
-    
-    // Inject missing fields
-    const finalResponse = injectMissingFields(response, true);
-    
-    // Validate the response
-    const validation = validateStrictMessage(finalResponse, true);
-    if (!validation.isValid) {
-        console.error('❌ messageResponse: Invalid response structure:', validation.errors);
+    try {
+        const response = {
+            type: originalType + '_RESPONSE',
+            data: data || {},
+            success: success,
+            error: error,
+            timestamp: Date.now(),
+            source: 'response',
+            originalType: originalType,
+            version: '1.0.6',
+            messageId: `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        };
+        
+        // Safety: Validate structure
+        const structureCheck = validateIncomingMessageStructure(response);
+        if (!structureCheck.isValid) {
+            safeLogError('messageResponse', new Error(structureCheck.reason), response.messageId);
+            return response; // Return anyway but log error
+        }
+        
+        // Inject missing fields
+        const finalResponse = injectMissingFields(response, true);
+        
+        // Validate the response
+        const validation = validateStrictMessage(finalResponse, true);
+        if (!validation.isValid) {
+            console.error('❌ messageResponse: Invalid response structure:', validation.errors);
+        }
+        if (validation.warnings.length > 0) {
+            console.warn('⚠️ messageResponse: Validation warnings:', validation.warnings);
+        }
+        
+        return finalResponse;
+    } catch (error) {
+        safeLogError('messageResponse', error);
+        // Return minimal valid response
+        return {
+            type: originalType + '_RESPONSE',
+            data: {},
+            success: false,
+            error: 'Internal error',
+            timestamp: Date.now(),
+            source: 'response',
+            originalType: originalType,
+            version: '1.0.6',
+            messageId: `error_${Date.now()}`
+        };
     }
-    if (validation.warnings.length > 0) {
-        console.warn('⚠️ messageResponse: Validation warnings:', validation.warnings);
-    }
-    
-    return finalResponse;
 }
 
 /**
@@ -1021,31 +1342,61 @@ export function messageResponse(originalType, data, success = true, error = null
  * @returns {object} Current configuration
  */
 export function configureMessaging(config = {}) {
-    if (!window.__API_MESSAGES) {
-        console.warn('⚠️ configureMessaging: API not initialized, initializing first');
-        initializeGlobalAPI();
+    try {
+        if (!window.__API_MESSAGES) {
+            console.warn('⚠️ configureMessaging: API not initialized, initializing first');
+            initializeGlobalAPI();
+        }
+        
+        if (config.allowedOrigins) {
+            window.__API_MESSAGES.config.allowedOrigins = [
+                ...new Set([...window.__API_MESSAGES.config.allowedOrigins, ...config.allowedOrigins])
+            ];
+        }
+        
+        if (config.strictMode !== undefined) {
+            window.__API_MESSAGES.config.strictMode = config.strictMode;
+        }
+        
+        if (config.validateOrigins !== undefined) {
+            window.__API_MESSAGES.config.validateOrigins = config.validateOrigins;
+        }
+        
+        if (config.debounceEnabled !== undefined) {
+            window.__API_MESSAGES.config.debounceEnabled = config.debounceEnabled;
+        }
+        
+        console.log('✅ configureMessaging: Updated configuration', window.__API_MESSAGES.config);
+        return { ...window.__API_MESSAGES.config };
+    } catch (error) {
+        safeLogError('configureMessaging', error);
+        return {
+            strictMode: false,
+            validateOrigins: false,
+            debounceEnabled: false,
+            allowedOrigins: ['*']
+        };
     }
-    
-    if (config.allowedOrigins) {
-        window.__API_MESSAGES.config.allowedOrigins = [
-            ...new Set([...window.__API_MESSAGES.config.allowedOrigins, ...config.allowedOrigins])
-        ];
+}
+
+/**
+ * Safety: Safe fetch wrapper
+ */
+async function safeFetch(url, options = {}) {
+    try {
+        const fetchFunction = window.secureFetch || window.fetch || fetch;
+        const response = await fetchFunction(url, options);
+        
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'No error details');
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        return response;
+    } catch (error) {
+        safeLogError('safeFetch', error);
+        throw error;
     }
-    
-    if (config.strictMode !== undefined) {
-        window.__API_MESSAGES.config.strictMode = config.strictMode;
-    }
-    
-    if (config.validateOrigins !== undefined) {
-        window.__API_MESSAGES.config.validateOrigins = config.validateOrigins;
-    }
-    
-    if (config.debounceEnabled !== undefined) {
-        window.__API_MESSAGES.config.debounceEnabled = config.debounceEnabled;
-    }
-    
-    console.log('✅ configureMessaging: Updated configuration', window.__API_MESSAGES.config);
-    return { ...window.__API_MESSAGES.config };
 }
 
 /**
@@ -1059,14 +1410,16 @@ export function configureMessaging(config = {}) {
  * @returns {Promise<object>} Message response
  */
 export async function sendMessage(conversationId, content, messageType = 'text', metadata = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('sendMessage')) {
+        throw new Error('sendMessage module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/messages`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1080,36 +1433,40 @@ export async function sendMessage(conversationId, content, messageType = 'text',
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to send message: ${response.status}`);
-        }
-
         const messageData = await response.json();
         
-        // Notify parent window if in iframe using strict protocol
+        // Safety: Notify parent window if in iframe using strict protocol
         if (window.parent !== window) {
-            sendParentMessage(STRICT_MESSAGE_TYPES.SESSION_DATA || 'SESSION_DATA', {
-                conversationId: conversationId,
-                message: messageData,
-                timestamp: Date.now(),
-                action: 'MESSAGE_SENT'
-            }, '*', { strict: true });
+            try {
+                sendParentMessage(STRICT_MESSAGE_TYPES.SESSION_DATA || 'SESSION_DATA', {
+                    conversationId: conversationId,
+                    message: messageData,
+                    timestamp: Date.now(),
+                    action: 'MESSAGE_SENT'
+                }, '*', { strict: true });
+            } catch (notificationError) {
+                safeLogError('sendMessage notification', notificationError);
+                // Continue even if notification fails
+            }
         }
 
         console.log(`✅ sendMessage: Message sent to conversation ${conversationId}`, messageData);
         return messageData;
     } catch (error) {
-        console.error('❌ sendMessage: Failed to send message', error);
+        safeLogError('sendMessage', error);
         
-        // Send error notification to parent if in iframe using strict protocol
+        // Safety: Send error notification to parent if in iframe using strict protocol
         if (window.parent !== window) {
-            sendParentMessage(STRICT_MESSAGE_TYPES.SESSION_ERROR || 'SESSION_ERROR', {
-                type: 'MESSAGE_SEND_FAILED',
-                conversationId: conversationId,
-                error: error.message,
-                timestamp: Date.now()
-            }, '*', { strict: true });
+            try {
+                sendParentMessage(STRICT_MESSAGE_TYPES.SESSION_ERROR || 'SESSION_ERROR', {
+                    type: 'MESSAGE_SEND_FAILED',
+                    conversationId: conversationId,
+                    error: error.message,
+                    timestamp: Date.now()
+                }, '*', { strict: true });
+            } catch (notificationError) {
+                safeLogError('sendMessage error notification', notificationError);
+            }
         }
         
         throw error;
@@ -1127,6 +1484,11 @@ export async function sendMessage(conversationId, content, messageType = 'text',
  * @returns {Promise<Array>} Array of messages
  */
 export async function fetchMessages(conversationId, limit = 50, before = null, after = null) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('fetchMessages')) {
+        throw new Error('fetchMessages module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
@@ -1137,27 +1499,19 @@ export async function fetchMessages(conversationId, limit = 50, before = null, a
         if (before) params.append('before', before);
         if (after) params.append('after', after);
 
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/messages?${params.toString()}`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages?${params.toString()}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to fetch messages: ${response.status}`);
-        }
-
         const messages = await response.json();
         
         console.log(`✅ fetchMessages: Fetched ${messages.length} messages for conversation ${conversationId}`);
         return messages;
     } catch (error) {
-        console.error('❌ fetchMessages: Failed to fetch messages', error);
+        safeLogError('fetchMessages', error);
         throw error;
     }
 }
@@ -1185,14 +1539,16 @@ export async function getMessages(conversationId, limit = 50, before = null, aft
  * @returns {Promise<object>} Status response
  */
 export async function markAsRead(conversationId, messageIds) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('markAsRead')) {
+        throw new Error('markAsRead module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/messages/read`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/read`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1204,27 +1560,26 @@ export async function markAsRead(conversationId, messageIds) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to mark messages as read: ${response.status}`);
-        }
-
         const result = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'MESSAGES_READ',
-                conversationId: conversationId,
-                messageIds: messageIds,
-                readAt: result.readAt
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'MESSAGES_READ',
+                    conversationId: conversationId,
+                    messageIds: messageIds,
+                    readAt: result.readAt
+                });
+            } catch (notificationError) {
+                safeLogError('markAsRead notification', notificationError);
+            }
         }
 
         console.log(`✅ markAsRead: Marked ${messageIds.length} messages as read in conversation ${conversationId}`);
         return result;
     } catch (error) {
-        console.error('❌ markAsRead: Failed to mark messages as read', error);
+        safeLogError('markAsRead', error);
         throw error;
     }
 }
@@ -1250,14 +1605,16 @@ export async function markChatAsRead(conversationId, messageIds) {
  * @returns {Promise<object>} Updated message with reactions
  */
 export async function addReaction(messageId, reaction) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('addReaction')) {
+        throw new Error('addReaction module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/${messageId}/reactions`, {
+        const response = await safeFetch(`/api/messages/${messageId}/reactions`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1269,27 +1626,26 @@ export async function addReaction(messageId, reaction) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to add reaction: ${response.status}`);
-        }
-
         const updatedMessage = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'REACTION_ADDED',
-                messageId: messageId,
-                reaction: reaction,
-                message: updatedMessage
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'REACTION_ADDED',
+                    messageId: messageId,
+                    reaction: reaction,
+                    message: updatedMessage
+                });
+            } catch (notificationError) {
+                safeLogError('addReaction notification', notificationError);
+            }
         }
 
         console.log(`✅ addReaction: Added reaction "${reaction}" to message ${messageId}`);
         return updatedMessage;
     } catch (error) {
-        console.error('❌ addReaction: Failed to add reaction', error);
+        safeLogError('addReaction', error);
         throw error;
     }
 }
@@ -1303,14 +1659,16 @@ export async function addReaction(messageId, reaction) {
  * @returns {Promise<object>} Status response
  */
 export async function clearChatHistory(conversationId, archive = true) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('clearChatHistory')) {
+        throw new Error('clearChatHistory module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/messages`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages`, {
             method: archive ? 'POST' : 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -1322,27 +1680,26 @@ export async function clearChatHistory(conversationId, archive = true) {
             }) : null
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to clear chat history: ${response.status}`);
-        }
-
         const result = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'CHAT_HISTORY_CLEARED',
-                conversationId: conversationId,
-                archived: archive,
-                timestamp: result.timestamp
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'CHAT_HISTORY_CLEARED',
+                    conversationId: conversationId,
+                    archived: archive,
+                    timestamp: result.timestamp
+                });
+            } catch (notificationError) {
+                safeLogError('clearChatHistory notification', notificationError);
+            }
         }
 
         console.log(`✅ clearChatHistory: ${archive ? 'Archived' : 'Deleted'} chat history for conversation ${conversationId}`);
         return result;
     } catch (error) {
-        console.error('❌ clearChatHistory: Failed to clear chat history', error);
+        safeLogError('clearChatHistory', error);
         throw error;
     }
 }
@@ -1356,14 +1713,16 @@ export async function clearChatHistory(conversationId, archive = true) {
  * @returns {Promise<object>} Status response
  */
 export async function deleteMessage(messageId, forEveryone = false) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('deleteMessage')) {
+        throw new Error('deleteMessage module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/${messageId}`, {
+        const response = await safeFetch(`/api/messages/${messageId}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -1375,27 +1734,26 @@ export async function deleteMessage(messageId, forEveryone = false) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to delete message: ${response.status}`);
-        }
-
         const result = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'MESSAGE_DELETED',
-                messageId: messageId,
-                forEveryone: forEveryone,
-                timestamp: result.deletedAt
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'MESSAGE_DELETED',
+                    messageId: messageId,
+                    forEveryone: forEveryone,
+                    timestamp: result.deletedAt
+                });
+            } catch (notificationError) {
+                safeLogError('deleteMessage notification', notificationError);
+            }
         }
 
         console.log(`✅ deleteMessage: Deleted message ${messageId} ${forEveryone ? 'for everyone' : 'for me only'}`);
         return result;
     } catch (error) {
-        console.error('❌ deleteMessage: Failed to delete message', error);
+        safeLogError('deleteMessage', error);
         throw error;
     }
 }
@@ -1410,14 +1768,16 @@ export async function deleteMessage(messageId, forEveryone = false) {
  * @returns {Promise<object>} Updated message
  */
 export async function editMessage(messageId, newContent, metadata = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('editMessage')) {
+        throw new Error('editMessage module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/${messageId}`, {
+        const response = await safeFetch(`/api/messages/${messageId}`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
@@ -1430,27 +1790,26 @@ export async function editMessage(messageId, newContent, metadata = {}) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to edit message: ${response.status}`);
-        }
-
         const updatedMessage = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'MESSAGE_EDITED',
-                messageId: messageId,
-                message: updatedMessage,
-                timestamp: updatedMessage.editedAt
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'MESSAGE_EDITED',
+                    messageId: messageId,
+                    message: updatedMessage,
+                    timestamp: updatedMessage.editedAt
+                });
+            } catch (notificationError) {
+                safeLogError('editMessage notification', notificationError);
+            }
         }
 
         console.log(`✅ editMessage: Edited message ${messageId}`);
         return updatedMessage;
     } catch (error) {
-        console.error('❌ editMessage: Failed to edit message', error);
+        safeLogError('editMessage', error);
         throw error;
     }
 }
@@ -1464,14 +1823,16 @@ export async function editMessage(messageId, newContent, metadata = {}) {
  * @returns {Promise<object>} New forwarded message
  */
 export async function forwardMessage(messageId, targetConversationId) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('forwardMessage')) {
+        throw new Error('forwardMessage module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/${messageId}/forward`, {
+        const response = await safeFetch(`/api/messages/${messageId}/forward`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1483,28 +1844,27 @@ export async function forwardMessage(messageId, targetConversationId) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to forward message: ${response.status}`);
-        }
-
         const forwardedMessage = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('MESSAGE_SENT', {
-                type: 'MESSAGE_FORWARDED',
-                originalMessageId: messageId,
-                targetConversationId: targetConversationId,
-                message: forwardedMessage,
-                timestamp: forwardedMessage.timestamp
-            });
+            try {
+                sendParentMessage('MESSAGE_SENT', {
+                    type: 'MESSAGE_FORWARDED',
+                    originalMessageId: messageId,
+                    targetConversationId: targetConversationId,
+                    message: forwardedMessage,
+                    timestamp: forwardedMessage.timestamp
+                });
+            } catch (notificationError) {
+                safeLogError('forwardMessage notification', notificationError);
+            }
         }
 
         console.log(`✅ forwardMessage: Forwarded message ${messageId} to conversation ${targetConversationId}`);
         return forwardedMessage;
     } catch (error) {
-        console.error('❌ forwardMessage: Failed to forward message', error);
+        safeLogError('forwardMessage', error);
         throw error;
     }
 }
@@ -1518,14 +1878,16 @@ export async function forwardMessage(messageId, targetConversationId) {
  * @returns {Promise<object>} Updated message
  */
 export async function pinMessage(messageId, pin = true) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('pinMessage')) {
+        throw new Error('pinMessage module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/${messageId}/pin`, {
+        const response = await safeFetch(`/api/messages/${messageId}/pin`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1537,27 +1899,26 @@ export async function pinMessage(messageId, pin = true) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to ${pin ? 'pin' : 'unpin'} message: ${response.status}`);
-        }
-
         const updatedMessage = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: pin ? 'MESSAGE_PINNED' : 'MESSAGE_UNPINNED',
-                messageId: messageId,
-                message: updatedMessage,
-                pinned: pin
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: pin ? 'MESSAGE_PINNED' : 'MESSAGE_UNPINNED',
+                    messageId: messageId,
+                    message: updatedMessage,
+                    pinned: pin
+                });
+            } catch (notificationError) {
+                safeLogError('pinMessage notification', notificationError);
+            }
         }
 
         console.log(`✅ pinMessage: ${pin ? 'Pinned' : 'Unpinned'} message ${messageId}`);
         return updatedMessage;
     } catch (error) {
-        console.error(`❌ pinMessage: Failed to ${pin ? 'pin' : 'unpin'} message`, error);
+        safeLogError('pinMessage', error);
         throw error;
     }
 }
@@ -1573,6 +1934,11 @@ export async function pinMessage(messageId, pin = true) {
  * @returns {Promise<Array>} Search results
  */
 export async function searchMessages(query, conversationId = null, limit = 20, offset = 0) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('searchMessages')) {
+        throw new Error('searchMessages module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
@@ -1584,27 +1950,19 @@ export async function searchMessages(query, conversationId = null, limit = 20, o
         params.append('offset', offset.toString());
         if (conversationId) params.append('conversationId', conversationId);
 
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/search?${params.toString()}`, {
+        const response = await safeFetch(`/api/messages/search?${params.toString()}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to search messages: ${response.status}`);
-        }
-
         const results = await response.json();
         
         console.log(`✅ searchMessages: Found ${results.length} messages matching "${query}"`);
         return results;
     } catch (error) {
-        console.error('❌ searchMessages: Failed to search messages', error);
+        safeLogError('searchMessages', error);
         throw error;
     }
 }
@@ -1617,31 +1975,28 @@ export async function searchMessages(query, conversationId = null, limit = 20, o
  * @returns {Promise<object>} Conversation information
  */
 export async function getConversationInfo(conversationId) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('getConversationInfo')) {
+        throw new Error('getConversationInfo module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to get conversation info: ${response.status}`);
-        }
-
         const conversationInfo = await response.json();
         
         console.log(`✅ getConversationInfo: Retrieved info for conversation ${conversationId}`);
         return conversationInfo;
     } catch (error) {
-        console.error('❌ getConversationInfo: Failed to get conversation info', error);
+        safeLogError('getConversationInfo', error);
         throw error;
     }
 }
@@ -1656,14 +2011,16 @@ export async function getConversationInfo(conversationId) {
  * @returns {Promise<object>} New conversation
  */
 export async function createConversation(participantIds, title = null, type = 'direct') {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('createConversation')) {
+        throw new Error('createConversation module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction('/api/conversations', {
+        const response = await safeFetch('/api/conversations', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1677,26 +2034,25 @@ export async function createConversation(participantIds, title = null, type = 'd
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to create conversation: ${response.status}`);
-        }
-
         const newConversation = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'CONVERSATION_CREATED',
-                conversation: newConversation,
-                timestamp: newConversation.createdAt
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'CONVERSATION_CREATED',
+                    conversation: newConversation,
+                    timestamp: newConversation.createdAt
+                });
+            } catch (notificationError) {
+                safeLogError('createConversation notification', notificationError);
+            }
         }
 
         console.log(`✅ createConversation: Created new ${type} conversation`);
         return newConversation;
     } catch (error) {
-        console.error('❌ createConversation: Failed to create conversation', error);
+        safeLogError('createConversation', error);
         throw error;
     }
 }
@@ -1709,14 +2065,16 @@ export async function createConversation(participantIds, title = null, type = 'd
  * @returns {Promise<object>} Status response
  */
 export async function leaveConversation(conversationId) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('leaveConversation')) {
+        throw new Error('leaveConversation module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        // Use secureFetch if available, otherwise fall back to fetch
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/leave`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/leave`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1724,26 +2082,25 @@ export async function leaveConversation(conversationId) {
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to leave conversation: ${response.status}`);
-        }
-
         const result = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'CONVERSATION_LEFT',
-                conversationId: conversationId,
-                timestamp: new Date().toISOString()
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'CONVERSATION_LEFT',
+                    conversationId: conversationId,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (notificationError) {
+                safeLogError('leaveConversation notification', notificationError);
+            }
         }
 
         console.log(`✅ leaveConversation: Left conversation ${conversationId}`);
         return result;
     } catch (error) {
-        console.error('❌ leaveConversation: Failed to leave conversation', error);
+        safeLogError('leaveConversation', error);
         throw error;
     }
 }
@@ -1756,6 +2113,11 @@ export async function leaveConversation(conversationId) {
  * @returns {boolean} True if simulation was successful
  */
 export function simulateIncomingCall(callerInfo) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('simulateIncomingCall')) {
+        return false;
+    }
+    
     try {
         if (!callerInfo || typeof callerInfo !== 'object') {
             console.warn('⚠️ simulateIncomingCall: Invalid caller info');
@@ -1780,21 +2142,26 @@ export function simulateIncomingCall(callerInfo) {
         });
         window.dispatchEvent(event);
         
-        // Also send to parent if in iframe using strict protocol
+        // Safety: Also send to parent if in iframe using strict protocol
         if (window.parent !== window) {
-            sendParentMessage(STRICT_MESSAGE_TYPES.SESSION_DATA || 'SESSION_DATA', {
-                type: 'INCOMING_CALL',
-                caller: defaultCallerInfo,
-                simulated: true,
-                timestamp: Date.now(),
-                action: 'CALL_START'
-            }, '*', { strict: true });
+            try {
+                sendParentMessage(STRICT_MESSAGE_TYPES.SESSION_DATA || 'SESSION_DATA', {
+                    type: 'INCOMING_CALL',
+                    caller: defaultCallerInfo,
+                    simulated: true,
+                    timestamp: Date.now(),
+                    action: 'CALL_START'
+                }, '*', { strict: true });
+            } catch (notificationError) {
+                safeLogError('simulateIncomingCall notification', notificationError);
+            }
         }
         
         console.log('✅ simulateIncomingCall: Incoming call simulated', defaultCallerInfo);
         return true;
     } catch (error) {
-        console.error('❌ simulateIncomingCall: Failed to simulate call', error);
+        safeLogError('simulateIncomingCall', error);
+        disableModule('simulateIncomingCall', 'Unhandled error');
         return false;
     }
 }
@@ -1808,6 +2175,11 @@ export function simulateIncomingCall(callerInfo) {
  * @returns {boolean} True if menu was built successfully
  */
 export function buildSettingsMenu(containerId, options = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('buildSettingsMenu')) {
+        return false;
+    }
+    
     try {
         const container = document.getElementById(containerId);
         if (!container) {
@@ -1894,7 +2266,8 @@ export function buildSettingsMenu(containerId, options = {}) {
         return true;
         
     } catch (error) {
-        console.error('❌ buildSettingsMenu: Failed to build menu', error);
+        safeLogError('buildSettingsMenu', error);
+        disableModule('buildSettingsMenu', 'Unhandled error');
         return false;
     }
 }
@@ -1907,6 +2280,11 @@ export function buildSettingsMenu(containerId, options = {}) {
  * @returns {boolean} True if indicator was sent
  */
 export function sendTypingIndicator(conversationId, isTyping = true) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('sendTypingIndicator')) {
+        return false;
+    }
+    
     try {
         if (window.parent !== window) {
             sendParentMessage('DATA_UPDATE', {
@@ -1931,7 +2309,8 @@ export function sendTypingIndicator(conversationId, isTyping = true) {
         console.log(`✅ sendTypingIndicator: ${isTyping ? 'Started' : 'Stopped'} typing in conversation ${conversationId}`);
         return true;
     } catch (error) {
-        console.error('❌ sendTypingIndicator: Failed to send indicator', error);
+        safeLogError('sendTypingIndicator', error);
+        disableModule('sendTypingIndicator', 'Unhandled error');
         return false;
     }
 }
@@ -1944,6 +2323,11 @@ export function sendTypingIndicator(conversationId, isTyping = true) {
  * @returns {boolean} True if logged successfully
  */
 export function logTransparencyAction(action, data = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('logTransparencyAction')) {
+        return false;
+    }
+    
     try {
         const logData = {
             action: action,
@@ -1955,17 +2339,22 @@ export function logTransparencyAction(action, data = {}) {
         
         console.log('📊 Transparency Action:', logData);
         
-        // Send to parent if in iframe
+        // Safety: Send to parent if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'TRANSPARENCY_LOG',
-                ...logData
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'TRANSPARENCY_LOG',
+                    ...logData
+                });
+            } catch (notificationError) {
+                safeLogError('logTransparencyAction notification', notificationError);
+            }
         }
         
         return true;
     } catch (error) {
-        console.error('❌ logTransparencyAction: Failed to log action', error);
+        safeLogError('logTransparencyAction', error);
+        disableModule('logTransparencyAction', 'Unhandled error');
         return false;
     }
 }
@@ -1981,6 +2370,11 @@ export function logTransparencyAction(action, data = {}) {
  * @returns {boolean} True if chat was opened successfully
  */
 export function openChat(conversationId, options = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('openChat')) {
+        return false;
+    }
+    
     try {
         console.log(`✅ openChat: Opening chat for conversation ${conversationId}`, options);
         
@@ -1994,19 +2388,24 @@ export function openChat(conversationId, options = {}) {
         });
         window.dispatchEvent(chatEvent);
         
-        // Send message to parent if in iframe
+        // Safety: Send message to parent if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'CHAT_OPENED',
-                conversationId: conversationId,
-                options: options,
-                timestamp: Date.now()
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'CHAT_OPENED',
+                    conversationId: conversationId,
+                    options: options,
+                    timestamp: Date.now()
+                });
+            } catch (notificationError) {
+                safeLogError('openChat notification', notificationError);
+            }
         }
         
         return true;
     } catch (error) {
-        console.error('❌ openChat: Failed to open chat', error);
+        safeLogError('openChat', error);
+        disableModule('openChat', 'Unhandled error');
         return false;
     }
 }
@@ -2019,30 +2418,28 @@ export function openChat(conversationId, options = {}) {
  * @returns {Promise<object>} The message
  */
 export async function getMessageById(messageId) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('getMessageById')) {
+        throw new Error('getMessageById module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/messages/${messageId}`, {
+        const response = await safeFetch(`/api/messages/${messageId}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to get message: ${response.status}`);
-        }
-
         const message = await response.json();
         
         console.log(`✅ getMessageById: Retrieved message ${messageId}`);
         return message;
     } catch (error) {
-        console.error('❌ getMessageById: Failed to get message', error);
+        safeLogError('getMessageById', error);
         throw error;
     }
 }
@@ -2056,34 +2453,32 @@ export async function getMessageById(messageId) {
  * @returns {Promise<Array>} Array of conversations
  */
 export async function getConversations(limit = 50, offset = 0) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('getConversations')) {
+        throw new Error('getConversations module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
-        
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
         
         const params = new URLSearchParams();
         params.append('limit', limit.toString());
         params.append('offset', offset.toString());
 
-        const response = await fetchFunction(`/api/conversations?${params.toString()}`, {
+        const response = await safeFetch(`/api/conversations?${params.toString()}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to get conversations: ${response.status}`);
-        }
-
         const conversations = await response.json();
         
         console.log(`✅ getConversations: Retrieved ${conversations.length} conversations`);
         return conversations;
     } catch (error) {
-        console.error('❌ getConversations: Failed to get conversations', error);
+        safeLogError('getConversations', error);
         throw error;
     }
 }
@@ -2096,13 +2491,16 @@ export async function getConversations(limit = 50, offset = 0) {
  * @returns {Promise<object>} Updated conversation
  */
 export async function updateConversation(conversationId, updates) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('updateConversation')) {
+        throw new Error('updateConversation module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
@@ -2111,27 +2509,26 @@ export async function updateConversation(conversationId, updates) {
             body: JSON.stringify(updates)
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to update conversation: ${response.status}`);
-        }
-
         const updatedConversation = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'CONVERSATION_UPDATED',
-                conversationId: conversationId,
-                conversation: updatedConversation,
-                timestamp: Date.now()
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'CONVERSATION_UPDATED',
+                    conversationId: conversationId,
+                    conversation: updatedConversation,
+                    timestamp: Date.now()
+                });
+            } catch (notificationError) {
+                safeLogError('updateConversation notification', notificationError);
+            }
         }
 
         console.log(`✅ updateConversation: Updated conversation ${conversationId}`);
         return updatedConversation;
     } catch (error) {
-        console.error('❌ updateConversation: Failed to update conversation', error);
+        safeLogError('updateConversation', error);
         throw error;
     }
 }
@@ -2144,13 +2541,16 @@ export async function updateConversation(conversationId, updates) {
  * @returns {Promise<object>} Updated conversation
  */
 export async function addParticipants(conversationId, participantIds) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('addParticipants')) {
+        throw new Error('addParticipants module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/participants`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/participants`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -2162,28 +2562,27 @@ export async function addParticipants(conversationId, participantIds) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to add participants: ${response.status}`);
-        }
-
         const updatedConversation = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'PARTICIPANTS_ADDED',
-                conversationId: conversationId,
-                participantIds: participantIds,
-                conversation: updatedConversation,
-                timestamp: Date.now()
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'PARTICIPANTS_ADDED',
+                    conversationId: conversationId,
+                    participantIds: participantIds,
+                    conversation: updatedConversation,
+                    timestamp: Date.now()
+                });
+            } catch (notificationError) {
+                safeLogError('addParticipants notification', notificationError);
+            }
         }
 
         console.log(`✅ addParticipants: Added ${participantIds.length} participants to conversation ${conversationId}`);
         return updatedConversation;
     } catch (error) {
-        console.error('❌ addParticipants: Failed to add participants', error);
+        safeLogError('addParticipants', error);
         throw error;
     }
 }
@@ -2196,13 +2595,16 @@ export async function addParticipants(conversationId, participantIds) {
  * @returns {Promise<object>} Updated conversation
  */
 export async function removeParticipants(conversationId, participantIds) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('removeParticipants')) {
+        throw new Error('removeParticipants module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction(`/api/conversations/${conversationId}/participants`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/participants`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -2214,28 +2616,27 @@ export async function removeParticipants(conversationId, participantIds) {
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to remove participants: ${response.status}`);
-        }
-
         const updatedConversation = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'PARTICIPANTS_REMOVED',
-                conversationId: conversationId,
-                participantIds: participantIds,
-                conversation: updatedConversation,
-                timestamp: Date.now()
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'PARTICIPANTS_REMOVED',
+                    conversationId: conversationId,
+                    participantIds: participantIds,
+                    conversation: updatedConversation,
+                    timestamp: Date.now()
+                });
+            } catch (notificationError) {
+                safeLogError('removeParticipants notification', notificationError);
+            }
         }
 
         console.log(`✅ removeParticipants: Removed ${participantIds.length} participants from conversation ${conversationId}`);
         return updatedConversation;
     } catch (error) {
-        console.error('❌ removeParticipants: Failed to remove participants', error);
+        safeLogError('removeParticipants', error);
         throw error;
     }
 }
@@ -2247,35 +2648,33 @@ export async function removeParticipants(conversationId, participantIds) {
  * @returns {Promise<number|object>} Unread count(s)
  */
 export async function getUnreadCount(conversationId = null) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('getUnreadCount')) {
+        throw new Error('getUnreadCount module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
-        
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
         
         let url = '/api/messages/unread/count';
         if (conversationId) {
             url = `/api/conversations/${conversationId}/messages/unread/count`;
         }
 
-        const response = await fetchFunction(url, {
+        const response = await safeFetch(url, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to get unread count: ${response.status}`);
-        }
-
         const result = await response.json();
         
         console.log(`✅ getUnreadCount: Retrieved unread count${conversationId ? ` for conversation ${conversationId}` : ' for all conversations'}`);
         return result;
     } catch (error) {
-        console.error('❌ getUnreadCount: Failed to get unread count', error);
+        safeLogError('getUnreadCount', error);
         throw error;
     }
 }
@@ -2288,33 +2687,31 @@ export async function getUnreadCount(conversationId = null) {
  * @returns {Promise<object>} Message statistics
  */
 export async function getMessageStatistics(conversationId, period = 'month') {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('getMessageStatistics')) {
+        throw new Error('getMessageStatistics module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
         const params = new URLSearchParams();
         params.append('period', period);
 
-        const response = await fetchFunction(`/api/conversations/${conversationId}/messages/statistics?${params.toString()}`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/messages/statistics?${params.toString()}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to get message statistics: ${response.status}`);
-        }
-
         const statistics = await response.json();
         
         console.log(`✅ getMessageStatistics: Retrieved statistics for conversation ${conversationId} (period: ${period})`);
         return statistics;
     } catch (error) {
-        console.error('❌ getMessageStatistics: Failed to get message statistics', error);
+        safeLogError('getMessageStatistics', error);
         throw error;
     }
 }
@@ -2327,26 +2724,24 @@ export async function getMessageStatistics(conversationId, period = 'month') {
  * @returns {Promise<Blob>} Exported data as Blob
  */
 export async function exportConversation(conversationId, format = 'json') {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('exportConversation')) {
+        throw new Error('exportConversation module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
         const params = new URLSearchParams();
         params.append('format', format);
 
-        const response = await fetchFunction(`/api/conversations/${conversationId}/export?${params.toString()}`, {
+        const response = await safeFetch(`/api/conversations/${conversationId}/export?${params.toString()}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
         });
-
-        if (!response.ok) {
-            const errorData = await response.text();
-            throw new Error(`Failed to export conversation: ${response.status} - ${errorData}`);
-        }
 
         const blob = await response.blob();
         
@@ -2363,7 +2758,7 @@ export async function exportConversation(conversationId, format = 'json') {
         console.log(`✅ exportConversation: Exported conversation ${conversationId} in ${format} format`);
         return blob;
     } catch (error) {
-        console.error('❌ exportConversation: Failed to export conversation', error);
+        safeLogError('exportConversation', error);
         throw error;
     }
 }
@@ -2378,13 +2773,16 @@ export async function exportConversation(conversationId, format = 'json') {
  * @returns {Promise<Array>} Array of message responses
  */
 export async function sendBulkMessages(conversationIds, content, messageType = 'text', metadata = {}) {
+    // Safety: Check if module is disabled
+    if (isModuleDisabled('sendBulkMessages')) {
+        throw new Error('sendBulkMessages module is disabled due to errors');
+    }
+    
     try {
         // Ensure API is initialized
         await ensureInitialized();
         
-        const fetchFunction = window.secureFetch || window.fetch || fetch;
-        
-        const response = await fetchFunction('/api/messages/bulk', {
+        const response = await safeFetch('/api/messages/bulk', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -2399,27 +2797,26 @@ export async function sendBulkMessages(conversationIds, content, messageType = '
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `Failed to send bulk messages: ${response.status}`);
-        }
-
         const results = await response.json();
         
-        // Notify parent window if in iframe
+        // Safety: Notify parent window if in iframe
         if (window.parent !== window) {
-            sendParentMessage('DATA_UPDATE', {
-                type: 'BULK_MESSAGES_SENT',
-                conversationIds: conversationIds,
-                results: results,
-                timestamp: Date.now()
-            });
+            try {
+                sendParentMessage('DATA_UPDATE', {
+                    type: 'BULK_MESSAGES_SENT',
+                    conversationIds: conversationIds,
+                    results: results,
+                    timestamp: Date.now()
+                });
+            } catch (notificationError) {
+                safeLogError('sendBulkMessages notification', notificationError);
+            }
         }
 
         console.log(`✅ sendBulkMessages: Sent messages to ${conversationIds.length} conversations`);
         return results;
     } catch (error) {
-        console.error('❌ sendBulkMessages: Failed to send bulk messages', error);
+        safeLogError('sendBulkMessages', error);
         throw error;
     }
 }
@@ -2433,7 +2830,7 @@ setTimeout(() => {
             if (!window.__API_MESSAGES) {
                 window.__API_MESSAGES = {
                     ready: false,
-                    version: '1.0.5',
+                    version: '1.0.6',
                     exports: {},
                     config: {
                         strictMode: false,
@@ -2444,6 +2841,11 @@ setTimeout(() => {
                 };
             }
         });
+    }
+    
+    // Perform safe handshake
+    if (window.parent !== window) {
+        setTimeout(performSafeHandshake, 1000);
     }
 }, 100);
 

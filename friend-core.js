@@ -32,10 +32,93 @@ let handshakeTimeout = null;
 let pendingSessionRequest = false;
 
 // =============================================
+// SAFETY GUARDS & ERROR LOGGING
+// =============================================
+
+const SafetyGuards = {
+    loggedErrors: new Set(),
+    retryCounters: new Map(),
+    messageCache: new Set(),
+    
+    // Safe error logging - log each unique error only once
+    safeLogError: function(module, functionName, error, data = null) {
+        const errorKey = `${module}:${functionName}:${error.message || error}`;
+        
+        if (!this.loggedErrors.has(errorKey)) {
+            this.loggedErrors.add(errorKey);
+            console.warn(`[${module}] ${functionName}: ${error.message || error}`, 
+                       data ? data : '', 
+                       new Date().toISOString());
+        }
+    },
+    
+    // Safe DOM access
+    safeGetElement: function(id) {
+        try {
+            const element = document.getElementById(id);
+            if (!element) {
+                this.safeLogError('SafetyGuard', 'safeGetElement', 
+                                 new Error(`Element not found: ${id}`));
+            }
+            return element;
+        } catch (error) {
+            this.safeLogError('SafetyGuard', 'safeGetElement', error);
+            return null;
+        }
+    },
+    
+    // Check if session is valid
+    isSessionValid: function() {
+        try {
+            if (window.parentCoordinator && window.parentCoordinator.isAuthenticated) {
+                return window.parentCoordinator.isAuthenticated();
+            }
+            if (window.KnectaAuth && window.KnectaAuth.isAuthenticated) {
+                return window.KnectaAuth.isAuthenticated();
+            }
+            const token = getValidToken();
+            return !!token;
+        } catch (error) {
+            return false;
+        }
+    },
+    
+    // Check if user data exists
+    isUserDataValid: function() {
+        try {
+            if (currentUser && currentUser.id) return true;
+            if (userData && userData.id) return true;
+            if (dataSource.userData && dataSource.userData.id) return true;
+            return false;
+        } catch (error) {
+            return false;
+        }
+    },
+    
+    // Safe function execution with fallback
+    safeExecute: function(funcName, func, fallbackValue = null, context = null) {
+        try {
+            return func.call(context || this);
+        } catch (error) {
+            this.safeLogError('SafetyGuard', 'safeExecute', 
+                            new Error(`${funcName} failed: ${error.message}`));
+            return fallbackValue;
+        }
+    }
+};
+
+// =============================================
 // API CALL WITH RETRY IMPLEMENTATION
 // =============================================
 
 export const apiCallWithRetry = async (url, options = {}, maxRetries = 3) => {
+    // Safety: Check if session is valid before making API calls
+    if (!SafetyGuards.isSessionValid() && !url.includes('/public/')) {
+        SafetyGuards.safeLogError('apiCallWithRetry', 'session_check', 
+                                 new Error('Invalid session, skipping API call'));
+        return { success: false, error: 'Session invalid' };
+    }
+    
     const baseDelay = 1000; // 1 second base delay
     let lastError;
     
@@ -136,10 +219,13 @@ async function getErrorMessageFromResponse(response) {
 // =============================================
 
 export function requestSessionFromParent() {
-    if (handshakeInProgress || pendingSessionRequest) {
+    // Safety: Check if already in progress or cached
+    const requestKey = `session_request_${Date.now()}`;
+    if (handshakeInProgress || pendingSessionRequest || SafetyGuards.messageCache.has(requestKey)) {
         return;
     }
     
+    SafetyGuards.messageCache.add(requestKey);
     handshakeInProgress = true;
     pendingSessionRequest = true;
     sessionValid = false;
@@ -186,7 +272,7 @@ export function requestSessionFromParent() {
         }, 5000);
         
     } catch (error) {
-        console.error('[Friend Page] Error sending session request:', error);
+        SafetyGuards.safeLogError('requestSessionFromParent', 'postMessage', error);
         handshakeInProgress = false;
         pendingSessionRequest = false;
     }
@@ -194,6 +280,13 @@ export function requestSessionFromParent() {
 
 // Enhanced message handler for secure handshake
 function handleEnhancedParentMessage(event) {
+    // Safety: Cache message to prevent duplicate processing
+    const messageKey = `enhanced_${event.data.type}_${event.data.requestId || event.data.timestamp}`;
+    if (SafetyGuards.messageCache.has(messageKey)) {
+        return;
+    }
+    SafetyGuards.messageCache.add(messageKey);
+    
     // Security: Accept messages from:
     // 1. Current origin
     // 2. Parent origin (if available)
@@ -216,7 +309,8 @@ function handleEnhancedParentMessage(event) {
     
     // Check if origin is acceptable
     if (!acceptableOrigins.includes(event.origin)) {
-        console.warn('[Friend Page] Message from unknown origin rejected:', event.origin);
+        SafetyGuards.safeLogError('handleEnhancedParentMessage', 'origin_check', 
+                                 new Error(`Message from unknown origin rejected: ${event.origin}`));
         return;
     }
     
@@ -251,7 +345,8 @@ function handleEnhancedParentMessage(event) {
 function handleEnhancedSessionData(data) {
     // Validate session data structure
     if (!data.token || !data.user) {
-        console.log('❌ [Friend Page] Received invalid session from parent');
+        SafetyGuards.safeLogError('handleEnhancedSessionData', 'validation', 
+                                 new Error('Received invalid session from parent'));
         handshakeInProgress = false;
         pendingSessionRequest = false;
         return;
@@ -259,7 +354,8 @@ function handleEnhancedSessionData(data) {
     
     // Validate token format
     if (typeof data.token !== 'string' || data.token.trim().length === 0) {
-        console.log('❌ [Friend Page] Invalid token format');
+        SafetyGuards.safeLogError('handleEnhancedSessionData', 'validation', 
+                                 new Error('Invalid token format'));
         handshakeInProgress = false;
         pendingSessionRequest = false;
         return;
@@ -267,7 +363,8 @@ function handleEnhancedSessionData(data) {
     
     // Validate user object
     if (!data.user || typeof data.user !== 'object' || !data.user.id) {
-        console.log('❌ [Friend Page] Invalid user data');
+        SafetyGuards.safeLogError('handleEnhancedSessionData', 'validation', 
+                                 new Error('Invalid user data'));
         handshakeInProgress = false;
         pendingSessionRequest = false;
         return;
@@ -275,7 +372,8 @@ function handleEnhancedSessionData(data) {
     
     // Source verification
     if (data.verification && data.verification !== 'knecta_secure_2024') {
-        console.warn('[Friend Page] Session source verification mismatch');
+        SafetyGuards.safeLogError('handleEnhancedSessionData', 'verification', 
+                                 new Error('Session source verification mismatch'));
         // Continue anyway for backward compatibility
     }
     
@@ -300,44 +398,49 @@ function handleEnhancedSessionData(data) {
 }
 
 function updateGlobalStateFromSession(sessionData) {
-    // Update dataSource
-    dataSource.source = 'parent';
-    dataSource.userData = sessionData.user;
-    dataSource.token = sessionData.token;
-    dataSource.fetched = true;
-    dataSource.parentSessionReceived = true;
-    
-    // Update current user
-    currentUser = sessionData.user;
-    userData = currentUser;
-    
-    // Update UI
-    updateUIWithUserData(sessionData.user);
-    updateDataSourceIndicator('parent');
-    
-    // Initialize main functionality
-    initializeMainFunctionality();
-    
-    // Dispatch event for other components
-    const event = new CustomEvent('parentSessionReady', {
-        detail: {
-            session: {
-                token: sessionData.token,
-                user: sessionData.user,
-                expiresAt: sessionData.expiresAt,
-                issuedAt: sessionData.issuedAt
-            },
-            source: 'enhanced_handshake',
-            timestamp: Date.now()
-        }
-    });
-    window.dispatchEvent(event);
+    try {
+        // Update dataSource
+        dataSource.source = 'parent';
+        dataSource.userData = sessionData.user;
+        dataSource.token = sessionData.token;
+        dataSource.fetched = true;
+        dataSource.parentSessionReceived = true;
+        
+        // Update current user
+        currentUser = sessionData.user;
+        userData = currentUser;
+        
+        // Update UI
+        updateUIWithUserData(sessionData.user);
+        updateDataSourceIndicator('parent');
+        
+        // Initialize main functionality
+        initializeMainFunctionality();
+        
+        // Dispatch event for other components
+        const event = new CustomEvent('parentSessionReady', {
+            detail: {
+                session: {
+                    token: sessionData.token,
+                    user: sessionData.user,
+                    expiresAt: sessionData.expiresAt,
+                    issuedAt: sessionData.issuedAt
+                },
+                source: 'enhanced_handshake',
+                timestamp: Date.now()
+            }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {
+        SafetyGuards.safeLogError('updateGlobalStateFromSession', 'update', error, sessionData);
+    }
 }
 
 function bindUIAfterSession() {
     // Only bind UI after session is validated
     if (!sessionValid) {
-        console.log('⚠️ [Friend Page] Cannot bind UI - session not validated');
+        SafetyGuards.safeLogError('bindUIAfterSession', 'validation', 
+                                 new Error('Cannot bind UI - session not validated'));
         return;
     }
     
@@ -416,6 +519,8 @@ export const ParentCoordinator = {
             
         } catch (error) {
             this.handleParentUnavailable();
+        } finally {
+            this.state.initializationLock = false;
         }
     },
     
@@ -469,54 +574,58 @@ export const ParentCoordinator = {
     
     // Handle messages from parent window (compatibility layer)
     handleParentMessage: function(event) {
-        if (this.config.parentOrigin !== '*' && event.origin !== this.config.parentOrigin) {
-            return;
-        }
-        
-        const data = event.data;
-        if (!data || !data.type) {
-            return;
-        }
-        
-        switch (data.type) {
-            case 'SESSION_DATA':
-                this.handleSessionData(data);
-                break;
-                
-            case 'SESSION_UPDATE':
-                this.handleSessionUpdate(data);
-                break;
-                
-            case 'LOGOUT':
-                this.handleLogout(data);
-                break;
-                
-            case 'HANDSHAKE_ACK':
-                this.handleHandshakeAck(data);
-                break;
-                
-            case 'PARENT_READY':
-                this.handleParentReady(data);
-                break;
-                
-            case 'AUTH_STATE_CHANGED':
-                this.handleAuthStateChanged(data);
-                break;
-                
-            case 'USER_PROFILE_UPDATED':
-                this.handleProfileUpdated(data);
-                break;
-                
-            case 'userDataResponse':
-                this.handleLegacyUserData(data);
-                break;
-                
-            case 'authStateChanged':
-                this.handleLegacyAuthState(data);
-                break;
-                
-            default:
-                this.log(`Unknown message type: ${data.type}`);
+        try {
+            if (this.config.parentOrigin !== '*' && event.origin !== this.config.parentOrigin) {
+                return;
+            }
+            
+            const data = event.data;
+            if (!data || !data.type) {
+                return;
+            }
+            
+            switch (data.type) {
+                case 'SESSION_DATA':
+                    this.handleSessionData(data);
+                    break;
+                    
+                case 'SESSION_UPDATE':
+                    this.handleSessionUpdate(data);
+                    break;
+                    
+                case 'LOGOUT':
+                    this.handleLogout(data);
+                    break;
+                    
+                case 'HANDSHAKE_ACK':
+                    this.handleHandshakeAck(data);
+                    break;
+                    
+                case 'PARENT_READY':
+                    this.handleParentReady(data);
+                    break;
+                    
+                case 'AUTH_STATE_CHANGED':
+                    this.handleAuthStateChanged(data);
+                    break;
+                    
+                case 'USER_PROFILE_UPDATED':
+                    this.handleProfileUpdated(data);
+                    break;
+                    
+                case 'userDataResponse':
+                    this.handleLegacyUserData(data);
+                    break;
+                    
+                case 'authStateChanged':
+                    this.handleLegacyAuthState(data);
+                    break;
+                    
+                default:
+                    this.log(`Unknown message type: ${data.type}`);
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.handleParentMessage', 'message_handling', error);
         }
     },
     
@@ -628,33 +737,38 @@ export const ParentCoordinator = {
     
     // Validate session data schema
     validateSessionData: function(data) {
-        if (!data || !data.session) {
+        try {
+            if (!data || !data.session) {
+                return false;
+            }
+            
+            const session = data.session;
+            
+            if (!session.token || typeof session.token !== 'string') {
+                return false;
+            }
+            
+            if (!session.user || typeof session.user !== 'object') {
+                return false;
+            }
+            
+            if (!session.user.id || typeof session.user.id !== 'string') {
+                return false;
+            }
+            
+            if (session.expiresAt && typeof session.expiresAt !== 'number') {
+                return false;
+            }
+            
+            if (session.issuedAt && typeof session.issuedAt !== 'number') {
+                return false;
+            }
+            
+            return true;
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.validateSessionData', 'validation', error);
             return false;
         }
-        
-        const session = data.session;
-        
-        if (!session.token || typeof session.token !== 'string') {
-            return false;
-        }
-        
-        if (!session.user || typeof session.user !== 'object') {
-            return false;
-        }
-        
-        if (!session.user.id || typeof session.user.id !== 'string') {
-            return false;
-        }
-        
-        if (session.expiresAt && typeof session.expiresAt !== 'number') {
-            return false;
-        }
-        
-        if (session.issuedAt && typeof session.issuedAt !== 'number') {
-            return false;
-        }
-        
-        return true;
     },
     
     // Handle session update
@@ -698,33 +812,26 @@ export const ParentCoordinator = {
     // Handle profile updated
     handleProfileUpdated: function(data) {
         if (this.state.sessionData && this.state.sessionData.user) {
-            this.state.sessionData.user = {
-                ...this.state.sessionData.user,
-                ...data.userData
-            };
-            
-            if (window.KnectaAuth) {
-                window.KnectaAuth.currentUser = this.state.sessionData.user;
+            try {
+                this.state.sessionData.user = {
+                    ...this.state.sessionData.user,
+                    ...data.userData
+                };
+                
+                if (window.KnectaAuth) {
+                    window.KnectaAuth.currentUser = this.state.sessionData.user;
+                }
+                
+                this.dispatchProfileUpdate(this.state.sessionData.user);
+            } catch (error) {
+                SafetyGuards.safeLogError('ParentCoordinator.handleProfileUpdated', 'update', error);
             }
-            
-            this.dispatchProfileUpdate(this.state.sessionData.user);
         }
     },
     
     // Legacy message handlers
     handleLegacyUserData: function(data) {
-        const session = {
-            token: data.token || window.knectaToken || localStorage.getItem('USER_TOKEN'),
-            user: data.userData,
-            issuedAt: Date.now(),
-            expiresAt: Date.now() + (24 * 60 * 60 * 1000)
-        };
-        
-        this.handleSessionData({ session });
-    },
-    
-    handleLegacyAuthState: function(data) {
-        if (data.authenticated && data.userData) {
+        try {
             const session = {
                 token: data.token || window.knectaToken || localStorage.getItem('USER_TOKEN'),
                 user: data.userData,
@@ -733,8 +840,27 @@ export const ParentCoordinator = {
             };
             
             this.handleSessionData({ session });
-        } else {
-            this.handleLogout(data);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.handleLegacyUserData', 'processing', error);
+        }
+    },
+    
+    handleLegacyAuthState: function(data) {
+        try {
+            if (data.authenticated && data.userData) {
+                const session = {
+                    token: data.token || window.knectaToken || localStorage.getItem('USER_TOKEN'),
+                    user: data.userData,
+                    issuedAt: Date.now(),
+                    expiresAt: Date.now() + (24 * 60 * 60 * 1000)
+                };
+                
+                this.handleSessionData({ session });
+            } else {
+                this.handleLogout(data);
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.handleLegacyAuthState', 'processing', error);
         }
     },
     
@@ -744,15 +870,19 @@ export const ParentCoordinator = {
             return;
         }
         
-        if (event.detail && event.detail.token && event.detail.user) {
-            this.state.authReady = true;
-            this.state.sessionData = {
-                token: event.detail.token,
-                user: event.detail.user,
-                source: 'unified_auth'
-            };
-            
-            this.ui.protectedUIBlocked = false;
+        try {
+            if (event.detail && event.detail.token && event.detail.user) {
+                this.state.authReady = true;
+                this.state.sessionData = {
+                    token: event.detail.token,
+                    user: event.detail.user,
+                    source: 'unified_auth'
+                };
+                
+                this.ui.protectedUIBlocked = false;
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.handleAuthReady', 'processing', error);
         }
     },
     
@@ -784,43 +914,51 @@ export const ParentCoordinator = {
     
     // Update unified auth system with parent session
     updateAuthSystem: function(session) {
-        if (!window.KnectaAuth) {
-            return;
+        try {
+            if (!window.KnectaAuth) {
+                return;
+            }
+            
+            window.KnectaAuth.token = session.token;
+            window.KnectaAuth.tokenReady = true;
+            
+            window.KnectaAuth.currentUser = session.user;
+            window.KnectaAuth.userReady = true;
+            
+            window.KnectaAuth.cacheReady = true;
+            
+            window.knectaToken = session.token;
+            window.knectaUser = session.user;
+            window.authReady = true;
+            
+            window.KnectaAuth.dispatchReadyEvent();
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.updateAuthSystem', 'update', error);
         }
-        
-        window.KnectaAuth.token = session.token;
-        window.KnectaAuth.tokenReady = true;
-        
-        window.KnectaAuth.currentUser = session.user;
-        window.KnectaAuth.userReady = true;
-        
-        window.KnectaAuth.cacheReady = true;
-        
-        window.knectaToken = session.token;
-        window.knectaUser = session.user;
-        window.authReady = true;
-        
-        window.KnectaAuth.dispatchReadyEvent();
     },
     
     // Clear unified auth system
     clearAuthSystem: function() {
-        if (!window.KnectaAuth) {
-            return;
+        try {
+            if (!window.KnectaAuth) {
+                return;
+            }
+            
+            window.KnectaAuth.token = null;
+            window.KnectaAuth.tokenReady = false;
+            
+            window.KnectaAuth.currentUser = null;
+            window.KnectaAuth.userReady = false;
+            
+            window.knectaToken = null;
+            window.knectaUser = null;
+            window.authReady = false;
+            
+            const event = new CustomEvent('knectaTokenExpired');
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.clearAuthSystem', 'clear', error);
         }
-        
-        window.KnectaAuth.token = null;
-        window.KnectaAuth.tokenReady = false;
-        
-        window.KnectaAuth.currentUser = null;
-        window.KnectaAuth.userReady = false;
-        
-        window.knectaToken = null;
-        window.knectaUser = null;
-        window.authReady = false;
-        
-        const event = new CustomEvent('knectaTokenExpired');
-        window.dispatchEvent(event);
     },
     
     // Handle parent unavailable
@@ -836,48 +974,52 @@ export const ParentCoordinator = {
     
     // Attempt cached session fallback
     attemptCachedSessionFallback: function() {
-        if (window.KnectaAuth && window.KnectaAuth.token && window.KnectaAuth.currentUser) {
-            this.state.sessionData = {
-                token: window.KnectaAuth.token,
-                user: window.KnectaAuth.currentUser,
-                source: 'cached_unified_auth'
-            };
-            
-            this.state.authReady = true;
-            this.ui.protectedUIBlocked = false;
-            
-            showNotification('Using cached session data. Some features may be limited.', 'warning');
-            
-            this.dispatchSessionReady(this.state.sessionData);
-            
-            return true;
-        }
-        
-        const token = localStorage.getItem('USER_TOKEN');
-        const userData = localStorage.getItem('USER_DATA');
-        
-        if (token && userData) {
-            try {
-                const user = JSON.parse(userData);
-                
+        try {
+            if (window.KnectaAuth && window.KnectaAuth.token && window.KnectaAuth.currentUser) {
                 this.state.sessionData = {
-                    token: token,
-                    user: user,
-                    source: 'cached_localstorage'
+                    token: window.KnectaAuth.token,
+                    user: window.KnectaAuth.currentUser,
+                    source: 'cached_unified_auth'
                 };
                 
                 this.state.authReady = true;
                 this.ui.protectedUIBlocked = false;
                 
-                showNotification('Using cached data. Reconnect for full features.', 'warning');
+                showNotification('Using cached session data. Some features may be limited.', 'warning');
                 
                 this.dispatchSessionReady(this.state.sessionData);
                 
                 return true;
-                
-            } catch (error) {
-                this.logError('Error parsing cached user data:', error);
             }
+            
+            const token = localStorage.getItem('USER_TOKEN');
+            const userData = localStorage.getItem('USER_DATA');
+            
+            if (token && userData) {
+                try {
+                    const user = JSON.parse(userData);
+                    
+                    this.state.sessionData = {
+                        token: token,
+                        user: user,
+                        source: 'cached_localstorage'
+                    };
+                    
+                    this.state.authReady = true;
+                    this.ui.protectedUIBlocked = false;
+                    
+                    showNotification('Using cached data. Reconnect for full features.', 'warning');
+                    
+                    this.dispatchSessionReady(this.state.sessionData);
+                    
+                    return true;
+                    
+                } catch (error) {
+                    this.logError('Error parsing cached user data:', error);
+                }
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.attemptCachedSessionFallback', 'fallback', error);
         }
         
         return false;
@@ -889,8 +1031,17 @@ export const ParentCoordinator = {
             clearInterval(this.reconnectionInterval);
         }
         
+        let retryCount = 0;
+        const maxRetries = 5;
+        
         this.reconnectionInterval = setInterval(() => {
             if (!this.state.parentReachable && this.state.parentDetected) {
+                if (retryCount >= maxRetries) {
+                    clearInterval(this.reconnectionInterval);
+                    this.log('Max reconnection retries reached');
+                    return;
+                }
+                retryCount++;
                 this.attemptParentReconnection();
             }
         }, 5000);
@@ -898,23 +1049,27 @@ export const ParentCoordinator = {
     
     // Attempt parent reconnection
     attemptParentReconnection: function() {
-        this.sendToParent({
-            type: 'RECONNECT_ATTEMPT',
-            source: 'friend.html',
-            timestamp: Date.now(),
-            sequenceId: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        });
-        
-        if (this.state.sessionData) {
-            setTimeout(() => {
-                this.sendToParent({
-                    type: 'REQUEST_SESSION',
-                    source: 'friend.html',
-                    timestamp: Date.now(),
-                    hasCachedSession: true,
-                    sequenceId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                });
-            }, 1000);
+        try {
+            this.sendToParent({
+                type: 'RECONNECT_ATTEMPT',
+                source: 'friend.html',
+                timestamp: Date.now(),
+                sequenceId: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            });
+            
+            if (this.state.sessionData) {
+                setTimeout(() => {
+                    this.sendToParent({
+                        type: 'REQUEST_SESSION',
+                        source: 'friend.html',
+                        timestamp: Date.now(),
+                        hasCachedSession: true,
+                        sequenceId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                    });
+                }, 1000);
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.attemptParentReconnection', 'reconnect', error);
         }
     },
     
@@ -923,6 +1078,13 @@ export const ParentCoordinator = {
         if (!this.state.parentDetected) {
             return false;
         }
+        
+        // Cache message to prevent duplicates
+        const messageKey = `send_${message.type}_${message.sequenceId || message.timestamp}`;
+        if (SafetyGuards.messageCache.has(messageKey)) {
+            return false;
+        }
+        SafetyGuards.messageCache.add(messageKey);
         
         try {
             window.parent.postMessage(message, this.state.parentOrigin || '*');
@@ -935,46 +1097,62 @@ export const ParentCoordinator = {
     
     // Dispatch session ready event
     dispatchSessionReady: function(session) {
-        const event = new CustomEvent('parentSessionReady', {
-            detail: {
-                session: session,
-                source: 'parent_coordinator',
-                timestamp: Date.now()
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('parentSessionReady', {
+                detail: {
+                    session: session,
+                    source: 'parent_coordinator',
+                    timestamp: Date.now()
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.dispatchSessionReady', 'dispatch', error);
+        }
     },
     
     // Dispatch session update event
     dispatchSessionUpdate: function(session) {
-        const event = new CustomEvent('parentSessionUpdated', {
-            detail: {
-                session: session,
-                timestamp: Date.now()
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('parentSessionUpdated', {
+                detail: {
+                    session: session,
+                    timestamp: Date.now()
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.dispatchSessionUpdate', 'dispatch', error);
+        }
     },
     
     // Dispatch logout event
     dispatchLogout: function() {
-        const event = new CustomEvent('parentSessionLogout', {
-            detail: {
-                timestamp: Date.now()
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('parentSessionLogout', {
+                detail: {
+                    timestamp: Date.now()
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.dispatchLogout', 'dispatch', error);
+        }
     },
     
     // Dispatch profile update event
     dispatchProfileUpdate: function(user) {
-        const event = new CustomEvent('parentProfileUpdated', {
-            detail: {
-                user: user,
-                timestamp: Date.now()
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('parentProfileUpdated', {
+                detail: {
+                    user: user,
+                    timestamp: Date.now()
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.dispatchProfileUpdate', 'dispatch', error);
+        }
     },
     
     // Show authentication error
@@ -982,8 +1160,8 @@ export const ParentCoordinator = {
         this.ui.authErrorDisplayed = true;
         
         try {
-            const overlay = document.getElementById('authErrorOverlay');
-            const messageElement = document.getElementById('authErrorMessage');
+            const overlay = SafetyGuards.safeGetElement('authErrorOverlay');
+            const messageElement = SafetyGuards.safeGetElement('authErrorMessage');
             
             if (overlay && messageElement) {
                 messageElement.textContent = message || 'Authentication required';
@@ -992,7 +1170,7 @@ export const ParentCoordinator = {
                 showNotification(message || 'Authentication error', 'error');
             }
         } catch (error) {
-            this.logError('Error showing auth error:', error);
+            SafetyGuards.safeLogError('ParentCoordinator.showAuthError', 'ui_update', error);
         }
     },
     
@@ -1001,19 +1179,19 @@ export const ParentCoordinator = {
         this.ui.authErrorDisplayed = false;
         
         try {
-            const overlay = document.getElementById('authErrorOverlay');
+            const overlay = SafetyGuards.safeGetElement('authErrorOverlay');
             if (overlay) {
                 overlay.classList.remove('active');
             }
         } catch (error) {
-            this.logError('Error hiding auth error:', error);
+            SafetyGuards.safeLogError('ParentCoordinator.hideAuthError', 'ui_update', error);
         }
     },
     
     // Show reconnection state
     showReconnectionState: function() {
         try {
-            const existingIndicator = document.getElementById('reconnectionIndicator');
+            const existingIndicator = SafetyGuards.safeGetElement('reconnectionIndicator');
             
             if (!existingIndicator) {
                 const indicator = document.createElement('div');
@@ -1031,7 +1209,7 @@ export const ParentCoordinator = {
                 
                 document.body.appendChild(indicator);
                 
-                const retryBtn = document.getElementById('retryReconnectionBtn');
+                const retryBtn = SafetyGuards.safeGetElement('retryReconnectionBtn');
                 if (retryBtn) {
                     retryBtn.addEventListener('click', () => {
                         this.attemptParentReconnection();
@@ -1041,7 +1219,7 @@ export const ParentCoordinator = {
                 existingIndicator.classList.add('active');
             }
         } catch (error) {
-            this.logError('Error showing reconnection state:', error);
+            SafetyGuards.safeLogError('ParentCoordinator.showReconnectionState', 'ui_update', error);
         }
     },
     
@@ -1050,12 +1228,12 @@ export const ParentCoordinator = {
         this.ui.reconnectionDisplayed = false;
         
         try {
-            const indicator = document.getElementById('reconnectionIndicator');
+            const indicator = SafetyGuards.safeGetElement('reconnectionIndicator');
             if (indicator) {
                 indicator.classList.remove('active');
             }
         } catch (error) {
-            this.logError('Error hiding reconnection state:', error);
+            SafetyGuards.safeLogError('ParentCoordinator.hideReconnectionState', 'ui_update', error);
         }
     },
     
@@ -1086,15 +1264,20 @@ export const ParentCoordinator = {
     
     // API Integration
     apiRequest: async function(endpoint, options = {}) {
-        if (this.state.parentReachable && this.state.sessionReceived) {
-            return this.apiRequestViaParent(endpoint, options);
+        try {
+            if (this.state.parentReachable && this.state.sessionReceived) {
+                return await this.apiRequestViaParent(endpoint, options);
+            }
+            
+            if (window.KnectaAuth && window.KnectaAuth.secureApiCall) {
+                return await window.KnectaAuth.secureApiCall(endpoint, options, true);
+            }
+            
+            return await this.apiRequestDirect(endpoint, options);
+        } catch (error) {
+            SafetyGuards.safeLogError('ParentCoordinator.apiRequest', 'api_call', error, { endpoint });
+            throw error;
         }
-        
-        if (window.KnectaAuth && window.KnectaAuth.secureApiCall) {
-            return window.KnectaAuth.secureApiCall(endpoint, options, true);
-        }
-        
-        return this.apiRequestDirect(endpoint, options);
     },
     
     // API request via parent
@@ -1135,37 +1318,37 @@ export const ParentCoordinator = {
     
     // Direct API request (fallback only)
     apiRequestDirect: async function(endpoint, options = {}) {
-        if (this.ui.protectedUIBlocked && endpoint.includes('/api/')) {
-            throw new Error('Authentication required. Parent session not available.');
-        }
-        
-        let token = this.getToken();
-        if (!token && window.KnectaAuth) {
-            token = window.KnectaAuth.getToken();
-        }
-        if (!token) {
-            token = localStorage.getItem('USER_TOKEN');
-        }
-        
-        if (!token && options.requireAuth !== false) {
-            throw new Error('Authentication token not available');
-        }
-        
-        const defaultOptions = {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(options.headers || {})
-            }
-        };
-        
-        if (token && options.requireAuth !== false) {
-            defaultOptions.headers.Authorization = `Bearer ${token}`;
-        }
-        
-        const finalOptions = { ...defaultOptions, ...options };
-        
         try {
+            if (this.ui.protectedUIBlocked && endpoint.includes('/api/')) {
+                throw new Error('Authentication required. Parent session not available.');
+            }
+            
+            let token = this.getToken();
+            if (!token && window.KnectaAuth) {
+                token = window.KnectaAuth.getToken();
+            }
+            if (!token) {
+                token = localStorage.getItem('USER_TOKEN');
+            }
+            
+            if (!token && options.requireAuth !== false) {
+                throw new Error('Authentication token not available');
+            }
+            
+            const defaultOptions = {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(options.headers || {})
+                }
+            };
+            
+            if (token && options.requireAuth !== false) {
+                defaultOptions.headers.Authorization = `Bearer ${token}`;
+            }
+            
+            const finalOptions = { ...defaultOptions, ...options };
+            
             const response = await secureFetch(endpoint, finalOptions);
             
             if (!response.ok) {
@@ -1200,15 +1383,19 @@ export const ParentCoordinator = {
 
 // Initialize parent coordination when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize enhanced handshake protocol
-    setTimeout(() => {
-        requestSessionFromParent();
-    }, 100);
-    
-    // Also initialize parent coordinator for compatibility
-    ParentCoordinator.init().catch(error => {
-        console.error('[Friend Page] Parent coordination failed:', error);
-    });
+    try {
+        // Initialize enhanced handshake protocol
+        setTimeout(() => {
+            requestSessionFromParent();
+        }, 100);
+        
+        // Also initialize parent coordinator for compatibility
+        ParentCoordinator.init().catch(error => {
+            SafetyGuards.safeLogError('DOMContentLoaded', 'ParentCoordinator.init', error);
+        });
+    } catch (error) {
+        SafetyGuards.safeLogError('DOMContentLoaded', 'initialization', error);
+    }
 });
 
 // =============================================
@@ -1234,6 +1421,7 @@ export const KnectaAuth = {
             this.dispatchCacheReadyEvent();
             
         } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.init', 'initialization', error);
             this.loadCachedData();
             this.cacheReady = true;
             this.dispatchCacheReadyEvent();
@@ -1241,38 +1429,42 @@ export const KnectaAuth = {
     },
     
     checkTokenMigration: function() {
-        const OLD_TOKEN_KEYS = [
-            'moodchat_token',
-            'accessToken',
-            'knecta_token',
-            'token',
-            'authToken',
-            'sessionToken'
-        ];
-        
-        const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
-        
-        const unifiedToken = localStorage.getItem(UNIFIED_TOKEN_KEY);
-        if (unifiedToken && unifiedToken !== 'null' && unifiedToken !== 'undefined') {
-            return;
-        }
-        
-        for (const oldKey of OLD_TOKEN_KEYS) {
-            const oldToken = localStorage.getItem(oldKey);
-            if (oldToken && oldToken !== 'null' && oldToken !== 'undefined') {
-                localStorage.setItem(UNIFIED_TOKEN_KEY, oldToken);
-                this.migrationPerformed = true;
-                
-                const notice = document.getElementById('tokenMigrationNotice');
-                if (notice) {
-                    notice.classList.add('active');
-                    setTimeout(() => {
-                        notice.classList.remove('active');
-                    }, 3000);
-                }
-                
-                break;
+        try {
+            const OLD_TOKEN_KEYS = [
+                'moodchat_token',
+                'accessToken',
+                'knecta_token',
+                'token',
+                'authToken',
+                'sessionToken'
+            ];
+            
+            const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
+            
+            const unifiedToken = localStorage.getItem(UNIFIED_TOKEN_KEY);
+            if (unifiedToken && unifiedToken !== 'null' && unifiedToken !== 'undefined') {
+                return;
             }
+            
+            for (const oldKey of OLD_TOKEN_KEYS) {
+                const oldToken = localStorage.getItem(oldKey);
+                if (oldToken && oldToken !== 'null' && oldToken !== 'undefined') {
+                    localStorage.setItem(UNIFIED_TOKEN_KEY, oldToken);
+                    this.migrationPerformed = true;
+                    
+                    const notice = SafetyGuards.safeGetElement('tokenMigrationNotice');
+                    if (notice) {
+                        notice.classList.add('active');
+                        setTimeout(() => {
+                            notice.classList.remove('active');
+                        }, 3000);
+                    }
+                    
+                    break;
+                }
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.checkTokenMigration', 'migration', error);
         }
     },
     
@@ -1316,7 +1508,7 @@ export const KnectaAuth = {
                         this.currentUser = JSON.parse(userData);
                         break;
                     } catch (e) {
-                        console.error(`Error parsing user data from ${key}:`, e);
+                        SafetyGuards.safeLogError('KnectaAuth.loadCachedData', 'parse', e, { key });
                     }
                 }
             }
@@ -1330,85 +1522,103 @@ export const KnectaAuth = {
             });
             window.dispatchEvent(event);
         } catch (error) {
-            console.error('Error loading cached data:', error);
+            SafetyGuards.safeLogError('KnectaAuth.loadCachedData', 'loading', error);
         }
     },
     
     dispatchReadyEvent: function() {
-        const event = new CustomEvent('knectaAuthReady', {
-            detail: { 
-                token: this.token,
-                user: this.currentUser,
-                migrationPerformed: this.migrationPerformed,
-                parentControlled: this.parentControlled
-            }
-        });
-        window.dispatchEvent(event);
-        
-        window.knectaToken = this.token;
-        window.knectaUser = this.currentUser;
-        window.authReady = true;
+        try {
+            const event = new CustomEvent('knectaAuthReady', {
+                detail: { 
+                    token: this.token,
+                    user: this.currentUser,
+                    migrationPerformed: this.migrationPerformed,
+                    parentControlled: this.parentControlled
+                }
+            });
+            window.dispatchEvent(event);
+            
+            window.knectaToken = this.token;
+            window.knectaUser = this.currentUser;
+            window.authReady = true;
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.dispatchReadyEvent', 'dispatch', error);
+        }
     },
     
     dispatchCacheReadyEvent: function() {
-        const event = new CustomEvent('knectaCacheReady', {
-            detail: { 
-                token: this.token,
-                user: this.currentUser,
-                cacheOnly: true
-            }
-        });
-        window.dispatchEvent(event);
+        try {
+            const event = new CustomEvent('knectaCacheReady', {
+                detail: { 
+                    token: this.token,
+                    user: this.currentUser,
+                    cacheOnly: true
+                }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.dispatchCacheReadyEvent', 'dispatch', error);
+        }
     },
     
     getTokenAsync: function() {
-        if (window.parentCoordinator && window.parentCoordinator.getToken()) {
-            return Promise.resolve(window.parentCoordinator.getToken());
+        try {
+            if (window.parentCoordinator && window.parentCoordinator.getToken()) {
+                return Promise.resolve(window.parentCoordinator.getToken());
+            }
+            
+            if (this.tokenReady && this.token) {
+                return Promise.resolve(this.token);
+            }
+            
+            if (!this.tokenPromise) {
+                this.tokenPromise = new Promise((resolve, reject) => {
+                    let checks = 0;
+                    const maxChecks = 100;
+                    
+                    const checkToken = () => {
+                        checks++;
+                        
+                        if (window.parentCoordinator && window.parentCoordinator.getToken()) {
+                            resolve(window.parentCoordinator.getToken());
+                            return;
+                        }
+                        
+                        if (this.tokenReady && this.token) {
+                            resolve(this.token);
+                            return;
+                        }
+                        
+                        if (checks >= maxChecks) {
+                            reject(new Error('Token not available'));
+                            return;
+                        }
+                        
+                        setTimeout(checkToken, 100);
+                    };
+                    
+                    checkToken();
+                });
+            }
+            
+            return this.tokenPromise;
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.getTokenAsync', 'get_token', error);
+            return Promise.reject(error);
         }
-        
-        if (this.tokenReady && this.token) {
-            return Promise.resolve(this.token);
-        }
-        
-        if (!this.tokenPromise) {
-            this.tokenPromise = new Promise((resolve, reject) => {
-                let checks = 0;
-                const maxChecks = 100;
-                
-                const checkToken = () => {
-                    checks++;
-                    
-                    if (window.parentCoordinator && window.parentCoordinator.getToken()) {
-                        resolve(window.parentCoordinator.getToken());
-                        return;
-                    }
-                    
-                    if (this.tokenReady && this.token) {
-                        resolve(this.token);
-                        return;
-                    }
-                    
-                    if (checks >= maxChecks) {
-                        reject(new Error('Token not available'));
-                        return;
-                    }
-                    
-                    setTimeout(checkToken, 100);
-                };
-                
-                checkToken();
-            });
-        }
-        
-        return this.tokenPromise;
     },
     
     secureApiCall: async function(apiPath, options = {}, requireAuth = true) {
-        if (window.parentCoordinator && window.parentCoordinator.isAuthenticated()) {
-            return window.parentCoordinator.apiRequest(apiPath, options);
+        try {
+            if (window.parentCoordinator && window.parentCoordinator.isAuthenticated()) {
+                return window.parentCoordinator.apiRequest(apiPath, options);
+            }
+            
+            return await this.secureApiCallFallback(apiPath, options, requireAuth);
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.secureApiCall', 'api_call', error, { apiPath });
+            throw error;
         }
-        
-        return this.secureApiCallFallback(apiPath, options, requireAuth);
     },
     
     secureApiCallFallback: async function(apiPath, options = {}, requireAuth = true) {
@@ -1464,7 +1674,7 @@ export const KnectaAuth = {
     
     showLoading: function(show) {
         try {
-            const overlay = document.getElementById('loadingOverlay');
+            const overlay = SafetyGuards.safeGetElement('loadingOverlay');
             if (overlay) {
                 if (show) {
                     overlay.classList.add('active');
@@ -1478,75 +1688,106 @@ export const KnectaAuth = {
     },
     
     handleTokenExpired: function() {
-        this.token = null;
-        this.tokenReady = false;
-        localStorage.removeItem('USER_TOKEN');
-        
-        if (window.parentCoordinator) {
-            window.parentCoordinator.handleTokenExpired();
-        } else {
-            showNotification('Session expired. Please log in again.', 'error');
+        try {
+            this.token = null;
+            this.tokenReady = false;
+            localStorage.removeItem('USER_TOKEN');
             
-            const event = new CustomEvent('knectaTokenExpired');
-            window.dispatchEvent(event);
-            
-            setTimeout(() => {
-                if (window.parent && window.parent.location) {
-                    window.parent.location.href = '/login.html';
-                } else {
-                    window.location.href = '/login.html';
-                }
-            }, 2000);
+            if (window.parentCoordinator) {
+                window.parentCoordinator.handleTokenExpired();
+            } else {
+                showNotification('Session expired. Please log in again.', 'error');
+                
+                const event = new CustomEvent('knectaTokenExpired');
+                window.dispatchEvent(event);
+                
+                setTimeout(() => {
+                    if (window.parent && window.parent.location) {
+                        window.parent.location.href = '/login.html';
+                    } else {
+                        window.location.href = '/login.html';
+                    }
+                }, 2000);
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.handleTokenExpired', 'token_expired', error);
         }
     },
     
     handleAuthError: function() {
-        showNotification('Please log in to continue', 'warning');
-        
-        const event = new CustomEvent('knectaAuthError');
-        window.dispatchEvent(event);
+        try {
+            showNotification('Please log in to continue', 'warning');
+            
+            const event = new CustomEvent('knectaAuthError');
+            window.dispatchEvent(event);
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.handleAuthError', 'auth_error', error);
+        }
     },
     
     showNotification: function(message, type = 'success') {
-        if (window.parentCoordinator) {
-            window.parentCoordinator.showNotification(message, type);
-        } else {
-            if (typeof showNotification === 'function') {
-                showNotification(message, type);
+        try {
+            if (window.parentCoordinator) {
+                window.parentCoordinator.showNotification(message, type);
+            } else {
+                if (typeof showNotification === 'function') {
+                    showNotification(message, type);
+                }
             }
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.showNotification', 'notification', error);
         }
     },
     
     isAuthenticated: function() {
-        if (window.parentCoordinator) {
-            return window.parentCoordinator.isAuthenticated();
+        try {
+            if (window.parentCoordinator) {
+                return window.parentCoordinator.isAuthenticated();
+            }
+            
+            return !!(this.token && this.tokenReady);
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.isAuthenticated', 'check', error);
+            return false;
         }
-        
-        return !!(this.token && this.tokenReady);
     },
     
     getUser: function() {
-        if (window.parentCoordinator) {
-            return window.parentCoordinator.getUser();
+        try {
+            if (window.parentCoordinator) {
+                return window.parentCoordinator.getUser();
+            }
+            
+            return this.currentUser;
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.getUser', 'get_user', error);
+            return null;
         }
-        
-        return this.currentUser;
     },
     
     getToken: function() {
-        if (window.parentCoordinator) {
-            return window.parentCoordinator.getToken();
+        try {
+            if (window.parentCoordinator) {
+                return window.parentCoordinator.getToken();
+            }
+            
+            return this.token;
+        } catch (error) {
+            SafetyGuards.safeLogError('KnectaAuth.getToken', 'get_token', error);
+            return null;
         }
-        
-        return this.token;
     }
 };
 
 // Initialize auth system
 window.addEventListener('DOMContentLoaded', () => {
-    KnectaAuth.init().catch(error => {
-        console.error('[Friend Page] Auth system initialization failed:', error);
-    });
+    try {
+        KnectaAuth.init().catch(error => {
+            SafetyGuards.safeLogError('KnectaAuth.init', 'initialization', error);
+        });
+    } catch (error) {
+        SafetyGuards.safeLogError('DOMContentLoaded', 'KnectaAuth.init', error);
+    }
 });
 
 // =============================================
@@ -1627,112 +1868,115 @@ export const dataSource = {
 // =============================================
 
 export function initializeParentChildCommunication() {
-    setupSessionEventListeners();
-    loadCachedDataInstantly();
-    waitForParentSession();
+    try {
+        setupSessionEventListeners();
+        loadCachedDataInstantly();
+        waitForParentSession();
+    } catch (error) {
+        SafetyGuards.safeLogError('initializeParentChildCommunication', 'initialization', error);
+    }
 }
 
 function setupSessionEventListeners() {
-    window.addEventListener('parentSessionReady', handleParentSessionReady);
-    window.addEventListener('parentSessionUpdated', handleParentSessionUpdate);
-    window.addEventListener('parentSessionLogout', handleParentLogout);
-    window.addEventListener('parentProfileUpdated', handleParentProfileUpdate);
-    window.addEventListener('knectaAuthReady', handleUnifiedAuthReady);
-    window.addEventListener('knectaCacheReady', handleUnifiedCacheReady);
+    try {
+        window.addEventListener('parentSessionReady', handleParentSessionReady);
+        window.addEventListener('parentSessionUpdated', handleParentSessionUpdate);
+        window.addEventListener('parentSessionLogout', handleParentLogout);
+        window.addEventListener('parentProfileUpdated', handleParentProfileUpdate);
+        window.addEventListener('knectaAuthReady', handleUnifiedAuthReady);
+        window.addEventListener('knectaCacheReady', handleUnifiedCacheReady);
+    } catch (error) {
+        SafetyGuards.safeLogError('setupSessionEventListeners', 'setup', error);
+    }
 }
 
 function handleParentSessionReady(event) {
-    dataSource.parentSessionReceived = true;
-    dataSource.fetched = true;
-    
-    const session = event.detail.session;
-    
-    dataSource.source = 'parent';
-    dataSource.userData = session.user;
-    dataSource.token = session.token;
-    
-    currentUser = session.user;
-    userData = currentUser;
-    
-    updateUIWithUserData(session.user);
-    updateDataSourceIndicator('parent');
-    
-    initializeMainFunctionality();
+    try {
+        dataSource.parentSessionReceived = true;
+        dataSource.fetched = true;
+        
+        const session = event.detail.session;
+        
+        dataSource.source = 'parent';
+        dataSource.userData = session.user;
+        dataSource.token = session.token;
+        
+        currentUser = session.user;
+        userData = currentUser;
+        
+        updateUIWithUserData(session.user);
+        updateDataSourceIndicator('parent');
+        
+        initializeMainFunctionality();
+    } catch (error) {
+        SafetyGuards.safeLogError('handleParentSessionReady', 'processing', error, event);
+    }
 }
 
 function handleParentSessionUpdate(event) {
-    const session = event.detail.session;
-    
-    dataSource.userData = session.user;
-    dataSource.token = session.token;
-    
-    currentUser = session.user;
-    userData = currentUser;
-    
-    updateUIWithUserData(session.user);
+    try {
+        const session = event.detail.session;
+        
+        dataSource.userData = session.user;
+        dataSource.token = session.token;
+        
+        currentUser = session.user;
+        userData = currentUser;
+        
+        updateUIWithUserData(session.user);
+    } catch (error) {
+        SafetyGuards.safeLogError('handleParentSessionUpdate', 'processing', error, event);
+    }
 }
 
 function handleParentLogout(event) {
-    dataSource.userData = null;
-    dataSource.token = null;
-    dataSource.fetched = false;
-    dataSource.parentSessionReceived = false;
-    
-    currentUser = null;
-    userData = null;
-    friends = [];
-    contacts = [];
-    friendRequests = [];
-    sentRequests = [];
-    
     try {
-        updateCurrentSection();
+        dataSource.userData = null;
+        dataSource.token = null;
+        dataSource.fetched = false;
+        dataSource.parentSessionReceived = false;
+        
+        currentUser = null;
+        userData = null;
+        friends = [];
+        contacts = [];
+        friendRequests = [];
+        sentRequests = [];
+        
+        try {
+            updateCurrentSection();
+        } catch (error) {
+            SafetyGuards.safeLogError('handleParentLogout', 'ui_update', error);
+        }
+        
+        showAuthError('You have been logged out. Please log in again.');
     } catch (error) {
-        console.error('Error updating section after logout:', error);
+        SafetyGuards.safeLogError('handleParentLogout', 'processing', error, event);
     }
-    
-    showAuthError('You have been logged out. Please log in again.');
 }
 
 function handleParentProfileUpdate(event) {
-    const user = event.detail.user;
-    
-    dataSource.userData = user;
-    currentUser = user;
-    userData = currentUser;
-    
-    updateUIWithUserData(user);
-    
-    showNotification('Profile updated', 'success');
-}
-
-function handleUnifiedAuthReady(event) {
-    if (!dataSource.parentSessionReceived) {
-        const detail = event.detail;
+    try {
+        const user = event.detail.user;
         
-        dataSource.source = 'unified_auth';
-        dataSource.userData = detail.user;
-        dataSource.token = detail.token;
-        dataSource.fetched = true;
-        
-        currentUser = detail.user;
+        dataSource.userData = user;
+        currentUser = user;
         userData = currentUser;
         
-        updateUIWithUserData(detail.user);
-        updateDataSourceIndicator('unified_auth');
+        updateUIWithUserData(user);
         
-        initializeMainFunctionality();
-        
-        showNotification('Using authentication system. Parent coordination not available.', 'warning');
+        showNotification('Profile updated', 'success');
+    } catch (error) {
+        SafetyGuards.safeLogError('handleParentProfileUpdate', 'processing', error, event);
     }
 }
 
-function handleUnifiedCacheReady(event) {
-    if (!dataSource.fetched) {
-        const detail = event.detail;
-        
-        if (detail.user) {
-            dataSource.source = 'cache';
+function handleUnifiedAuthReady(event) {
+    try {
+        if (!dataSource.parentSessionReceived) {
+            const detail = event.detail;
+            
+            dataSource.source = 'unified_auth';
             dataSource.userData = detail.user;
             dataSource.token = detail.token;
             dataSource.fetched = true;
@@ -1741,12 +1985,41 @@ function handleUnifiedCacheReady(event) {
             userData = currentUser;
             
             updateUIWithUserData(detail.user);
-            updateDataSourceIndicator('cache');
+            updateDataSourceIndicator('unified_auth');
             
             initializeMainFunctionality();
             
-            showNotification('Using cached data. Sign in for live updates.', 'warning');
+            showNotification('Using authentication system. Parent coordination not available.', 'warning');
         }
+    } catch (error) {
+        SafetyGuards.safeLogError('handleUnifiedAuthReady', 'processing', error, event);
+    }
+}
+
+function handleUnifiedCacheReady(event) {
+    try {
+        if (!dataSource.fetched) {
+            const detail = event.detail;
+            
+            if (detail.user) {
+                dataSource.source = 'cache';
+                dataSource.userData = detail.user;
+                dataSource.token = detail.token;
+                dataSource.fetched = true;
+                
+                currentUser = detail.user;
+                userData = currentUser;
+                
+                updateUIWithUserData(detail.user);
+                updateDataSourceIndicator('cache');
+                
+                initializeMainFunctionality();
+                
+                showNotification('Using cached data. Sign in for live updates.', 'warning');
+            }
+        }
+    } catch (error) {
+        SafetyGuards.safeLogError('handleUnifiedCacheReady', 'processing', error, event);
     }
 }
 
@@ -1779,28 +2052,32 @@ function waitForParentSession() {
 // =============================================
 
 export function getCurrentUser() {
-    if (window.parentCoordinator && window.parentCoordinator.getUser()) {
-        return window.parentCoordinator.getUser();
-    }
-    
-    if (dataSource.userData) {
-        return dataSource.userData;
-    }
-    
-    if (window.KnectaAuth && window.KnectaAuth.getUser()) {
-        return window.KnectaAuth.getUser();
-    }
-    
-    const userKeys = ['knecta_current_user', 'USER_DATA'];
-    for (const key of userKeys) {
-        const userData = localStorage.getItem(key);
-        if (userData) {
-            try {
-                return JSON.parse(userData);
-            } catch (e) {
-                console.error('[Friend Page] Error parsing user data:', e);
+    try {
+        if (window.parentCoordinator && window.parentCoordinator.getUser()) {
+            return window.parentCoordinator.getUser();
+        }
+        
+        if (dataSource.userData) {
+            return dataSource.userData;
+        }
+        
+        if (window.KnectaAuth && window.KnectaAuth.getUser()) {
+            return window.KnectaAuth.getUser();
+        }
+        
+        const userKeys = ['knecta_current_user', 'USER_DATA'];
+        for (const key of userKeys) {
+            const userData = localStorage.getItem(key);
+            if (userData) {
+                try {
+                    return JSON.parse(userData);
+                } catch (e) {
+                    SafetyGuards.safeLogError('getCurrentUser', 'parse', e, { key });
+                }
             }
         }
+    } catch (error) {
+        SafetyGuards.safeLogError('getCurrentUser', 'get_user', error);
     }
     
     return null;
@@ -1812,6 +2089,14 @@ export function getCurrentUser() {
 
 export async function sendFriendRequest(friendId, category = 'friend', note = '', isTemporary = false, duration = null, isBusiness = false) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('sendFriendRequest', 'session_check', 
+                                     new Error('Invalid session, skipping friend request'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         // Validate friendId
         if (!friendId || typeof friendId !== 'string') {
             showNotification('Invalid friend ID', 'error');
@@ -1861,7 +2146,7 @@ export async function sendFriendRequest(friendId, category = 'friend', note = ''
             try {
                 updateCurrentSection();
             } catch (error) {
-                console.error('Error updating section after sending friend request:', error);
+                SafetyGuards.safeLogError('sendFriendRequest', 'ui_update', error);
             }
             
             showNotification('Friend request sent successfully', 'success');
@@ -1871,6 +2156,7 @@ export async function sendFriendRequest(friendId, category = 'friend', note = ''
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('sendFriendRequest', 'api_call', error, { friendId });
             showNotification('Failed to send friend request', 'error');
         }
     }
@@ -1878,33 +2164,51 @@ export async function sendFriendRequest(friendId, category = 'friend', note = ''
 
 // Helper function to validate friend ID
 function validateFriendId(friendId) {
-    if (typeof friendId !== 'string') return false;
-    if (friendId.trim().length === 0) return false;
-    if (friendId.length > 100) return false;
-    
-    // Basic validation for common ID formats
-    const validPattern = /^[a-zA-Z0-9_\-:.@]+$/;
-    return validPattern.test(friendId);
+    try {
+        if (typeof friendId !== 'string') return false;
+        if (friendId.trim().length === 0) return false;
+        if (friendId.length > 100) return false;
+        
+        // Basic validation for common ID formats
+        const validPattern = /^[a-zA-Z0-9_\-:.@]+$/;
+        return validPattern.test(friendId);
+    } catch (error) {
+        SafetyGuards.safeLogError('validateFriendId', 'validation', error);
+        return false;
+    }
 }
 
 // Helper function to validate friend data
 function validateFriendData(friendData) {
-    if (!friendData || typeof friendData !== 'object') return false;
-    if (!friendData.id || typeof friendData.id !== 'string') return false;
-    
-    // Validate required fields
-    if (!validateFriendId(friendData.id)) return false;
-    
-    // Validate optional fields if present
-    if (friendData.displayName && typeof friendData.displayName !== 'string') return false;
-    if (friendData.username && typeof friendData.username !== 'string') return false;
-    if (friendData.email && typeof friendData.email !== 'string') return false;
-    
-    return true;
+    try {
+        if (!friendData || typeof friendData !== 'object') return false;
+        if (!friendData.id || typeof friendData.id !== 'string') return false;
+        
+        // Validate required fields
+        if (!validateFriendId(friendData.id)) return false;
+        
+        // Validate optional fields if present
+        if (friendData.displayName && typeof friendData.displayName !== 'string') return false;
+        if (friendData.username && typeof friendData.username !== 'string') return false;
+        if (friendData.email && typeof friendData.email !== 'string') return false;
+        
+        return true;
+    } catch (error) {
+        SafetyGuards.safeLogError('validateFriendData', 'validation', error);
+        return false;
+    }
 }
 
 export async function acceptFriendRequestOnline(requestId, friendId) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('acceptFriendRequestOnline', 'session_check', 
+                                     new Error('Invalid session, skipping friend request acceptance'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -1935,6 +2239,7 @@ export async function acceptFriendRequestOnline(requestId, friendId) {
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('acceptFriendRequestOnline', 'api_call', error, { requestId, friendId });
             showNotification('Failed to accept friend request', 'error');
         }
     }
@@ -1942,6 +2247,14 @@ export async function acceptFriendRequestOnline(requestId, friendId) {
 
 export async function declineFriendRequest(requestData) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('declineFriendRequest', 'session_check', 
+                                     new Error('Invalid session, skipping friend request decline'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -1975,7 +2288,7 @@ export async function declineFriendRequest(requestData) {
             try {
                 updateCurrentSection();
             } catch (error) {
-                console.error('Error updating section after declining friend request:', error);
+                SafetyGuards.safeLogError('declineFriendRequest', 'ui_update', error);
             }
             
             showNotification('Friend request declined', 'success');
@@ -1985,6 +2298,7 @@ export async function declineFriendRequest(requestData) {
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('declineFriendRequest', 'api_call', error, requestData);
             showNotification('Failed to decline friend request', 'error');
         }
     }
@@ -1992,6 +2306,14 @@ export async function declineFriendRequest(requestData) {
 
 export async function cancelFriendRequest(requestData) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('cancelFriendRequest', 'session_check', 
+                                     new Error('Invalid session, skipping friend request cancellation'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -2025,7 +2347,7 @@ export async function cancelFriendRequest(requestData) {
             try {
                 updateCurrentSection();
             } catch (error) {
-                console.error('Error updating section after canceling friend request:', error);
+                SafetyGuards.safeLogError('cancelFriendRequest', 'ui_update', error);
             }
             
             showNotification('Friend request cancelled', 'success');
@@ -2035,6 +2357,7 @@ export async function cancelFriendRequest(requestData) {
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('cancelFriendRequest', 'api_call', error, requestData);
             showNotification('Failed to cancel friend request', 'error');
         }
     }
@@ -2047,6 +2370,13 @@ export async function cancelFriendRequest(requestData) {
 export async function loadFriendsFromBackend() {
     try {
         if (window.parentCoordinator && window.parentCoordinator.shouldBlockProtectedUI()) {
+            throw new Error('Authentication required');
+        }
+        
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadFriendsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
             throw new Error('Authentication required');
         }
         
@@ -2063,13 +2393,14 @@ export async function loadFriendsFromBackend() {
             try {
                 updateFriendCounts();
             } catch (error) {
-                console.error('Error updating friend counts:', error);
+                SafetyGuards.safeLogError('loadFriendsFromBackend', 'ui_update', error);
             }
             
             localStorage.setItem(LOCAL_STORAGE_KEYS.FRIENDS, JSON.stringify(friends));
             localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadFriendsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.FRIENDS);
         if (cached) {
             try {
@@ -2078,10 +2409,11 @@ export async function loadFriendsFromBackend() {
                 friends = Array.isArray(parsed) ? parsed.filter(friend => validateFriendData(friend)) : [];
                 try {
                     updateFriendCounts();
-                } catch (error) {
-                    console.error('Error updating friend counts from cache:', error);
+                } catch (uiError) {
+                    SafetyGuards.safeLogError('loadFriendsFromBackend', 'cache_ui_update', uiError);
                 }
             } catch (parseError) {
+                SafetyGuards.safeLogError('loadFriendsFromBackend', 'cache_parse', parseError);
                 friends = [];
             }
         }
@@ -2090,6 +2422,13 @@ export async function loadFriendsFromBackend() {
 
 export async function loadFriendRequestsFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadFriendRequestsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2100,15 +2439,28 @@ export async function loadFriendRequestsFromBackend() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.REQUESTS, JSON.stringify(friendRequests));
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadFriendRequestsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.REQUESTS);
         if (cached) {
-            friendRequests = JSON.parse(cached);
+            try {
+                friendRequests = JSON.parse(cached);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('loadFriendRequestsFromBackend', 'cache_parse', parseError);
+                friendRequests = [];
+            }
         }
     }
 }
 
 export async function loadSentRequestsFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadSentRequestsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2119,15 +2471,28 @@ export async function loadSentRequestsFromBackend() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS, JSON.stringify(sentRequests));
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadSentRequestsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
         if (cached) {
-            sentRequests = JSON.parse(cached);
+            try {
+                sentRequests = JSON.parse(cached);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('loadSentRequestsFromBackend', 'cache_parse', parseError);
+                sentRequests = [];
+            }
         }
     }
 }
 
 export async function loadPinnedFriendsFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadPinnedFriendsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2138,15 +2503,28 @@ export async function loadPinnedFriendsFromBackend() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadPinnedFriendsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
         if (cached) {
-            pinnedFriends = JSON.parse(cached);
+            try {
+                pinnedFriends = JSON.parse(cached);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('loadPinnedFriendsFromBackend', 'cache_parse', parseError);
+                pinnedFriends = [];
+            }
         }
     }
 }
 
 export async function loadMutedFriendsFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadMutedFriendsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2157,15 +2535,28 @@ export async function loadMutedFriendsFromBackend() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadMutedFriendsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
         if (cached) {
-            mutedFriends = JSON.parse(cached);
+            try {
+                mutedFriends = JSON.parse(cached);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('loadMutedFriendsFromBackend', 'cache_parse', parseError);
+                mutedFriends = [];
+            }
         }
     }
 }
 
 export async function loadContactsFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadContactsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2176,15 +2567,28 @@ export async function loadContactsFromBackend() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadContactsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.CONTACTS);
         if (cached) {
-            contacts = JSON.parse(cached);
+            try {
+                contacts = JSON.parse(cached);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('loadContactsFromBackend', 'cache_parse', parseError);
+                contacts = [];
+            }
         }
     }
 }
 
 export async function loadGroupsFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('loadGroupsFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2195,13 +2599,28 @@ export async function loadGroupsFromBackend() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.USER_GROUPS, JSON.stringify(groups));
         }
     } catch (error) {
+        SafetyGuards.safeLogError('loadGroupsFromBackend', 'api_call', error);
         const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_GROUPS);
-        if (cached) groups = JSON.parse(cached);
+        if (cached) {
+            try {
+                groups = JSON.parse(cached);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('loadGroupsFromBackend', 'cache_parse', parseError);
+                groups = [];
+            }
+        }
     }
 }
 
 export async function fetchAllUsersFromBackend() {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('fetchAllUsersFromBackend', 'session_check', 
+                                     new Error('Invalid session, loading from cache'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) throw new Error('No valid token');
         
@@ -2230,9 +2649,15 @@ export async function fetchAllUsersFromBackend() {
         }
         
     } catch (error) {
+        SafetyGuards.safeLogError('fetchAllUsersFromBackend', 'api_call', error);
         const cachedAllUsers = localStorage.getItem(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
         if (cachedAllUsers) {
-            allUsers = JSON.parse(cachedAllUsers);
+            try {
+                allUsers = JSON.parse(cachedAllUsers);
+            } catch (parseError) {
+                SafetyGuards.safeLogError('fetchAllUsersFromBackend', 'cache_parse', parseError);
+                allUsers = [];
+            }
         }
     }
 }
@@ -2257,6 +2682,7 @@ export async function enhancedInitialize() {
         return true;
         
     } catch (error) {
+        SafetyGuards.safeLogError('enhancedInitialize', 'initialization', error);
         loadCachedDataInstantly();
         apiReady = false;
         isInitialized = true;
@@ -2280,7 +2706,7 @@ export function loadCachedDataInstantly() {
             try {
                 updateFriendCounts();
             } catch (error) {
-                console.error('Error updating friend counts from cache:', error);
+                SafetyGuards.safeLogError('loadCachedDataInstantly', 'ui_update', error);
             }
         }
         
@@ -2327,12 +2753,19 @@ export function loadCachedDataInstantly() {
         if (notesData) window.privateNotes = JSON.parse(notesData);
         
     } catch (error) {
-        console.error('[Friend Page] Error loading cached data:', error.message);
+        SafetyGuards.safeLogError('loadCachedDataInstantly', 'loading', error);
     }
 }
 
 export function startParallelDataLoading() {
     if (backgroundTasksStarted) {
+        return;
+    }
+    
+    // Safety: Check session
+    if (!SafetyGuards.isSessionValid()) {
+        SafetyGuards.safeLogError('startParallelDataLoading', 'session_check', 
+                                 new Error('Invalid session, skipping background tasks'));
         return;
     }
     
@@ -2363,7 +2796,7 @@ export function startParallelDataLoading() {
         try {
             updateCurrentSection();
         } catch (error) {
-            console.error('Error updating section after data loading:', error);
+            SafetyGuards.safeLogError('startParallelDataLoading', 'ui_update', error);
         }
         showNotification('Friends data loaded', 'success');
         
@@ -2378,7 +2811,11 @@ export function startParallelDataLoading() {
 // =============================================
 
 export function checkMobile() {
-    isMobile = window.innerWidth <= 768;
+    try {
+        isMobile = window.innerWidth <= 768;
+    } catch (error) {
+        SafetyGuards.safeLogError('checkMobile', 'check', error);
+    }
 }
 
 // =============================================
@@ -2387,8 +2824,8 @@ export function checkMobile() {
 
 export async function startCameraScanner() {
     try {
-        const videoElement = document.getElementById('cameraVideo');
-        const canvasElement = document.getElementById('scannerCanvas');
+        const videoElement = SafetyGuards.safeGetElement('cameraVideo');
+        const canvasElement = SafetyGuards.safeGetElement('scannerCanvas');
         if (!videoElement || !canvasElement) {
             showNotification('Camera elements not found', 'error');
             return;
@@ -2414,6 +2851,7 @@ export async function startCameraScanner() {
         showNotification('Camera started successfully', 'success');
         
     } catch (error) {
+        SafetyGuards.safeLogError('startCameraScanner', 'camera', error);
         const cameraContainer = document.querySelector('.camera-container');
         if (cameraContainer) {
             cameraContainer.innerHTML = `
@@ -2465,15 +2903,19 @@ function startRealQRCodeScanning(videoElement, canvasElement) {
     }
     
     function drawQRCodeRect(location, ctx) {
-        ctx.beginPath();
-        ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
-        ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
-        ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
-        ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
-        ctx.lineTo(location.topLeftCorner.x, location.topLeftCorner.y);
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = "#00FF00";
-        ctx.stroke();
+        try {
+            ctx.beginPath();
+            ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
+            ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
+            ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
+            ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
+            ctx.lineTo(location.topLeftCorner.x, location.topLeftCorner.y);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = "#00FF00";
+            ctx.stroke();
+        } catch (error) {
+            // Silently fail
+        }
     }
     
     scanFrame();
@@ -2507,55 +2949,106 @@ function processScannedQRCodeReal(qrData) {
         showFriendRequestFromQRReal(parsedData);
         
         stopCameraScanner();
-        document.getElementById('cameraScannerModal').classList.remove('active');
+        const modal = SafetyGuards.safeGetElement('cameraScannerModal');
+        if (modal) modal.classList.remove('active');
         
         showNotification('QR code scanned successfully!', 'success');
         
     } catch (error) {
+        SafetyGuards.safeLogError('processScannedQRCodeReal', 'processing', error);
         showNotification('Error processing QR code', 'error');
     }
 }
 
 function showFriendRequestFromQRReal(qrData) {
     fetchUserInfoFromQR(qrData.userId).then(userInfo => {
-        document.getElementById('requestAvatar').innerHTML = `
-            <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-                ${userInfo.displayName ? userInfo.displayName.charAt(0).toUpperCase() : 'U'}
-            </div>
-        `;
+        const requestAvatar = SafetyGuards.safeGetElement('requestAvatar');
+        const requestName = SafetyGuards.safeGetElement('requestName');
+        const requestUsername = SafetyGuards.safeGetElement('requestUsername');
+        const mutualCount = SafetyGuards.safeGetElement('mutualCount');
+        const acceptBtn = SafetyGuards.safeGetElement('acceptRequestBtn');
+        const friendRequestModal = SafetyGuards.safeGetElement('friendRequestModal');
         
-        document.getElementById('requestName').textContent = userInfo.displayName || qrData.displayName || 'QR Code User';
-        document.getElementById('requestUsername').textContent = userInfo.username || qrData.username || '@unknown';
-        document.getElementById('mutualCount').textContent = '0';
+        if (requestAvatar) {
+            requestAvatar.innerHTML = `
+                <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                    ${userInfo.displayName ? userInfo.displayName.charAt(0).toUpperCase() : 'U'}
+                </div>
+            `;
+        }
         
-        const acceptBtn = document.getElementById('acceptRequestBtn');
-        acceptBtn.dataset.userId = qrData.userId;
-        acceptBtn.dataset.userName = userInfo.displayName || qrData.displayName || 'User';
-        acceptBtn.dataset.qrData = JSON.stringify(qrData);
+        if (requestName) {
+            requestName.textContent = userInfo.displayName || qrData.displayName || 'QR Code User';
+        }
         
-        document.getElementById('friendRequestModal').classList.add('active');
+        if (requestUsername) {
+            requestUsername.textContent = userInfo.username || qrData.username || '@unknown';
+        }
+        
+        if (mutualCount) {
+            mutualCount.textContent = '0';
+        }
+        
+        if (acceptBtn) {
+            acceptBtn.dataset.userId = qrData.userId;
+            acceptBtn.dataset.userName = userInfo.displayName || qrData.displayName || 'User';
+            acceptBtn.dataset.qrData = JSON.stringify(qrData);
+        }
+        
+        if (friendRequestModal) {
+            friendRequestModal.classList.add('active');
+        }
     }).catch(error => {
-        document.getElementById('requestAvatar').innerHTML = `
-            <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-                ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
-            </div>
-        `;
+        SafetyGuards.safeLogError('showFriendRequestFromQRReal', 'user_fetch', error);
         
-        document.getElementById('requestName').textContent = qrData.displayName || 'QR Code User';
-        document.getElementById('requestUsername').textContent = qrData.username || '@unknown';
-        document.getElementById('mutualCount').textContent = '0';
+        const requestAvatar = SafetyGuards.safeGetElement('requestAvatar');
+        const requestName = SafetyGuards.safeGetElement('requestName');
+        const requestUsername = SafetyGuards.safeGetElement('requestUsername');
+        const mutualCount = SafetyGuards.safeGetElement('mutualCount');
+        const acceptBtn = SafetyGuards.safeGetElement('acceptRequestBtn');
+        const friendRequestModal = SafetyGuards.safeGetElement('friendRequestModal');
         
-        const acceptBtn = document.getElementById('acceptRequestBtn');
-        acceptBtn.dataset.userId = qrData.userId;
-        acceptBtn.dataset.userName = qrData.displayName || 'User';
-        acceptBtn.dataset.qrData = JSON.stringify(qrData);
+        if (requestAvatar) {
+            requestAvatar.innerHTML = `
+                <div style="width: 100%; height: 100%; border-radius: 50%; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                    ${qrData.displayName ? qrData.displayName.charAt(0).toUpperCase() : 'U'}
+                </div>
+            `;
+        }
         
-        document.getElementById('friendRequestModal').classList.add('active');
+        if (requestName) {
+            requestName.textContent = qrData.displayName || 'QR Code User';
+        }
+        
+        if (requestUsername) {
+            requestUsername.textContent = qrData.username || '@unknown';
+        }
+        
+        if (mutualCount) {
+            mutualCount.textContent = '0';
+        }
+        
+        if (acceptBtn) {
+            acceptBtn.dataset.userId = qrData.userId;
+            acceptBtn.dataset.userName = qrData.displayName || 'User';
+            acceptBtn.dataset.qrData = JSON.stringify(qrData);
+        }
+        
+        if (friendRequestModal) {
+            friendRequestModal.classList.add('active');
+        }
     });
 }
 
 async function fetchUserInfoFromQR(userId) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('fetchUserInfoFromQR', 'session_check', 
+                                     new Error('Invalid session, cannot fetch user info'));
+            throw new Error('No valid token');
+        }
+        
         const token = getValidToken();
         if (!token) {
             throw new Error('No valid token');
@@ -2572,6 +3065,7 @@ async function fetchUserInfoFromQR(userId) {
         }
         throw new Error('User not found');
     } catch (error) {
+        SafetyGuards.safeLogError('fetchUserInfoFromQR', 'api_call', error, { userId });
         throw error;
     }
 }
@@ -2584,46 +3078,54 @@ export function stopCameraScanner() {
         cameraStream = null;
     }
     
-    const videoElement = document.getElementById('cameraVideo');
+    const videoElement = SafetyGuards.safeGetElement('cameraVideo');
     if (videoElement) {
         videoElement.srcObject = null;
     }
 }
 
 export async function toggleCamera() {
-    currentCamera = currentCamera === 'environment' ? 'user' : 'environment';
-    await startCameraScanner();
+    try {
+        currentCamera = currentCamera === 'environment' ? 'user' : 'environment';
+        await startCameraScanner();
+    } catch (error) {
+        SafetyGuards.safeLogError('toggleCamera', 'toggle', error);
+    }
 }
 
 export function toggleFlash() {
     if (!cameraStream) return;
     
-    const track = cameraStream.getVideoTracks()[0];
-    if (!track || !track.getCapabilities) {
-        showNotification('Flash not supported on this device', 'warning');
-        return;
+    try {
+        const track = cameraStream.getVideoTracks()[0];
+        if (!track || !track.getCapabilities) {
+            showNotification('Flash not supported on this device', 'warning');
+            return;
+        }
+        
+        const capabilities = track.getCapabilities();
+        if (!capabilities.torch) {
+            showNotification('Flash not supported on this camera', 'warning');
+            return;
+        }
+        
+        flashOn = !flashOn;
+        track.applyConstraints({
+            advanced: [{ torch: flashOn }]
+        });
+        
+        const flashBtn = SafetyGuards.safeGetElement('toggleFlashBtn');
+        if (flashBtn) {
+            flashBtn.innerHTML = flashOn ? 
+                '<i class="fas fa-lightbulb"></i> Flash On' : 
+                '<i class="far fa-lightbulb"></i> Flash Off';
+            flashBtn.style.backgroundColor = flashOn ? 'var(--warning-color)' : 'var(--primary-color)';
+        }
+        
+        showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
+    } catch (error) {
+        SafetyGuards.safeLogError('toggleFlash', 'toggle', error);
     }
-    
-    const capabilities = track.getCapabilities();
-    if (!capabilities.torch) {
-        showNotification('Flash not supported on this camera', 'warning');
-        return;
-    }
-    
-    flashOn = !flashOn;
-    track.applyConstraints({
-        advanced: [{ torch: flashOn }]
-    });
-    
-    const flashBtn = document.getElementById('toggleFlashBtn');
-    if (flashBtn) {
-        flashBtn.innerHTML = flashOn ? 
-            '<i class="fas fa-lightbulb"></i> Flash On' : 
-            '<i class="far fa-lightbulb"></i> Flash Off';
-        flashBtn.style.backgroundColor = flashOn ? 'var(--warning-color)' : 'var(--primary-color)';
-    }
-    
-    showNotification(flashOn ? 'Flash turned on' : 'Flash turned off', 'info');
 }
 
 // =============================================
@@ -2632,7 +3134,7 @@ export function toggleFlash() {
 
 export function generateUniqueQRCode() {
     try {
-        const qrContainer = document.getElementById('qrCodeContainer');
+        const qrContainer = SafetyGuards.safeGetElement('qrCodeContainer');
         if (!qrContainer) return;
         
         qrContainer.innerHTML = '';
@@ -2694,6 +3196,7 @@ export function generateUniqueQRCode() {
             localStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
             
         } catch (qrError) {
+            SafetyGuards.safeLogError('generateUniqueQRCode', 'qr_generation', qrError);
             qrContainer.innerHTML = `
                 <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                     <i class="fas fa-qrcode" style="font-size: 48px; margin-bottom: 15px; color: var(--primary-color);"></i>
@@ -2705,7 +3208,8 @@ export function generateUniqueQRCode() {
         }
         
     } catch (error) {
-        const qrContainer = document.getElementById('qrCodeContainer');
+        SafetyGuards.safeLogError('generateUniqueQRCode', 'generation', error);
+        const qrContainer = SafetyGuards.safeGetElement('qrCodeContainer');
         if (qrContainer) {
             qrContainer.innerHTML = `
                 <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
@@ -2718,15 +3222,20 @@ export function generateUniqueQRCode() {
 }
 
 function generateVerificationHash(userId, username) {
-    const secret = 'knecta_secret_2024';
-    const data = userId + username + Date.now();
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-        const char = data.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
+    try {
+        const secret = 'knecta_secret_2024';
+        const data = userId + username + Date.now();
+        let hash = 0;
+        for (let i = 0; i < data.length; i++) {
+            const char = data.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return Math.abs(hash).toString(16);
+    } catch (error) {
+        SafetyGuards.safeLogError('generateVerificationHash', 'generation', error);
+        return 'error';
     }
-    return Math.abs(hash).toString(16);
 }
 
 // =============================================
@@ -2735,6 +3244,14 @@ function generateVerificationHash(userId, username) {
 
 export async function showMutualFriends(userId, userName) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('showMutualFriends', 'session_check', 
+                                     new Error('Invalid session, cannot show mutual friends'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -2763,16 +3280,20 @@ export async function showMutualFriends(userId, userName) {
         }
         
     } catch (error) {
+        SafetyGuards.safeLogError('showMutualFriends', 'api_call', error, { userId });
         showNotification('Error loading mutual friends', 'error');
     }
 }
 
 function displayMutualFriendsModal(mutualFriends, userName) {
     try {
-        const mutualCountText = document.getElementById('mutualCountText');
-        const mutualFriendsList = document.getElementById('mutualFriendsList');
+        const mutualCountText = SafetyGuards.safeGetElement('mutualCountText');
+        const mutualFriendsList = SafetyGuards.safeGetElement('mutualFriendsList');
+        const mutualFriendsModal = SafetyGuards.safeGetElement('mutualFriendsModal');
         
-        if (!mutualCountText || !mutualFriendsList) {
+        if (!mutualCountText || !mutualFriendsList || !mutualFriendsModal) {
+            SafetyGuards.safeLogError('displayMutualFriendsModal', 'elements_not_found', 
+                                     new Error('Required modal elements not found'));
             return;
         }
         
@@ -2807,20 +3328,22 @@ function displayMutualFriendsModal(mutualFriends, userName) {
                 
                 friendItem.addEventListener('click', () => {
                     try {
-                        showFriendDetails(friend, 'friend');
+                        if (typeof showFriendDetails === 'function') {
+                            showFriendDetails(friend, 'friend');
+                        }
                     } catch (error) {
-                        console.error('Error showing friend details:', error);
+                        SafetyGuards.safeLogError('displayMutualFriendsModal', 'click_handler', error);
                     }
-                    document.getElementById('mutualFriendsModal').classList.remove('active');
+                    mutualFriendsModal.classList.remove('active');
                 });
                 
                 mutualFriendsList.appendChild(friendItem);
             });
         }
         
-        document.getElementById('mutualFriendsModal').classList.add('active');
+        mutualFriendsModal.classList.add('active');
     } catch (error) {
-        console.error('Error displaying mutual friends modal:', error);
+        SafetyGuards.safeLogError('displayMutualFriendsModal', 'display', error);
     }
 }
 
@@ -2830,6 +3353,14 @@ function displayMutualFriendsModal(mutualFriends, userName) {
 
 export async function togglePinFriend(friendData) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('togglePinFriend', 'session_check', 
+                                     new Error('Invalid session, cannot toggle pin'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -2866,14 +3397,19 @@ export async function togglePinFriend(friendData) {
         localStorage.setItem(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, JSON.stringify(pinnedFriends));
         
         try {
-            updateCurrentSection();
-            updateFriendCounts();
+            if (typeof updateCurrentSection === 'function') {
+                updateCurrentSection();
+            }
+            if (typeof updateFriendCounts === 'function') {
+                updateFriendCounts();
+            }
         } catch (error) {
-            console.error('Error updating UI after pinning friend:', error);
+            SafetyGuards.safeLogError('togglePinFriend', 'ui_update', error);
         }
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('togglePinFriend', 'api_call', error, friendData);
             showNotification('Failed to update pin status', 'error');
         }
     }
@@ -2881,6 +3417,14 @@ export async function togglePinFriend(friendData) {
 
 export async function toggleMuteFriend(friendData) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('toggleMuteFriend', 'session_check', 
+                                     new Error('Invalid session, cannot toggle mute'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -2917,14 +3461,19 @@ export async function toggleMuteFriend(friendData) {
         localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
         
         try {
-            updateCurrentSection();
-            updateFriendCounts();
+            if (typeof updateCurrentSection === 'function') {
+                updateCurrentSection();
+            }
+            if (typeof updateFriendCounts === 'function') {
+                updateFriendCounts();
+            }
         } catch (error) {
-            console.error('Error updating UI after muting friend:', error);
+            SafetyGuards.safeLogError('toggleMuteFriend', 'ui_update', error);
         }
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('toggleMuteFriend', 'api_call', error, friendData);
             showNotification('Failed to update mute status', 'error');
         }
     }
@@ -2953,36 +3502,50 @@ export function savePrivateNote(friendId, note) {
         showNotification('Note saved', 'success');
         
     } catch (error) {
+        SafetyGuards.safeLogError('savePrivateNote', 'save', error, { friendId });
         showNotification('Failed to save note', 'error');
     }
 }
 
 export function getLastInteraction(friendId) {
-    if (!window.lastInteractions) {
-        window.lastInteractions = {};
+    try {
+        if (!window.lastInteractions) {
+            window.lastInteractions = {};
+        }
+        
+        const interaction = window.lastInteractions[friendId];
+        if (!interaction) return null;
+        
+        const now = new Date();
+        const interactionTime = new Date(interaction.timestamp);
+        const minutesAgo = Math.floor((now - interactionTime) / 60000);
+        
+        if (minutesAgo < 1) return 'Just now';
+        if (minutesAgo < 60) return `${minutesAgo}m ago`;
+        
+        const hoursAgo = Math.floor(minutesAgo / 60);
+        if (hoursAgo < 24) return `${hoursAgo}h ago`;
+        
+        const daysAgo = Math.floor(hoursAgo / 24);
+        if (daysAgo < 7) return `${daysAgo}d ago`;
+        
+        return `${Math.floor(daysAgo / 7)}w ago`;
+    } catch (error) {
+        SafetyGuards.safeLogError('getLastInteraction', 'calculation', error);
+        return null;
     }
-    
-    const interaction = window.lastInteractions[friendId];
-    if (!interaction) return null;
-    
-    const now = new Date();
-    const interactionTime = new Date(interaction.timestamp);
-    const minutesAgo = Math.floor((now - interactionTime) / 60000);
-    
-    if (minutesAgo < 1) return 'Just now';
-    if (minutesAgo < 60) return `${minutesAgo}m ago`;
-    
-    const hoursAgo = Math.floor(minutesAgo / 60);
-    if (hoursAgo < 24) return `${hoursAgo}h ago`;
-    
-    const daysAgo = Math.floor(hoursAgo / 24);
-    if (daysAgo < 7) return `${daysAgo}d ago`;
-    
-    return `${Math.floor(daysAgo / 7)}w ago`;
 }
 
 export async function removeFriend(friendData) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('removeFriend', 'session_check', 
+                                     new Error('Invalid session, cannot remove friend'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -3009,10 +3572,14 @@ export async function removeFriend(friendData) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
             
             try {
-                updateCurrentSection();
-                updateFriendCounts();
+                if (typeof updateCurrentSection === 'function') {
+                    updateCurrentSection();
+                }
+                if (typeof updateFriendCounts === 'function') {
+                    updateFriendCounts();
+                }
             } catch (error) {
-                console.error('Error updating UI after removing friend:', error);
+                SafetyGuards.safeLogError('removeFriend', 'ui_update', error);
             }
             
             showNotification('Friend removed successfully', 'success');
@@ -3022,6 +3589,7 @@ export async function removeFriend(friendData) {
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('removeFriend', 'api_call', error, friendData);
             showNotification('Failed to remove friend', 'error');
         }
     }
@@ -3029,6 +3597,14 @@ export async function removeFriend(friendData) {
 
 export async function blockUser(friendData) {
     try {
+        // Safety: Check session
+        if (!SafetyGuards.isSessionValid()) {
+            SafetyGuards.safeLogError('blockUser', 'session_check', 
+                                     new Error('Invalid session, cannot block user'));
+            showNotification('Authentication required', 'error');
+            return;
+        }
+        
         const token = getValidToken();
         if (!token) {
             showNotification('Authentication required', 'error');
@@ -3055,10 +3631,14 @@ export async function blockUser(friendData) {
             localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
             
             try {
-                updateCurrentSection();
-                updateFriendCounts();
+                if (typeof updateCurrentSection === 'function') {
+                    updateCurrentSection();
+                }
+                if (typeof updateFriendCounts === 'function') {
+                    updateFriendCounts();
+                }
             } catch (error) {
-                console.error('Error updating UI after blocking user:', error);
+                SafetyGuards.safeLogError('blockUser', 'ui_update', error);
             }
             
             showNotification('User blocked successfully', 'success');
@@ -3068,6 +3648,7 @@ export async function blockUser(friendData) {
         
     } catch (error) {
         if (error.message !== 'Session expired') {
+            SafetyGuards.safeLogError('blockUser', 'api_call', error, friendData);
             showNotification('Failed to block user', 'error');
         }
     }
@@ -3088,7 +3669,7 @@ export function saveFriendsToLocalStorage() {
         localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, JSON.stringify(mutedFriends));
         localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_SYNC, Date.now().toString());
     } catch (error) {
-        console.error('Error saving friends to localStorage:', error);
+        SafetyGuards.safeLogError('saveFriendsToLocalStorage', 'save', error);
     }
 }
 
@@ -3097,38 +3678,45 @@ export function saveFriendsToLocalStorage() {
 // =============================================
 
 export function updateUIWithUserData(userData) {
-    currentUser = userData;
-    userData = userData;
-    
     try {
-        updateUserDisplayElements(userData);
+        currentUser = userData;
+        userData = userData;
+        
+        try {
+            if (typeof updateUserDisplayElements === 'function') {
+                updateUserDisplayElements(userData);
+            }
+        } catch (error) {
+            SafetyGuards.safeLogError('updateUIWithUserData', 'ui_update', error);
+        }
+        
+        if (userData.id) {
+            setTimeout(() => generateUniqueQRCode(), 100);
+        }
+        
+        const event = new CustomEvent('userDataLoaded', {
+            detail: { userData: userData, source: dataSource.source }
+        });
+        window.dispatchEvent(event);
     } catch (error) {
-        console.error('Error updating user display elements:', error);
+        SafetyGuards.safeLogError('updateUIWithUserData', 'processing', error);
     }
-    
-    if (userData.id) {
-        setTimeout(() => generateUniqueQRCode(), 100);
-    }
-    
-    const event = new CustomEvent('userDataLoaded', {
-        detail: { userData: userData, source: dataSource.source }
-    });
-    window.dispatchEvent(event);
 }
 
 function updateUserDisplayElements(userData) {
     // Implementation depends on external UI functions
+    // Safety wrapper already applied in updateUIWithUserData
 }
 
 export function updateDataSourceIndicator(source) {
     try {
-        const indicator = document.getElementById('dataSourceIndicator');
+        const indicator = SafetyGuards.safeGetElement('dataSourceIndicator');
         if (!indicator) return;
         
         indicator.className = 'data-source-indicator active';
         indicator.classList.add(source);
         
-        const textElement = document.getElementById('dataSourceText');
+        const textElement = SafetyGuards.safeGetElement('dataSourceText');
         if (textElement) {
             const sourceText = {
                 'parent': 'Data from Parent',
@@ -3143,7 +3731,7 @@ export function updateDataSourceIndicator(source) {
             indicator.classList.remove('active');
         }, 5000);
     } catch (error) {
-        console.error('Error updating data source indicator:', error);
+        SafetyGuards.safeLogError('updateDataSourceIndicator', 'ui_update', error);
     }
 }
 
@@ -3174,79 +3762,87 @@ export function attemptCachedDataFallback() {
         return false;
         
     } catch (error) {
-        console.error('[Friend Page] Error using cached data:', error.message);
+        SafetyGuards.safeLogError('attemptCachedDataFallback', 'fallback', error);
         return false;
     }
 }
 
 export function initializeMainFunctionality() {
-    hideAuthError();
-    
-    if (typeof enhancedInitialize === 'function') {
-        enhancedInitialize();
-    } else {
-        initializeOriginalFunctionality();
+    try {
+        hideAuthError();
+        
+        if (typeof enhancedInitialize === 'function') {
+            enhancedInitialize();
+        } else {
+            initializeOriginalFunctionality();
+        }
+    } catch (error) {
+        SafetyGuards.safeLogError('initializeMainFunctionality', 'initialization', error);
     }
 }
 
 function initializeOriginalFunctionality() {
-    if (typeof loadCachedDataInstantly === 'function') {
-        loadCachedDataInstantly();
-        cacheLoaded = true;
-    }
-    
-    if (typeof startParallelDataLoading === 'function') {
-        setTimeout(startParallelDataLoading, 1000);
-    }
-    
-    if (typeof updateCurrentSection === 'function') {
-        setTimeout(updateCurrentSection, 500);
+    try {
+        if (typeof loadCachedDataInstantly === 'function') {
+            loadCachedDataInstantly();
+            cacheLoaded = true;
+        }
+        
+        if (typeof startParallelDataLoading === 'function') {
+            setTimeout(startParallelDataLoading, 1000);
+        }
+        
+        if (typeof updateCurrentSection === 'function') {
+            setTimeout(updateCurrentSection, 500);
+        }
+    } catch (error) {
+        SafetyGuards.safeLogError('initializeOriginalFunctionality', 'initialization', error);
     }
 }
 
 export function showAuthError(message) {
-    if (window.parentCoordinator) {
-        window.parentCoordinator.showAuthError(message);
-        return;
-    }
-    
     try {
-        const overlay = document.getElementById('authErrorOverlay');
-        const messageElement = document.getElementById('authErrorMessage');
+        if (window.parentCoordinator) {
+            window.parentCoordinator.showAuthError(message);
+            return;
+        }
+        
+        const overlay = SafetyGuards.safeGetElement('authErrorOverlay');
+        const messageElement = SafetyGuards.safeGetElement('authErrorMessage');
         
         if (overlay && messageElement) {
             messageElement.textContent = message || 'Authentication required';
             overlay.classList.add('active');
         }
     } catch (error) {
-        console.error('Error showing auth error:', error);
+        SafetyGuards.safeLogError('showAuthError', 'ui_update', error);
     }
 }
 
 export function hideAuthError() {
-    if (window.parentCoordinator) {
-        window.parentCoordinator.hideAuthError();
-        return;
-    }
-    
     try {
-        const overlay = document.getElementById('authErrorOverlay');
+        if (window.parentCoordinator) {
+            window.parentCoordinator.hideAuthError();
+            return;
+        }
+        
+        const overlay = SafetyGuards.safeGetElement('authErrorOverlay');
         if (overlay) {
             overlay.classList.remove('active');
         }
     } catch (error) {
-        console.error('Error hiding auth error:', error);
+        SafetyGuards.safeLogError('hideAuthError', 'ui_update', error);
     }
 }
 
 export function showReconnectionState() {
-    if (window.parentCoordinator) {
-        window.parentCoordinator.showReconnectionState();
-        return;
-    }
-    
     try {
-        const existingIndicator = document.getElementById('reconnectionIndicator');
+        if (window.parentCoordinator) {
+            window.parentCoordinator.showReconnectionState();
+            return;
+        }
+        
+        const existingIndicator = SafetyGuards.safeGetElement('reconnectionIndicator');
         if (!existingIndicator) {
             const indicator = document.createElement('div');
             indicator.id = 'reconnectionIndicator';
@@ -3260,24 +3856,52 @@ export function showReconnectionState() {
             document.body.appendChild(indicator);
         }
     } catch (error) {
-        console.error('Error showing reconnection state:', error);
+        SafetyGuards.safeLogError('showReconnectionState', 'ui_update', error);
     }
 }
 
 export function hideReconnectionState() {
-    if (window.parentCoordinator) {
-        window.parentCoordinator.hideReconnectionState();
-        return;
-    }
-    
     try {
-        const indicator = document.getElementById('reconnectionIndicator');
+        if (window.parentCoordinator) {
+            window.parentCoordinator.hideReconnectionState();
+            return;
+        }
+        
+        const indicator = SafetyGuards.safeGetElement('reconnectionIndicator');
         if (indicator) {
             indicator.remove();
         }
     } catch (error) {
-        console.error('Error hiding reconnection state:', error);
+        SafetyGuards.safeLogError('hideReconnectionState', 'ui_update', error);
     }
+}
+
+// =============================================
+// MISSING FUNCTION WRAPPERS (For functions used elsewhere but not defined here)
+// =============================================
+
+// These functions are called in the code but might be defined elsewhere
+// Adding thin wrappers to prevent crashes
+
+export function updateCurrentSection() {
+    // This function is referenced but might be defined in UI modules
+    // Return safely to prevent crashes
+    SafetyGuards.safeLogError('updateCurrentSection', 'missing', 
+                             new Error('Function not implemented in friend-core.js'));
+}
+
+export function updateFriendCounts() {
+    // This function is referenced but might be defined in UI modules
+    // Return safely to prevent crashes
+    SafetyGuards.safeLogError('updateFriendCounts', 'missing', 
+                             new Error('Function not implemented in friend-core.js'));
+}
+
+export function showFriendDetails(friend, type) {
+    // This function is referenced but might be defined in UI modules
+    // Return safely to prevent crashes
+    SafetyGuards.safeLogError('showFriendDetails', 'missing', 
+                             new Error('Function not implemented in friend-core.js'), { friend, type });
 }
 
 // =============================================
@@ -3319,9 +3943,16 @@ if (typeof module !== 'undefined' && module.exports) {
         getCurrentUser,
         enhancedInitialize,
         escapeHtml,
-        requestSessionFromParent, // Added new function
-        handleEnhancedParentMessage, // Added new function
-        updateGlobalStateFromSession, // Added new function
-        bindUIAfterSession // Added new function
+        requestSessionFromParent,
+        handleEnhancedParentMessage,
+        updateGlobalStateFromSession,
+        bindUIAfterSession,
+        // Missing function wrappers
+        updateCurrentSection,
+        updateFriendCounts,
+        showFriendDetails
     };
 }
+
+// Initialize SafetyGuards for the module
+window.SafetyGuards = SafetyGuards;

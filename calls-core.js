@@ -31,6 +31,48 @@ export const maxHandshakeAttempts = 2;
 export const handshakeTimeout = 5000;
 export const sessionRetryDelay = 3000;
 
+// ==================== SAFETY GUARDS & LOGGING ====================
+const loggedErrors = new Set();
+const retryCounters = new Map();
+const trustedOrigins = new Set();
+const messageDuplicates = new Set();
+
+function logErrorOnce(module, error, context = '') {
+    const errorKey = `${module}:${error.message}:${context}`;
+    if (!loggedErrors.has(errorKey)) {
+        console.warn(`[Calls iframe] ${module} error (logged once):`, error.message, context);
+        loggedErrors.add(errorKey);
+    }
+}
+
+function getRetryCount(key) {
+    return retryCounters.get(key) || 0;
+}
+
+function incrementRetryCount(key) {
+    const count = getRetryCount(key) + 1;
+    retryCounters.set(key, count);
+    return count;
+}
+
+function resetRetryCount(key) {
+    retryCounters.delete(key);
+}
+
+function canRetry(key, maxRetries = 3) {
+    return getRetryCount(key) < maxRetries;
+}
+
+function isMessageDuplicate(message) {
+    const messageKey = JSON.stringify(message);
+    if (messageDuplicates.has(messageKey)) {
+        return true;
+    }
+    messageDuplicates.add(messageKey);
+    setTimeout(() => messageDuplicates.delete(messageKey), 1000);
+    return false;
+}
+
 // ==================== PARENT COORDINATION CONTROLLER ====================
 export class ParentCoordinator {
     constructor() {
@@ -53,32 +95,39 @@ export class ParentCoordinator {
         this.sessionWaitingLogged = false;
         this.secureSessionValid = false;
         this.secureHandshakeRequested = false;
+        this.messageRetryCounts = new Map();
+        this.maxMessageRetries = 3;
     }
     
     async initialize() {
-        console.info('[Calls iframe] Initializing parent coordination...');
-        
-        this.detectParent();
-        
-        if (!this.parentDetected) {
-            console.warn('[Calls iframe] No parent window detected');
+        try {
+            console.info('[Calls iframe] Initializing parent coordination...');
+            
+            this.detectParent();
+            
+            if (!this.parentDetected) {
+                console.warn('[Calls iframe] No parent window detected');
+                this.setFallbackState('unavailable');
+                return;
+            }
+            
+            if (!this.sameOrigin) {
+                console.warn('[Calls iframe] Cross-origin parent detected, limited functionality');
+                this.setFallbackState('reconnecting');
+            }
+            
+            this.establishMessagingChannel();
+            
+            // Start secure handshake protocol
+            this.startSecureHandshake();
+            
+            this.startHeartbeat();
+            
+            this.setupResynchronization();
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.initialize', error);
             this.setFallbackState('unavailable');
-            return;
         }
-        
-        if (!this.sameOrigin) {
-            console.warn('[Calls iframe] Cross-origin parent detected, limited functionality');
-            this.setFallbackState('reconnecting');
-        }
-        
-        this.establishMessagingChannel();
-        
-        // Start secure handshake protocol
-        this.startSecureHandshake();
-        
-        this.startHeartbeat();
-        
-        this.setupResynchronization();
     }
     
     detectParent() {
@@ -89,22 +138,31 @@ export class ParentCoordinator {
                 try {
                     this.sameOrigin = window.location.origin === window.parent.location.origin;
                     console.info(`[Calls iframe] Parent detected, same-origin: ${this.sameOrigin}`);
+                    
+                    if (this.sameOrigin) {
+                        trustedOrigins.add(window.location.origin);
+                    }
                 } catch (error) {
                     console.info('[Calls iframe] Cross-origin parent detected');
                     this.sameOrigin = false;
                 }
             }
         } catch (error) {
-            console.error('[Calls iframe] Error detecting parent:', error);
+            logErrorOnce('ParentCoordinator.detectParent', error);
             this.parentDetected = false;
             this.sameOrigin = false;
         }
     }
     
     establishMessagingChannel() {
-        window.addEventListener('message', this.handleParentMessage.bind(this));
-        console.info('[Calls iframe] Secure messaging channel established');
-        this.secureChannelEstablished = true;
+        try {
+            window.addEventListener('message', this.handleParentMessage.bind(this));
+            console.info('[Calls iframe] Secure messaging channel established');
+            this.secureChannelEstablished = true;
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.establishMessagingChannel', error);
+            this.secureChannelEstablished = false;
+        }
     }
     
     handleParentMessage(event) {
@@ -115,36 +173,55 @@ export class ParentCoordinator {
         
         const data = event.data;
         
-        if (this.messageHandlers.has(data.type)) {
-            this.messageHandlers.get(data.type)(data);
-        } else {
-            this.handleDefaultMessage(data);
+        if (!data || typeof data !== 'object') {
+            console.warn('[Calls iframe] Invalid message data');
+            return;
         }
         
-        if (data.requestId && this.pendingRequests.has(data.requestId)) {
-            const { resolve, reject } = this.pendingRequests.get(data.requestId);
-            if (data.success !== false) {
-                resolve(data);
+        try {
+            if (this.messageHandlers.has(data.type)) {
+                this.messageHandlers.get(data.type)(data);
             } else {
-                reject(new Error(data.error || 'Request failed'));
+                this.handleDefaultMessage(data);
             }
-            this.pendingRequests.delete(data.requestId);
+            
+            if (data.requestId && this.pendingRequests.has(data.requestId)) {
+                const { resolve, reject } = this.pendingRequests.get(data.requestId);
+                if (data.success !== false) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Request failed'));
+                }
+                this.pendingRequests.delete(data.requestId);
+            }
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.handleParentMessage', error, `type: ${data?.type}`);
         }
     }
     
     isValidOrigin(origin) {
+        if (trustedOrigins.has(origin)) return true;
         if (origin === window.location.origin) return true;
         
         // Allow localhost for development
-        if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) return true;
+        if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+            trustedOrigins.add(origin);
+            return true;
+        }
         
         try {
             const parentHost = window.location.hostname;
             const originHost = new URL(origin).hostname;
             
-            return originHost === parentHost || 
-                   originHost.endsWith('.' + parentHost) ||
-                   parentHost.endsWith('.' + originHost);
+            const isValid = originHost === parentHost || 
+                           originHost.endsWith('.' + parentHost) ||
+                           parentHost.endsWith('.' + originHost);
+            
+            if (isValid) {
+                trustedOrigins.add(origin);
+            }
+            
+            return isValid;
         } catch (error) {
             return false;
         }
@@ -157,11 +234,17 @@ export class ParentCoordinator {
             return;
         }
         
+        const retryKey = 'secureHandshake';
+        if (!canRetry(retryKey, maxHandshakeAttempts)) {
+            console.warn('[Calls iframe] Max secure handshake retries reached');
+            return;
+        }
+        
         secureHandshakeInProgress = true;
         this.secureHandshakeRequested = true;
-        secureHandshakeAttempts = 0;
+        secureHandshakeAttempts = incrementRetryCount(retryKey);
         
-        console.info('[Calls iframe] Starting secure handshake protocol...');
+        console.info(`[Calls iframe] Starting secure handshake protocol (attempt ${secureHandshakeAttempts}/${maxHandshakeAttempts})...`);
         this.requestSecureSession();
     }
     
@@ -178,8 +261,6 @@ export class ParentCoordinator {
             return;
         }
         
-        secureHandshakeAttempts++;
-        
         if (secureHandshakeAttempts === 1) {
             console.info('[Calls iframe] ⏳ Waiting for secure session from parent...');
         } else {
@@ -189,11 +270,12 @@ export class ParentCoordinator {
         // Clear any existing timeout
         if (secureHandshakeTimeout) {
             clearTimeout(secureHandshakeTimeout);
+            secureHandshakeTimeout = null;
         }
         
         const requestId = 'secure_session_req_' + Date.now();
         
-        this.sendToParent({
+        const message = {
             type: 'REQUEST_SESSION',
             source: 'calls-iframe',
             requestId: requestId,
@@ -201,14 +283,18 @@ export class ParentCoordinator {
             version: '1.0',
             secure: true,
             iframeId: this.getIframeId()
-        });
+        };
+        
+        if (!this.sendToParent(message)) {
+            this.handleSecureHandshakeFailure('Failed to send request');
+            return;
+        }
         
         // Set timeout for handshake response
         secureHandshakeTimeout = setTimeout(() => {
             if (!this.secureSessionValid) {
                 console.warn(`[Calls iframe] ⚠️ Secure session request timeout (attempt ${secureHandshakeAttempts})`);
                 if (secureHandshakeAttempts < maxHandshakeAttempts) {
-                    // Retry once
                     console.info('[Calls iframe] Will retry secure handshake...');
                     setTimeout(() => this.requestSecureSession(), sessionRetryDelay);
                 } else {
@@ -231,6 +317,11 @@ export class ParentCoordinator {
     }
     
     handleSecureSessionData(sessionData) {
+        if (!sessionData || typeof sessionData !== 'object') {
+            console.warn('[Calls iframe] Invalid session data received');
+            return;
+        }
+        
         // Validate session data structure
         if (!this.validateSecureSessionSchema(sessionData)) {
             console.warn('[Calls iframe] ❌ Received invalid secure session from parent');
@@ -258,6 +349,8 @@ export class ParentCoordinator {
         this.handshakeComplete = true;
         this.handshakeInProgress = false;
         
+        resetRetryCount('secureHandshake');
+        
         console.info('[Calls iframe] ✅ Secure session received and validated successfully');
         
         this.setFallbackState('connected');
@@ -266,14 +359,18 @@ export class ParentCoordinator {
         
         this.bindUIAfterSessionConfirmation();
         
-        this.sendToParent({
+        const confirmMessage = {
             type: 'SESSION_CONSUMED',
             source: 'calls-iframe',
             timestamp: Date.now(),
             sessionId: sessionData.sessionId,
             userId: sessionData.user?.id,
             secure: true
-        });
+        };
+        
+        if (!this.sendToParent(confirmMessage)) {
+            console.warn('[Calls iframe] Failed to send session confirmation');
+        }
         
         console.info('[Calls iframe] Secure session data consumed successfully');
     }
@@ -294,7 +391,7 @@ export class ParentCoordinator {
         }
         
         // Validate user object
-        if (!sessionData.user.id || !sessionData.user.username) {
+        if (!sessionData.user || !sessionData.user.id || !sessionData.user.username) {
             console.warn('[Calls iframe] Invalid user data in secure session');
             return false;
         }
@@ -352,35 +449,53 @@ export class ParentCoordinator {
         
         console.info('[Calls iframe] Starting handshake protocol...');
         
-        this.sendToParent({
+        const message = {
             type: 'CHILD_READY',
             source: 'calls-iframe',
             timestamp: Date.now(),
             version: '1.0',
             capabilities: ['session_management', 'ui_coordination', 'api_routing']
-        });
+        };
+        
+        if (!this.sendToParent(message)) {
+            console.warn('[Calls iframe] Failed to send CHILD_READY');
+            this.handshakeInProgress = false;
+            return;
+        }
         
         await this.requestSessionWithBackoff();
     }
     
     async requestSessionWithBackoff() {
-        let attempt = 0;
+        const retryKey = 'sessionRequest';
+        if (!canRetry(retryKey, 5)) {
+            console.warn('[Calls iframe] Max session request attempts reached');
+            this.setFallbackState('unavailable');
+            this.handshakeInProgress = false;
+            return;
+        }
+        
+        let attempt = getRetryCount(retryKey);
         const maxAttempts = 5;
         const baseDelay = 1000;
         
         while (attempt < maxAttempts && !this.handshakeComplete) {
-            attempt++;
+            attempt = incrementRetryCount(retryKey);
             const delay = baseDelay * Math.pow(2, attempt - 1);
             
             console.info(`[Calls iframe] Requesting session (attempt ${attempt}/${maxAttempts})...`);
             
-            this.sendToParent({
+            const message = {
                 type: 'REQUEST_SESSION',
                 source: 'calls-iframe',
                 timestamp: Date.now(),
                 attempt: attempt,
                 requestId: 'session_req_' + Date.now()
-            });
+            };
+            
+            if (!this.sendToParent(message)) {
+                console.warn(`[Calls iframe] Failed to send session request (attempt ${attempt})`);
+            }
             
             await new Promise(resolve => {
                 const timeoutId = setTimeout(() => {
@@ -411,14 +526,43 @@ export class ParentCoordinator {
             return false;
         }
         
+        if (!message || typeof message !== 'object') {
+            console.warn('[Calls iframe] Invalid message object');
+            return false;
+        }
+        
+        if (isMessageDuplicate(message)) {
+            console.warn('[Calls iframe] Duplicate message detected, skipping');
+            return false;
+        }
+        
+        const retryKey = `sendMessage:${message.type}`;
+        const retryCount = getRetryCount(retryKey);
+        
+        if (retryCount >= this.maxMessageRetries) {
+            console.warn(`[Calls iframe] Max retries reached for message type: ${message.type}`);
+            return false;
+        }
+        
         try {
             message.source = message.source || 'calls-iframe';
             message.timestamp = message.timestamp || Date.now();
             
             window.parent.postMessage(message, targetOrigin);
+            
+            if (retryCount > 0) {
+                resetRetryCount(retryKey);
+            }
+            
             return true;
         } catch (error) {
-            console.error('[Calls iframe] Error sending message to parent:', error);
+            incrementRetryCount(retryKey);
+            logErrorOnce('ParentCoordinator.sendToParent', error, `type: ${message.type}, retry: ${retryCount + 1}`);
+            
+            if (retryCount < this.maxMessageRetries - 1) {
+                setTimeout(() => this.sendToParent(message, targetOrigin), 1000 * (retryCount + 1));
+            }
+            
             return false;
         }
     }
@@ -427,6 +571,11 @@ export class ParentCoordinator {
         return new Promise((resolve, reject) => {
             if (!this.parentDetected) {
                 reject(new Error('No parent detected'));
+                return;
+            }
+            
+            if (!message || typeof message !== 'object') {
+                reject(new Error('Invalid message'));
                 return;
             }
             
@@ -451,16 +600,22 @@ export class ParentCoordinator {
     }
     
     handleSessionData(sessionData) {
+        if (!sessionData || typeof sessionData !== 'object') {
+            console.warn('[Calls iframe] Invalid session data received');
+            return;
+        }
+        
         console.info('[Calls iframe] Received SESSION_DATA');
         
         if (!this.validateSessionSchema(sessionData)) {
             console.error('[Calls iframe] Invalid session schema');
-            this.sendToParent({
+            const errorMessage = {
                 type: 'SESSION_ERROR',
                 source: 'calls-iframe',
                 error: 'Invalid session schema',
                 timestamp: Date.now()
-            });
+            };
+            this.sendToParent(errorMessage);
             return;
         }
         
@@ -475,13 +630,17 @@ export class ParentCoordinator {
         
         this.bindUIAfterSessionConfirmation();
         
-        this.sendToParent({
+        const confirmMessage = {
             type: 'SESSION_CONSUMED',
             source: 'calls-iframe',
             timestamp: Date.now(),
             sessionId: sessionData.sessionId,
             userId: sessionData.user?.id
-        });
+        };
+        
+        if (!this.sendToParent(confirmMessage)) {
+            console.warn('[Calls iframe] Failed to send session confirmation');
+        }
         
         console.info('[Calls iframe] Session data consumed successfully');
     }
@@ -515,11 +674,16 @@ export class ParentCoordinator {
     }
     
     updateGlobalStateFromSession() {
+        if (!this.sessionData) {
+            console.warn('[Calls iframe] No session data available');
+            return;
+        }
+        
         // Add defensive guard for session data
-        if (!this.sessionData || !this.sessionData.token) {
+        if (!this.sessionData.token) {
             // Log only once per session initialization to prevent spam
             if (!this.sessionWaitingLogged) {
-                console.info('[Calls iframe] Session not ready, waiting...');
+                console.info('[Calls iframe] Session token not ready, waiting...');
                 this.sessionWaitingLogged = true;
             }
             return; // Skip processing until session is ready
@@ -529,36 +693,57 @@ export class ParentCoordinator {
         this.sessionWaitingLogged = false;
         
         if (this.sessionData.user) {
-            currentUser = this.sessionData.user;
-            userDataLoaded = true;
-            
-            if (window.AppState) {
-                window.AppState.user = this.sessionData.user;
-                window.AppState.currentUser = this.sessionData.user;
-                window.AppState.isAuthenticated = this.sessionData.authenticated || false;
+            try {
+                currentUser = this.sessionData.user;
+                userDataLoaded = true;
+                
+                if (window.AppState) {
+                    window.AppState.user = this.sessionData.user;
+                    window.AppState.currentUser = this.sessionData.user;
+                    window.AppState.isAuthenticated = this.sessionData.authenticated || false;
+                }
+            } catch (error) {
+                logErrorOnce('ParentCoordinator.updateGlobalStateFromSession.user', error);
             }
         }
         
         if (this.sessionData.authenticated !== undefined) {
-            sessionAuthorityReady = this.sessionData.authenticated;
-            
-            if (!this.sessionData.authenticated) {
-                this.handleLogout();
+            try {
+                sessionAuthorityReady = this.sessionData.authenticated;
+                
+                if (!this.sessionData.authenticated) {
+                    this.handleLogout();
+                }
+            } catch (error) {
+                logErrorOnce('ParentCoordinator.updateGlobalStateFromSession.auth', error);
             }
         }
         
         if (this.sessionData.token) {
-            this.handleTokenUpdate(this.sessionData.token);
+            try {
+                this.handleTokenUpdate(this.sessionData.token);
+            } catch (error) {
+                logErrorOnce('ParentCoordinator.updateGlobalStateFromSession.token', error);
+            }
         }
         
         if (this.sessionData.apiConfig) {
-            this.handleApiConfigUpdate(this.sessionData.apiConfig);
+            try {
+                this.handleApiConfigUpdate(this.sessionData.apiConfig);
+            } catch (error) {
+                logErrorOnce('ParentCoordinator.updateGlobalStateFromSession.apiConfig', error);
+            }
         }
     }
     
     bindUIAfterSessionConfirmation() {
-        if (!this.sessionValidated || !currentUser) {
-            console.warn('[Calls iframe] Cannot bind UI - session not validated or no user data');
+        if (!this.sessionValidated) {
+            console.warn('[Calls iframe] Cannot bind UI - session not validated');
+            return;
+        }
+        
+        if (!currentUser) {
+            console.warn('[Calls iframe] Cannot bind UI - no user data');
             return;
         }
         
@@ -568,34 +753,40 @@ export class ParentCoordinator {
             try {
                 binding();
             } catch (error) {
-                console.error('[Calls iframe] Error in UI binding:', error);
+                logErrorOnce('ParentCoordinator.bindUIAfterSessionConfirmation.binding', error);
             }
         });
         
-        this.updateUIWithSessionData();
-        
-        this.enableProtectedUI();
-        
-        console.info('[Calls iframe] UI binding complete');
+        try {
+            this.updateUIWithSessionData();
+            this.enableProtectedUI();
+            console.info('[Calls iframe] UI binding complete');
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.bindUIAfterSessionConfirmation.ui', error);
+        }
     }
     
     updateUIWithSessionData() {
         if (!currentUser) return;
         
-        const userElements = {
-            'userAvatar': currentUser.avatar,
-            'userName': currentUser.name || currentUser.username,
-            'userStatus': currentUser.status || 'Online'
-        };
-        
-        this.updateUserSpecificUI(userElements);
-        
-        this.updateApiStatusIndicator();
-        
-        this.updateSyncIndicator();
+        try {
+            const userElements = {
+                'userAvatar': currentUser.avatar,
+                'userName': currentUser.name || currentUser.username,
+                'userStatus': currentUser.status || 'Online'
+            };
+            
+            this.updateUserSpecificUI(userElements);
+            this.updateApiStatusIndicator();
+            this.updateSyncIndicator();
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.updateUIWithSessionData', error);
+        }
     }
     
     updateUserSpecificUI(userElements) {
+        if (!userElements) return;
+        
         try {
             document.querySelectorAll('.user-avatar, .avatar-img').forEach(el => {
                 if (userElements.userAvatar) {
@@ -619,7 +810,7 @@ export class ParentCoordinator {
                 callStatusText.textContent = `Ready (${userElements.userName})`;
             }
         } catch (error) {
-            console.error('[Calls iframe] Error updating user UI:', error);
+            logErrorOnce('ParentCoordinator.updateUserSpecificUI', error);
         }
     }
     
@@ -637,7 +828,7 @@ export class ParentCoordinator {
                 }, 2000);
             }
         } catch (error) {
-            console.error('[Calls iframe] Error updating API status:', error);
+            logErrorOnce('ParentCoordinator.updateApiStatusIndicator', error);
         }
     }
     
@@ -649,7 +840,7 @@ export class ParentCoordinator {
                 syncIndicator.classList.remove('syncing');
             }
         } catch (error) {
-            console.error('[Calls iframe] Error updating sync indicator:', error);
+            logErrorOnce('ParentCoordinator.updateSyncIndicator', error);
         }
     }
     
@@ -672,7 +863,7 @@ export class ParentCoordinator {
             
             this.loadUserSpecificData();
         } catch (error) {
-            console.error('[Calls iframe] Error enabling protected UI:', error);
+            logErrorOnce('ParentCoordinator.enableProtectedUI', error);
         }
     }
     
@@ -689,7 +880,7 @@ export class ParentCoordinator {
                 await window.callAPI.performInitialDataLoad();
             }
         } catch (error) {
-            console.error('[Calls iframe] Error loading user-specific data:', error);
+            logErrorOnce('ParentCoordinator.loadUserSpecificData', error);
         }
     }
     
@@ -718,68 +909,80 @@ export class ParentCoordinator {
             
             return response.data;
         } catch (error) {
-            console.error('[Calls iframe] API routing failed:', error);
+            logErrorOnce('ParentCoordinator.routeApiCall', error);
             throw error;
         }
     }
     
     handleSessionUpdate(updateData) {
+        if (!updateData || typeof updateData !== 'object') {
+            console.warn('[Calls iframe] Invalid session update data');
+            return;
+        }
+        
         console.info('[Calls iframe] Received SESSION_UPDATE');
         
-        if (updateData.sessionData) {
-            this.sessionData = { ...this.sessionData, ...updateData.sessionData };
-        }
-        
-        if (updateData.user) {
-            currentUser = { ...currentUser, ...updateData.user };
-            
-            if (window.AppState) {
-                window.AppState.user = currentUser;
-                window.AppState.currentUser = currentUser;
+        try {
+            if (updateData.sessionData) {
+                this.sessionData = { ...this.sessionData, ...updateData.sessionData };
             }
             
-            this.updateUIWithSessionData();
-        }
-        
-        this.sessionUpdateCallbacks.forEach(callback => {
-            try {
-                callback(updateData);
-            } catch (error) {
-                console.error('[Calls iframe] Error in session update callback:', error);
+            if (updateData.user) {
+                currentUser = { ...currentUser, ...updateData.user };
+                
+                if (window.AppState) {
+                    window.AppState.user = currentUser;
+                    window.AppState.currentUser = currentUser;
+                }
+                
+                this.updateUIWithSessionData();
             }
-        });
-        
-        console.info('[Calls iframe] Session updated successfully');
+            
+            this.sessionUpdateCallbacks.forEach(callback => {
+                try {
+                    callback(updateData);
+                } catch (error) {
+                    logErrorOnce('ParentCoordinator.handleSessionUpdate.callback', error);
+                }
+            });
+            
+            console.info('[Calls iframe] Session updated successfully');
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.handleSessionUpdate', error);
+        }
     }
     
     handleLogout() {
         console.info('[Calls iframe] Logout received from parent coordination');
         
-        currentUser = null;
-        userDataLoaded = false;
-        sessionAuthorityReady = false;
-        this.sessionValidated = false;
-        this.sessionData = null;
-        this.sessionWaitingLogged = false;
-        this.secureSessionValid = false;
-        secureHandshakeInProgress = false;
-        this.secureHandshakeRequested = false;
-        
-        if (window.AppState) {
-            window.AppState.user = null;
-            window.AppState.currentUser = null;
-            window.AppState.isAuthenticated = false;
+        try {
+            currentUser = null;
+            userDataLoaded = false;
+            sessionAuthorityReady = false;
+            this.sessionValidated = false;
+            this.sessionData = null;
+            this.sessionWaitingLogged = false;
+            this.secureSessionValid = false;
+            secureHandshakeInProgress = false;
+            this.secureHandshakeRequested = false;
+            
+            if (window.AppState) {
+                window.AppState.user = null;
+                window.AppState.currentUser = null;
+                window.AppState.isAuthenticated = false;
+            }
+            
+            this.disableProtectedUI();
+            this.showReconnectState();
+            
+            if (window.CallApp) {
+                window.CallApp.notifyParent('USER_LOGGED_OUT', {});
+            }
+            
+            console.info('[Calls iframe] Logout handled successfully');
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.handleLogout', error);
         }
-        
-        this.disableProtectedUI();
-        
-        this.showReconnectState();
-        
-        if (window.CallApp) {
-            window.CallApp.notifyParent('USER_LOGGED_OUT', {});
-        }
-        
-        console.info('[Calls iframe] Logout handled successfully');
     }
     
     disableProtectedUI() {
@@ -796,7 +999,7 @@ export class ParentCoordinator {
             
             this.showReconnectState();
         } catch (error) {
-            console.error('[Calls iframe] Error disabling protected UI:', error);
+            logErrorOnce('ParentCoordinator.disableProtectedUI', error);
         }
     }
     
@@ -833,36 +1036,59 @@ export class ParentCoordinator {
                 });
             }
         } catch (error) {
-            console.error('[Calls iframe] Error showing reconnect state:', error);
+            logErrorOnce('ParentCoordinator.showReconnectState', error);
         }
     }
     
     handleTokenUpdate(tokenData) {
-        console.info('[Calls iframe] Received token update from parent coordination');
-        
-        if (!tokenData || !tokenData.token) {
+        if (!tokenData || typeof tokenData !== 'object') {
             console.warn('[Calls iframe] Invalid token data received');
             return;
         }
         
-        if (window.callAPI && window.callAPI.tokenManager) {
-            window.callAPI.tokenManager.setToken(tokenData.token);
+        console.info('[Calls iframe] Received token update from parent coordination');
+        
+        if (!tokenData.token) {
+            console.warn('[Calls iframe] No token in token data');
+            return;
         }
         
-        if (this.sessionData) {
-            this.sessionData.token = tokenData.token;
+        try {
+            if (window.callAPI && window.callAPI.tokenManager) {
+                window.callAPI.tokenManager.setToken(tokenData.token);
+            }
+            
+            if (this.sessionData) {
+                this.sessionData.token = tokenData.token;
+            }
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.handleTokenUpdate', error);
         }
     }
     
     handleApiConfigUpdate(apiConfig) {
+        if (!apiConfig || typeof apiConfig !== 'object') {
+            console.warn('[Calls iframe] Invalid API config received');
+            return;
+        }
+        
         console.info('[Calls iframe] Received API config update');
         
-        if (window.callAPI) {
-            window.callAPI.apiConfig = { ...window.callAPI.apiConfig, ...apiConfig };
+        try {
+            if (window.callAPI) {
+                window.callAPI.apiConfig = { ...window.callAPI.apiConfig, ...apiConfig };
+            }
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.handleApiConfigUpdate', error);
         }
     }
     
     handleDefaultMessage(data) {
+        if (!data || typeof data !== 'object') {
+            console.warn('[Calls iframe] Invalid message data');
+            return;
+        }
+        
         try {
             switch (data.type) {
                 case 'SESSION_DATA':
@@ -900,32 +1126,49 @@ export class ParentCoordinator {
                     break;
             }
         } catch (error) {
-            console.error('[Calls iframe] Error handling default message:', error);
+            logErrorOnce('ParentCoordinator.handleDefaultMessage', error, `type: ${data.type}`);
         }
     }
     
     registerMessageHandler(type, handler) {
-        this.messageHandlers.set(type, handler);
+        try {
+            this.messageHandlers.set(type, handler);
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.registerMessageHandler', error);
+        }
     }
     
     registerUIBinding(binding) {
-        this.uiBindings.push(binding);
+        try {
+            this.uiBindings.push(binding);
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.registerUIBinding', error);
+        }
     }
     
     registerSessionUpdateCallback(callback) {
-        this.sessionUpdateCallbacks.push(callback);
+        try {
+            this.sessionUpdateCallbacks.push(callback);
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.registerSessionUpdateCallback', error);
+        }
     }
     
     startHeartbeat() {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
+        try {
+            if (this.heartbeatInterval) {
+                clearInterval(this.heartbeatInterval);
+                this.heartbeatInterval = null;
+            }
+            
+            this.heartbeatInterval = setInterval(() => {
+                this.sendHeartbeat();
+            }, 30000);
+            
+            setTimeout(() => this.sendHeartbeat(), 5000);
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.startHeartbeat', error);
         }
-        
-        this.heartbeatInterval = setInterval(() => {
-            this.sendHeartbeat();
-        }, 30000);
-        
-        setTimeout(() => this.sendHeartbeat(), 5000);
     }
     
     sendHeartbeat() {
@@ -933,12 +1176,16 @@ export class ParentCoordinator {
             return;
         }
         
-        this.sendToParent({
+        const heartbeatMessage = {
             type: 'HEARTBEAT',
             source: 'calls-iframe',
             timestamp: Date.now(),
             sessionId: this.sessionData?.sessionId
-        });
+        };
+        
+        if (!this.sendToParent(heartbeatMessage)) {
+            console.warn('[Calls iframe] Failed to send heartbeat');
+        }
         
         this.lastHeartbeat = Date.now();
     }
@@ -958,33 +1205,41 @@ export class ParentCoordinator {
     handleApiReady() {
         console.info('[Calls iframe] Parent API ready signal received');
         
-        if (window.AppState) {
-            window.AppState.apiReady = true;
-        }
-        
-        setTimeout(() => {
-            if (window.callAPI && window.callAPI.tokenManager) {
-                window.callAPI.tokenManager.tryGetTokenFromAPI();
+        try {
+            if (window.AppState) {
+                window.AppState.apiReady = true;
             }
-        }, 100);
+            
+            setTimeout(() => {
+                if (window.callAPI && window.callAPI.tokenManager) {
+                    window.callAPI.tokenManager.tryGetTokenFromAPI();
+                }
+            }, 100);
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.handleApiReady', error);
+        }
     }
     
     setFallbackState(state) {
         this.fallbackState = state;
         
-        switch (state) {
-            case 'waiting':
-                this.showWaitingState();
-                break;
-            case 'reconnecting':
-                this.showReconnectingState();
-                break;
-            case 'unavailable':
-                this.showUnavailableState();
-                break;
-            case 'connected':
-                this.hideFallbackState();
-                break;
+        try {
+            switch (state) {
+                case 'waiting':
+                    this.showWaitingState();
+                    break;
+                case 'reconnecting':
+                    this.showReconnectingState();
+                    break;
+                case 'unavailable':
+                    this.showUnavailableState();
+                    break;
+                case 'connected':
+                    this.hideFallbackState();
+                    break;
+            }
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.setFallbackState', error);
         }
     }
     
@@ -1029,7 +1284,7 @@ export class ParentCoordinator {
                 });
             }
         } catch (error) {
-            console.error('[Calls iframe] Error showing unavailable state:', error);
+            logErrorOnce('ParentCoordinator.showUnavailableState', error);
         }
     }
     
@@ -1037,7 +1292,7 @@ export class ParentCoordinator {
         try {
             document.querySelectorAll('.reconnect-overlay, .unavailable-overlay').forEach(el => el.remove());
         } catch (error) {
-            console.error('[Calls iframe] Error hiding fallback state:', error);
+            logErrorOnce('ParentCoordinator.hideFallbackState', error);
         }
     }
     
@@ -1055,7 +1310,7 @@ export class ParentCoordinator {
                 }
             });
         } catch (error) {
-            console.error('[Calls iframe] Error setting up resynchronization:', error);
+            logErrorOnce('ParentCoordinator.setupResynchronization', error);
         }
     }
     
@@ -1067,40 +1322,59 @@ export class ParentCoordinator {
     }
     
     cleanup() {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
-            this.heartbeatInterval = null;
+        try {
+            if (this.heartbeatInterval) {
+                clearInterval(this.heartbeatInterval);
+                this.heartbeatInterval = null;
+            }
+            
+            if (this.reconnectionTimer) {
+                clearTimeout(this.reconnectionTimer);
+                this.reconnectionTimer = null;
+            }
+            
+            if (secureHandshakeTimeout) {
+                clearTimeout(secureHandshakeTimeout);
+                secureHandshakeTimeout = null;
+            }
+            
+            this.messageHandlers.clear();
+            this.pendingRequests.clear();
+            this.uiBindings = [];
+            this.sessionUpdateCallbacks = [];
+            this.sessionWaitingLogged = false;
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.cleanup', error);
         }
-        
-        if (this.reconnectionTimer) {
-            clearTimeout(this.reconnectionTimer);
-            this.reconnectionTimer = null;
-        }
-        
-        if (secureHandshakeTimeout) {
-            clearTimeout(secureHandshakeTimeout);
-            secureHandshakeTimeout = null;
-        }
-        
-        this.messageHandlers.clear();
-        this.pendingRequests.clear();
-        this.uiBindings = [];
-        this.sessionUpdateCallbacks = [];
-        this.sessionWaitingLogged = false;
     }
     
     getStatus() {
-        return {
-            parentDetected: this.parentDetected,
-            sameOrigin: this.sameOrigin,
-            secureChannelEstablished: this.secureChannelEstablished,
-            handshakeComplete: this.handshakeComplete,
-            sessionValidated: this.sessionValidated,
-            fallbackState: this.fallbackState,
-            secureSessionValid: this.secureSessionValid,
-            secureHandshakeInProgress: secureHandshakeInProgress,
-            sessionData: this.sessionData ? { ...this.sessionData, token: '***' } : null
-        };
+        try {
+            return {
+                parentDetected: this.parentDetected,
+                sameOrigin: this.sameOrigin,
+                secureChannelEstablished: this.secureChannelEstablished,
+                handshakeComplete: this.handshakeComplete,
+                sessionValidated: this.sessionValidated,
+                fallbackState: this.fallbackState,
+                secureSessionValid: this.secureSessionValid,
+                secureHandshakeInProgress: secureHandshakeInProgress,
+                sessionData: this.sessionData ? { ...this.sessionData, token: '***' } : null
+            };
+        } catch (error) {
+            logErrorOnce('ParentCoordinator.getStatus', error);
+            return {
+                parentDetected: false,
+                sameOrigin: false,
+                secureChannelEstablished: false,
+                handshakeComplete: false,
+                sessionValidated: false,
+                fallbackState: 'error',
+                secureSessionValid: false,
+                secureHandshakeInProgress: false,
+                sessionData: null
+            };
+        }
     }
 }
 
@@ -1117,30 +1391,34 @@ export class ParentChildCommunication {
     }
     
     async initialize() {
-        console.info('[Calls iframe] Initializing parent-child communication with coordination...');
-        
-        if (!parentCoordinator) {
-            console.info('[Calls iframe] Parent coordinator not yet available, waiting...');
-            await this.waitForParentCoordinator();
+        try {
+            console.info('[Calls iframe] Initializing parent-child communication with coordination...');
+            
+            if (!parentCoordinator) {
+                console.info('[Calls iframe] Parent coordinator not yet available, waiting...');
+                await this.waitForParentCoordinator();
+            }
+            
+            this.parentCoordinator = parentCoordinator;
+            
+            this.setupLegacyMessageListener();
+            
+            if (this.parentCoordinator && this.parentCoordinator.handshakeComplete) {
+                console.info('[Calls iframe] Parent coordinator handshake already complete');
+            } else {
+                this.requestDataFromParent();
+            }
+            
+            this.startParentResponseTimeout();
+            
+            this.loadCachedUserData();
+            
+            this.registerWithCoordinator();
+            
+            console.info('[Calls iframe] Parent-child communication initialized');
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.initialize', error);
         }
-        
-        this.parentCoordinator = parentCoordinator;
-        
-        this.setupLegacyMessageListener();
-        
-        if (this.parentCoordinator && this.parentCoordinator.handshakeComplete) {
-            console.info('[Calls iframe] Parent coordinator handshake already complete');
-        } else {
-            this.requestDataFromParent();
-        }
-        
-        this.startParentResponseTimeout();
-        
-        this.loadCachedUserData();
-        
-        this.registerWithCoordinator();
-        
-        console.info('[Calls iframe] Parent-child communication initialized');
     }
     
     async waitForParentCoordinator() {
@@ -1163,40 +1441,48 @@ export class ParentChildCommunication {
             return;
         }
         
-        this.parentCoordinator.registerMessageHandler('USER_DATA', (data) => {
-            this.handleParentUserData(data.payload || data);
-        });
-        
-        this.parentCoordinator.registerMessageHandler('AUTH_UPDATE', (data) => {
-            this.handleAuthUpdate(data.payload || data);
-        });
-        
-        this.parentCoordinator.registerMessageHandler('PROFILE_UPDATE', (data) => {
-            this.handleProfileUpdate(data.payload || data);
-        });
-        
-        this.parentCoordinator.registerUIBinding(() => {
-            if (currentUser) {
-                this.updateUIWithUserData();
-                this.initializeAppWithUserData();
-            }
-        });
-        
-        this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
-            if (updateData.user) {
-                this.handleProfileUpdate(updateData.user);
-            }
-        });
+        try {
+            this.parentCoordinator.registerMessageHandler('USER_DATA', (data) => {
+                this.handleParentUserData(data.payload || data);
+            });
+            
+            this.parentCoordinator.registerMessageHandler('AUTH_UPDATE', (data) => {
+                this.handleAuthUpdate(data.payload || data);
+            });
+            
+            this.parentCoordinator.registerMessageHandler('PROFILE_UPDATE', (data) => {
+                this.handleProfileUpdate(data.payload || data);
+            });
+            
+            this.parentCoordinator.registerUIBinding(() => {
+                if (currentUser) {
+                    this.updateUIWithUserData();
+                    this.initializeAppWithUserData();
+                }
+            });
+            
+            this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
+                if (updateData.user) {
+                    this.handleProfileUpdate(updateData.user);
+                }
+            });
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.registerWithCoordinator', error);
+        }
     }
     
     setupLegacyMessageListener() {
-        window.addEventListener('message', (event) => {
-            if (this.parentCoordinator && this.parentCoordinator.secureChannelEstablished) {
-                return;
-            }
-            
-            this.handleLegacyMessage(event);
-        });
+        try {
+            window.addEventListener('message', (event) => {
+                if (this.parentCoordinator && this.parentCoordinator.secureChannelEstablished) {
+                    return;
+                }
+                
+                this.handleLegacyMessage(event);
+            });
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.setupLegacyMessageListener', error);
+        }
     }
     
     handleLegacyMessage(event) {
@@ -1205,46 +1491,65 @@ export class ParentChildCommunication {
             return;
         }
         
-        this.parentOrigin = event.origin;
         const data = event.data;
+        if (!data || typeof data !== 'object') {
+            console.warn('[Calls iframe] Invalid legacy message data');
+            return;
+        }
         
-        switch (data.type) {
-            case 'USER_DATA':
-                this.handleParentUserData(data.payload);
-                break;
-            case 'AUTH_UPDATE':
-                this.handleAuthUpdate(data.payload);
-                break;
-            case 'PROFILE_UPDATE':
-                this.handleProfileUpdate(data.payload);
-                break;
-            case 'LOGOUT':
-                this.handleLogout();
-                break;
-            case 'PONG':
-                this.handleParentPong();
-                break;
-            case 'TOKEN_UPDATE':
-                this.handleTokenUpdate(data.payload);
-                break;
-            case 'API_READY':
-                this.handleApiReady();
-                break;
+        try {
+            this.parentOrigin = event.origin;
+            
+            switch (data.type) {
+                case 'USER_DATA':
+                    this.handleParentUserData(data.payload);
+                    break;
+                case 'AUTH_UPDATE':
+                    this.handleAuthUpdate(data.payload);
+                    break;
+                case 'PROFILE_UPDATE':
+                    this.handleProfileUpdate(data.payload);
+                    break;
+                case 'LOGOUT':
+                    this.handleLogout();
+                    break;
+                case 'PONG':
+                    this.handleParentPong();
+                    break;
+                case 'TOKEN_UPDATE':
+                    this.handleTokenUpdate(data.payload);
+                    break;
+                case 'API_READY':
+                    this.handleApiReady();
+                    break;
+            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleLegacyMessage', error, `type: ${data?.type}`);
         }
     }
     
     isValidOrigin(origin) {
+        if (trustedOrigins.has(origin)) return true;
         if (origin === window.location.origin) return true;
         
-        if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) return true;
+        if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+            trustedOrigins.add(origin);
+            return true;
+        }
         
         try {
             const parentHost = window.location.hostname;
             const originHost = new URL(origin).hostname;
             
-            return originHost === parentHost || 
-                   originHost.endsWith('.' + parentHost) ||
-                   parentHost.endsWith('.' + originHost);
+            const isValid = originHost === parentHost || 
+                           originHost.endsWith('.' + parentHost) ||
+                           parentHost.endsWith('.' + originHost);
+            
+            if (isValid) {
+                trustedOrigins.add(origin);
+            }
+            
+            return isValid;
         } catch (error) {
             return false;
         }
@@ -1256,23 +1561,27 @@ export class ParentChildCommunication {
             
             const requestId = 'req_' + Date.now();
             
-            window.parent.postMessage({
-                type: 'PING',
-                source: 'calls-iframe',
-                requestId: requestId,
-                timestamp: Date.now()
-            }, '*');
-            
-            setTimeout(() => {
+            try {
                 window.parent.postMessage({
-                    type: 'GET_USER_DATA',
+                    type: 'PING',
                     source: 'calls-iframe',
                     requestId: requestId,
                     timestamp: Date.now()
                 }, '*');
-            }, 100);
-            
-            parentCommunicationAttempted = true;
+                
+                setTimeout(() => {
+                    window.parent.postMessage({
+                        type: 'GET_USER_DATA',
+                        source: 'calls-iframe',
+                        requestId: requestId,
+                        timestamp: Date.now()
+                    }, '*');
+                }, 100);
+                
+                parentCommunicationAttempted = true;
+            } catch (error) {
+                logErrorOnce('ParentChildCommunication.requestDataFromParent', error);
+            }
         } else {
             console.info('[Calls iframe] No parent window detected, will use coordination system');
             this.parentDataReceived = false;
@@ -1284,6 +1593,12 @@ export class ParentChildCommunication {
     }
     
     async startCoordinatedFetch() {
+        const retryKey = 'coordinatedFetch';
+        if (!canRetry(retryKey, 3)) {
+            console.warn('[Calls iframe] Max coordinated fetch attempts reached');
+            return;
+        }
+        
         if (this.dataFetchLock || userDataLoaded) {
             console.info('[Calls iframe] Data fetch already in progress or completed, skipping...');
             return;
@@ -1300,7 +1615,8 @@ export class ParentChildCommunication {
                 throw new Error('Parent coordinator not available');
             }
         } catch (error) {
-            console.error('[Calls iframe] Coordinated fetch failed:', error);
+            incrementRetryCount(retryKey);
+            logErrorOnce('ParentChildCommunication.startCoordinatedFetch', error, `attempt: ${getRetryCount(retryKey)}`);
             this.handleDataFetchFailure(error);
         } finally {
             this.dataFetchLock = false;
@@ -1358,6 +1674,11 @@ export class ParentChildCommunication {
             return;
         }
         
+        if (!userData || typeof userData !== 'object') {
+            console.warn('[Calls iframe] Invalid user data received from parent');
+            return;
+        }
+        
         if (this.parentResponseTimeout) {
             clearTimeout(this.parentResponseTimeout);
             this.parentResponseTimeout = null;
@@ -1366,70 +1687,98 @@ export class ParentChildCommunication {
         this.parentDataReceived = true;
         this.dataFetchLock = true;
         
-        this.processUserData(userData, 'parent-legacy');
-        
-        this.notifyDataLoaded('parent-legacy');
+        try {
+            this.processUserData(userData, 'parent-legacy');
+            this.notifyDataLoaded('parent-legacy');
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleParentUserData', error);
+        } finally {
+            this.dataFetchLock = false;
+        }
     }
     
     handleAuthUpdate(authData) {
-        if (this.parentCoordinator && authData.authenticated !== undefined) {
-            if (authData.authenticated && authData.user) {
-                this.parentCoordinator.handleSessionData({
-                    sessionId: 'legacy-auth-' + Date.now(),
-                    authenticated: true,
-                    user: authData.user,
-                    timestamp: Date.now()
-                });
-            } else if (authData.authenticated === false) {
-                this.parentCoordinator.handleLogout();
+        if (!authData || typeof authData !== 'object') {
+            console.warn('[Calls iframe] Invalid auth data received');
+            return;
+        }
+        
+        try {
+            if (this.parentCoordinator && authData.authenticated !== undefined) {
+                if (authData.authenticated && authData.user) {
+                    this.parentCoordinator.handleSessionData({
+                        sessionId: 'legacy-auth-' + Date.now(),
+                        authenticated: true,
+                        user: authData.user,
+                        timestamp: Date.now()
+                    });
+                } else if (authData.authenticated === false) {
+                    this.parentCoordinator.handleLogout();
+                }
+            } else {
+                if (authData.authenticated && authData.user) {
+                    currentUser = authData.user;
+                    userDataLoaded = true;
+                    this.updateUIWithUserData();
+                } else if (authData.authenticated === false) {
+                    this.handleLogout();
+                }
             }
-        } else {
-            if (authData.authenticated && authData.user) {
-                currentUser = authData.user;
-                userDataLoaded = true;
-                this.updateUIWithUserData();
-            } else if (authData.authenticated === false) {
-                this.handleLogout();
-            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleAuthUpdate', error);
         }
     }
     
     handleProfileUpdate(profileData) {
+        if (!profileData || typeof profileData !== 'object') {
+            console.warn('[Calls iframe] Invalid profile data received');
+            return;
+        }
+        
         if (currentUser) {
-            currentUser = {
-                ...currentUser,
-                ...profileData
-            };
-            
-            this.updateUIWithUserData();
-            
-            this.cacheUserData();
-            
-            this.showNotification('Profile updated', 'success');
+            try {
+                currentUser = {
+                    ...currentUser,
+                    ...profileData
+                };
+                
+                this.updateUIWithUserData();
+                this.cacheUserData();
+                this.showNotification('Profile updated', 'success');
+            } catch (error) {
+                logErrorOnce('ParentChildCommunication.handleProfileUpdate', error);
+            }
         }
     }
     
     handleLogout() {
         console.info('[Calls iframe] Logout requested by parent');
         
-        if (this.parentCoordinator) {
-            this.parentCoordinator.handleLogout();
-        } else {
-            this.performLegacyLogout();
+        try {
+            if (this.parentCoordinator) {
+                this.parentCoordinator.handleLogout();
+            } else {
+                this.performLegacyLogout();
+            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleLogout', error);
         }
     }
     
     performLegacyLogout() {
-        currentUser = null;
-        userDataLoaded = false;
-        this.authVerified = false;
-        
-        this.clearCachedData();
-        
-        this.showLoginScreen();
-        
-        if (window.CallApp) {
-            window.CallApp.notifyParent('USER_LOGGED_OUT', {});
+        try {
+            currentUser = null;
+            userDataLoaded = false;
+            this.authVerified = false;
+            
+            this.clearCachedData();
+            this.showLoginScreen();
+            
+            if (window.CallApp) {
+                window.CallApp.notifyParent('USER_LOGGED_OUT', {});
+            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.performLegacyLogout', error);
         }
     }
     
@@ -1438,74 +1787,101 @@ export class ParentChildCommunication {
     }
     
     handleTokenUpdate(tokenData) {
-        if (this.parentCoordinator) {
-            this.parentCoordinator.handleTokenUpdate(tokenData);
+        if (!tokenData || typeof tokenData !== 'object') {
+            console.warn('[Calls iframe] Invalid token data received');
+            return;
+        }
+        
+        try {
+            if (this.parentCoordinator) {
+                this.parentCoordinator.handleTokenUpdate(tokenData);
+            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleTokenUpdate', error);
         }
     }
     
     handleApiReady() {
-        if (this.parentCoordinator) {
-            this.parentCoordinator.handleApiReady();
+        try {
+            if (this.parentCoordinator) {
+                this.parentCoordinator.handleApiReady();
+            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleApiReady', error);
         }
     }
     
     processUserData(userData, source) {
-        if (!userData || !userData.id) {
+        if (!userData || typeof userData !== 'object') {
             throw new Error('Invalid user data received');
         }
         
-        currentUser = userData;
-        userDataLoaded = true;
-        this.authVerified = true;
+        if (!userData.id) {
+            throw new Error('User data missing id field');
+        }
         
-        this.cacheUserData();
-        
-        this.updateUIWithUserData();
-        
-        this.initializeAppWithUserData();
-        
-        this.showNotification(`User data loaded from ${source}`, 'success');
-        
-        console.info(`[Calls iframe] User data successfully loaded from ${source}`);
+        try {
+            currentUser = userData;
+            userDataLoaded = true;
+            this.authVerified = true;
+            
+            this.cacheUserData();
+            this.updateUIWithUserData();
+            this.initializeAppWithUserData();
+            this.showNotification(`User data loaded from ${source}`, 'success');
+            
+            console.info(`[Calls iframe] User data successfully loaded from ${source}`);
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.processUserData', error);
+            throw error;
+        }
     }
     
     handleDataFetchFailure(error) {
         console.error('[Calls iframe] All data fetch attempts failed:', error);
         
-        const cachedUser = this.getCachedUserData();
-        if (cachedUser) {
-            console.info('[Calls iframe] Using cached user data');
-            currentUser = cachedUser;
-            userDataLoaded = true;
-            this.updateUIWithUserData();
-            this.showNotification('Using cached data (offline mode)', 'warning');
-        } else {
-            if (this.parentCoordinator) {
-                this.parentCoordinator.showReconnectState();
+        try {
+            const cachedUser = this.getCachedUserData();
+            if (cachedUser) {
+                console.info('[Calls iframe] Using cached user data');
+                currentUser = cachedUser;
+                userDataLoaded = true;
+                this.updateUIWithUserData();
+                this.showNotification('Using cached data (offline mode)', 'warning');
             } else {
-                this.showLoginScreen();
+                if (this.parentCoordinator) {
+                    this.parentCoordinator.showReconnectState();
+                } else {
+                    this.showLoginScreen();
+                }
+                this.showNotification('Please wait for session reconnection', 'error');
             }
-            this.showNotification('Please wait for session reconnection', 'error');
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.handleDataFetchFailure', error);
         }
     }
     
     updateUIWithUserData() {
         if (!currentUser) return;
         
-        const userElements = {
-            'userAvatar': currentUser.avatar,
-            'userName': currentUser.name || currentUser.username,
-            'userStatus': currentUser.status || 'Online'
-        };
-        
-        this.updateUserSpecificUI(userElements);
-        
-        this.updateApiStatusIndicator();
-        
-        this.updateSyncIndicator();
+        try {
+            const userElements = {
+                'userAvatar': currentUser.avatar,
+                'userName': currentUser.name || currentUser.username,
+                'userStatus': currentUser.status || 'Online'
+            };
+            
+            this.updateUserSpecificUI(userElements);
+            this.updateApiStatusIndicator();
+            this.updateSyncIndicator();
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.updateUIWithUserData', error);
+        }
     }
     
     updateUserSpecificUI(userElements) {
+        if (!userElements) return;
+        
         try {
             document.querySelectorAll('.user-avatar, .avatar-img').forEach(el => {
                 if (userElements.userAvatar) {
@@ -1529,7 +1905,7 @@ export class ParentChildCommunication {
                 callStatusText.textContent = `Ready (${userElements.userName})`;
             }
         } catch (error) {
-            console.error('[Calls iframe] Error updating user specific UI:', error);
+            logErrorOnce('ParentChildCommunication.updateUserSpecificUI', error);
         }
     }
     
@@ -1547,7 +1923,7 @@ export class ParentChildCommunication {
                 }, 2000);
             }
         } catch (error) {
-            console.error('[Calls iframe] Error updating API status indicator:', error);
+            logErrorOnce('ParentChildCommunication.updateApiStatusIndicator', error);
         }
     }
     
@@ -1559,22 +1935,28 @@ export class ParentChildCommunication {
                 syncIndicator.classList.remove('syncing');
             }
         } catch (error) {
-            console.error('[Calls iframe] Error updating sync indicator:', error);
+            logErrorOnce('ParentChildCommunication.updateSyncIndicator', error);
         }
     }
     
     initializeAppWithUserData() {
-        if (window.callAPI) {
-            window.callAPI.onAuthenticationSuccess();
-        }
+        if (!currentUser) return;
         
-        if (window.AppState) {
-            window.AppState.user = currentUser;
-            window.AppState.currentUser = currentUser;
-            window.AppState.isAuthenticated = true;
+        try {
+            if (window.callAPI) {
+                window.callAPI.onAuthenticationSuccess();
+            }
+            
+            if (window.AppState) {
+                window.AppState.user = currentUser;
+                window.AppState.currentUser = currentUser;
+                window.AppState.isAuthenticated = true;
+            }
+            
+            this.enableUIFeatures();
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.initializeAppWithUserData', error);
         }
-        
-        this.enableUIFeatures();
     }
     
     enableUIFeatures() {
@@ -1589,7 +1971,7 @@ export class ParentChildCommunication {
             
             this.loadUserSpecificData();
         } catch (error) {
-            console.error('[Calls iframe] Error enabling UI features:', error);
+            logErrorOnce('ParentChildCommunication.enableUIFeatures', error);
         }
     }
     
@@ -1605,7 +1987,7 @@ export class ParentChildCommunication {
                 await window.callAPI.performInitialDataLoad();
             }
         } catch (error) {
-            console.error('[Calls iframe] Error loading user-specific data:', error);
+            logErrorOnce('ParentChildCommunication.loadUserSpecificData', error);
         }
     }
     
@@ -1622,7 +2004,7 @@ export class ParentChildCommunication {
             localStorage.setItem('authUser', JSON.stringify(currentUser));
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
         } catch (error) {
-            console.error('[Calls iframe] Error caching user data:', error);
+            logErrorOnce('ParentChildCommunication.cacheUserData', error);
         }
     }
     
@@ -1650,7 +2032,7 @@ export class ParentChildCommunication {
                 }
             }
         } catch (error) {
-            console.error('[Calls iframe] Error loading cached user data:', error);
+            logErrorOnce('ParentChildCommunication.loadCachedUserData', error);
         }
         
         return false;
@@ -1664,7 +2046,7 @@ export class ParentChildCommunication {
                 return data.user;
             }
         } catch (error) {
-            console.error('[Calls iframe] Error getting cached user data:', error);
+            logErrorOnce('ParentChildCommunication.getCachedUserData', error);
         }
         return null;
     }
@@ -1675,7 +2057,7 @@ export class ParentChildCommunication {
             localStorage.removeItem('authUser');
             localStorage.removeItem('currentUser');
         } catch (error) {
-            console.error('[Calls iframe] Error clearing cached data:', error);
+            logErrorOnce('ParentChildCommunication.clearCachedData', error);
         }
     }
     
@@ -1708,52 +2090,57 @@ export class ParentChildCommunication {
                 }
             }
         } catch (error) {
-            console.error('[Calls iframe] Error showing login screen:', error);
+            logErrorOnce('ParentChildCommunication.showLoginScreen', error);
         }
     }
     
     getAuthToken() {
-        if (this.parentCoordinator && this.parentCoordinator.sessionData?.token) {
-            return this.parentCoordinator.sessionData.token;
-        }
-        
         try {
-            const token = getUserToken();
-            if (token && typeof token === 'string' && token.length > 10) {
-                return token;
+            if (this.parentCoordinator && this.parentCoordinator.sessionData?.token) {
+                return this.parentCoordinator.sessionData.token;
             }
-        } catch (error) {
-            console.error('[Calls iframe] Error getting token from api.core.js:', error);
-        }
-        
-        const tokenSources = [
-            () => localStorage.getItem('USER_TOKEN'),
-            () => localStorage.getItem('accessToken'),
-            () => localStorage.getItem('authToken'),
-            () => sessionStorage.getItem('accessToken')
-        ];
-        
-        for (const source of tokenSources) {
+            
             try {
-                const token = source();
+                const token = getUserToken();
                 if (token && typeof token === 'string' && token.length > 10) {
                     return token;
                 }
-            } catch (e) {
-                continue;
+            } catch (error) {
+                console.error('[Calls iframe] Error getting token from api.core.js:', error);
             }
+            
+            const tokenSources = [
+                () => localStorage.getItem('USER_TOKEN'),
+                () => localStorage.getItem('accessToken'),
+                () => localStorage.getItem('authToken'),
+                () => sessionStorage.getItem('accessToken')
+            ];
+            
+            for (const source of tokenSources) {
+                try {
+                    const token = source();
+                    if (token && typeof token === 'string' && token.length > 10) {
+                        return token;
+                    }
+                } catch (e) {
+                    continue;
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.getAuthToken', error);
+            return null;
         }
-        
-        return null;
     }
     
     showNotification(message, type = 'info') {
-        if (window.showNotification) {
-            window.showNotification(message, type);
-            return;
-        }
-        
         try {
+            if (window.showNotification) {
+                window.showNotification(message, type);
+                return;
+            }
+            
             const notificationArea = document.getElementById('notificationArea');
             if (notificationArea) {
                 const notification = document.createElement('div');
@@ -1784,25 +2171,33 @@ export class ParentChildCommunication {
                 }, 3000);
             }
         } catch (error) {
-            console.error('[Calls iframe] Error showing notification:', error);
+            logErrorOnce('ParentChildCommunication.showNotification', error);
         }
     }
     
     notifyDataLoaded(source) {
         if (window.parent && window.parent !== window) {
-            window.parent.postMessage({
-                type: 'USER_DATA_RECEIVED',
-                source: 'calls-iframe',
-                timestamp: Date.now(),
-                dataSource: source
-            }, '*');
+            try {
+                window.parent.postMessage({
+                    type: 'USER_DATA_RECEIVED',
+                    source: 'calls-iframe',
+                    timestamp: Date.now(),
+                    dataSource: source
+                }, '*');
+            } catch (error) {
+                logErrorOnce('ParentChildCommunication.notifyDataLoaded', error);
+            }
         }
     }
     
     cleanup() {
-        if (this.parentResponseTimeout) {
-            clearTimeout(this.parentResponseTimeout);
-            this.parentResponseTimeout = null;
+        try {
+            if (this.parentResponseTimeout) {
+                clearTimeout(this.parentResponseTimeout);
+                this.parentResponseTimeout = null;
+            }
+        } catch (error) {
+            logErrorOnce('ParentChildCommunication.cleanup', error);
         }
     }
 }
@@ -1823,53 +2218,57 @@ export class TokenManager {
     }
     
     async initialize() {
-        console.info('[Calls iframe] Initializing token manager with parent coordination...');
-        
-        if (!parentCoordinator) {
-            console.info('[Calls iframe] Parent coordinator not yet available');
-        } else {
-            this.parentCoordinator = parentCoordinator;
-            if (this.parentCoordinator?.sessionData?.token) {
-                this.setToken(this.parentCoordinator.sessionData.token);
-                this.coordinatedToken = true;
+        try {
+            console.info('[Calls iframe] Initializing token manager with parent coordination...');
+            
+            if (!parentCoordinator) {
+                console.info('[Calls iframe] Parent coordinator not yet available');
+            } else {
+                this.parentCoordinator = parentCoordinator;
+                if (this.parentCoordinator?.sessionData?.token) {
+                    this.setToken(this.parentCoordinator.sessionData.token);
+                    this.coordinatedToken = true;
+                }
             }
+            
+            await this.tryGetTokenFromAPI();
+            this.loadCachedData();
+            this.startTokenPolling();
+            this.setupCoordinatedListener();
+            this.migrateOldTokens();
+        } catch (error) {
+            logErrorOnce('TokenManager.initialize', error);
         }
-        
-        await this.tryGetTokenFromAPI();
-        
-        this.loadCachedData();
-        
-        this.startTokenPolling();
-        
-        this.setupCoordinatedListener();
-        
-        this.migrateOldTokens();
     }
     
     setupCoordinatedListener() {
-        if (!this.parentCoordinator) {
-            const checkInterval = setInterval(() => {
-                if (parentCoordinator) {
-                    this.parentCoordinator = parentCoordinator;
-                    clearInterval(checkInterval);
-                    
-                    this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
-                        if (updateData.token) {
-                            this.setToken(updateData.token);
-                            this.coordinatedToken = true;
-                        }
-                    });
-                }
-            }, 100);
-            return;
-        }
-        
-        this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
-            if (updateData.token) {
-                this.setToken(updateData.token);
-                this.coordinatedToken = true;
+        try {
+            if (!this.parentCoordinator) {
+                const checkInterval = setInterval(() => {
+                    if (parentCoordinator) {
+                        this.parentCoordinator = parentCoordinator;
+                        clearInterval(checkInterval);
+                        
+                        this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
+                            if (updateData.token) {
+                                this.setToken(updateData.token);
+                                this.coordinatedToken = true;
+                            }
+                        });
+                    }
+                }, 100);
+                return;
             }
-        });
+            
+            this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
+                if (updateData.token) {
+                    this.setToken(updateData.token);
+                    this.coordinatedToken = true;
+                }
+            });
+        } catch (error) {
+            logErrorOnce('TokenManager.setupCoordinatedListener', error);
+        }
     }
     
     async tryGetTokenFromAPI() {
@@ -1894,44 +2293,51 @@ export class TokenManager {
             
             return false;
         } catch (error) {
-            console.error('[Calls iframe] Error getting token from api.core.js:', error.message);
+            logErrorOnce('TokenManager.tryGetTokenFromAPI', error, `attempt: ${this.tokenRetryCount}`);
             return false;
         }
     }
     
     startTokenPolling() {
-        if (this.tokenCheckInterval) {
-            clearInterval(this.tokenCheckInterval);
-        }
-        
-        if (this.coordinatedToken) {
-            console.info('[Calls iframe] Using coordinated token, skipping API polling');
-            return;
-        }
-        
-        let attempts = 0;
-        const maxAttempts = 20;
-        
-        this.tokenCheckInterval = setInterval(() => {
-            attempts++;
-            
-            const gotToken = this.tryGetTokenFromAPI();
-            
-            if (gotToken) {
+        try {
+            if (this.tokenCheckInterval) {
                 clearInterval(this.tokenCheckInterval);
-                this.apiInitialized = true;
-                this.executeWaitingCallbacks();
-            } else if (attempts >= maxAttempts) {
-                clearInterval(this.tokenCheckInterval);
-                console.info('[Calls iframe] API initialization timeout, using coordinated token only');
-                this.executeWaitingCallbacks();
+                this.tokenCheckInterval = null;
             }
             
-            const storedToken = localStorage.getItem('USER_TOKEN');
-            if (storedToken && this.validateToken(storedToken) && !this.token) {
-                this.setToken(storedToken);
+            if (this.coordinatedToken) {
+                console.info('[Calls iframe] Using coordinated token, skipping API polling');
+                return;
             }
-        }, 500);
+            
+            let attempts = 0;
+            const maxAttempts = 20;
+            
+            this.tokenCheckInterval = setInterval(() => {
+                attempts++;
+                
+                const gotToken = this.tryGetTokenFromAPI();
+                
+                if (gotToken) {
+                    clearInterval(this.tokenCheckInterval);
+                    this.tokenCheckInterval = null;
+                    this.apiInitialized = true;
+                    this.executeWaitingCallbacks();
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(this.tokenCheckInterval);
+                    this.tokenCheckInterval = null;
+                    console.info('[Calls iframe] API initialization timeout, using coordinated token only');
+                    this.executeWaitingCallbacks();
+                }
+                
+                const storedToken = localStorage.getItem('USER_TOKEN');
+                if (storedToken && this.validateToken(storedToken) && !this.token) {
+                    this.setToken(storedToken);
+                }
+            }, 500);
+        } catch (error) {
+            logErrorOnce('TokenManager.startTokenPolling', error);
+        }
     }
     
     setToken(token) {
@@ -1940,29 +2346,34 @@ export class TokenManager {
             return;
         }
         
-        this.token = token;
-        this.tokenReady = true;
-        this.tokenRetryCount = 0;
-        
         try {
+            this.token = token;
+            this.tokenReady = true;
+            this.tokenRetryCount = 0;
+            
             localStorage.setItem('USER_TOKEN', token);
+            
+            if (window.AppState) {
+                window.AppState.isAuthenticated = true;
+            }
+            
+            this.executeWaitingCallbacks();
         } catch (error) {
-            console.error('[Calls iframe] Error storing token:', error);
+            logErrorOnce('TokenManager.setToken', error);
         }
-        
-        if (window.AppState) {
-            window.AppState.isAuthenticated = true;
-        }
-        
-        this.executeWaitingCallbacks();
     }
     
     waitForToken() {
         return new Promise((resolve) => {
-            if (this.tokenReady && this.token) {
-                resolve(this.token);
-            } else {
-                this.waitingCallbacks.push(resolve);
+            try {
+                if (this.tokenReady && this.token) {
+                    resolve(this.token);
+                } else {
+                    this.waitingCallbacks.push(resolve);
+                }
+            } catch (error) {
+                logErrorOnce('TokenManager.waitForToken', error);
+                resolve(null);
             }
         });
     }
@@ -1974,7 +2385,7 @@ export class TokenManager {
                 try {
                     callback(this.token);
                 } catch (error) {
-                    console.error('[Calls iframe] Error in token callback:', error);
+                    logErrorOnce('TokenManager.executeWaitingCallbacks', error);
                 }
             }
         }
@@ -2016,13 +2427,10 @@ export class TokenManager {
                 'auth_token'
             ];
             
-            let migrated = false;
-            
             for (const key of oldTokenKeys) {
                 const oldToken = localStorage.getItem(key);
                 if (oldToken && this.validateToken(oldToken)) {
                     localStorage.setItem('USER_TOKEN', oldToken);
-                    migrated = true;
                 }
             }
             
@@ -2030,13 +2438,12 @@ export class TokenManager {
                 const oldToken = sessionStorage.getItem(key);
                 if (oldToken && this.validateToken(oldToken)) {
                     localStorage.setItem('USER_TOKEN', oldToken);
-                    migrated = true;
                 }
             }
             
             this.migrationDone = true;
         } catch (error) {
-            console.error('[Calls iframe] Error during token migration:', error);
+            logErrorOnce('TokenManager.migrateOldTokens', error);
         }
     }
     
@@ -2076,89 +2483,107 @@ export class TokenManager {
                 }
             }
         } catch (error) {
-            console.error('[Calls iframe] Error loading cached data:', error);
+            logErrorOnce('TokenManager.loadCachedData', error);
         }
     }
     
     setupMessageListener() {
-        window.addEventListener('message', (event) => {
-            const allowedOrigins = [window.location.origin, 'http://localhost:*', 'https://yourdomain.com'];
-            if (!allowedOrigins.some(origin => event.origin.match(new RegExp(origin.replace('*', '.*'))))) {
-                return;
-            }
-            
-            const data = event.data;
-            
-            if (data.type === 'TOKEN_UPDATE') {
-                if (data.token && this.validateToken(data.token)) {
-                    this.setToken(data.token);
+        try {
+            window.addEventListener('message', (event) => {
+                const allowedOrigins = [window.location.origin, 'http://localhost:*', 'https://yourdomain.com'];
+                if (!allowedOrigins.some(origin => event.origin.match(new RegExp(origin.replace('*', '.*'))))) {
+                    return;
                 }
-            }
-            
-            if (data.type === 'API_READY') {
-                setTimeout(() => this.tryGetTokenFromAPI(), 100);
-            }
-        });
+                
+                const data = event.data;
+                
+                if (data.type === 'TOKEN_UPDATE') {
+                    if (data.token && this.validateToken(data.token)) {
+                        this.setToken(data.token);
+                    }
+                }
+                
+                if (data.type === 'API_READY') {
+                    setTimeout(() => this.tryGetTokenFromAPI(), 100);
+                }
+            });
+        } catch (error) {
+            logErrorOnce('TokenManager.setupMessageListener', error);
+        }
     }
     
     getToken() {
-        if (this.parentCoordinator?.sessionData?.token) {
-            return this.parentCoordinator.sessionData.token;
-        }
-        
         try {
-            const token = getUserToken();
-            if (token && this.validateToken(token)) {
-                return token;
+            if (this.parentCoordinator?.sessionData?.token) {
+                return this.parentCoordinator.sessionData.token;
             }
+            
+            try {
+                const token = getUserToken();
+                if (token && this.validateToken(token)) {
+                    return token;
+                }
+            } catch (error) {
+                console.error('[Calls iframe] Error getting token from api.core.js:', error);
+            }
+            
+            return this.token;
         } catch (error) {
-            console.error('[Calls iframe] Error getting token from api.core.js:', error);
+            logErrorOnce('TokenManager.getToken', error);
+            return null;
         }
-        
-        return this.token;
     }
     
     isTokenReady() {
-        if (this.parentCoordinator?.sessionData?.token) {
-            return true;
-        }
-        
         try {
-            const token = getUserToken();
-            if (token && this.validateToken(token)) {
+            if (this.parentCoordinator?.sessionData?.token) {
                 return true;
             }
+            
+            try {
+                const token = getUserToken();
+                if (token && this.validateToken(token)) {
+                    return true;
+                }
+            } catch (error) {
+                console.error('[Calls iframe] Error checking token from api.core.js:', error);
+            }
+            
+            return this.tokenReady && this.validateToken(this.token);
         } catch (error) {
-            console.error('[Calls iframe] Error checking token from api.core.js:', error);
+            logErrorOnce('TokenManager.isTokenReady', error);
+            return false;
         }
-        
-        return this.tokenReady && this.validateToken(this.token);
     }
     
     clearToken() {
-        this.token = null;
-        this.tokenReady = false;
-        this.apiInitialized = false;
-        this.coordinatedToken = false;
-        this.tokenRetryCount = 0;
-        
         try {
+            this.token = null;
+            this.tokenReady = false;
+            this.apiInitialized = false;
+            this.coordinatedToken = false;
+            this.tokenRetryCount = 0;
+            
             localStorage.removeItem('USER_TOKEN');
+            
+            if (window.AppState) {
+                window.AppState.isAuthenticated = false;
+                window.AppState.user = null;
+                window.AppState.currentUser = null;
+            }
         } catch (error) {
-            console.error('[Calls iframe] Error clearing token:', error);
-        }
-        
-        if (window.AppState) {
-            window.AppState.isAuthenticated = false;
-            window.AppState.user = null;
-            window.AppState.currentUser = null;
+            logErrorOnce('TokenManager.clearToken', error);
         }
     }
     
     cleanup() {
-        if (this.tokenCheckInterval) {
-            clearInterval(this.tokenCheckInterval);
-            this.tokenCheckInterval = null;
+        try {
+            if (this.tokenCheckInterval) {
+                clearInterval(this.tokenCheckInterval);
+                this.tokenCheckInterval = null;
+            }
+        } catch (error) {
+            logErrorOnce('TokenManager.cleanup', error);
         }
     }
 }
@@ -2177,26 +2602,35 @@ export class SecureAPIClient {
     }
     
     async fetch(url, options = {}) {
-        if (!this.parentCoordinator && parentCoordinator) {
-            this.parentCoordinator = parentCoordinator;
-        }
-        
-        if (this.parentCoordinator?.sessionValidated) {
-            try {
-                return await this.fetchThroughCoordinator(url, options);
-            } catch (error) {
-                console.warn('[Calls iframe] Coordinator fetch failed, falling back:', error.message);
-                this.useCoordinatedRouting = false;
-            }
+        if (!url) {
+            throw new Error('URL is required');
         }
         
         try {
-            return await secureFetch(url, options);
+            if (!this.parentCoordinator && parentCoordinator) {
+                this.parentCoordinator = parentCoordinator;
+            }
+            
+            if (this.parentCoordinator?.sessionValidated) {
+                try {
+                    return await this.fetchThroughCoordinator(url, options);
+                } catch (error) {
+                    console.warn('[Calls iframe] Coordinator fetch failed, falling back:', error.message);
+                    this.useCoordinatedRouting = false;
+                }
+            }
+            
+            try {
+                return await secureFetch(url, options);
+            } catch (error) {
+                console.error('[Calls iframe] api.core.js secureFetch failed:', error.message);
+            }
+            
+            return this.secureFetchFallback(url, options);
         } catch (error) {
-            console.error('[Calls iframe] api.core.js secureFetch failed:', error.message);
+            logErrorOnce('SecureAPIClient.fetch', error, `url: ${url}`);
+            throw error;
         }
-        
-        return this.secureFetchFallback(url, options);
     }
     
     async fetchThroughCoordinator(url, options = {}) {
@@ -2204,31 +2638,36 @@ export class SecureAPIClient {
             throw new Error('Parent coordinator not available');
         }
         
-        let endpoint = url;
-        if (url.startsWith('http')) {
-            try {
-                const urlObj = new URL(url);
-                endpoint = urlObj.pathname + urlObj.search;
-            } catch (error) {
-                console.error('[Calls iframe] Error parsing URL:', error);
+        try {
+            let endpoint = url;
+            if (url.startsWith('http')) {
+                try {
+                    const urlObj = new URL(url);
+                    endpoint = urlObj.pathname + urlObj.search;
+                } catch (error) {
+                    console.error('[Calls iframe] Error parsing URL:', error);
+                }
             }
+            
+            const result = await this.parentCoordinator.routeApiCall(
+                endpoint,
+                options.method || 'GET',
+                options.body ? JSON.parse(options.body) : null
+            );
+            
+            return {
+                ok: true,
+                status: 200,
+                json: async () => result,
+                text: async () => JSON.stringify(result),
+                headers: new Headers({
+                    'Content-Type': 'application/json'
+                })
+            };
+        } catch (error) {
+            logErrorOnce('SecureAPIClient.fetchThroughCoordinator', error);
+            throw error;
         }
-        
-        const result = await this.parentCoordinator.routeApiCall(
-            endpoint,
-            options.method || 'GET',
-            options.body ? JSON.parse(options.body) : null
-        );
-        
-        return {
-            ok: true,
-            status: 200,
-            json: async () => result,
-            text: async () => JSON.stringify(result),
-            headers: new Headers({
-                'Content-Type': 'application/json'
-            })
-        };
     }
     
     async secureFetchFallback(url, options = {}, retryCount = 0) {
@@ -2299,6 +2738,7 @@ export class SecureAPIClient {
                 return this.secureFetchFallback(url, options, retryCount + 1);
             }
             
+            logErrorOnce('SecureAPIClient.secureFetchFallback', error, `url: ${url}, retry: ${retryCount}`);
             throw error;
         }
     }
@@ -2353,8 +2793,13 @@ export class SecureAPIClient {
     }
     
     async fetchJSON(url, options = {}) {
-        const response = await this.fetch(url, options);
-        return response.json();
+        try {
+            const response = await this.fetch(url, options);
+            return response.json();
+        } catch (error) {
+            logErrorOnce('SecureAPIClient.fetchJSON', error);
+            throw error;
+        }
     }
     
     async get(url, options = {}) {
@@ -2382,12 +2827,12 @@ export class SecureAPIClient {
     }
     
     showNotification(message, type = 'info') {
-        if (window.showNotification) {
-            window.showNotification(message, type);
-            return;
-        }
-        
         try {
+            if (window.showNotification) {
+                window.showNotification(message, type);
+                return;
+            }
+            
             const notificationArea = document.getElementById('notificationArea');
             if (notificationArea) {
                 const notification = document.createElement('div');
@@ -2418,7 +2863,7 @@ export class SecureAPIClient {
                 }, 3000);
             }
         } catch (error) {
-            console.error('[Calls iframe] Error showing notification:', error);
+            logErrorOnce('SecureAPIClient.showNotification', error);
         }
     }
 }
@@ -2472,15 +2917,11 @@ export class CallAPIIntegration {
             this.apiClient.parentCoordinator = this.parentCoordinator;
             
             await this.parentCommunication.initialize();
-            
             await this.tokenManager.initialize();
-            
             this.setupInitialUI();
-            
             await this.startBackgroundAuthCheck();
             
             window.addEventListener('beforeunload', () => this.cleanup());
-            
             this.registerWithCoordinator();
             
             sessionInitialized = true;
@@ -2490,7 +2931,7 @@ export class CallAPIIntegration {
             console.info('[Calls iframe] API integration with parent coordination initialized');
             return this;
         } catch (error) {
-            console.error('[Calls iframe] API integration initialization failed:', error);
+            logErrorOnce('CallAPIIntegration.initialize', error, `attempt: ${this.initAttempts}`);
             
             if (this.initAttempts < this.maxInitAttempts) {
                 console.info(`[Calls iframe] Retrying initialization (${this.initAttempts}/${this.maxInitAttempts})...`);
@@ -2514,30 +2955,38 @@ export class CallAPIIntegration {
             return;
         }
         
-        this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
-            this.handleCoordinatedSessionUpdate(updateData);
-        });
-        
-        this.parentCoordinator.registerUIBinding(() => {
-            if (currentUser && !this.authCheckDone) {
-                this.onAuthenticationSuccess();
-            }
-        });
+        try {
+            this.parentCoordinator.registerSessionUpdateCallback((updateData) => {
+                this.handleCoordinatedSessionUpdate(updateData);
+            });
+            
+            this.parentCoordinator.registerUIBinding(() => {
+                if (currentUser && !this.authCheckDone) {
+                    this.onAuthenticationSuccess();
+                }
+            });
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.registerWithCoordinator', error);
+        }
     }
     
     handleCoordinatedSessionUpdate(updateData) {
         if (!updateData) return;
         
-        if (updateData.apiConfig) {
-            this.apiConfig = { ...this.apiConfig, ...updateData.apiConfig };
-        }
-        
-        if (updateData.authenticated !== undefined) {
-            if (updateData.authenticated && updateData.user) {
-                this.onAuthenticationSuccess();
-            } else if (updateData.authenticated === false) {
-                this.handleLogout();
+        try {
+            if (updateData.apiConfig) {
+                this.apiConfig = { ...this.apiConfig, ...updateData.apiConfig };
             }
+            
+            if (updateData.authenticated !== undefined) {
+                if (updateData.authenticated && updateData.user) {
+                    this.onAuthenticationSuccess();
+                } else if (updateData.authenticated === false) {
+                    this.handleLogout();
+                }
+            }
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.handleCoordinatedSessionUpdate', error);
         }
     }
     
@@ -2553,10 +3002,9 @@ export class CallAPIIntegration {
             }
             
             this.loadCachedDataToUI();
-            
             this.showUI();
         } catch (error) {
-            console.error('[Calls iframe] Error setting up initial UI:', error);
+            logErrorOnce('CallAPIIntegration.setupInitialUI', error);
         }
     }
     
@@ -2570,7 +3018,7 @@ export class CallAPIIntegration {
             
             this.enableBasicUI();
         } catch (error) {
-            console.error('[Calls iframe] Error showing UI:', error);
+            logErrorOnce('CallAPIIntegration.showUI', error);
         }
     }
     
@@ -2583,7 +3031,7 @@ export class CallAPIIntegration {
             
             this.renderCachedCallHistory();
         } catch (error) {
-            console.error('[Calls iframe] Error enabling basic UI:', error);
+            logErrorOnce('CallAPIIntegration.enableBasicUI', error);
         }
     }
     
@@ -2595,7 +3043,7 @@ export class CallAPIIntegration {
                 await this.waitForTokenAuth();
             }
         } catch (error) {
-            console.error('[Calls iframe] Background auth check failed:', error.message);
+            logErrorOnce('CallAPIIntegration.startBackgroundAuthCheck', error);
         }
     }
     
@@ -2605,7 +3053,7 @@ export class CallAPIIntegration {
             return;
         }
         
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             if (this.parentCoordinator.sessionValidated && currentUser) {
                 this.onAuthenticationSuccess();
                 resolve();
@@ -2636,16 +3084,20 @@ export class CallAPIIntegration {
     }
     
     async waitForTokenAuth() {
-        const tokenPromise = this.tokenManager.waitForToken();
-        const timeoutPromise = new Promise(resolve => 
-            setTimeout(() => resolve(null), 5000));
-        
-        const token = await Promise.race([tokenPromise, timeoutPromise]);
-        
-        if (token) {
-            this.onAuthenticationSuccess(token);
-        } else {
-            console.info('[Calls iframe] Token not ready yet, continuing with cached data');
+        try {
+            const tokenPromise = this.tokenManager.waitForToken();
+            const timeoutPromise = new Promise(resolve => 
+                setTimeout(() => resolve(null), 5000));
+            
+            const token = await Promise.race([tokenPromise, timeoutPromise]);
+            
+            if (token) {
+                this.onAuthenticationSuccess(token);
+            } else {
+                console.info('[Calls iframe] Token not ready yet, continuing with cached data');
+            }
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.waitForTokenAuth', error);
         }
     }
     
@@ -2654,12 +3106,12 @@ export class CallAPIIntegration {
             return;
         }
         
-        if (window.AppState) {
-            window.AppState.isAuthenticated = true;
-        }
-        this.authCheckDone = true;
-        
         try {
+            if (window.AppState) {
+                window.AppState.isAuthenticated = true;
+            }
+            this.authCheckDone = true;
+            
             const apiStatusIndicator = document.getElementById('apiStatusIndicator');
             const apiStatusText = document.getElementById('apiStatusText');
             
@@ -2678,13 +3130,13 @@ export class CallAPIIntegration {
                     }
                 }, 2000);
             }
+            
+            if (!this.backgroundJobsStarted) {
+                this.backgroundJobsStarted = true;
+                this.startBackgroundJobs();
+            }
         } catch (error) {
-            console.error('[Calls iframe] Error updating auth status:', error);
-        }
-        
-        if (!this.backgroundJobsStarted) {
-            this.backgroundJobsStarted = true;
-            this.startBackgroundJobs();
+            logErrorOnce('CallAPIIntegration.onAuthenticationSuccess', error);
         }
     }
     
@@ -2693,11 +3145,15 @@ export class CallAPIIntegration {
         
         console.info('[Calls iframe] Starting background jobs...');
         
-        this.initializeBackgroundSync();
-        
-        setTimeout(() => {
-            this.performInitialDataLoad();
-        }, 1000);
+        try {
+            this.initializeBackgroundSync();
+            
+            setTimeout(() => {
+                this.performInitialDataLoad();
+            }, 1000);
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.startBackgroundJobs', error);
+        }
     }
     
     async performInitialDataLoad() {
@@ -2733,7 +3189,8 @@ export class CallAPIIntegration {
                 });
             }
         } catch (error) {
-            console.error('[Calls iframe] Background data loading failed:', error.message);
+            logErrorOnce('CallAPIIntegration.performInitialDataLoad', error);
+            
             if (window.AppState) {
                 window.AppState.syncPending = true;
             }
@@ -2747,20 +3204,25 @@ export class CallAPIIntegration {
     }
     
     initializeBackgroundSync() {
-        if (this.backgroundSyncInterval) {
-            clearInterval(this.backgroundSyncInterval);
-        }
-        
-        if (window.AppState && window.AppState.isAuthenticated && window.AppState.isOnline) {
-            this.backgroundSyncInterval = setInterval(() => {
-                this.performBackgroundSync();
-            }, 30000);
+        try {
+            if (this.backgroundSyncInterval) {
+                clearInterval(this.backgroundSyncInterval);
+                this.backgroundSyncInterval = null;
+            }
             
-            document.addEventListener('visibilitychange', () => {
-                if (!document.hidden && window.AppState && window.AppState.isOnline && window.AppState.isAuthenticated) {
+            if (window.AppState && window.AppState.isAuthenticated && window.AppState.isOnline) {
+                this.backgroundSyncInterval = setInterval(() => {
                     this.performBackgroundSync();
-                }
-            });
+                }, 30000);
+                
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && window.AppState && window.AppState.isOnline && window.AppState.isAuthenticated) {
+                        this.performBackgroundSync();
+                    }
+                });
+            }
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.initializeBackgroundSync', error);
         }
     }
     
@@ -2784,7 +3246,7 @@ export class CallAPIIntegration {
                 window.AppState.syncPending = false;
             }
         } catch (error) {
-            console.error('[Calls iframe] Background sync failed:', error.message);
+            logErrorOnce('CallAPIIntegration.performBackgroundSync', error);
             if (window.AppState) {
                 window.AppState.syncPending = true;
             }
@@ -2808,6 +3270,8 @@ export class CallAPIIntegration {
                 return userData;
             }
         } catch (error) {
+            logErrorOnce('CallAPIIntegration.fetchUserData', error);
+            
             const cachedUser = localStorage.getItem('authUser') || 
                               localStorage.getItem('currentUser');
             
@@ -2826,35 +3290,40 @@ export class CallAPIIntegration {
     }
     
     getApiBaseUrl() {
-        if (this.parentCoordinator?.sessionData?.apiConfig?.baseUrl) {
-            return this.parentCoordinator.sessionData.apiConfig.baseUrl;
-        }
-        
         try {
-            const baseUrl = getApiBaseUrl();
-            if (baseUrl) {
-                return baseUrl;
+            if (this.parentCoordinator?.sessionData?.apiConfig?.baseUrl) {
+                return this.parentCoordinator.sessionData.apiConfig.baseUrl;
             }
+            
+            try {
+                const baseUrl = getApiBaseUrl();
+                if (baseUrl) {
+                    return baseUrl;
+                }
+            } catch (error) {
+                console.error('[Calls iframe] Error getting API base URL from api.core.js:', error);
+            }
+            
+            return '/api';
         } catch (error) {
-            console.error('[Calls iframe] Error getting API base URL from api.core.js:', error);
+            logErrorOnce('CallAPIIntegration.getApiBaseUrl', error);
+            return '/api';
         }
-        
-        return '/api';
     }
     
     updateUserState(userData) {
         if (!userData) return;
         
-        if (window.AppState) {
-            window.AppState.user = userData;
-            window.AppState.currentUser = userData;
-        }
-        
         try {
+            if (window.AppState) {
+                window.AppState.user = userData;
+                window.AppState.currentUser = userData;
+            }
+            
             localStorage.setItem('authUser', JSON.stringify(userData));
             localStorage.setItem('currentUser', JSON.stringify(userData));
         } catch (error) {
-            console.error('[Calls iframe] Error caching user data:', error);
+            logErrorOnce('CallAPIIntegration.updateUserState', error);
         }
     }
     
@@ -2910,7 +3379,7 @@ export class CallAPIIntegration {
             
             return contacts;
         } catch (error) {
-            console.error('[Calls iframe] Failed to fetch contacts:', error.message);
+            logErrorOnce('CallAPIIntegration.fetchContacts', error);
             
             const cachedContacts = localStorage.getItem('cachedContacts');
             if (cachedContacts) {
@@ -2935,7 +3404,7 @@ export class CallAPIIntegration {
             localStorage.setItem('cachedContacts', JSON.stringify(contacts));
             localStorage.setItem('cachedContactsTimestamp', Date.now().toString());
         } catch (error) {
-            console.error('[Calls iframe] Failed to cache contacts:', error);
+            logErrorOnce('CallAPIIntegration.cacheContacts', error);
         }
     }
     
@@ -2983,12 +3452,11 @@ export class CallAPIIntegration {
             }
             
             this.cacheCallHistory(history);
-            
             renderCallHistory();
             
             return history;
         } catch (error) {
-            console.error('[Calls iframe] Failed to fetch call history:', error.message);
+            logErrorOnce('CallAPIIntegration.fetchCallHistory', error);
             
             const cachedHistory = localStorage.getItem('cachedCallHistory');
             if (cachedHistory) {
@@ -3013,22 +3481,26 @@ export class CallAPIIntegration {
             localStorage.setItem('cachedCallHistory', JSON.stringify(history));
             localStorage.setItem('cachedCallHistoryTimestamp', Date.now().toString());
         } catch (error) {
-            console.error('[Calls iframe] Failed to cache call history:', error);
+            logErrorOnce('CallAPIIntegration.cacheCallHistory', error);
         }
     }
     
     renderCachedCallHistory() {
-        const cachedHistory = localStorage.getItem('cachedCallHistory');
-        if (cachedHistory) {
-            try {
-                const history = JSON.parse(cachedHistory);
-                if (window.AppState) {
-                    window.AppState.callHistory = history;
+        try {
+            const cachedHistory = localStorage.getItem('cachedCallHistory');
+            if (cachedHistory) {
+                try {
+                    const history = JSON.parse(cachedHistory);
+                    if (window.AppState) {
+                        window.AppState.callHistory = history;
+                    }
+                    renderCallHistory();
+                } catch (e) {
+                    console.error('[Calls iframe] Failed to parse cached call history for UI');
                 }
-                renderCallHistory();
-            } catch (e) {
-                console.error('[Calls iframe] Failed to parse cached call history for UI');
             }
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.renderCachedCallHistory', error);
         }
     }
     
@@ -3067,7 +3539,7 @@ export class CallAPIIntegration {
             
             return window.AppState ? window.AppState.settings : {};
         } catch (error) {
-            console.error('[Calls iframe] Failed to fetch settings:', error.message);
+            logErrorOnce('CallAPIIntegration.fetchSettings', error);
             
             const cachedSettings = localStorage.getItem('callSettings');
             if (cachedSettings && window.AppState) {
@@ -3121,12 +3593,11 @@ export class CallAPIIntegration {
                 window.AppState.premiumFeatures = premiumData.features || window.AppState.premiumFeatures;
                 
                 this.cachePremiumStatus(premiumData);
-                
                 updatePremiumUI();
             }
             return window.AppState ? window.AppState.isPremium : false;
         } catch (error) {
-            console.error('[Calls iframe] Failed to check premium status:', error.message);
+            logErrorOnce('CallAPIIntegration.checkPremiumStatus', error);
             
             const cachedPremium = localStorage.getItem('premiumStatus');
             if (cachedPremium && window.AppState) {
@@ -3153,7 +3624,7 @@ export class CallAPIIntegration {
                 features: window.AppState ? window.AppState.premiumFeatures : {}
             }));
         } catch (error) {
-            console.error('[Calls iframe] Error caching premium status:', error);
+            logErrorOnce('CallAPIIntegration.cachePremiumStatus', error);
         }
     }
     
@@ -3202,21 +3673,25 @@ export class CallAPIIntegration {
                 }
             }
         } catch (error) {
-            console.error('[Calls iframe] Error loading cached data to UI:', error);
+            logErrorOnce('CallAPIIntegration.loadCachedDataToUI', error);
         }
     }
     
     handleLogout() {
-        this.authCheckDone = false;
-        this.backgroundJobsStarted = false;
-        this.initialDataLoaded = false;
-        
-        if (this.backgroundSyncInterval) {
-            clearInterval(this.backgroundSyncInterval);
-            this.backgroundSyncInterval = null;
+        try {
+            this.authCheckDone = false;
+            this.backgroundJobsStarted = false;
+            this.initialDataLoaded = false;
+            
+            if (this.backgroundSyncInterval) {
+                clearInterval(this.backgroundSyncInterval);
+                this.backgroundSyncInterval = null;
+            }
+            
+            this.tokenManager.clearToken();
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.handleLogout', error);
         }
-        
-        this.tokenManager.clearToken();
     }
     
     renderContacts(contacts) {
@@ -3228,110 +3703,122 @@ export class CallAPIIntegration {
             return;
         }
         
-        const contactsList = document.getElementById('contactsList');
-        if (!contactsList) return;
-        
-        let html = '';
-        
-        contacts.forEach(contact => {
-            const isOnline = Math.random() > 0.3;
-            const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+        try {
+            const contactsList = document.getElementById('contactsList');
+            if (!contactsList) return;
             
-            html += `
-                <div class="contact-item" data-id="${contact.id}">
-                    <input type="checkbox" class="contact-checkbox" id="contact-${contact.id}">
-                    <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
-                        ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
-                        <div class="call-status-icon ${isOnline ? 'incoming' : 'offline'}">
-                            <i class="fas fa-circle"></i>
+            let html = '';
+            
+            contacts.forEach(contact => {
+                const isOnline = Math.random() > 0.3;
+                const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+                
+                html += `
+                    <div class="contact-item" data-id="${contact.id}">
+                        <input type="checkbox" class="contact-checkbox" id="contact-${contact.id}">
+                        <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
+                            ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
+                            <div class="call-status-icon ${isOnline ? 'incoming' : 'offline'}">
+                                <i class="fas fa-circle"></i>
+                            </div>
+                        </div>
+                        <div class="call-info">
+                            <div class="call-name">
+                                ${contact.name}
+                                ${contact.isPremium ? '<span class="premium-badge">PRO</span>' : ''}
+                            </div>
+                            <div class="call-details">
+                                <span>${isOnline ? 'Online' : 'Offline'}</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="call-info">
-                        <div class="call-name">
-                            ${contact.name}
-                            ${contact.isPremium ? '<span class="premium-badge">PRO</span>' : ''}
-                        </div>
-                        <div class="call-details">
-                            <span>${isOnline ? 'Online' : 'Offline'}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        contactsList.innerHTML = html;
-        const contactsLoading = document.getElementById('contactsLoading');
-        if (contactsLoading) {
-            contactsLoading.style.display = 'none';
-        }
-        
-        document.querySelectorAll('.contact-item').forEach(item => {
-            item.addEventListener('click', function(e) {
-                if (e.target.type === 'checkbox') return;
-                
-                const checkbox = this.querySelector('.contact-checkbox');
-                checkbox.checked = !checkbox.checked;
-                this.classList.toggle('selected', checkbox.checked);
-                
-                updateGroupCallButton();
+                `;
             });
-        });
-        
-        this.renderGroupContacts(contacts);
+            
+            contactsList.innerHTML = html;
+            const contactsLoading = document.getElementById('contactsLoading');
+            if (contactsLoading) {
+                contactsLoading.style.display = 'none';
+            }
+            
+            document.querySelectorAll('.contact-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    if (e.target.type === 'checkbox') return;
+                    
+                    const checkbox = this.querySelector('.contact-checkbox');
+                    checkbox.checked = !checkbox.checked;
+                    this.classList.toggle('selected', checkbox.checked);
+                    
+                    updateGroupCallButton();
+                });
+            });
+            
+            this.renderGroupContacts(contacts);
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.renderContacts', error);
+        }
     }
     
     renderGroupContacts(contacts) {
-        const groupContactsList = document.getElementById('groupContactsList');
-        if (!groupContactsList) return;
-        
-        let html = '';
-        
-        contacts.forEach(contact => {
-            const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+        try {
+            const groupContactsList = document.getElementById('groupContactsList');
+            if (!groupContactsList) return;
             
-            html += `
-                <div class="contact-item" data-id="${contact.id}">
-                    <input type="checkbox" class="contact-checkbox group-contact" id="group-contact-${contact.id}">
-                    <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
-                        ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
-                    </div>
-                    <div class="call-info">
-                        <div class="call-name">
-                            ${contact.name}
+            let html = '';
+            
+            contacts.forEach(contact => {
+                const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+                
+                html += `
+                    <div class="contact-item" data-id="${contact.id}">
+                        <input type="checkbox" class="contact-checkbox group-contact" id="group-contact-${contact.id}">
+                        <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
+                            ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
+                        </div>
+                        <div class="call-info">
+                            <div class="call-name">
+                                ${contact.name}
+                            </div>
                         </div>
                     </div>
-                </div>
-            `;
-        });
-        
-        groupContactsList.innerHTML = html;
-        
-        document.querySelectorAll('.group-contact').forEach(checkbox => {
-            checkbox.addEventListener('change', function() {
-                const item = this.closest('.contact-item');
-                item.classList.toggle('selected', this.checked);
-                
-                updateGroupCallButton();
+                `;
             });
-        });
+            
+            groupContactsList.innerHTML = html;
+            
+            document.querySelectorAll('.group-contact').forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    const item = this.closest('.contact-item');
+                    item.classList.toggle('selected', this.checked);
+                    
+                    updateGroupCallButton();
+                });
+            });
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.renderGroupContacts', error);
+        }
     }
     
     cleanup() {
-        if (this.backgroundSyncInterval) {
-            clearInterval(this.backgroundSyncInterval);
-            this.backgroundSyncInterval = null;
-        }
-        
-        if (this.tokenManager) {
-            this.tokenManager.cleanup();
-        }
-        
-        if (this.parentCommunication) {
-            this.parentCommunication.cleanup();
-        }
-        
-        if (this.parentCoordinator) {
-            this.parentCoordinator.cleanup();
+        try {
+            if (this.backgroundSyncInterval) {
+                clearInterval(this.backgroundSyncInterval);
+                this.backgroundSyncInterval = null;
+            }
+            
+            if (this.tokenManager) {
+                this.tokenManager.cleanup();
+            }
+            
+            if (this.parentCommunication) {
+                this.parentCommunication.cleanup();
+            }
+            
+            if (this.parentCoordinator) {
+                this.parentCoordinator.cleanup();
+            }
+        } catch (error) {
+            logErrorOnce('CallAPIIntegration.cleanup', error);
         }
     }
 }
@@ -3428,253 +3915,276 @@ export function simulateIncomingCall(callerId, metadata = {}) {
         return false;
     }
     
-    let callerContact = null;
-    
-    if (AppState.contacts && AppState.contacts.length > 0) {
-        callerContact = AppState.contacts.find(c => c.id === callerId);
-    }
-    
-    if (!callerContact) {
-        callerContact = {
-            id: callerId,
-            name: metadata.name || 'Test Caller',
-            avatar: metadata.avatar || null,
-            isPremium: metadata.isPremium || false
+    try {
+        let callerContact = null;
+        
+        if (AppState.contacts && AppState.contacts.length > 0) {
+            callerContact = AppState.contacts.find(c => c.id === callerId);
+        }
+        
+        if (!callerContact) {
+            callerContact = {
+                id: callerId,
+                name: metadata.name || 'Test Caller',
+                avatar: metadata.avatar || null,
+                isPremium: metadata.isPremium || false
+            };
+        }
+        
+        const callMetadata = {
+            callType: metadata.callType || 'voice',
+            mood: metadata.mood || 'neutral',
+            intention: metadata.intention || 'quick',
+            isGroup: metadata.isGroup || false,
+            callId: metadata.callId || 'simulated-call-' + Date.now(),
+            timestamp: Date.now(),
+            ...metadata
         };
-    }
-    
-    const callMetadata = {
-        callType: metadata.callType || 'voice',
-        mood: metadata.mood || 'neutral',
-        intention: metadata.intention || 'quick',
-        isGroup: metadata.isGroup || false,
-        callId: metadata.callId || 'simulated-call-' + Date.now(),
-        timestamp: Date.now(),
-        ...metadata
-    };
-    
-    if (elements.incomingCallModal && elements.incomingCallAvatar && elements.incomingCallName) {
-        elements.incomingCallName.textContent = callerContact.name;
         
-        if (callerContact.avatar) {
-            elements.incomingCallAvatar.src = callerContact.avatar;
-            elements.incomingCallAvatar.alt = callerContact.name;
-        } else {
-            const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
-            const bgColor = stringToColor(callerContact.name);
-            elements.incomingCallAvatar.style.backgroundColor = bgColor;
-            elements.incomingCallAvatar.textContent = initials;
-            elements.incomingCallAvatar.src = '';
-        }
-        
-        if (elements.incomingCallType) {
-            elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
-            elements.incomingCallType.className = `call-type-badge ${callMetadata.callType}`;
-        }
-        
-        if (elements.incomingCallMood && callMetadata.mood) {
-            elements.incomingCallMood.innerHTML = `
-                <div class="mood-indicator mood-${callMetadata.mood}">
-                    <i class="fas fa-smile"></i>
-                    <span>${callMetadata.mood}</span>
-                </div>
-            `;
-            elements.incomingCallMood.style.display = 'block';
-        } else if (elements.incomingCallMood) {
-            elements.incomingCallMood.style.display = 'none';
-        }
-        
-        if (elements.incomingCallIntention && callMetadata.intention) {
-            elements.incomingCallIntention.innerHTML = `
-                <div class="intention-indicator intention-${callMetadata.intention}">
-                    <i class="fas fa-bullseye"></i>
-                    <span>${callMetadata.intention}</span>
-                </div>
-            `;
-            elements.incomingCallIntention.style.display = 'block';
-        } else if (elements.incomingCallIntention) {
-            elements.incomingCallIntention.style.display = 'none';
-        }
-        
-        elements.incomingCallModal.classList.add('active');
-        
-        let timeLeft = 30;
-        if (elements.autoDeclineTimer) {
-            elements.autoDeclineTimer.textContent = timeLeft;
-        }
-        
-        const declineTimer = setInterval(() => {
-            timeLeft--;
+        if (elements.incomingCallModal && elements.incomingCallAvatar && elements.incomingCallName) {
+            elements.incomingCallName.textContent = callerContact.name;
+            
+            if (callerContact.avatar) {
+                elements.incomingCallAvatar.src = callerContact.avatar;
+                elements.incomingCallAvatar.alt = callerContact.name;
+            } else {
+                const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+                const bgColor = stringToColor(callerContact.name);
+                elements.incomingCallAvatar.style.backgroundColor = bgColor;
+                elements.incomingCallAvatar.textContent = initials;
+                elements.incomingCallAvatar.src = '';
+            }
+            
+            if (elements.incomingCallType) {
+                elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
+                elements.incomingCallType.className = `call-type-badge ${callMetadata.callType}`;
+            }
+            
+            if (elements.incomingCallMood && callMetadata.mood) {
+                elements.incomingCallMood.innerHTML = `
+                    <div class="mood-indicator mood-${callMetadata.mood}">
+                        <i class="fas fa-smile"></i>
+                        <span>${callMetadata.mood}</span>
+                    </div>
+                `;
+                elements.incomingCallMood.style.display = 'block';
+            } else if (elements.incomingCallMood) {
+                elements.incomingCallMood.style.display = 'none';
+            }
+            
+            if (elements.incomingCallIntention && callMetadata.intention) {
+                elements.incomingCallIntention.innerHTML = `
+                    <div class="intention-indicator intention-${callMetadata.intention}">
+                        <i class="fas fa-bullseye"></i>
+                        <span>${callMetadata.intention}</span>
+                    </div>
+                `;
+                elements.incomingCallIntention.style.display = 'block';
+            } else if (elements.incomingCallIntention) {
+                elements.incomingCallIntention.style.display = 'none';
+            }
+            
+            elements.incomingCallModal.classList.add('active');
+            
+            let timeLeft = 30;
             if (elements.autoDeclineTimer) {
                 elements.autoDeclineTimer.textContent = timeLeft;
             }
             
-            if (timeLeft <= 0) {
-                clearInterval(declineTimer);
-                handleDeclineSimulatedCall(callMetadata.callId);
+            const declineTimer = setInterval(() => {
+                timeLeft--;
+                if (elements.autoDeclineTimer) {
+                    elements.autoDeclineTimer.textContent = timeLeft;
+                }
+                
+                if (timeLeft <= 0) {
+                    clearInterval(declineTimer);
+                    handleDeclineSimulatedCall(callMetadata.callId);
+                }
+            }, 1000);
+            
+            window._simulatedCallTimer = declineTimer;
+            window._simulatedCallMetadata = callMetadata;
+            window._simulatedCallerContact = callerContact;
+            
+            playIncomingCallSound();
+            
+            emitCallEvent('incoming_call_simulated', {
+                callerId: callerId,
+                callerContact: callerContact,
+                metadata: callMetadata,
+                timestamp: Date.now()
+            });
+            
+            if (window.parent && window.parent !== window) {
+                try {
+                    window.parent.postMessage({
+                        type: 'INCOMING_CALL_SIMULATED',
+                        source: 'calls-iframe',
+                        callerId: callerId,
+                        metadata: callMetadata,
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (error) {
+                    logErrorOnce('simulateIncomingCall.postMessage', error);
+                }
             }
-        }, 1000);
+            
+            return true;
+        } else {
+            console.error('[Calls iframe] Could not find required UI elements for incoming call simulation');
+            return false;
+        }
+    } catch (error) {
+        logErrorOnce('simulateIncomingCall', error);
+        return false;
+    }
+}
+
+function handleDeclineSimulatedCall(callId) {
+    try {
+        if (elements.incomingCallModal) {
+            elements.incomingCallModal.classList.remove('active');
+        }
         
-        window._simulatedCallTimer = declineTimer;
-        window._simulatedCallMetadata = callMetadata;
-        window._simulatedCallerContact = callerContact;
+        if (window._simulatedCallTimer) {
+            clearInterval(window._simulatedCallTimer);
+            window._simulatedCallTimer = null;
+        }
         
-        playIncomingCallSound();
+        emitCallEvent('call_declined', {
+            callId: callId,
+            reason: 'auto_decline',
+            timestamp: Date.now()
+        });
         
-        emitCallEvent('incoming_call_simulated', {
-            callerId: callerId,
+        showNotification('Simulated call declined (auto)', 'info');
+        
+        window._simulatedCallMetadata = null;
+        window._simulatedCallerContact = null;
+        
+        stopIncomingCallSound();
+    } catch (error) {
+        logErrorOnce('handleDeclineSimulatedCall', error);
+    }
+}
+
+function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false) {
+    try {
+        if (window._simulatedCallTimer) {
+            clearInterval(window._simulatedCallTimer);
+            window._simulatedCallTimer = null;
+        }
+        
+        if (elements.incomingCallModal) {
+            elements.incomingCallModal.classList.remove('active');
+        }
+        
+        AppState.isInCall = true;
+        AppState.callType = isVideo ? 'video' : callMetadata.callType;
+        AppState.activeCallId = callMetadata.callId;
+        AppState.callParticipants = [callerContact];
+        AppState.callStartTime = Date.now();
+        AppState.currentMood = callMetadata.mood || 'neutral';
+        AppState.currentIntention = callMetadata.intention || 'quick';
+        
+        if (elements.callContainer) {
+            elements.callContainer.classList.add('active');
+        }
+        
+        if (elements.appContainer) {
+            elements.appContainer.classList.add('in-call');
+        }
+        
+        if (elements.callWithName) {
+            elements.callWithName.textContent = callerContact.name;
+        }
+        
+        if (elements.callTypeIcon) {
+            elements.callTypeIcon.className = `call-type-icon ${AppState.callType}`;
+            elements.callTypeIcon.innerHTML = `<i class="fas fa-${AppState.callType === 'video' ? 'video' : 'phone'}"></i>`;
+        }
+        
+        if (elements.callStatusText) {
+            elements.callStatusText.textContent = 'Connected (Simulated)';
+        }
+        
+        updateMoodIndicator(AppState.currentMood);
+        updateIntentionIndicator(AppState.currentIntention);
+        
+        startCallTimer();
+        initializeCallFeatures();
+        
+        if (isVideo || callMetadata.callType === 'video') {
+            showSimulatedVideo(callerContact);
+        }
+        
+        emitCallEvent('call_accepted', {
+            callId: callMetadata.callId,
+            callType: AppState.callType,
             callerContact: callerContact,
             metadata: callMetadata,
             timestamp: Date.now()
         });
         
         if (window.parent && window.parent !== window) {
-            window.parent.postMessage({
-                type: 'INCOMING_CALL_SIMULATED',
-                source: 'calls-iframe',
-                callerId: callerId,
-                metadata: callMetadata,
-                timestamp: Date.now()
-            }, '*');
+            try {
+                window.parent.postMessage({
+                    type: 'CALL_ACCEPTED_SIMULATED',
+                    source: 'calls-iframe',
+                    callId: callMetadata.callId,
+                    callType: AppState.callType,
+                    callerContact: callerContact,
+                    timestamp: Date.now()
+                }, '*');
+            } catch (error) {
+                logErrorOnce('handleAcceptSimulatedCall.postMessage', error);
+            }
         }
         
-        return true;
-    } else {
-        console.error('[Calls iframe] Could not find required UI elements for incoming call simulation');
-        return false;
+        showNotification(`Simulated ${AppState.callType} call started`, 'success');
+        
+        window._simulatedCallMetadata = null;
+        window._simulatedCallerContact = null;
+        stopIncomingCallSound();
+    } catch (error) {
+        logErrorOnce('handleAcceptSimulatedCall', error);
     }
-}
-
-function handleDeclineSimulatedCall(callId) {
-    if (elements.incomingCallModal) {
-        elements.incomingCallModal.classList.remove('active');
-    }
-    
-    if (window._simulatedCallTimer) {
-        clearInterval(window._simulatedCallTimer);
-        window._simulatedCallTimer = null;
-    }
-    
-    emitCallEvent('call_declined', {
-        callId: callId,
-        reason: 'auto_decline',
-        timestamp: Date.now()
-    });
-    
-    showNotification('Simulated call declined (auto)', 'info');
-    
-    window._simulatedCallMetadata = null;
-    window._simulatedCallerContact = null;
-    
-    stopIncomingCallSound();
-}
-
-function handleAcceptSimulatedCall(callMetadata, callerContact, isVideo = false) {
-    if (window._simulatedCallTimer) {
-        clearInterval(window._simulatedCallTimer);
-        window._simulatedCallTimer = null;
-    }
-    
-    if (elements.incomingCallModal) {
-        elements.incomingCallModal.classList.remove('active');
-    }
-    
-    AppState.isInCall = true;
-    AppState.callType = isVideo ? 'video' : callMetadata.callType;
-    AppState.activeCallId = callMetadata.callId;
-    AppState.callParticipants = [callerContact];
-    AppState.callStartTime = Date.now();
-    AppState.currentMood = callMetadata.mood || 'neutral';
-    AppState.currentIntention = callMetadata.intention || 'quick';
-    
-    if (elements.callContainer) {
-        elements.callContainer.classList.add('active');
-    }
-    
-    if (elements.appContainer) {
-        elements.appContainer.classList.add('in-call');
-    }
-    
-    if (elements.callWithName) {
-        elements.callWithName.textContent = callerContact.name;
-    }
-    
-    if (elements.callTypeIcon) {
-        elements.callTypeIcon.className = `call-type-icon ${AppState.callType}`;
-        elements.callTypeIcon.innerHTML = `<i class="fas fa-${AppState.callType === 'video' ? 'video' : 'phone'}"></i>`;
-    }
-    
-    if (elements.callStatusText) {
-        elements.callStatusText.textContent = 'Connected (Simulated)';
-    }
-    
-    updateMoodIndicator(AppState.currentMood);
-    updateIntentionIndicator(AppState.currentIntention);
-    
-    startCallTimer();
-    
-    initializeCallFeatures();
-    
-    if (isVideo || callMetadata.callType === 'video') {
-        showSimulatedVideo(callerContact);
-    }
-    
-    emitCallEvent('call_accepted', {
-        callId: callMetadata.callId,
-        callType: AppState.callType,
-        callerContact: callerContact,
-        metadata: callMetadata,
-        timestamp: Date.now()
-    });
-    
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-            type: 'CALL_ACCEPTED_SIMULATED',
-            source: 'calls-iframe',
-            callId: callMetadata.callId,
-            callType: AppState.callType,
-            callerContact: callerContact,
-            timestamp: Date.now()
-        }, '*');
-    }
-    
-    showNotification(`Simulated ${AppState.callType} call started`, 'success');
-    
-    window._simulatedCallMetadata = null;
-    window._simulatedCallerContact = null;
-    
-    stopIncomingCallSound();
 }
 
 function showSimulatedVideo(callerContact) {
-    if (elements.videoGrid) {
-        elements.videoGrid.innerHTML = '';
-        
-        const localVideoContainer = document.createElement('div');
-        localVideoContainer.className = 'video-container local';
-        localVideoContainer.innerHTML = `
-            <video class="local-video" autoplay muted playsinline></video>
-            <div class="video-overlay">
-                <div class="video-name">You (Simulated)</div>
-                <div class="video-status">Simulated Video</div>
-            </div>
-        `;
-        elements.videoGrid.appendChild(localVideoContainer);
-        
-        const remoteVideoContainer = document.createElement('div');
-        remoteVideoContainer.className = 'video-container remote';
-        remoteVideoContainer.innerHTML = `
-            <div class="video-placeholder" style="background-color: ${stringToColor(callerContact.name)}">
-                <div class="placeholder-initials">${callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase()}</div>
-            </div>
-            <div class="video-overlay">
-                <div class="video-name">${callerContact.name}</div>
-                <div class="video-status">Simulated Participant</div>
-            </div>
-        `;
-        elements.videoGrid.appendChild(remoteVideoContainer);
-        
-        updateVideoLayout();
+    try {
+        if (elements.videoGrid) {
+            elements.videoGrid.innerHTML = '';
+            
+            const localVideoContainer = document.createElement('div');
+            localVideoContainer.className = 'video-container local';
+            localVideoContainer.innerHTML = `
+                <video class="local-video" autoplay muted playsinline></video>
+                <div class="video-overlay">
+                    <div class="video-name">You (Simulated)</div>
+                    <div class="video-status">Simulated Video</div>
+                </div>
+            `;
+            elements.videoGrid.appendChild(localVideoContainer);
+            
+            const remoteVideoContainer = document.createElement('div');
+            remoteVideoContainer.className = 'video-container remote';
+            remoteVideoContainer.innerHTML = `
+                <div class="video-placeholder" style="background-color: ${stringToColor(callerContact.name)}">
+                    <div class="placeholder-initials">${callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase()}</div>
+                </div>
+                <div class="video-overlay">
+                    <div class="video-name">${callerContact.name}</div>
+                    <div class="video-status">Simulated Participant</div>
+                </div>
+            `;
+            elements.videoGrid.appendChild(remoteVideoContainer);
+            
+            updateVideoLayout();
+        }
+    } catch (error) {
+        logErrorOnce('showSimulatedVideo', error);
     }
 }
 
@@ -3708,41 +4218,41 @@ function playIncomingCallSound() {
         window._oscillator = oscillator;
         
     } catch (error) {
-        console.error('[Calls iframe] Could not play audio:', error);
+        logErrorOnce('playIncomingCallSound', error);
     }
 }
 
 function stopIncomingCallSound() {
-    if (window._soundInterval) {
-        clearInterval(window._soundInterval);
-        window._soundInterval = null;
-    }
-    
-    if (window._oscillator) {
-        try {
+    try {
+        if (window._soundInterval) {
+            clearInterval(window._soundInterval);
+            window._soundInterval = null;
+        }
+        
+        if (window._oscillator) {
             window._oscillator.stop();
             window._oscillator = null;
-        } catch (error) {
-            console.error('[Calls iframe] Error stopping oscillator:', error);
         }
-    }
-    
-    if (window._audioContext) {
-        try {
+        
+        if (window._audioContext) {
             window._audioContext.close();
             window._audioContext = null;
-        } catch (error) {
-            console.error('[Calls iframe] Error closing audio context:', error);
         }
+    } catch (error) {
+        logErrorOnce('stopIncomingCallSound', error);
     }
 }
 
 function emitCallEvent(eventType, data) {
-    const event = new CustomEvent(`call:${eventType}`, { detail: data });
-    window.dispatchEvent(event);
-    
-    if (window.EventBus) {
-        window.EventBus.emit(`call.${eventType}`, data);
+    try {
+        const event = new CustomEvent(`call:${eventType}`, { detail: data });
+        window.dispatchEvent(event);
+        
+        if (window.EventBus) {
+            window.EventBus.emit(`call.${eventType}`, data);
+        }
+    } catch (error) {
+        logErrorOnce('emitCallEvent', error);
     }
 }
 
@@ -3902,28 +4412,38 @@ export function cacheElements() {
         elements.notificationToast = document.getElementById('notificationToast');
         elements.notificationMessage = document.getElementById('notificationMessage');
     } catch (error) {
-        console.error('[Calls iframe] Error caching elements:', error);
+        logErrorOnce('cacheElements', error);
     }
 }
 
 export function initializeOfflineDetection() {
-    AppState.isOnline = navigator.onLine;
-    
-    if (!AppState.isOnline) {
-        handleOffline();
+    try {
+        AppState.isOnline = navigator.onLine;
+        
+        if (!AppState.isOnline) {
+            handleOffline();
+        }
+    } catch (error) {
+        logErrorOnce('initializeOfflineDetection', error);
     }
 }
 
 export function handleOnline() {
-    AppState.isOnline = true;
-    
     try {
-        elements.offlineBanner.classList.remove('active');
+        AppState.isOnline = true;
         
-        elements.appContainer.classList.remove('offline-ui');
+        if (elements.offlineBanner) {
+            elements.offlineBanner.classList.remove('active');
+        }
         
-        elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
-        elements.syncIndicator.classList.add('syncing');
+        if (elements.appContainer) {
+            elements.appContainer.classList.remove('offline-ui');
+        }
+        
+        if (elements.syncIndicator) {
+            elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Syncing...</span>';
+            elements.syncIndicator.classList.add('syncing');
+        }
         
         if (window.callAPI && AppState.isAuthenticated) {
             window.callAPI.initializeBackgroundSync();
@@ -3931,32 +4451,42 @@ export function handleOnline() {
         
         enableUI();
     } catch (error) {
-        console.error('[Calls iframe] Error handling online state:', error);
+        logErrorOnce('handleOnline', error);
     }
 }
 
 export function handleOffline() {
-    AppState.isOnline = false;
-    
     try {
-        elements.offlineBanner.classList.add('active');
+        AppState.isOnline = false;
         
-        elements.appContainer.classList.add('offline-ui');
+        if (elements.offlineBanner) {
+            elements.offlineBanner.classList.add('active');
+        }
         
-        elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-        elements.syncIndicator.classList.remove('syncing');
+        if (elements.appContainer) {
+            elements.appContainer.classList.add('offline-ui');
+        }
+        
+        if (elements.syncIndicator) {
+            elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+            elements.syncIndicator.classList.remove('syncing');
+        }
         
         showOfflineUI();
     } catch (error) {
-        console.error('[Calls iframe] Error handling offline state:', error);
+        logErrorOnce('handleOffline', error);
     }
 }
 
 export function showOfflineUI() {
     try {
         if (elements.callContainer && elements.callContainer.classList.contains('active')) {
-            elements.offlineCallPlaceholder.style.display = 'flex';
-            elements.videoGrid.style.display = 'none';
+            if (elements.offlineCallPlaceholder) {
+                elements.offlineCallPlaceholder.style.display = 'flex';
+            }
+            if (elements.videoGrid) {
+                elements.videoGrid.style.display = 'none';
+            }
         }
         
         if (elements.offlineContactsMessage) {
@@ -3975,7 +4505,7 @@ export function showOfflineUI() {
             window.callAPI.loadCachedDataToUI();
         }
     } catch (error) {
-        console.error('[Calls iframe] Error showing offline UI:', error);
+        logErrorOnce('showOfflineUI', error);
     }
 }
 
@@ -4028,7 +4558,7 @@ export function enableUI() {
         
         applySettingsToUI();
     } catch (error) {
-        console.error('[Calls iframe] Error enabling UI:', error);
+        logErrorOnce('enableUI', error);
     }
 }
 
@@ -4042,7 +4572,7 @@ export function initializeUI() {
         
         initializeNotifications();
     } catch (error) {
-        console.error('[Calls iframe] Error initializing UI:', error);
+        logErrorOnce('initializeUI', error);
     }
 }
 
@@ -4052,7 +4582,7 @@ export function initializeNotifications() {
             elements.notificationToast.style.display = 'none';
         }
     } catch (error) {
-        console.error('[Calls iframe] Error initializing notifications:', error);
+        logErrorOnce('initializeNotifications', error);
     }
 }
 
@@ -4094,18 +4624,20 @@ export function showNotification(message, type = 'success') {
             }
         }, 3000);
     } catch (error) {
-        console.error('[Calls iframe] Error showing notification:', error);
+        logErrorOnce('showNotification', error);
     }
 }
 
 export function makeDraggable(element) {
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    if (!element) return;
     
     try {
-        if (element.querySelector('.pip-controls')) {
-            element.querySelector('.pip-controls').onmousedown = dragMouseDown;
-        } else {
-            element.onmousedown = dragMouseDown;
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        
+        const dragElement = element.querySelector('.pip-controls') || element;
+        
+        if (dragElement) {
+            dragElement.onmousedown = dragMouseDown;
         }
         
         function dragMouseDown(e) {
@@ -4137,7 +4669,7 @@ export function makeDraggable(element) {
             document.onmousemove = null;
         }
     } catch (error) {
-        console.error('[Calls iframe] Error making element draggable:', error);
+        logErrorOnce('makeDraggable', error);
     }
 }
 
@@ -4147,7 +4679,7 @@ export function closePip() {
             elements.pipContainer.style.display = 'none';
         }
     } catch (error) {
-        console.error('[Calls iframe] Error closing PiP:', error);
+        logErrorOnce('closePip', error);
     }
 }
 
@@ -4185,7 +4717,7 @@ export function checkPremiumFeature(feature) {
             elements.premiumLimitOverlay.classList.add('active');
         }
     } catch (error) {
-        console.error('[Calls iframe] Error checking premium feature:', error);
+        logErrorOnce('checkPremiumFeature', error);
     }
     
     return false;
@@ -4197,36 +4729,41 @@ export function updatePremiumUI() {
     try {
         if (AppState.isPremium) {
             document.querySelectorAll('.premium-badge-small').forEach(badge => {
-                badge.style.display = 'none';
+                if (badge) {
+                    badge.style.display = 'none';
+                }
             });
             
             elements.quickGroupBtn.disabled = false;
             elements.screenShareBtn.disabled = false;
         } else {
             document.querySelectorAll('.premium-badge-small').forEach(badge => {
-                badge.style.display = 'block';
+                if (badge) {
+                    badge.style.display = 'block';
+                }
             });
             
             elements.quickGroupBtn.disabled = true;
             elements.screenShareBtn.disabled = true;
         }
     } catch (error) {
-        console.error('[Calls iframe] Error updating premium UI:', error);
+        logErrorOnce('updatePremiumUI', error);
     }
 }
 
 export function loadSettings() {
     return new Promise((resolve) => {
-        const savedSettings = localStorage.getItem('callSettings');
-        if (savedSettings) {
-            try {
+        try {
+            const savedSettings = localStorage.getItem('callSettings');
+            if (savedSettings) {
                 AppState.settings = { ...AppState.settings, ...JSON.parse(savedSettings) };
                 applySettingsToUI();
-            } catch (error) {
-                console.error('[Calls iframe] Error loading settings:', error);
             }
+            resolve();
+        } catch (error) {
+            logErrorOnce('loadSettings', error);
+            resolve();
         }
-        resolve();
     });
 }
 
@@ -4234,7 +4771,7 @@ export function saveSettings() {
     try {
         localStorage.setItem('callSettings', JSON.stringify(AppState.settings));
     } catch (error) {
-        console.error('[Calls iframe] Error saving settings:', error);
+        logErrorOnce('saveSettings', error);
     }
 }
 
@@ -4249,16 +4786,19 @@ export function applySettingsToUI() {
         if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
         if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
     } catch (error) {
-        console.error('[Calls iframe] Error applying settings to UI:', error);
+        logErrorOnce('applySettingsToUI', error);
     }
 }
 
 export function updateSetting(event) {
-    const setting = event.target.id.replace('Toggle', '');
-    AppState.settings[setting] = event.target.checked;
-    saveSettings();
-    
-    applySettingChange(setting, event.target.checked);
+    try {
+        const setting = event.target.id.replace('Toggle', '');
+        AppState.settings[setting] = event.target.checked;
+        saveSettings();
+        applySettingChange(setting, event.target.checked);
+    } catch (error) {
+        logErrorOnce('updateSetting', error);
+    }
 }
 
 export function applySettingChange(setting, value) {
@@ -4295,28 +4835,31 @@ export function applySettingChange(setting, value) {
                 break;
         }
     } catch (error) {
-        console.error('[Calls iframe] Error applying setting change:', error);
+        logErrorOnce('applySettingChange', error);
     }
 }
 
 export function resetSettings() {
-    if (confirm('Reset all settings to defaults?')) {
-        AppState.settings = {
-            emotionalContext: true,
-            callIntention: true,
-            inCallChat: true,
-            whiteboard: true,
-            polls: true,
-            notes: true,
-            focusMode: false,
-            liveReactions: true,
-            theme: 'light'
-        };
-        
-        saveSettings();
-        applySettingsToUI();
-        
-        showNotification('Settings reset to defaults', 'success');
+    try {
+        if (confirm('Reset all settings to defaults?')) {
+            AppState.settings = {
+                emotionalContext: true,
+                callIntention: true,
+                inCallChat: true,
+                whiteboard: true,
+                polls: true,
+                notes: true,
+                focusMode: false,
+                liveReactions: true,
+                theme: 'light'
+            };
+            
+            saveSettings();
+            applySettingsToUI();
+            showNotification('Settings reset to defaults', 'success');
+        }
+    } catch (error) {
+        logErrorOnce('resetSettings', error);
     }
 }
 
@@ -4331,6 +4874,9 @@ export function handleParentMessage(event) {
     }
     
     const data = event.data;
+    if (!data || typeof data !== 'object') {
+        return;
+    }
     
     try {
         switch (data.type) {
@@ -4354,7 +4900,7 @@ export function handleParentMessage(event) {
                 break;
         }
     } catch (error) {
-        console.error('[Calls iframe] Error handling parent message:', error);
+        logErrorOnce('handleParentMessage', error, `type: ${data?.type}`);
     }
 }
 
@@ -4371,10 +4917,14 @@ export function handleAuthUpdate(payload) {
 }
 
 export function handleApiReady() {
-    AppState.apiReady = true;
-    
-    if (window.callAPI && window.callAPI.tokenManager) {
-        setTimeout(() => window.callAPI.tokenManager.tryGetTokenFromAPI(), 100);
+    try {
+        AppState.apiReady = true;
+        
+        if (window.callAPI && window.callAPI.tokenManager) {
+            setTimeout(() => window.callAPI.tokenManager.tryGetTokenFromAPI(), 100);
+        }
+    } catch (error) {
+        logErrorOnce('handleApiReady', error);
     }
 }
 
@@ -4386,7 +4936,7 @@ export function handleDataRefresh(payload) {
 }
 
 export function handleStartCallRequest(payload) {
-    if (payload.contactId && AppState.contacts.length > 0) {
+    if (payload && payload.contactId && AppState.contacts && AppState.contacts.length > 0) {
         const contact = AppState.contacts.find(c => c.id === payload.contactId);
         if (contact) {
             const callType = payload.callType || 'voice';
@@ -4439,7 +4989,7 @@ export function handleStorageEvent(event) {
             }
         }
     } catch (error) {
-        console.error('[Calls iframe] Error handling storage event:', error);
+        logErrorOnce('handleStorageEvent', error);
     }
 }
 
@@ -4456,6 +5006,8 @@ export function debounce(func, wait) {
 }
 
 export function stringToColor(str) {
+    if (!str) return '#000000';
+    
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -4466,172 +5018,217 @@ export function stringToColor(str) {
 }
 
 export function formatTimeAgo(timestamp) {
-    const now = new Date();
-    const date = new Date(timestamp);
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
+    if (!timestamp) return 'Unknown';
     
-    if (diffMins < 1) {
-        return 'Just now';
-    } else if (diffMins < 60) {
-        return `${diffMins}m ago`;
-    } else if (diffHours < 24) {
-        return `${diffHours}h ago`;
-    } else if (diffDays < 7) {
-        return `${diffDays}d ago`;
-    } else {
-        return date.toLocaleDateString();
+    try {
+        const now = new Date();
+        const date = new Date(timestamp);
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) {
+            return 'Just now';
+        } else if (diffMins < 60) {
+            return `${diffMins}m ago`;
+        } else if (diffHours < 24) {
+            return `${diffHours}h ago`;
+        } else if (diffDays < 7) {
+            return `${diffDays}d ago`;
+        } else {
+            return date.toLocaleDateString();
+        }
+    } catch (error) {
+        return 'Unknown';
     }
 }
 
 export function formatDuration(seconds) {
+    if (!seconds && seconds !== 0) return '0:00';
+    
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export function checkUrlParameters() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const callId = urlParams.get('call');
-    const callType = urlParams.get('type');
-    
-    if (callId && elements.urlParamText && elements.urlParamOverlay) {
-        elements.urlParamText.textContent = `You've been invited to join a ${callType || 'voice'} call. Would you like to join now?`;
-        elements.urlParamOverlay.classList.add('active');
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const callId = urlParams.get('call');
+        const callType = urlParams.get('type');
+        
+        if (callId && elements.urlParamText && elements.urlParamOverlay) {
+            elements.urlParamText.textContent = `You've been invited to join a ${callType || 'voice'} call. Would you like to join now?`;
+            elements.urlParamOverlay.classList.add('active');
+        }
+    } catch (error) {
+        logErrorOnce('checkUrlParameters', error);
     }
 }
 
 export function closeUrlParamOverlay() {
-    if (elements.urlParamOverlay) {
-        elements.urlParamOverlay.classList.remove('active');
+    try {
+        if (elements.urlParamOverlay) {
+            elements.urlParamOverlay.classList.remove('active');
+        }
+        
+        const url = new URL(window.location);
+        url.searchParams.delete('call');
+        url.searchParams.delete('type');
+        window.history.replaceState({}, '', url);
+    } catch (error) {
+        logErrorOnce('closeUrlParamOverlay', error);
     }
-    
-    const url = new URL(window.location);
-    url.searchParams.delete('call');
-    url.searchParams.delete('type');
-    window.history.replaceState({}, '', url);
 }
 
 export function joinUrlParamCall() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const callId = urlParams.get('call');
-    const callType = urlParams.get('type') || 'voice';
-    
-    showNotification(`Joining ${callType} call...`, 'info');
-    
-    closeUrlParamOverlay();
-    
-    setTimeout(() => {
-        const randomContact = AppState.contacts.length > 0 ? 
-            AppState.contacts[0] : 
-            { id: 'remote', name: 'Remote Participant' };
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const callId = urlParams.get('call');
+        const callType = urlParams.get('type') || 'voice';
         
-        AppState.isInCall = true;
-        AppState.callType = callType;
-        AppState.callParticipants = [randomContact];
-        AppState.callStartTime = Date.now();
+        showNotification(`Joining ${callType} call...`, 'info');
+        closeUrlParamOverlay();
         
-        showCallUI();
-        startCallTimer();
-        initializeCallFeatures();
-        
-        showNotification(`Joined ${callType} call`, 'success');
-    }, 1000);
+        setTimeout(() => {
+            const randomContact = AppState.contacts && AppState.contacts.length > 0 ? 
+                AppState.contacts[0] : 
+                { id: 'remote', name: 'Remote Participant' };
+            
+            AppState.isInCall = true;
+            AppState.callType = callType;
+            AppState.callParticipants = [randomContact];
+            AppState.callStartTime = Date.now();
+            
+            showCallUI();
+            startCallTimer();
+            initializeCallFeatures();
+            
+            showNotification(`Joined ${callType} call`, 'success');
+        }, 1000);
+    } catch (error) {
+        logErrorOnce('joinUrlParamCall', error);
+    }
 }
 
 export function updateMoodIndicator(mood) {
     if (!AppState.settings.emotionalContext || !elements.callMoodIndicator) return;
     
-    const moodNames = {
-        happy: 'Happy',
-        neutral: 'Neutral',
-        sad: 'Sad',
-        angry: 'Angry',
-        tired: 'Tired',
-        excited: 'Excited'
-    };
-    
-    elements.callMoodIndicator.innerHTML = `
-        <div class="mood-indicator mood-${mood}" style="display: inline-flex; margin-top: 5px;">
-            <i class="fas fa-smile"></i>
-            <span>${moodNames[mood] || mood}</span>
-        </div>
-    `;
-    elements.callMoodIndicator.style.display = 'block';
+    try {
+        const moodNames = {
+            happy: 'Happy',
+            neutral: 'Neutral',
+            sad: 'Sad',
+            angry: 'Angry',
+            tired: 'Tired',
+            excited: 'Excited'
+        };
+        
+        elements.callMoodIndicator.innerHTML = `
+            <div class="mood-indicator mood-${mood}" style="display: inline-flex; margin-top: 5px;">
+                <i class="fas fa-smile"></i>
+                <span>${moodNames[mood] || mood}</span>
+            </div>
+        `;
+        elements.callMoodIndicator.style.display = 'block';
+    } catch (error) {
+        logErrorOnce('updateMoodIndicator', error);
+    }
 }
 
 export function updateIntentionIndicator(intention) {
     if (!AppState.settings.callIntention || !elements.callIntentionIndicator) return;
     
-    const intentionNames = {
-        quick: 'Quick Chat',
-        important: 'Important Discussion',
-        emergency: 'Emergency',
-        checkin: 'Check-in',
-        work: 'Work/Business'
-    };
-    
-    elements.callIntentionIndicator.innerHTML = `
-        <div class="intention-indicator intention-${intention}" style="display: inline-flex; margin-top: 5px;">
-            <i class="fas fa-bullseye"></i>
-            <span>${intentionNames[intention] || intention}</span>
-        </div>
-    `;
-    elements.callIntentionIndicator.style.display = 'block';
+    try {
+        const intentionNames = {
+            quick: 'Quick Chat',
+            important: 'Important Discussion',
+            emergency: 'Emergency',
+            checkin: 'Check-in',
+            work: 'Work/Business'
+        };
+        
+        elements.callIntentionIndicator.innerHTML = `
+            <div class="intention-indicator intention-${intention}" style="display: inline-flex; margin-top: 5px;">
+                <i class="fas fa-bullseye"></i>
+                <span>${intentionNames[intention] || intention}</span>
+            </div>
+        `;
+        elements.callIntentionIndicator.style.display = 'block';
+    } catch (error) {
+        logErrorOnce('updateIntentionIndicator', error);
+    }
 }
 
 export function updateParticipantBadge() {
     if (!elements.participantBadge) return;
     
-    const count = AppState.callParticipants.length + 1;
-    elements.participantBadge.textContent = count;
+    try {
+        const count = AppState.callParticipants.length + 1;
+        elements.participantBadge.textContent = count;
+    } catch (error) {
+        logErrorOnce('updateParticipantBadge', error);
+    }
 }
 
 export function updateChatBadge() {
     if (!elements.chatBadge) return;
     
-    elements.chatBadge.textContent = AppState.unreadChatCount;
-    if (AppState.unreadChatCount > 0) {
-        elements.chatBadge.style.display = 'block';
-    } else {
-        elements.chatBadge.style.display = 'none';
+    try {
+        elements.chatBadge.textContent = AppState.unreadChatCount;
+        if (AppState.unreadChatCount > 0) {
+            elements.chatBadge.style.display = 'block';
+        } else {
+            elements.chatBadge.style.display = 'none';
+        }
+    } catch (error) {
+        logErrorOnce('updateChatBadge', error);
     }
 }
 
 export function updateGroupCallButton() {
     if (!elements.startGroupCallBtn) return;
     
-    const selectedContacts = document.querySelectorAll('.group-contact:checked').length;
-    const hasGroupOption = document.querySelector('.option-item.selected') !== null;
-    
-    elements.startGroupCallBtn.disabled = !(selectedContacts >= 1 && hasGroupOption);
+    try {
+        const selectedContacts = document.querySelectorAll('.group-contact:checked').length;
+        const hasGroupOption = document.querySelector('.option-item.selected') !== null;
+        
+        elements.startGroupCallBtn.disabled = !(selectedContacts >= 1 && hasGroupOption);
+    } catch (error) {
+        logErrorOnce('updateGroupCallButton', error);
+    }
 }
 
 export function updateVideoLayout() {
     if (!elements.videoGrid) return;
     
-    const videoContainers = elements.videoGrid.querySelectorAll('.video-container');
-    const count = videoContainers.length;
-    
-    videoContainers.forEach(container => {
-        container.classList.remove('large');
-    });
-    
-    if (count === 1) {
-        videoContainers[0].classList.add('large');
-    } else if (count === 3) {
-        const pinned = elements.videoGrid.querySelector('.video-container.pinned');
-        if (pinned) {
-            pinned.classList.add('large');
-        } else {
+    try {
+        const videoContainers = elements.videoGrid.querySelectorAll('.video-container');
+        const count = videoContainers.length;
+        
+        videoContainers.forEach(container => {
+            container.classList.remove('large');
+        });
+        
+        if (count === 1) {
             videoContainers[0].classList.add('large');
+        } else if (count === 3) {
+            const pinned = elements.videoGrid.querySelector('.video-container.pinned');
+            if (pinned) {
+                pinned.classList.add('large');
+            } else {
+                videoContainers[0].classList.add('large');
+            }
         }
+    } catch (error) {
+        logErrorOnce('updateVideoLayout', error);
     }
 }
 
 export function initializeWhiteboard(canvas) {
+    if (!canvas) return;
+    
     try {
         const ctx = canvas.getContext('2d');
         let drawing = false;
@@ -4715,57 +5312,64 @@ export function initializeWhiteboard(canvas) {
             }
         }
     } catch (error) {
-        console.error('[Calls iframe] Error initializing whiteboard:', error);
+        logErrorOnce('initializeWhiteboard', error);
     }
 }
 
 export function sendChatMessage(message) {
-    const chatMessages = document.querySelector('#chatMessagesPanel');
-    if (chatMessages) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'chat-message user';
-        messageDiv.innerHTML = `
-            <div class="message-sender">You</div>
-            <div class="message-content">${message}</div>
-            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-        `;
-        chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+    if (!message) return;
     
-    setTimeout(() => {
-        if (AppState.callParticipants.length > 0) {
-            const participant = AppState.callParticipants[0];
-            const responses = [
-                "Thanks for sharing!",
-                "I agree with that.",
-                "Let's discuss this further.",
-                "Interesting point.",
-                "Can you elaborate on that?"
-            ];
-            const response = responses[Math.floor(Math.random() * responses.length)];
-            
-            if (chatMessages) {
-                const responseDiv = document.createElement('div');
-                responseDiv.className = 'chat-message other';
-                responseDiv.innerHTML = `
-                    <div class="message-sender">${participant.name}</div>
-                    <div class="message-content">${response}</div>
-                    <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                `;
-                chatMessages.appendChild(responseDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
+    try {
+        const chatMessages = document.querySelector('#chatMessagesPanel');
+        if (chatMessages) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message user';
+            messageDiv.innerHTML = `
+                <div class="message-sender">You</div>
+                <div class="message-content">${message}</div>
+                <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+            `;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
-    }, 1000 + Math.random() * 2000);
-    
-    AppState.unreadChatCount++;
-    updateChatBadge();
-    
-    showNotification('Message sent', 'success');
+        
+        setTimeout(() => {
+            if (AppState.callParticipants && AppState.callParticipants.length > 0) {
+                const participant = AppState.callParticipants[0];
+                const responses = [
+                    "Thanks for sharing!",
+                    "I agree with that.",
+                    "Let's discuss this further.",
+                    "Interesting point.",
+                    "Can you elaborate on that?"
+                ];
+                const response = responses[Math.floor(Math.random() * responses.length)];
+                
+                if (chatMessages) {
+                    const responseDiv = document.createElement('div');
+                    responseDiv.className = 'chat-message other';
+                    responseDiv.innerHTML = `
+                        <div class="message-sender">${participant.name}</div>
+                        <div class="message-content">${response}</div>
+                        <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    `;
+                    chatMessages.appendChild(responseDiv);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            }
+        }, 1000 + Math.random() * 2000);
+        
+        AppState.unreadChatCount++;
+        updateChatBadge();
+        showNotification('Message sent', 'success');
+    } catch (error) {
+        logErrorOnce('sendChatMessage', error);
+    }
 }
 
 export function saveSharedNotes(notes) {
+    if (!notes) return;
+    
     try {
         const callNotes = JSON.parse(localStorage.getItem('sharedCallNotes') || '[]');
         callNotes.push({
@@ -4775,100 +5379,111 @@ export function saveSharedNotes(notes) {
         });
         localStorage.setItem('sharedCallNotes', JSON.stringify(callNotes));
     } catch (error) {
-        console.error('[Calls iframe] Error saving shared notes:', error);
+        logErrorOnce('saveSharedNotes', error);
     }
 }
 
 export function renderCallHistory() {
     if (!elements.callsLoading || !elements.allCallsList || !elements.missedCallsList || !elements.groupCallsList) return;
     
-    elements.callsLoading.style.display = 'none';
-    
-    if (AppState.callHistory.length === 0) {
-        elements.allCallsList.innerHTML = '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No call history</p><p class="subtext">Make your first call to see it here</p></div>';
-        return;
-    }
-    
-    let allCallsHtml = '';
-    let missedCallsHtml = '';
-    let groupCallsHtml = '';
-    
-    AppState.callHistory.forEach(call => {
-        const callItem = createCallHistoryItem(call);
+    try {
+        elements.callsLoading.style.display = 'none';
         
-        allCallsHtml += callItem;
-        
-        if (call.status === 'missed') {
-            missedCallsHtml += callItem;
+        if (!AppState.callHistory || AppState.callHistory.length === 0) {
+            elements.allCallsList.innerHTML = '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No call history</p><p class="subtext">Make your first call to see it here</p></div>';
+            return;
         }
         
-        if (call.isGroup) {
-            groupCallsHtml += callItem;
-        }
-    });
-    
-    elements.allCallsList.innerHTML = allCallsHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No calls</p></div>';
-    elements.missedCallsList.innerHTML = missedCallsHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No missed calls</p><p class="subtext">All calls have been answered</p></div>';
-    elements.groupCallsList.innerHTML = groupCallsHtml || '<div class="offline-state"><i class="fas fa-users-slash"></i><p>No group calls yet</p><p class="subtext">Start your first group call to see it here</p></div>';
-    
-    document.querySelectorAll('.call-action-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const callItem = this.closest('.call-item');
-            const contactId = callItem.dataset.contactId;
-            const contact = AppState.contacts.find(c => c.id === contactId);
+        let allCallsHtml = '';
+        let missedCallsHtml = '';
+        let groupCallsHtml = '';
+        
+        AppState.callHistory.forEach(call => {
+            const callItem = createCallHistoryItem(call);
             
-            if (contact) {
-                startCall('voice', [contact]);
+            allCallsHtml += callItem;
+            
+            if (call.status === 'missed') {
+                missedCallsHtml += callItem;
+            }
+            
+            if (call.isGroup) {
+                groupCallsHtml += callItem;
             }
         });
-    });
+        
+        elements.allCallsList.innerHTML = allCallsHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No calls</p></div>';
+        elements.missedCallsList.innerHTML = missedCallsHtml || '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No missed calls</p><p class="subtext">All calls have been answered</p></div>';
+        elements.groupCallsList.innerHTML = groupCallsHtml || '<div class="offline-state"><i class="fas fa-users-slash"></i><p>No group calls yet</p><p class="subtext">Start your first group call to see it here</p></div>';
+        
+        document.querySelectorAll('.call-action-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const callItem = this.closest('.call-item');
+                const contactId = callItem.dataset.contactId;
+                const contact = AppState.contacts.find(c => c.id === contactId);
+                
+                if (contact) {
+                    startCall('voice', [contact]);
+                }
+            });
+        });
+    } catch (error) {
+        logErrorOnce('renderCallHistory', error);
+    }
 }
 
 export function createCallHistoryItem(call) {
-    const contact = AppState.contacts.find(c => c.id === call.contactId) || { name: call.contactName || 'Unknown' };
-    const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
-    const timeAgo = formatTimeAgo(call.timestamp);
+    if (!call) return '';
     
-    let statusIcon = '';
-    let statusClass = '';
-    
-    if (call.status === 'incoming') {
-        statusIcon = '<i class="fas fa-phone-alt"></i>';
-        statusClass = 'incoming';
-    } else if (call.status === 'outgoing') {
-        statusIcon = '<i class="fas fa-phone-alt"></i>';
-        statusClass = 'outgoing';
-    } else if (call.status === 'missed') {
-        statusIcon = '<i class="fas fa-phone-slash"></i>';
-        statusClass = 'missed';
+    try {
+        const contact = AppState.contacts?.find(c => c.id === call.contactId) || { name: call.contactName || 'Unknown' };
+        const initials = contact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+        const timeAgo = formatTimeAgo(call.timestamp);
+        
+        let statusIcon = '';
+        let statusClass = '';
+        
+        if (call.status === 'incoming') {
+            statusIcon = '<i class="fas fa-phone-alt"></i>';
+            statusClass = 'incoming';
+        } else if (call.status === 'outgoing') {
+            statusIcon = '<i class="fas fa-phone-alt"></i>';
+            statusClass = 'outgoing';
+        } else if (call.status === 'missed') {
+            statusIcon = '<i class="fas fa-phone-slash"></i>';
+            statusClass = 'missed';
+        }
+        
+        return `
+            <div class="call-item" data-contact-id="${call.contactId}">
+                <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
+                    ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
+                    <div class="call-status-icon ${statusClass}">
+                        ${statusIcon}
+                    </div>
+                </div>
+                <div class="call-info">
+                    <div class="call-name">
+                        <span>${contact.name}</span>
+                        <span class="call-time">${timeAgo}</span>
+                    </div>
+                    <div class="call-details">
+                        <span>${call.type === 'video' ? 'Video Call' : 'Voice Call'}</span>
+                        ${call.duration ? `<span>• ${formatDuration(call.duration)}</span>` : ''}
+                        ${call.isGroup ? '<span class="premium-badge">Group</span>' : ''}
+                    </div>
+                    ${call.mood ? `<div class="mood-indicator mood-${call.mood}"><i class="fas fa-smile"></i><span>${call.mood}</span></div>` : ''}
+                    ${call.intention ? `<div class="intention-indicator intention-${call.intention}"><i class="fas fa-bullseye"></i><span>${call.intention}</span></div>` : ''}
+                </div>
+                <button class="call-action-btn" title="Call back">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+    } catch (error) {
+        logErrorOnce('createCallHistoryItem', error);
+        return '';
     }
-    
-    return `
-        <div class="call-item" data-contact-id="${call.contactId}">
-            <div class="call-avatar" style="background-color: ${stringToColor(contact.name)}">
-                ${contact.avatar ? `<img src="${contact.avatar}" alt="${contact.name}">` : initials}
-                <div class="call-status-icon ${statusClass}">
-                    ${statusIcon}
-                </div>
-            </div>
-            <div class="call-info">
-                <div class="call-name">
-                    <span>${contact.name}</span>
-                    <span class="call-time">${timeAgo}</span>
-                </div>
-                <div class="call-details">
-                    <span>${call.type === 'video' ? 'Video Call' : 'Voice Call'}</span>
-                    ${call.duration ? `<span>• ${formatDuration(call.duration)}</span>` : ''}
-                    ${call.isGroup ? '<span class="premium-badge">Group</span>' : ''}
-                </div>
-                ${call.mood ? `<div class="mood-indicator mood-${call.mood}"><i class="fas fa-smile"></i><span>${call.mood}</span></div>` : ''}
-                ${call.intention ? `<div class="intention-indicator intention-${call.intention}"><i class="fas fa-bullseye"></i><span>${call.intention}</span></div>` : ''}
-            </div>
-            <button class="call-action-btn" title="Call back">
-                <i class="fas fa-phone"></i>
-            </button>
-        </div>
-    `;
 }
 
 export function showUI() {
@@ -4881,10 +5496,12 @@ export function showUI() {
         
         const loadingIndicators = document.querySelectorAll('.loading-indicator, .initializing-overlay');
         loadingIndicators.forEach(indicator => {
-            indicator.style.display = 'none';
+            if (indicator) {
+                indicator.style.display = 'none';
+            }
         });
     } catch (error) {
-        console.error('[Calls iframe] Error showing UI:', error);
+        logErrorOnce('showUI', error);
     }
 }
 
@@ -4898,13 +5515,9 @@ export function bootstrapIframe() {
     
     try {
         cacheElements();
-        
         setupEventListeners();
-        
         initializeOfflineDetection();
-        
         initializeUI();
-        
         showUI();
         
         window.callAPI = new CallAPIIntegration();
@@ -4913,7 +5526,7 @@ export function bootstrapIframe() {
             window.callAPI.initialize().then(() => {
                 console.info('[Calls iframe] API integration initialized successfully');
             }).catch(error => {
-                console.error('[Calls iframe] API integration failed:', error);
+                logErrorOnce('bootstrapIframe.callAPI', error);
                 enableUI();
             });
         }, 100);
@@ -4928,12 +5541,12 @@ export function bootstrapIframe() {
         
         console.info('[Calls iframe] Bootstrap completed');
     } catch (error) {
-        console.error('[Calls iframe] Bootstrap failed:', error);
+        logErrorOnce('bootstrapIframe', error);
         try {
             showUI();
             enableUI();
         } catch (e) {
-            console.error('[Calls iframe] Critical error during fallback:', e);
+            logErrorOnce('bootstrapIframe.fallback', e);
         }
     }
 }
@@ -4965,22 +5578,27 @@ function setupEventListeners() {
             });
         }
     } catch (error) {
-        console.error('[Calls iframe] Error setting up event listeners:', error);
+        logErrorOnce('setupEventListeners', error);
     }
 }
 
 // ==================== CALL MANAGEMENT FUNCTIONS ====================
 function startCallTimer() {
-    if (AppState.callDurationInterval) {
-        clearInterval(AppState.callDurationInterval);
-    }
-    
-    AppState.callDurationInterval = setInterval(() => {
-        if (AppState.callStartTime && elements.callDuration) {
-            const elapsedSeconds = Math.floor((Date.now() - AppState.callStartTime) / 1000);
-            elements.callDuration.textContent = formatDuration(elapsedSeconds);
+    try {
+        if (AppState.callDurationInterval) {
+            clearInterval(AppState.callDurationInterval);
+            AppState.callDurationInterval = null;
         }
-    }, 1000);
+        
+        AppState.callDurationInterval = setInterval(() => {
+            if (AppState.callStartTime && elements.callDuration) {
+                const elapsedSeconds = Math.floor((Date.now() - AppState.callStartTime) / 1000);
+                elements.callDuration.textContent = formatDuration(elapsedSeconds);
+            }
+        }, 1000);
+    } catch (error) {
+        logErrorOnce('startCallTimer', error);
+    }
 }
 
 function initializeCallFeatures() {
@@ -4988,12 +5606,16 @@ function initializeCallFeatures() {
 }
 
 function showCallUI() {
-    if (elements.callContainer) {
-        elements.callContainer.classList.add('active');
-    }
-    
-    if (elements.appContainer) {
-        elements.appContainer.classList.add('in-call');
+    try {
+        if (elements.callContainer) {
+            elements.callContainer.classList.add('active');
+        }
+        
+        if (elements.appContainer) {
+            elements.appContainer.classList.add('in-call');
+        }
+    } catch (error) {
+        logErrorOnce('showCallUI', error);
     }
 }
 
@@ -5009,7 +5631,7 @@ function disableFocusMode() {
 window.CallApp = {
     simulateIncomingCall,
     startTestCall: () => {
-        if (AppState.contacts.length > 0) {
+        if (AppState.contacts && AppState.contacts.length > 0) {
             startCall('video', [AppState.contacts[0]]);
         } else {
             console.error('[Calls iframe] Cannot start test call - no contacts available');
@@ -5017,24 +5639,41 @@ window.CallApp = {
     },
     getState: () => AppState,
     checkApiStatus: () => {
-        return {
-            isAuthenticated: AppState.isAuthenticated,
-            apiReady: AppState.apiReady,
-            user: AppState.user,
-            tokenReady: window.callAPI ? window.callAPI.tokenManager.isTokenReady() : false,
-            parentCoordinator: parentCoordinator ? parentCoordinator.getStatus() : null,
-            secureHandshakeInProgress: secureHandshakeInProgress,
-            secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false
-        };
+        try {
+            return {
+                isAuthenticated: AppState.isAuthenticated,
+                apiReady: AppState.apiReady,
+                user: AppState.user,
+                tokenReady: window.callAPI ? window.callAPI.tokenManager.isTokenReady() : false,
+                parentCoordinator: parentCoordinator ? parentCoordinator.getStatus() : null,
+                secureHandshakeInProgress: secureHandshakeInProgress,
+                secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false
+            };
+        } catch (error) {
+            logErrorOnce('CallApp.checkApiStatus', error);
+            return {
+                isAuthenticated: false,
+                apiReady: false,
+                user: null,
+                tokenReady: false,
+                parentCoordinator: null,
+                secureHandshakeInProgress: false,
+                secureSessionValid: false
+            };
+        }
     },
     notifyParent: (type, data) => {
         if (window.parent && window.parent !== window) {
-            window.parent.postMessage({
-                type: type,
-                source: 'calls-iframe',
-                ...data,
-                timestamp: Date.now()
-            }, '*');
+            try {
+                window.parent.postMessage({
+                    type: type,
+                    source: 'calls-iframe',
+                    ...data,
+                    timestamp: Date.now()
+                }, '*');
+            } catch (error) {
+                logErrorOnce('CallApp.notifyParent', error);
+            }
         }
     },
     // New secure handshake functions
@@ -5046,12 +5685,22 @@ window.CallApp = {
         }
     },
     getHandshakeStatus: () => {
-        return {
-            secureHandshakeInProgress: secureHandshakeInProgress,
-            secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false,
-            secureHandshakeAttempts: secureHandshakeAttempts,
-            maxHandshakeAttempts: maxHandshakeAttempts
-        };
+        try {
+            return {
+                secureHandshakeInProgress: secureHandshakeInProgress,
+                secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false,
+                secureHandshakeAttempts: secureHandshakeAttempts,
+                maxHandshakeAttempts: maxHandshakeAttempts
+            };
+        } catch (error) {
+            logErrorOnce('CallApp.getHandshakeStatus', error);
+            return {
+                secureHandshakeInProgress: false,
+                secureSessionValid: false,
+                secureHandshakeAttempts: 0,
+                maxHandshakeAttempts: maxHandshakeAttempts
+            };
+        }
     }
 };
 

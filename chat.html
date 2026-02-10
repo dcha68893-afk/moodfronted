@@ -25,6 +25,8 @@
           integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" 
           crossorigin="anonymous" referrerpolicy="no-referrer">
     
+    <link rel="stylesheet" href="chat.css">
+
     <style>
         * {
             -webkit-user-select: none;
@@ -1562,6 +1564,172 @@
         
         console.log("[Bootstrap] Bootstrap module loaded");
     </script>
+    
+    <!-- Error isolation wrapper for optional scripts -->
+    <script>
+        // Core scripts that must load first
+        const CORE_SCRIPTS = ['app.core', 'api.core', 'api.auth', 'api.request'];
+        const UI_SCRIPTS = ['emoji', 'waveform', 'video', 'toolbar', 'chat-ui'];
+        
+        // Track loaded scripts and errors
+        window._SCRIPT_ERRORS = new Map();
+        window._SCRIPT_RETRY_COUNT = new Map();
+        const MAX_RETRIES = 3;
+        
+        // Function to safely load scripts
+        function safeLoadScript(url, isCore = false) {
+            return new Promise((resolve, reject) => {
+                if (window._SCRIPT_ERRORS.has(url) && window._SCRIPT_ERRORS.get(url).retries >= MAX_RETRIES) {
+                    console.warn(`[Script Isolation] Skipping ${url} - max retries exceeded`);
+                    resolve(false);
+                    return;
+                }
+                
+                const script = document.createElement('script');
+                script.src = url;
+                script.onload = () => {
+                    console.log(`[Script Isolation] Loaded: ${url}`);
+                    window._SCRIPT_ERRORS.delete(url);
+                    resolve(true);
+                };
+                script.onerror = (error) => {
+                    const retryCount = (window._SCRIPT_RETRY_COUNT.get(url) || 0) + 1;
+                    window._SCRIPT_RETRY_COUNT.set(url, retryCount);
+                    window._SCRIPT_ERRORS.set(url, { error, retryCount, timestamp: Date.now() });
+                    
+                    if (isCore) {
+                        console.error(`[Script Isolation] Core script failed: ${url}`, error);
+                        if (retryCount >= MAX_RETRIES) {
+                            console.error(`[Script Isolation] CRITICAL: Core script ${url} failed after ${MAX_RETRIES} retries`);
+                        }
+                    } else {
+                        console.warn(`[Script Isolation] Optional script failed: ${url} (retry ${retryCount}/${MAX_RETRIES})`);
+                    }
+                    
+                    resolve(false);
+                };
+                
+                // Set timeout for script loading
+                setTimeout(() => {
+                    if (!script.loaded && !script.error) {
+                        script.onerror(new Error(`Script load timeout: ${url}`));
+                    }
+                }, 10000);
+                
+                document.head.appendChild(script);
+            });
+        }
+        
+        // Load scripts in proper order
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('[Script Isolation] Starting script loading...');
+            
+            try {
+                // Load core scripts first
+                for (const scriptType of CORE_SCRIPTS) {
+                    const scriptUrl = getScriptUrlForType(scriptType);
+                    if (scriptUrl) {
+                        const loaded = await safeLoadScript(scriptUrl, true);
+                        if (!loaded && scriptType === 'app.core' || scriptType === 'api.core') {
+                            console.error(`[Script Isolation] Critical core script ${scriptType} failed to load`);
+                            // Continue anyway, app might work in degraded mode
+                        }
+                    }
+                }
+                
+                // Load UI scripts after core
+                setTimeout(async () => {
+                    for (const scriptType of UI_SCRIPTS) {
+                        const scriptUrl = getScriptUrlForType(scriptType);
+                        if (scriptUrl) {
+                            await safeLoadScript(scriptUrl, false);
+                        }
+                    }
+                    
+                    // Initialize optional UI components safely
+                    setTimeout(() => {
+                        try {
+                            if (typeof window.initializeEmojiPicker === 'function') {
+                                window.initializeEmojiPicker();
+                            }
+                        } catch (e) {
+                            console.warn('[Script Isolation] Emoji picker initialization failed:', e);
+                        }
+                        
+                        try {
+                            if (typeof window.initializeWaveform === 'function') {
+                                window.initializeWaveform();
+                            }
+                        } catch (e) {
+                            console.warn('[Script Isolation] Waveform initialization failed:', e);
+                        }
+                        
+                        try {
+                            if (typeof window.initializeVideoPlayer === 'function') {
+                                window.initializeVideoPlayer();
+                            }
+                        } catch (e) {
+                            console.warn('[Script Isolation] Video player initialization failed:', e);
+                        }
+                    }, 1000);
+                }, 500);
+                
+            } catch (error) {
+                console.error('[Script Isolation] Error during script loading:', error);
+            }
+        });
+        
+        // Helper function to determine script URLs
+        function getScriptUrlForType(scriptType) {
+            const scriptMap = {
+                'app.core': '../js/app.core.js',
+                'api.core': '../js/api.core.js',
+                'api.auth': '../js/api.auth.js',
+                'api.request': '../js/api.request.js',
+                'emoji': '../js/emoji-picker.js',
+                'waveform': '../js/waveform.js',
+                'video': '../js/video-player.js',
+                'toolbar': '../js/toolbar.js',
+                'chat-ui': '../js/chat-ui.js'
+            };
+            return scriptMap[scriptType];
+        }
+        
+        // Ensure jQuery loads before plugins
+        if (typeof jQuery === 'undefined') {
+            console.log('[Script Isolation] Loading jQuery...');
+            const jqueryScript = document.createElement('script');
+            jqueryScript.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
+            jqueryScript.integrity = 'sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=';
+            jqueryScript.crossOrigin = 'anonymous';
+            jqueryScript.onload = () => {
+                console.log('[Script Isolation] jQuery loaded');
+                // Load jQuery plugins after jQuery
+                setTimeout(() => {
+                    loadJQueryPluginsSafely();
+                }, 100);
+            };
+            jqueryScript.onerror = () => {
+                console.error('[Script Isolation] jQuery failed to load');
+            };
+            document.head.appendChild(jqueryScript);
+        }
+        
+        function loadJQueryPluginsSafely() {
+            const plugins = [
+                'https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js'
+            ];
+            
+            plugins.forEach(url => {
+                const script = document.createElement('script');
+                script.src = url;
+                script.onerror = () => {
+                    console.warn(`[Script Isolation] jQuery plugin failed: ${url}`);
+                };
+                document.head.appendChild(script);
+            });
+        }
+    </script>
 </head>
 <body class="h-full overflow-hidden bg-gray-50" data-theme="light">
     <script>
@@ -1830,7 +1998,7 @@
         </div>
     </div>
 
-    <!-- Iframe Content Areas -->
+    <!-- Iframe Content Areas with error isolation -->
     <div id="messagesContent" class="content-area iframe-container hidden">
         <div class="iframe-loading-overlay" id="messagesLoadingOverlay">
             <div class="text-center">
@@ -2004,7 +2172,8 @@
         </div>
     </div>
 
-    <!-- Main application script -->
+    
+    <!-- Main application script with enhanced error isolation -->
     <script type="module">
         class SessionBroker {
             constructor() {
@@ -2036,7 +2205,11 @@
                     // Track which frames have received session data to prevent duplicates
                     sessionSentToFrames: new Set(),
                     // Universal secure message listener
-                    secureMessageListener: null
+                    secureMessageListener: null,
+                    // Error tracking
+                    failedFrames: new Set(),
+                    frameRetryCount: new Map(),
+                    maxFrameRetries: 3
                 };
                 
                 this.init();
@@ -2465,10 +2638,21 @@
             }
             
             sendToFrame(frameId, type, payload = {}, expectAck = false) {
+                // Check if frame is marked as failed
+                if (this.state.failedFrames.has(frameId)) {
+                    if (this.state.debugMode) {
+                        console.warn(`${this.state.logPrefix} Skipping send to failed frame: ${frameId}`);
+                    }
+                    return false;
+                }
+                
                 const frameInfo = this.state.iframes.get(frameId);
                 
                 if (!frameInfo || !frameInfo.element || !frameInfo.element.contentWindow) {
-                    console.warn(`${this.state.logPrefix} Cannot send to frame ${frameId}: not found`);
+                    if (!this.state.failedFrames.has(frameId)) {
+                        console.warn(`${this.state.logPrefix} Cannot send to frame ${frameId}: not found`);
+                        this.state.failedFrames.add(frameId);
+                    }
                     return false;
                 }
                 
@@ -2505,6 +2689,7 @@
                     return true;
                 } catch (error) {
                     console.error(`${this.state.logPrefix} Failed to send to frame ${frameId}:`, error);
+                    this.markFrameAsFailed(frameId, error);
                     return false;
                 }
             }
@@ -2513,7 +2698,7 @@
                 let successCount = 0;
                 
                 for (const [frameId, frameInfo] of this.state.iframes.entries()) {
-                    if (frameInfo.ready) {
+                    if (frameInfo.ready && !this.state.failedFrames.has(frameId)) {
                         const sent = this.sendToFrame(frameId, type, payload);
                         if (sent) successCount++;
                     }
@@ -2574,282 +2759,397 @@
             }
             
             registerIframe(iframeElement, frameId = null) {
-                if (!iframeElement || !iframeElement.tagName || iframeElement.tagName !== 'IFRAME') {
-                    console.error(`${this.state.logPrefix} Invalid iframe element provided`);
+                try {
+                    if (!iframeElement || !iframeElement.tagName || iframeElement.tagName !== 'IFRAME') {
+                        console.error(`${this.state.logPrefix} Invalid iframe element provided`);
+                        return null;
+                    }
+                    
+                    const id = frameId || iframeElement.id || this.generateFrameId(iframeElement);
+                    
+                    // Check if frame is already marked as failed
+                    if (this.state.failedFrames.has(id)) {
+                        console.warn(`${this.state.logPrefix} Not registering failed frame: ${id}`);
+                        return null;
+                    }
+                    
+                    for (const [existingId, existingInfo] of this.state.iframes.entries()) {
+                        if (existingInfo.element === iframeElement) {
+                            if (existingId !== id) {
+                                this.state.iframes.delete(existingId);
+                                existingInfo.id = id;
+                                this.state.iframes.set(id, existingInfo);
+                            }
+                            
+                            return id;
+                        }
+                    }
+                    
+                    if (this.state.iframes.has(id)) {
+                        const newId = this.generateFrameId(iframeElement);
+                        return this.registerIframe(iframeElement, newId);
+                    }
+                    
+                    const frameInfo = {
+                        element: iframeElement,
+                        id: id,
+                        ready: false,
+                        sessionAcknowledged: false,
+                        lastSessionUpdate: null,
+                        lastHeartbeat: Date.now(),
+                        pendingAcks: new Map(),
+                        requestQueue: [],
+                        checkInterval: null,
+                        metadata: {
+                            src: iframeElement.src || 'about:blank',
+                            title: iframeElement.title || iframeElement.getAttribute('title') || 'Untitled',
+                            registeredAt: Date.now(),
+                            elementId: iframeElement.id || 'none'
+                        }
+                    };
+                    
+                    this.state.iframes.set(id, frameInfo);
+                    
+                    this.state.pendingFrames = this.state.pendingFrames.filter(pending => 
+                        !(pending.frameId === id || pending.source === iframeElement.contentWindow)
+                    );
+                    
+                    if (this.state.initialized && this.state.sessionValid) {
+                        setTimeout(() => {
+                            this.sendSessionToFrame(id);
+                        }, 100);
+                    } else if (!this.state.initialized) {
+                        this.state.pendingFrames.push({ frameId: id, element: iframeElement });
+                    }
+                    
+                    this.setupFrameUnloadDetection(iframeElement, id);
+                    
+                    return id;
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error registering iframe:`, error);
                     return null;
                 }
-                
-                const id = frameId || iframeElement.id || this.generateFrameId(iframeElement);
-                
-                for (const [existingId, existingInfo] of this.state.iframes.entries()) {
-                    if (existingInfo.element === iframeElement) {
-                        if (existingId !== id) {
-                            this.state.iframes.delete(existingId);
-                            existingInfo.id = id;
-                            this.state.iframes.set(id, existingInfo);
-                        }
-                        
-                        return id;
-                    }
-                }
-                
-                if (this.state.iframes.has(id)) {
-                    const newId = this.generateFrameId(iframeElement);
-                    return this.registerIframe(iframeElement, newId);
-                }
-                
-                const frameInfo = {
-                    element: iframeElement,
-                    id: id,
-                    ready: false,
-                    sessionAcknowledged: false,
-                    lastSessionUpdate: null,
-                    lastHeartbeat: Date.now(),
-                    pendingAcks: new Map(),
-                    requestQueue: [],
-                    checkInterval: null,
-                    metadata: {
-                        src: iframeElement.src || 'about:blank',
-                        title: iframeElement.title || iframeElement.getAttribute('title') || 'Untitled',
-                        registeredAt: Date.now(),
-                        elementId: iframeElement.id || 'none'
-                    }
-                };
-                
-                this.state.iframes.set(id, frameInfo);
-                
-                this.state.pendingFrames = this.state.pendingFrames.filter(pending => 
-                    !(pending.frameId === id || pending.source === iframeElement.contentWindow)
-                );
-                
-                if (this.state.initialized && this.state.sessionValid) {
-                    setTimeout(() => {
-                        this.sendSessionToFrame(id);
-                    }, 100);
-                } else if (!this.state.initialized) {
-                    this.state.pendingFrames.push({ frameId: id, element: iframeElement });
-                }
-                
-                this.setupFrameUnloadDetection(iframeElement, id);
-                
-                return id;
             }
             
             unregisterIframe(frameId) {
-                if (this.state.iframes.has(frameId)) {
-                    const frameInfo = this.state.iframes.get(frameId);
-                    
-                    if (frameInfo.pendingAcks) {
-                        frameInfo.pendingAcks.clear();
+                try {
+                    if (this.state.iframes.has(frameId)) {
+                        const frameInfo = this.state.iframes.get(frameId);
+                        
+                        if (frameInfo.pendingAcks) {
+                            frameInfo.pendingAcks.clear();
+                        }
+                        
+                        if (frameInfo.checkInterval) {
+                            clearInterval(frameInfo.checkInterval);
+                        }
+                        
+                        if (frameInfo.requestQueue) {
+                            frameInfo.requestQueue.length = 0;
+                        }
+                        
+                        this.state.iframes.delete(frameId);
+                        this.state.sessionSentToFrames.delete(frameId);
+                        this.state.failedFrames.delete(frameId);
+                        
+                        this.state.pendingFrames = this.state.pendingFrames.filter(pending => 
+                            !(pending.frameId === frameId || (pending.element && pending.element === frameInfo.element))
+                        );
+                        
+                        if (this.state.frameSequences[frameId]) {
+                            delete this.state.frameSequences[frameId];
+                        }
                     }
-                    
-                    if (frameInfo.checkInterval) {
-                        clearInterval(frameInfo.checkInterval);
-                    }
-                    
-                    if (frameInfo.requestQueue) {
-                        frameInfo.requestQueue.length = 0;
-                    }
-                    
-                    this.state.iframes.delete(frameId);
-                    this.state.sessionSentToFrames.delete(frameId);
-                    
-                    this.state.pendingFrames = this.state.pendingFrames.filter(pending => 
-                        !(pending.frameId === frameId || (pending.element && pending.element === frameInfo.element))
-                    );
-                    
-                    if (this.state.frameSequences[frameId]) {
-                        delete this.state.frameSequences[frameId];
-                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error unregistering iframe:`, error);
                 }
             }
             
             setupFrameUnloadDetection(iframeElement, frameId) {
-                iframeElement.addEventListener('load', () => {
-                    this.sendSessionToFrame(frameId);
-                });
-                
-                const checkInterval = setInterval(() => {
-                    const frameInfo = this.state.iframes.get(frameId);
+                try {
+                    iframeElement.addEventListener('load', () => {
+                        this.sendSessionToFrame(frameId);
+                    });
                     
-                    if (!frameInfo || frameInfo.element !== iframeElement) {
-                        clearInterval(checkInterval);
-                        return;
-                    }
-                    
-                    try {
-                        if (!iframeElement.contentWindow) {
-                            throw new Error('Frame window inaccessible');
+                    const checkInterval = setInterval(() => {
+                        const frameInfo = this.state.iframes.get(frameId);
+                        
+                        if (!frameInfo || frameInfo.element !== iframeElement) {
+                            clearInterval(checkInterval);
+                            return;
                         }
                         
-                        this.sendToFrame(frameId, 'HEARTBEAT_PING', {}, false);
-                        
-                    } catch (error) {
-                        clearInterval(checkInterval);
-                        this.unregisterIframe(frameId);
+                        try {
+                            if (!iframeElement.contentWindow) {
+                                throw new Error('Frame window inaccessible');
+                            }
+                            
+                            this.sendToFrame(frameId, 'HEARTBEAT_PING', {}, false);
+                            
+                        } catch (error) {
+                            clearInterval(checkInterval);
+                            this.markFrameAsFailed(frameId, error);
+                        }
+                    }, 30000);
+                    
+                    const frameInfo = this.state.iframes.get(frameId);
+                    if (frameInfo) {
+                        frameInfo.checkInterval = checkInterval;
                     }
-                }, 30000);
-                
-                const frameInfo = this.state.iframes.get(frameId);
-                if (frameInfo) {
-                    frameInfo.checkInterval = checkInterval;
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error setting up frame unload detection:`, error);
+                }
+            }
+            
+            markFrameAsFailed(frameId, error) {
+                if (!this.state.failedFrames.has(frameId)) {
+                    const retryCount = (this.state.frameRetryCount.get(frameId) || 0) + 1;
+                    this.state.frameRetryCount.set(frameId, retryCount);
+                    
+                    if (retryCount >= this.state.maxFrameRetries) {
+                        console.error(`${this.state.logPrefix} Frame ${frameId} marked as failed after ${retryCount} retries:`, error);
+                        this.state.failedFrames.add(frameId);
+                        
+                        // Show error in iframe
+                        try {
+                            const frameInfo = this.state.iframes.get(frameId);
+                            if (frameInfo && frameInfo.element) {
+                                const errorHtml = `
+                                    <div class="flex items-center justify-center h-full bg-gray-50">
+                                        <div class="text-center p-8">
+                                            <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
+                                            <h3 class="text-xl font-semibold mb-2">Connection Error</h3>
+                                            <p class="text-gray-600">This section is temporarily unavailable</p>
+                                        </div>
+                                    </div>
+                                `;
+                                frameInfo.element.srcdoc = errorHtml;
+                            }
+                        } catch (e) {
+                            // Ignore errors in error handling
+                        }
+                    } else {
+                        console.warn(`${this.state.logPrefix} Frame ${frameId} error (retry ${retryCount}/${this.state.maxFrameRetries}):`, error);
+                    }
                 }
             }
             
             setupEventSubscriptions() {
                 if (this.state.apiAuthReady && window.api.auth && window.api.auth.on) {
-                    window.api.auth.on('ready', () => {
-                        this.state.apiAuthReady = true;
-                        this.initializeSession();
-                    });
-                    
-                    window.api.auth.on('login', (userData) => {
-                        this.handleAuthLogin(userData);
-                    });
-                    
-                    window.api.auth.on('logout', () => {
-                        this.clearSession();
-                    });
-                    
-                    window.api.auth.on('refresh', (userData) => {
-                        this.handleAuthRefresh(userData);
-                    });
+                    try {
+                        window.api.auth.on('ready', () => {
+                            this.state.apiAuthReady = true;
+                            this.initializeSession();
+                        });
+                        
+                        window.api.auth.on('login', (userData) => {
+                            this.handleAuthLogin(userData);
+                        });
+                        
+                        window.api.auth.on('logout', () => {
+                            this.clearSession();
+                        });
+                        
+                        window.api.auth.on('refresh', (userData) => {
+                            this.handleAuthRefresh(userData);
+                        });
+                    } catch (error) {
+                        console.error(`${this.state.logPrefix} Error setting up auth subscriptions:`, error);
+                    }
                 }
                 
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden && this.state.sessionValid) {
+                try {
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden && this.state.sessionValid) {
+                            this.refreshSession();
+                        }
+                    });
+                    
+                    window.addEventListener('online', () => {
                         this.refreshSession();
-                    }
-                });
-                
-                window.addEventListener('online', () => {
-                    this.refreshSession();
-                });
+                    });
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error setting up event listeners:`, error);
+                }
             }
             
             handleAuthLogin(userData) {
-                if (userData) {
-                    this.state.currentUser = this.sanitizeUserData(userData);
-                    this.state.sessionValid = true;
-                    this.state.lastSynced = Date.now();
-                    
-                    if (window.api.auth && window.api.auth.getToken) {
-                        window.api.auth.getToken().then(token => {
-                            this.state.authToken = token;
-                        }).catch(console.error);
+                try {
+                    if (userData) {
+                        this.state.currentUser = this.sanitizeUserData(userData);
+                        this.state.sessionValid = true;
+                        this.state.lastSynced = Date.now();
+                        
+                        if (window.api.auth && window.api.auth.getToken) {
+                            window.api.auth.getToken().then(token => {
+                                this.state.authToken = token;
+                            }).catch(console.error);
+                        }
+                        
+                        this.broadcastSessionUpdate();
                     }
-                    
-                    this.broadcastSessionUpdate();
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling auth login:`, error);
                 }
             }
             
             handleAuthRefresh(userData) {
-                if (userData) {
-                    const oldUser = this.state.currentUser;
-                    this.state.currentUser = this.sanitizeUserData(userData);
-                    this.state.sessionValid = true;
-                    this.state.lastSynced = Date.now();
-                    
-                    if (!oldUser || oldUser.id !== userData.id || 
-                        JSON.stringify(oldUser) !== JSON.stringify(this.state.currentUser)) {
-                        this.broadcastSessionUpdate();
+                try {
+                    if (userData) {
+                        const oldUser = this.state.currentUser;
+                        this.state.currentUser = this.sanitizeUserData(userData);
+                        this.state.sessionValid = true;
+                        this.state.lastSynced = Date.now();
+                        
+                        if (!oldUser || oldUser.id !== userData.id || 
+                            JSON.stringify(oldUser) !== JSON.stringify(this.state.currentUser)) {
+                            this.broadcastSessionUpdate();
+                        }
                     }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling auth refresh:`, error);
                 }
             }
             
             handleToolAction(event, payload, frameId) {
-                const toolActions = {
-                    'theme': () => this.switchToSettingsPage('theme'),
-                    'notifications': () => this.switchToSettingsPage('notifications'),
-                    'privacy': () => this.switchToSettingsPage('privacy'),
-                    'mood_tracker': () => this.openMoodTracker(),
-                    'goals': () => this.openGoalsTracker(),
-                    'analytics': () => this.openAnalytics(),
-                    'voice_notes': () => this.openVoiceNotes(),
-                    'file_sharing': () => this.openFileSharing(),
-                    'quick_call': () => this.initiateQuickCall(),
-                    'help': () => this.openHelp(),
-                    'about': () => this.openAbout(),
-                    'logout': () => this.handleLogout()
-                };
-                
-                const action = toolActions[payload.tool];
-                if (action) {
-                    try {
-                        action();
-                    } catch (error) {
-                        console.error(`${this.state.logPrefix} Tool action failed:`, error);
-                        ParentApplicationManager.showGlobalNotification(
-                            `Tool action failed: ${error.message}`,
-                            'error',
-                            3000
-                        );
+                try {
+                    const toolActions = {
+                        'theme': () => this.switchToSettingsPage('theme'),
+                        'notifications': () => this.switchToSettingsPage('notifications'),
+                        'privacy': () => this.switchToSettingsPage('privacy'),
+                        'mood_tracker': () => this.openMoodTracker(),
+                        'goals': () => this.openGoalsTracker(),
+                        'analytics': () => this.openAnalytics(),
+                        'voice_notes': () => this.openVoiceNotes(),
+                        'file_sharing': () => this.openFileSharing(),
+                        'quick_call': () => this.initiateQuickCall(),
+                        'help': () => this.openHelp(),
+                        'about': () => this.openAbout(),
+                        'logout': () => this.handleLogout()
+                    };
+                    
+                    const action = toolActions[payload.tool];
+                    if (action) {
+                        try {
+                            action();
+                        } catch (error) {
+                            console.error(`${this.state.logPrefix} Tool action failed:`, error);
+                            ParentApplicationManager.showGlobalNotification(
+                                `Tool action failed: ${error.message}`,
+                                'error',
+                                3000
+                            );
+                        }
                     }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling tool action:`, error);
                 }
             }
             
             switchToSettingsPage(section) {
-                ParentApplicationManager.switchPage('settings');
-                setTimeout(() => {
-                    const settingsIframe = document.getElementById('settingsIframe');
-                    if (settingsIframe && settingsIframe.contentWindow) {
-                        settingsIframe.contentWindow.postMessage({
-                            type: 'NAVIGATE_TO_SECTION',
-                            section: section
-                        }, '*');
-                    }
-                }, 500);
+                try {
+                    ParentApplicationManager.switchPage('settings');
+                    setTimeout(() => {
+                        const settingsIframe = document.getElementById('settingsIframe');
+                        if (settingsIframe && settingsIframe.contentWindow) {
+                            settingsIframe.contentWindow.postMessage({
+                                type: 'NAVIGATE_TO_SECTION',
+                                section: section
+                            }, '*');
+                        }
+                    }, 500);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error switching to settings page:`, error);
+                }
             }
             
             openMoodTracker() {
-                const moodModal = document.getElementById('moodModal');
-                if (moodModal) {
-                    moodModal.classList.remove('hidden');
+                try {
+                    const moodModal = document.getElementById('moodModal');
+                    if (moodModal) {
+                        moodModal.classList.remove('hidden');
+                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening mood tracker:`, error);
                 }
             }
             
             openGoalsTracker() {
-                ParentApplicationManager.switchPage('tools');
-                setTimeout(() => {
-                    const toolsIframe = document.getElementById('toolsIframe');
-                    if (toolsIframe && toolsIframe.contentWindow) {
-                        toolsIframe.contentWindow.postMessage({
-                            type: 'OPEN_TOOL',
-                            tool: 'goals_tracker'
-                        }, '*');
-                    }
-                }, 500);
+                try {
+                    ParentApplicationManager.switchPage('tools');
+                    setTimeout(() => {
+                        const toolsIframe = document.getElementById('toolsIframe');
+                        if (toolsIframe && toolsIframe.contentWindow) {
+                            toolsIframe.contentWindow.postMessage({
+                                type: 'OPEN_TOOL',
+                                tool: 'goals_tracker'
+                            }, '*');
+                        }
+                    }, 500);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening goals tracker:`, error);
+                }
             }
             
             openAnalytics() {
-                ParentApplicationManager.showGlobalNotification('Analytics dashboard will open in tools section', 'info', 3000);
-                ParentApplicationManager.switchPage('tools');
+                try {
+                    ParentApplicationManager.showGlobalNotification('Analytics dashboard will open in tools section', 'info', 3000);
+                    ParentApplicationManager.switchPage('tools');
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening analytics:`, error);
+                }
             }
             
             openVoiceNotes() {
-                ParentApplicationManager.showGlobalNotification('Voice notes tool activated', 'info', 2000);
+                try {
+                    ParentApplicationManager.showGlobalNotification('Voice notes tool activated', 'info', 2000);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening voice notes:`, error);
+                }
             }
             
             openFileSharing() {
-                ParentApplicationManager.showGlobalNotification('File sharing tool activated', 'info', 2000);
+                try {
+                    ParentApplicationManager.showGlobalNotification('File sharing tool activated', 'info', 2000);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening file sharing:`, error);
+                }
             }
             
             initiateQuickCall() {
-                ParentApplicationManager.showGlobalNotification('Quick call feature launching...', 'info', 2000);
+                try {
+                    ParentApplicationManager.showGlobalNotification('Quick call feature launching...', 'info', 2000);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error initiating quick call:`, error);
+                }
             }
             
             openHelp() {
-                window.open('https://help.kynecta.com', '_blank');
+                try {
+                    window.open('https://help.kynecta.com', '_blank');
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening help:`, error);
+                }
             }
             
             openAbout() {
-                ParentApplicationManager.showGlobalNotification('Kynecta v1.0.0 - Advanced Mood-Based Chat', 'info', 3000);
+                try {
+                    ParentApplicationManager.showGlobalNotification('Kynecta v1.0.0 - Advanced Mood-Based Chat', 'info', 3000);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error opening about:`, error);
+                }
             }
             
             handleLogout() {
-                if (window.api && window.api.auth && window.api.auth.logout) {
-                    window.api.auth.logout();
-                } else {
+                try {
+                    if (window.api && window.api.auth && window.api.auth.logout) {
+                        window.api.auth.logout();
+                    } else {
+                        localStorage.clear();
+                        window.location.href = '../index.html';
+                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling logout:`, error);
                     localStorage.clear();
                     window.location.href = '../index.html';
                 }
@@ -2873,45 +3173,57 @@
             }
             
             queueFrameRequest(frameId, request) {
-                const frameInfo = this.state.iframes.get(frameId);
-                
-                if (!frameInfo) {
-                    console.warn(`${this.state.logPrefix} Cannot queue request for unknown frame:`, frameId);
-                    return;
-                }
-                
-                if (!frameInfo.requestQueue) {
-                    frameInfo.requestQueue = [];
-                }
-                
-                frameInfo.requestQueue.push({
-                    ...request,
-                    queuedAt: Date.now()
-                });
-                
-                if (this.state.sessionValid) {
-                    this.processFrameQueue(frameId);
+                try {
+                    const frameInfo = this.state.iframes.get(frameId);
+                    
+                    if (!frameInfo) {
+                        console.warn(`${this.state.logPrefix} Cannot queue request for unknown frame:`, frameId);
+                        return;
+                    }
+                    
+                    if (!frameInfo.requestQueue) {
+                        frameInfo.requestQueue = [];
+                    }
+                    
+                    frameInfo.requestQueue.push({
+                        ...request,
+                        queuedAt: Date.now()
+                    });
+                    
+                    if (this.state.sessionValid) {
+                        this.processFrameQueue(frameId);
+                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error queueing frame request:`, error);
                 }
             }
             
             processFrameQueue(frameId) {
-                const frameInfo = this.state.iframes.get(frameId);
-                
-                if (!frameInfo || !frameInfo.requestQueue || frameInfo.requestQueue.length === 0) {
-                    return;
-                }
-                
-                while (frameInfo.requestQueue.length > 0) {
-                    const request = frameInfo.requestQueue.shift();
-                    this.handleQueuedRequest(frameId, request);
+                try {
+                    const frameInfo = this.state.iframes.get(frameId);
+                    
+                    if (!frameInfo || !frameInfo.requestQueue || frameInfo.requestQueue.length === 0) {
+                        return;
+                    }
+                    
+                    while (frameInfo.requestQueue.length > 0) {
+                        const request = frameInfo.requestQueue.shift();
+                        this.handleQueuedRequest(frameId, request);
+                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error processing frame queue:`, error);
                 }
             }
             
             handleQueuedRequest(frameId, request) {
-                switch (request.type) {
-                    case 'REQUEST_SESSION':
-                        this.sendSessionToFrame(frameId);
-                        break;
+                try {
+                    switch (request.type) {
+                        case 'REQUEST_SESSION':
+                            this.sendSessionToFrame(frameId);
+                            break;
+                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling queued request:`, error);
                 }
             }
             
@@ -2930,11 +3242,14 @@
                 
                 for (const [frameId, frameInfo] of this.state.iframes.entries()) {
                     try {
-                        this.sendToFrame(frameId, 'HEARTBEAT_PING', {}, false);
-                        frameInfo.lastHeartbeat = now;
+                        if (!this.state.failedFrames.has(frameId)) {
+                            this.sendToFrame(frameId, 'HEARTBEAT_PING', {}, false);
+                            frameInfo.lastHeartbeat = now;
+                        }
                     } catch (error) {
                         if (now - (frameInfo.lastHeartbeat || 0) > 120000) {
                             console.warn(`${this.state.logPrefix} Frame ${frameId} appears dead`);
+                            this.markFrameAsFailed(frameId, error);
                         }
                     }
                 }
@@ -2945,147 +3260,185 @@
             }
             
             checkAcknowledgment(frameId, sequence) {
-                const frameInfo = this.state.iframes.get(frameId);
-                
-                if (!frameInfo || !frameInfo.pendingAcks) {
-                    return;
+                try {
+                    const frameInfo = this.state.iframes.get(frameId);
+                    
+                    if (!frameInfo || !frameInfo.pendingAcks) {
+                        return;
+                    }
+                    
+                    const ackInfo = frameInfo.pendingAcks.get(sequence);
+                    
+                    if (!ackInfo) {
+                        return;
+                    }
+                    
+                    if (ackInfo.retries >= 3) {
+                        console.warn(`${this.state.logPrefix} Frame ${frameId} not acknowledging after ${ackInfo.retries} retries`);
+                        frameInfo.pendingAcks.delete(sequence);
+                        this.markFrameAsFailed(frameId, new Error('No acknowledgment'));
+                        return;
+                    }
+                    
+                    ackInfo.retries++;
+                    this.sendToFrame(frameId, ackInfo.message.type, ackInfo.message.payload, true);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error checking acknowledgment:`, error);
                 }
-                
-                const ackInfo = frameInfo.pendingAcks.get(sequence);
-                
-                if (!ackInfo) {
-                    return;
-                }
-                
-                if (ackInfo.retries >= 3) {
-                    console.warn(`${this.state.logPrefix} Frame ${frameId} not acknowledging after ${ackInfo.retries} retries`);
-                    frameInfo.pendingAcks.delete(sequence);
-                    return;
-                }
-                
-                ackInfo.retries++;
-                this.sendToFrame(frameId, ackInfo.message.type, ackInfo.message.payload, true);
             }
             
             handleLegacyRequestUserData(event, payload, frameId) {
-                this.handleRequestSession(event, { frameId }, frameId);
+                try {
+                    this.handleRequestSession(event, { frameId }, frameId);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling legacy request:`, error);
+                }
             }
             
             handleLegacyIframeLoaded(event, payload, frameId) {
-                this.handleChildReady(event, { frameId }, frameId);
+                try {
+                    this.handleChildReady(event, { frameId }, frameId);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling legacy iframe loaded:`, error);
+                }
             }
             
             handleChildReady(event, payload, frameId) {
-                let actualFrameId = frameId;
-                const iframeElement = this.findIframeElement(event.source);
-                
-                if (!actualFrameId || actualFrameId === 'undefined') {
+                try {
+                    let actualFrameId = frameId;
+                    const iframeElement = this.findIframeElement(event.source);
+                    
+                    if (!actualFrameId || actualFrameId === 'undefined') {
+                        if (iframeElement) {
+                            actualFrameId = iframeElement.id || this.generateFrameId(iframeElement);
+                        } else {
+                            actualFrameId = `frame_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+                        }
+                    }
+                    
                     if (iframeElement) {
-                        actualFrameId = iframeElement.id || this.generateFrameId(iframeElement);
+                        if (this.state.iframes.has(actualFrameId)) {
+                            const existing = this.state.iframes.get(actualFrameId);
+                            if (existing.element !== iframeElement) {
+                                actualFrameId = this.generateFrameId(iframeElement);
+                            }
+                        }
+                        
+                        const registeredId = this.registerIframe(iframeElement, actualFrameId);
+                        
+                        const frameInfo = this.state.iframes.get(registeredId);
+                        if (frameInfo) {
+                            frameInfo.ready = true;
+                            frameInfo.readyAt = Date.now();
+                            
+                            this.sendToFrame(registeredId, 'CHILD_ACKNOWLEDGED', {
+                                assignedFrameId: registeredId,
+                                sessionBrokerReady: this.state.initialized
+                            }, false);
+                            
+                            if (this.state.sessionValid || this.state.initialized) {
+                                this.sendSessionToFrame(registeredId);
+                            }
+                        }
                     } else {
-                        actualFrameId = `frame_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-                    }
-                }
-                
-                if (iframeElement) {
-                    if (this.state.iframes.has(actualFrameId)) {
-                        const existing = this.state.iframes.get(actualFrameId);
-                        if (existing.element !== iframeElement) {
-                            actualFrameId = this.generateFrameId(iframeElement);
-                        }
-                    }
-                    
-                    const registeredId = this.registerIframe(iframeElement, actualFrameId);
-                    
-                    const frameInfo = this.state.iframes.get(registeredId);
-                    if (frameInfo) {
-                        frameInfo.ready = true;
-                        frameInfo.readyAt = Date.now();
+                        this.state.pendingFrames.push({
+                            frameId: actualFrameId,
+                            source: event.source,
+                            receivedAt: Date.now()
+                        });
                         
-                        this.sendToFrame(registeredId, 'CHILD_ACKNOWLEDGED', {
-                            assignedFrameId: registeredId,
-                            sessionBrokerReady: this.state.initialized
-                        }, false);
-                        
-                        if (this.state.sessionValid || this.state.initialized) {
-                            this.sendSessionToFrame(registeredId);
-                        }
+                        try {
+                            event.source.postMessage({
+                                type: 'CHILD_ACKNOWLEDGED',
+                                assignedFrameId: actualFrameId,
+                                sessionBrokerReady: this.state.initialized,
+                                note: 'iframe_element_not_found'
+                            }, event.origin || '*');
+                        } catch (e) {}
                     }
-                } else {
-                    this.state.pendingFrames.push({
-                        frameId: actualFrameId,
-                        source: event.source,
-                        receivedAt: Date.now()
-                    });
-                    
-                    try {
-                        event.source.postMessage({
-                            type: 'CHILD_ACKNOWLEDGED',
-                            assignedFrameId: actualFrameId,
-                            sessionBrokerReady: this.state.initialized,
-                            note: 'iframe_element_not_found'
-                        }, event.origin || '*');
-                    } catch (e) {}
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling child ready:`, error);
                 }
             }
             
             handleRequestSession(event, payload, frameId) {
-                const iframeElement = this.findIframeElement(event.source);
-                if (!iframeElement) {
-                    console.warn(`${this.state.logPrefix} Could not find iframe for session request:`, frameId);
-                    return;
-                }
-                
-                let registeredId = frameId;
-                if (!this.state.iframes.has(frameId)) {
-                    registeredId = this.registerIframe(iframeElement, frameId);
-                }
-                
-                const frameInfo = this.state.iframes.get(registeredId);
-                if (frameInfo) {
-                    frameInfo.ready = true;
-                    this.sendSessionToFrame(registeredId);
+                try {
+                    const iframeElement = this.findIframeElement(event.source);
+                    if (!iframeElement) {
+                        console.warn(`${this.state.logPrefix} Could not find iframe for session request:`, frameId);
+                        return;
+                    }
+                    
+                    let registeredId = frameId;
+                    if (!this.state.iframes.has(frameId)) {
+                        registeredId = this.registerIframe(iframeElement, frameId);
+                    }
+                    
+                    const frameInfo = this.state.iframes.get(registeredId);
+                    if (frameInfo) {
+                        frameInfo.ready = true;
+                        this.sendSessionToFrame(registeredId);
+                    }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling request session:`, error);
                 }
             }
             
             handlePingParent(event, payload, frameId) {
-                this.sendToFrame(frameId, 'PONG', {
-                    timestamp: Date.now(),
-                    sessionId: this.state.sessionId
-                }, false);
+                try {
+                    this.sendToFrame(frameId, 'PONG', {
+                        timestamp: Date.now(),
+                        sessionId: this.state.sessionId
+                    }, false);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling ping parent:`, error);
+                }
             }
             
             handleSessionAck(event, payload, frameId, sequence) {
-                const frameInfo = this.state.iframes.get(frameId);
-                
-                if (frameInfo && frameInfo.pendingAcks) {
-                    if (frameInfo.pendingAcks.has(sequence)) {
-                        frameInfo.pendingAcks.delete(sequence);
-                    }
+                try {
+                    const frameInfo = this.state.iframes.get(frameId);
                     
-                    if (payload.sessionId === this.state.sessionId) {
-                        frameInfo.sessionAcknowledged = true;
-                        frameInfo.lastSessionUpdate = Date.now();
+                    if (frameInfo && frameInfo.pendingAcks) {
+                        if (frameInfo.pendingAcks.has(sequence)) {
+                            frameInfo.pendingAcks.delete(sequence);
+                        }
+                        
+                        if (payload.sessionId === this.state.sessionId) {
+                            frameInfo.sessionAcknowledged = true;
+                            frameInfo.lastSessionUpdate = Date.now();
+                        }
                     }
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling session ack:`, error);
                 }
             }
             
             handleFrameUnload(event, payload, frameId) {
-                this.unregisterIframe(frameId);
+                try {
+                    this.unregisterIframe(frameId);
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error handling frame unload:`, error);
+                }
             }
             
             findIframeElement(contentWindow) {
-                const iframes = document.querySelectorAll('iframe');
-                for (const iframe of iframes) {
-                    try {
-                        if (iframe.contentWindow === contentWindow) {
-                            return iframe;
+                try {
+                    const iframes = document.querySelectorAll('iframe');
+                    for (const iframe of iframes) {
+                        try {
+                            if (iframe.contentWindow === contentWindow) {
+                                return iframe;
+                            }
+                        } catch (error) {
+                            continue;
                         }
-                    } catch (error) {
-                        continue;
                     }
+                    return null;
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error finding iframe element:`, error);
+                    return null;
                 }
-                return null;
             }
             
             generateSessionId() {
@@ -3107,22 +3460,33 @@
             }
             
             sendSessionToFrame(frameId) {
-                if (!this.state.initialized) {
-                    console.warn(`${this.state.logPrefix} Cannot send session: broker not initialized`);
+                try {
+                    if (!this.state.initialized) {
+                        console.warn(`${this.state.logPrefix} Cannot send session: broker not initialized`);
+                        return false;
+                    }
+                    
+                    // Check if frame is failed
+                    if (this.state.failedFrames.has(frameId)) {
+                        console.warn(`${this.state.logPrefix} Skipping session send to failed frame: ${frameId}`);
+                        return false;
+                    }
+                    
+                    // Track that we've sent session to this frame
+                    this.state.sessionSentToFrames.add(frameId);
+                    
+                    const sessionData = this.getSessionData();
+                    const sent = this.sendToFrame(frameId, 'SESSION_DATA', sessionData, true);
+                    
+                    return sent;
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error sending session to frame:`, error);
                     return false;
                 }
-                
-                // Track that we've sent session to this frame
-                this.state.sessionSentToFrames.add(frameId);
-                
-                const sessionData = this.getSessionData();
-                const sent = this.sendToFrame(frameId, 'SESSION_DATA', sessionData, true);
-                
-                return sent;
             }
             
             logStatus() {
-                console.log(`${this.state.logPrefix} Status: Initialized: ${this.state.initialized}, Session: ${this.state.sessionValid ? 'Valid' : 'Invalid'}, Frames: ${this.state.iframes.size}, Trusted Origins: ${this.state.trustedOrigins.length}`);
+                console.log(`${this.state.logPrefix} Status: Initialized: ${this.state.initialized}, Session: ${this.state.sessionValid ? 'Valid' : 'Invalid'}, Frames: ${this.state.iframes.size}, Failed: ${this.state.failedFrames.size}, Trusted Origins: ${this.state.trustedOrigins.length}`);
             }
             
             async ready() {
@@ -3156,21 +3520,49 @@
                 this.clearSession();
             }
             
+            // Safe API fetch with retry logic
+            async safeApiFetch(endpoint, options = {}, maxRetries = 3) {
+                let lastError;
+                
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        const response = await fetch(endpoint, options);
+                        if (!response.ok) {
+                            throw new Error(`API error: ${response.status} ${response.statusText}`);
+                        }
+                        return await response.json();
+                    } catch (error) {
+                        lastError = error;
+                        if (i < maxRetries - 1) {
+                            console.warn(`[Safe API] Retry ${i + 1}/${maxRetries} for ${endpoint}:`, error.message);
+                            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i))); // Exponential backoff
+                        }
+                    }
+                }
+                
+                console.error(`[Safe API] Failed after ${maxRetries} retries for ${endpoint}:`, lastError);
+                return null;
+            }
+            
             // Cleanup method
             cleanup() {
-                if (this.state.secureMessageListener) {
-                    window.removeEventListener('message', this.state.secureMessageListener);
+                try {
+                    if (this.state.secureMessageListener) {
+                        window.removeEventListener('message', this.state.secureMessageListener);
+                    }
+                    
+                    if (this.state.heartbeatInterval) {
+                        clearInterval(this.state.heartbeatInterval);
+                    }
+                    
+                    if (this.state.broadcastDebounceTimer) {
+                        clearTimeout(this.state.broadcastDebounceTimer);
+                    }
+                    
+                    window.removeEventListener('message', this.handleIncomingMessage.bind(this));
+                } catch (error) {
+                    console.error(`${this.state.logPrefix} Error during cleanup:`, error);
                 }
-                
-                if (this.state.heartbeatInterval) {
-                    clearInterval(this.state.heartbeatInterval);
-                }
-                
-                if (this.state.broadcastDebounceTimer) {
-                    clearTimeout(this.state.broadcastDebounceTimer);
-                }
-                
-                window.removeEventListener('message', this.handleIncomingMessage.bind(this));
             }
         }
         
@@ -3193,304 +3585,425 @@
                 iframeLoadingOverlays: {},
                 sessionBroker: null,
                 toolsMenuOpen: false,
-                mobileToolsMenuOpen: false
+                mobileToolsMenuOpen: false,
+                failedIframes: new Set(),
+                iframeRetryCount: new Map()
             },
             
             async initialize() {
                 console.log('[ParentApplicationManager] Initializing application...');
                 
-                this.state.sessionBroker = new SessionBroker();
-
                 try {
-                    const initialized = await this.state.sessionBroker.initializeWithTimeout(8000);
-                    
-                    if (!initialized) {
+                    this.state.sessionBroker = new SessionBroker();
+
+                    try {
+                        const initialized = await this.state.sessionBroker.initializeWithTimeout(8000);
+                        
+                        if (!initialized) {
+                            ParentApplicationManager.showGlobalNotification(
+                                'Session manager initialized with limited functionality',
+                                'warning',
+                                3000
+                            );
+                        }
+                    } catch (error) {
+                        console.error('Failed to initialize SessionBroker:', error);
+                        
+                        // Fallback session broker
+                        this.state.sessionBroker = {
+                            ready: () => Promise.resolve(true),
+                            getUser: () => {
+                                try {
+                                    return JSON.parse(localStorage.getItem('kynecta_user') || 'null');
+                                } catch (e) {
+                                    return null;
+                                }
+                            },
+                            isAuthenticated: () => {
+                                try {
+                                    return !!localStorage.getItem('kynecta_token');
+                                } catch (e) {
+                                    return false;
+                                }
+                            },
+                            sendToFrame: () => false,
+                            broadcastToAllFrames: () => 0,
+                            handleToolAction: () => {},
+                            cleanup: () => {},
+                            safeApiFetch: async (endpoint, options, maxRetries) => {
+                                try {
+                                    const response = await fetch(endpoint, options);
+                                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                                    return await response.json();
+                                } catch (error) {
+                                    console.error(`[Fallback API] Failed: ${endpoint}`, error);
+                                    return null;
+                                }
+                            }
+                        };
+                        
                         ParentApplicationManager.showGlobalNotification(
-                            'Session manager initialized with limited functionality',
+                            'Running in fallback mode - some features disabled',
                             'warning',
-                            3000
+                            5000
                         );
                     }
-                } catch (error) {
-                    console.error('Failed to initialize SessionBroker:', error);
-                    
-                    this.state.sessionBroker = {
-                        ready: () => Promise.resolve(true),
-                        getUser: () => null,
-                        isAuthenticated: () => false,
-                        sendToFrame: () => false,
-                        broadcastToAllFrames: () => 0,
-                        handleToolAction: () => {},
-                        cleanup: () => {}
-                    };
-                    
-                    ParentApplicationManager.showGlobalNotification(
-                        'Running in fallback mode - some features disabled',
-                        'error',
-                        5000
-                    );
-                }
 
-                this.setupUI();
-                this.preloadIframesInBackground();
-                this.setupQuickToolsMenu();
-                
-                this.state.initialized = true;
-                console.log('[ParentApplicationManager] Application initialized');
+                    this.setupUI();
+                    this.preloadIframesInBackground();
+                    this.setupQuickToolsMenu();
+                    
+                    this.state.initialized = true;
+                    console.log('[ParentApplicationManager] Application initialized');
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Critical initialization error:', error);
+                    this.setupFallbackUI();
+                }
+            },
+            
+            setupFallbackUI() {
+                try {
+                    this.hideLoadingScreen();
+                    
+                    // Show basic error message but keep app running
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'fixed top-4 left-4 right-4 bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded-lg z-50';
+                    errorMsg.innerHTML = `
+                        <div class="flex items-center">
+                            <i class="fas fa-exclamation-triangle mr-2"></i>
+                            <span>Application running in limited mode. Some features may be unavailable.</span>
+                        </div>
+                    `;
+                    document.body.appendChild(errorMsg);
+                    
+                    // Set up basic navigation
+                    this.setupNavigation();
+                    this.switchPage('messages');
+                } catch (e) {
+                    console.error('Failed to setup fallback UI:', e);
+                }
             },
             
             setupUI() {
-                this.hideLoadingScreen();
-                document.getElementById('permanentSidebar')?.classList.remove('hidden');
-                
-                if (window.innerWidth < 768) {
-                    document.getElementById('mobileNavBar')?.classList.remove('hidden');
+                try {
+                    this.hideLoadingScreen();
+                    document.getElementById('permanentSidebar')?.classList.remove('hidden');
+                    
+                    if (window.innerWidth < 768) {
+                        document.getElementById('mobileNavBar')?.classList.remove('hidden');
+                    }
+                    
+                    this.setupNavigation();
+                    this.setupBackButton();
+                    this.switchPage('messages');
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting up UI:', error);
                 }
-                
-                this.setupNavigation();
-                this.setupBackButton();
-                this.switchPage('messages');
             },
             
             setupNavigation() {
-                document.querySelectorAll('.nav-icon').forEach(icon => {
-                    icon.addEventListener('click', () => {
-                        const page = icon.dataset.page;
-                        if (page && this.state.navigationEnabled) {
-                            this.exitAllFullscreenViews();
-                            this.switchPage(page);
-                        }
+                try {
+                    document.querySelectorAll('.nav-icon').forEach(icon => {
+                        icon.addEventListener('click', () => {
+                            const page = icon.dataset.page;
+                            if (page && this.state.navigationEnabled) {
+                                this.exitAllFullscreenViews();
+                                this.switchPage(page);
+                            }
+                        });
                     });
-                });
-                
-                document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
-                    icon.addEventListener('click', () => {
-                        const page = icon.dataset.page;
-                        if (page && this.state.navigationEnabled) {
-                            this.exitAllFullscreenViews();
-                            this.switchPage(page);
-                        }
+                    
+                    document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
+                        icon.addEventListener('click', () => {
+                            const page = icon.dataset.page;
+                            if (page && this.state.navigationEnabled) {
+                                this.exitAllFullscreenViews();
+                                this.switchPage(page);
+                            }
+                        });
                     });
-                });
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting up navigation:', error);
+                }
             },
             
             setupQuickToolsMenu() {
-                const quickToolsMenu = document.getElementById('quickToolsDropdownMenu');
-                const mobileQuickToolsMenu = document.getElementById('mobileQuickToolsDropdownMenu');
-                
-                const quickLogoutItem = document.getElementById('quickLogoutToolItem');
-                const mobileQuickLogoutItem = document.getElementById('mobileQuickLogoutToolItem');
-                
-                if (quickLogoutItem) {
-                    quickLogoutItem.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.handleLogout();
-                    });
-                }
-                
-                if (mobileQuickLogoutItem) {
-                    mobileQuickLogoutItem.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.handleLogout();
-                    });
-                }
-                
-                const setupQuickToolItems = (menuId) => {
-                    const menu = document.getElementById(menuId);
-                    if (!menu) return;
+                try {
+                    const quickToolsMenu = document.getElementById('quickToolsDropdownMenu');
+                    const mobileQuickToolsMenu = document.getElementById('mobileQuickToolsDropdownMenu');
                     
-                    const toolItems = menu.querySelectorAll('.tool-menu-item');
-                    toolItems.forEach(item => {
-                        const tool = item.dataset.tool;
-                        if (tool && tool !== 'logout') {
-                            item.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                this.handleToolSelection(tool);
-                            });
-                        }
-                    });
-                };
-                
-                setupQuickToolItems('quickToolsDropdownMenu');
-                setupQuickToolItems('mobileQuickToolsDropdownMenu');
-                
-                const closeQuickToolsMenu = document.getElementById('closeQuickToolsMenu');
-                const closeMobileQuickToolsMenu = document.getElementById('closeMobileQuickToolsMenu');
-                
-                if (closeQuickToolsMenu) {
-                    closeQuickToolsMenu.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        quickToolsMenu.classList.add('hidden');
-                    });
-                }
-                
-                if (closeMobileQuickToolsMenu) {
-                    closeMobileQuickToolsMenu.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        mobileQuickToolsMenu.classList.add('hidden');
-                    });
+                    const quickLogoutItem = document.getElementById('quickLogoutToolItem');
+                    const mobileQuickLogoutItem = document.getElementById('mobileQuickLogoutToolItem');
+                    
+                    if (quickLogoutItem) {
+                        quickLogoutItem.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.handleLogout();
+                        });
+                    }
+                    
+                    if (mobileQuickLogoutItem) {
+                        mobileQuickLogoutItem.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.handleLogout();
+                        });
+                    }
+                    
+                    const setupQuickToolItems = (menuId) => {
+                        const menu = document.getElementById(menuId);
+                        if (!menu) return;
+                        
+                        const toolItems = menu.querySelectorAll('.tool-menu-item');
+                        toolItems.forEach(item => {
+                            const tool = item.dataset.tool;
+                            if (tool && tool !== 'logout') {
+                                item.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    this.handleToolSelection(tool);
+                                });
+                            }
+                        });
+                    };
+                    
+                    setupQuickToolItems('quickToolsDropdownMenu');
+                    setupQuickToolItems('mobileQuickToolsDropdownMenu');
+                    
+                    const closeQuickToolsMenu = document.getElementById('closeQuickToolsMenu');
+                    const closeMobileQuickToolsMenu = document.getElementById('closeMobileQuickToolsMenu');
+                    
+                    if (closeQuickToolsMenu) {
+                        closeQuickToolsMenu.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            quickToolsMenu.classList.add('hidden');
+                        });
+                    }
+                    
+                    if (closeMobileQuickToolsMenu) {
+                        closeMobileQuickToolsMenu.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            mobileQuickToolsMenu.classList.add('hidden');
+                        });
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting up quick tools menu:', error);
                 }
             },
             
             setupBackButton() {
-                window.goBack = () => {
-                    if (this.state.isInChatView || this.state.isInStatusView || 
-                        this.state.isInGroupView || this.state.isInFullscreenView) {
-                        
-                        if (this.state.isInChatView) {
-                            this.setIsInChatView(false);
-                            const messagesIframe = document.getElementById('messagesIframe');
-                            if (messagesIframe) {
-                                this.state.sessionBroker.sendToFrame('messagesIframe', 'NAVIGATE_BACK', {});
+                try {
+                    window.goBack = () => {
+                        if (this.state.isInChatView || this.state.isInStatusView || 
+                            this.state.isInGroupView || this.state.isInFullscreenView) {
+                            
+                            if (this.state.isInChatView) {
+                                this.setIsInChatView(false);
+                                const messagesIframe = document.getElementById('messagesIframe');
+                                if (messagesIframe) {
+                                    try {
+                                        this.state.sessionBroker.sendToFrame('messagesIframe', 'NAVIGATE_BACK', {});
+                                    } catch (e) {
+                                        console.warn('Failed to send navigate back to messages iframe');
+                                    }
+                                }
+                            } else if (this.state.isInStatusView) {
+                                this.setIsInStatusView(false);
+                                const statusIframe = document.getElementById('statusIframe');
+                                if (statusIframe) {
+                                    try {
+                                        this.state.sessionBroker.sendToFrame('statusIframe', 'NAVIGATE_BACK', {});
+                                    } catch (e) {
+                                        console.warn('Failed to send navigate back to status iframe');
+                                    }
+                                }
+                            } else if (this.state.isInGroupView) {
+                                this.setIsInGroupView(false);
+                                const groupIframe = document.getElementById('groupIframe');
+                                if (groupIframe) {
+                                    try {
+                                        this.state.sessionBroker.sendToFrame('groupIframe', 'NAVIGATE_BACK', {});
+                                    } catch (e) {
+                                        console.warn('Failed to send navigate back to group iframe');
+                                    }
+                                }
+                            } else if (this.state.isInFullscreenView) {
+                                this.setIsInFullscreenView(false);
                             }
-                        } else if (this.state.isInStatusView) {
-                            this.setIsInStatusView(false);
-                            const statusIframe = document.getElementById('statusIframe');
-                            if (statusIframe) {
-                                this.state.sessionBroker.sendToFrame('statusIframe', 'NAVIGATE_BACK', {});
-                            }
-                        } else if (this.state.isInGroupView) {
-                            this.setIsInGroupView(false);
-                            const groupIframe = document.getElementById('groupIframe');
-                            if (groupIframe) {
-                                this.state.sessionBroker.sendToFrame('groupIframe', 'NAVIGATE_BACK', {});
-                            }
-                        } else if (this.state.isInFullscreenView) {
-                            this.setIsInFullscreenView(false);
+                            return true;
                         }
-                        return true;
-                    }
-                    return false;
-                };
+                        return false;
+                    };
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting up back button:', error);
+                }
             },
             
             exitAllFullscreenViews() {
-                this.setIsInChatView(false);
-                this.setIsInStatusView(false);
-                this.setIsInGroupView(false);
-                this.setIsInFullscreenView(false);
-                this.closeQuickToolsMenu();
+                try {
+                    this.setIsInChatView(false);
+                    this.setIsInStatusView(false);
+                    this.setIsInGroupView(false);
+                    this.setIsInFullscreenView(false);
+                    this.closeQuickToolsMenu();
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error exiting fullscreen views:', error);
+                }
             },
             
             setIsInChatView(inChatView) {
-                this.state.isInChatView = inChatView;
-                if (inChatView) {
-                    document.body.classList.add('in-chat-view');
-                    this.hideBottomNavigation();
-                } else {
-                    document.body.classList.remove('in-chat-view');
-                    this.showBottomNavigation();
+                try {
+                    this.state.isInChatView = inChatView;
+                    if (inChatView) {
+                        document.body.classList.add('in-chat-view');
+                        this.hideBottomNavigation();
+                    } else {
+                        document.body.classList.remove('in-chat-view');
+                        this.showBottomNavigation();
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting chat view:', error);
                 }
             },
             
             setIsInStatusView(inStatusView) {
-                this.state.isInStatusView = inStatusView;
-                if (inStatusView) {
-                    document.body.classList.add('in-status-view');
-                    this.hideBottomNavigation();
-                } else {
-                    document.body.classList.remove('in-status-view');
-                    this.showBottomNavigation();
+                try {
+                    this.state.isInStatusView = inStatusView;
+                    if (inStatusView) {
+                        document.body.classList.add('in-status-view');
+                        this.hideBottomNavigation();
+                    } else {
+                        document.body.classList.remove('in-status-view');
+                        this.showBottomNavigation();
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting status view:', error);
                 }
             },
             
             setIsInGroupView(inGroupView) {
-                this.state.isInGroupView = inGroupView;
-                if (inGroupView) {
-                    document.body.classList.add('in-group-view');
-                    this.hideBottomNavigation();
-                } else {
-                    document.body.classList.remove('in-group-view');
-                    this.showBottomNavigation();
+                try {
+                    this.state.isInGroupView = inGroupView;
+                    if (inGroupView) {
+                        document.body.classList.add('in-group-view');
+                        this.hideBottomNavigation();
+                    } else {
+                        document.body.classList.remove('in-group-view');
+                        this.showBottomNavigation();
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting group view:', error);
                 }
             },
             
             setIsInFullscreenView(inFullscreenView) {
-                this.state.isInFullscreenView = inFullscreenView;
-                if (inFullscreenView) {
-                    document.body.classList.add('in-fullscreen-view');
-                    this.hideBottomNavigation();
-                } else {
-                    document.body.classList.remove('in-fullscreen-view');
-                    this.showBottomNavigation();
+                try {
+                    this.state.isInFullscreenView = inFullscreenView;
+                    if (inFullscreenView) {
+                        document.body.classList.add('in-fullscreen-view');
+                        this.hideBottomNavigation();
+                    } else {
+                        document.body.classList.remove('in-fullscreen-view');
+                        this.showBottomNavigation();
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error setting fullscreen view:', error);
                 }
             },
             
             showBottomNavigation() {
-                if (window.innerWidth >= 768) return;
-                if (this.state.isInChatView || this.state.isInStatusView || 
-                    this.state.isInGroupView || this.state.isInFullscreenView) return;
-                
-                const mobileNavBar = document.getElementById('mobileNavBar');
-                if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
-                    mobileNavBar.classList.remove('hidden-nav');
-                    this.state.bottomNavVisible = true;
+                try {
+                    if (window.innerWidth >= 768) return;
+                    if (this.state.isInChatView || this.state.isInStatusView || 
+                        this.state.isInGroupView || this.state.isInFullscreenView) return;
+                    
+                    const mobileNavBar = document.getElementById('mobileNavBar');
+                    if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
+                        mobileNavBar.classList.remove('hidden-nav');
+                        this.state.bottomNavVisible = true;
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error showing bottom navigation:', error);
                 }
             },
             
             hideBottomNavigation() {
-                if (window.innerWidth >= 768) return;
-                
-                const mobileNavBar = document.getElementById('mobileNavBar');
-                if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
-                    mobileNavBar.classList.add('hidden-nav');
-                    this.state.bottomNavVisible = false;
+                try {
+                    if (window.innerWidth >= 768) return;
+                    
+                    const mobileNavBar = document.getElementById('mobileNavBar');
+                    if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
+                        mobileNavBar.classList.add('hidden-nav');
+                        this.state.bottomNavVisible = false;
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error hiding bottom navigation:', error);
                 }
             },
             
             closeQuickToolsMenu() {
-                const quickToolsMenu = document.getElementById('quickToolsDropdownMenu');
-                const mobileQuickToolsMenu = document.getElementById('mobileQuickToolsDropdownMenu');
-                
-                if (quickToolsMenu) {
-                    quickToolsMenu.classList.add('hidden');
-                }
-                
-                if (mobileQuickToolsMenu) {
-                    mobileQuickToolsMenu.classList.add('hidden');
+                try {
+                    const quickToolsMenu = document.getElementById('quickToolsDropdownMenu');
+                    const mobileQuickToolsMenu = document.getElementById('mobileQuickToolsDropdownMenu');
+                    
+                    if (quickToolsMenu) {
+                        quickToolsMenu.classList.add('hidden');
+                    }
+                    
+                    if (mobileQuickToolsMenu) {
+                        mobileQuickToolsMenu.classList.add('hidden');
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error closing quick tools menu:', error);
                 }
             },
             
             handleToolSelection(tool) {
-                if (this.state.sessionBroker && this.state.sessionBroker.handleToolAction) {
-                    this.state.sessionBroker.handleToolAction(null, { tool: tool }, null);
-                } else {
-                    switch(tool) {
-                        case 'theme':
-                        case 'notifications':
-                        case 'privacy':
-                            this.switchPage('settings');
-                            setTimeout(() => {
-                                const settingsIframe = document.getElementById('settingsIframe');
-                                if (settingsIframe && settingsIframe.contentWindow) {
-                                    settingsIframe.contentWindow.postMessage({
-                                        type: 'NAVIGATE_TO_SECTION',
-                                        section: tool
-                                    }, '*');
+                try {
+                    if (this.state.sessionBroker && this.state.sessionBroker.handleToolAction) {
+                        this.state.sessionBroker.handleToolAction(null, { tool: tool }, null);
+                    } else {
+                        switch(tool) {
+                            case 'theme':
+                            case 'notifications':
+                            case 'privacy':
+                                this.switchPage('settings');
+                                setTimeout(() => {
+                                    const settingsIframe = document.getElementById('settingsIframe');
+                                    if (settingsIframe && settingsIframe.contentWindow) {
+                                        try {
+                                            settingsIframe.contentWindow.postMessage({
+                                                type: 'NAVIGATE_TO_SECTION',
+                                                section: tool
+                                            }, '*');
+                                        } catch (e) {
+                                            console.warn('Failed to post message to settings iframe');
+                                        }
+                                    }
+                                }, 500);
+                                break;
+                            case 'logout':
+                                this.handleLogout();
+                                break;
+                            case 'mood_tracker':
+                                const moodModal = document.getElementById('moodModal');
+                                if (moodModal) {
+                                    moodModal.classList.remove('hidden');
                                 }
-                            }, 500);
-                            break;
-                        case 'logout':
-                            this.handleLogout();
-                            break;
-                        case 'mood_tracker':
-                            const moodModal = document.getElementById('moodModal');
-                            if (moodModal) {
-                                moodModal.classList.remove('hidden');
-                            }
-                            break;
-                        case 'goals':
-                        case 'analytics':
-                            this.switchPage('tools');
-                            break;
-                        default:
-                            ParentApplicationManager.showGlobalNotification(
-                                `${tool.replace('_', ' ')} tool activated`,
-                                'info',
-                                2000
-                            );
-                            break;
+                                break;
+                            case 'goals':
+                            case 'analytics':
+                                this.switchPage('tools');
+                                break;
+                            default:
+                                ParentApplicationManager.showGlobalNotification(
+                                    `${tool.replace('_', ' ')} tool activated`,
+                                    'info',
+                                    2000
+                                );
+                                break;
+                        }
                     }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error handling tool selection:', error);
                 }
             },
             
@@ -3506,394 +4019,492 @@
                 ];
                 
                 iframes.forEach(iframeConfig => {
-                    const iframe = document.getElementById(iframeConfig.id);
-                    if (iframe) {
-                        this.state.iframesLoaded[iframeConfig.id] = false;
-                        this.state.iframeLoadingOverlays[iframeConfig.id] = iframeConfig.loadingOverlay;
-                        
-                        this.showIframeLoadingOverlay(iframeConfig.id);
-                        this.state.sessionBroker.registerIframe(iframe, iframeConfig.id);
-                        
-                        iframe.onload = () => {
-                            this.state.iframesLoaded[iframeConfig.id] = true;
-                            iframe.classList.add('loaded');
-                            this.hideIframeLoadingOverlay(iframeConfig.id);
+                    try {
+                        const iframe = document.getElementById(iframeConfig.id);
+                        if (iframe) {
+                            this.state.iframesLoaded[iframeConfig.id] = false;
+                            this.state.iframeLoadingOverlays[iframeConfig.id] = iframeConfig.loadingOverlay;
                             
-                            try {
-                                iframe.contentWindow.postMessage({
-                                    type: 'FRAME_ID_ASSIGNED',
-                                    frameId: iframeConfig.id,
-                                    sessionBrokerAvailable: true
-                                }, '*');
-                            } catch (error) {}
-                        };
-                        
-                        iframe.onerror = () => {
-                            this.state.iframesLoaded[iframeConfig.id] = true;
-                            this.hideIframeLoadingOverlay(iframeConfig.id);
-                            this.showIframeError(iframeConfig.id);
-                        };
-                        
-                        const cacheBuster = `?v=${this.state.appVersion}&t=${Date.now()}`;
-                        iframe.src = iframeConfig.src + cacheBuster;
+                            this.showIframeLoadingOverlay(iframeConfig.id);
+                            
+                            if (this.state.sessionBroker && this.state.sessionBroker.registerIframe) {
+                                this.state.sessionBroker.registerIframe(iframe, iframeConfig.id);
+                            }
+                            
+                            iframe.onload = () => {
+                                this.state.iframesLoaded[iframeConfig.id] = true;
+                                iframe.classList.add('loaded');
+                                this.hideIframeLoadingOverlay(iframeConfig.id);
+                                
+                                try {
+                                    iframe.contentWindow.postMessage({
+                                        type: 'FRAME_ID_ASSIGNED',
+                                        frameId: iframeConfig.id,
+                                        sessionBrokerAvailable: true
+                                    }, '*');
+                                } catch (error) {
+                                    console.warn(`Failed to send FRAME_ID_ASSIGNED to ${iframeConfig.id}:`, error);
+                                }
+                            };
+                            
+                            iframe.onerror = () => {
+                                this.state.iframesLoaded[iframeConfig.id] = true;
+                                this.hideIframeLoadingOverlay(iframeConfig.id);
+                                this.showIframeError(iframeConfig.id);
+                                this.state.failedIframes.add(iframeConfig.id);
+                            };
+                            
+                            const cacheBuster = `?v=${this.state.appVersion}&t=${Date.now()}`;
+                            iframe.src = iframeConfig.src + cacheBuster;
+                        }
+                    } catch (error) {
+                        console.error(`[ParentApplicationManager] Error preloading iframe ${iframeConfig.id}:`, error);
+                        this.state.failedIframes.add(iframeConfig.id);
                     }
                 });
             },
             
             showIframeLoadingOverlay(iframeId) {
-                const overlayId = this.state.iframeLoadingOverlays[iframeId];
-                if (overlayId) {
-                    const overlay = document.getElementById(overlayId);
-                    if (overlay) {
-                        overlay.classList.add('active');
+                try {
+                    const overlayId = this.state.iframeLoadingOverlays[iframeId];
+                    if (overlayId) {
+                        const overlay = document.getElementById(overlayId);
+                        if (overlay) {
+                            overlay.classList.add('active');
+                        }
                     }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error showing iframe loading overlay:', error);
                 }
             },
             
             hideIframeLoadingOverlay(iframeId) {
-                const overlayId = this.state.iframeLoadingOverlays[iframeId];
-                if (overlayId) {
-                    const overlay = document.getElementById(overlayId);
-                    if (overlay) {
-                        overlay.classList.remove('active');
+                try {
+                    const overlayId = this.state.iframeLoadingOverlays[iframeId];
+                    if (overlayId) {
+                        const overlay = document.getElementById(overlayId);
+                        if (overlay) {
+                            overlay.classList.remove('active');
+                        }
                     }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error hiding iframe loading overlay:', error);
                 }
             },
             
             showIframeError(iframeId) {
-                const iframe = document.getElementById(iframeId);
-                if (iframe) {
-                    try {
-                        iframe.contentWindow.document.body.innerHTML = `
-                            <div class="flex items-center justify-center h-full">
-                                <div class="text-center p-8">
-                                    <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
-                                    <h3 class="text-xl font-semibold mb-2">Failed to load</h3>
-                                    <p class="text-gray-600">Please check your connection and try again</p>
-                                    <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg">
-                                        Retry
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    } catch (e) {
-                        const overlayId = this.state.iframeLoadingOverlays[iframeId];
-                        if (overlayId) {
-                            const overlay = document.getElementById(overlayId);
-                            if (overlay) {
-                                overlay.innerHTML = `
-                                    <div class="text-center">
-                                        <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-3"></i>
-                                        <h3 class="text-lg font-semibold mb-2">Failed to load</h3>
-                                        <p class="text-gray-600">Please check your connection</p>
+                try {
+                    const iframe = document.getElementById(iframeId);
+                    if (iframe) {
+                        const retryCount = (this.state.iframeRetryCount.get(iframeId) || 0) + 1;
+                        this.state.iframeRetryCount.set(iframeId, retryCount);
+                        
+                        if (retryCount >= 3) {
+                            try {
+                                iframe.contentWindow.document.body.innerHTML = `
+                                    <div class="flex items-center justify-center h-full">
+                                        <div class="text-center p-8">
+                                            <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
+                                            <h3 class="text-xl font-semibold mb-2">Failed to load</h3>
+                                            <p class="text-gray-600">Please check your connection and try again</p>
+                                            <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg">
+                                                Retry
+                                            </button>
+                                        </div>
                                     </div>
                                 `;
-                                overlay.classList.add('active');
+                            } catch (e) {
+                                const overlayId = this.state.iframeLoadingOverlays[iframeId];
+                                if (overlayId) {
+                                    const overlay = document.getElementById(overlayId);
+                                    if (overlay) {
+                                        overlay.innerHTML = `
+                                            <div class="text-center">
+                                                <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-3"></i>
+                                                <h3 class="text-lg font-semibold mb-2">Failed to load</h3>
+                                                <p class="text-gray-600">Please check your connection</p>
+                                            </div>
+                                        `;
+                                        overlay.classList.add('active');
+                                    }
+                                }
                             }
+                        } else {
+                            // Retry loading
+                            setTimeout(() => {
+                                iframe.src = iframe.src.split('?')[0] + `?v=${this.state.appVersion}&t=${Date.now()}&retry=${retryCount}`;
+                            }, 1000 * retryCount);
                         }
                     }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error showing iframe error:', error);
                 }
             },
             
             switchPage(pageName) {
-                if (!this.state.navigationEnabled) return;
-                
-                this.state.currentPage = pageName;
-                this.exitAllFullscreenViews();
-                
-                document.querySelectorAll('.content-area').forEach(area => {
-                    area.classList.add('hidden');
-                });
-                
-                this.updateActiveNavIcon(pageName);
-                
-                const iframeContainer = document.getElementById(`${pageName}Content`);
-                if (iframeContainer) {
-                    iframeContainer.classList.remove('hidden');
+                try {
+                    if (!this.state.navigationEnabled) return;
                     
-                    const iframe = document.getElementById(`${pageName}Iframe`);
-                    if (iframe && !this.state.iframesLoaded[`${pageName}Iframe`]) {
-                        this.showIframeLoadingOverlay(`${pageName}Iframe`);
+                    this.state.currentPage = pageName;
+                    this.exitAllFullscreenViews();
+                    
+                    document.querySelectorAll('.content-area').forEach(area => {
+                        area.classList.add('hidden');
+                    });
+                    
+                    this.updateActiveNavIcon(pageName);
+                    
+                    const iframeContainer = document.getElementById(`${pageName}Content`);
+                    if (iframeContainer) {
+                        iframeContainer.classList.remove('hidden');
+                        
+                        const iframe = document.getElementById(`${pageName}Iframe`);
+                        if (iframe && !this.state.iframesLoaded[`${pageName}Iframe`]) {
+                            this.showIframeLoadingOverlay(`${pageName}Iframe`);
+                        }
+                        
+                        if (iframe && this.state.sessionBroker) {
+                            try {
+                                this.state.sessionBroker.sendSessionToFrame(`${pageName}Iframe`);
+                            } catch (error) {
+                                console.warn(`Failed to send session to ${pageName}Iframe:`, error);
+                            }
+                        }
                     }
                     
-                    if (iframe && this.state.sessionBroker) {
-                        this.state.sessionBroker.sendSessionToFrame(`${pageName}Iframe`);
-                    }
+                    setTimeout(() => {
+                        this.checkIframeForFullscreenPage();
+                    }, 200);
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error switching page:', error);
                 }
-                
-                setTimeout(() => {
-                    this.checkIframeForFullscreenPage();
-                }, 200);
             },
             
             updateActiveNavIcon(pageName) {
-                document.querySelectorAll('.nav-icon').forEach(icon => {
-                    icon.classList.remove('text-white', 'bg-purple-700');
-                    icon.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
-                });
-                
-                const activeIcon = document.querySelector(`[data-page="${pageName}"]`);
-                if (activeIcon) {
-                    activeIcon.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
-                    activeIcon.classList.add('text-white', 'bg-purple-700');
-                }
-                
-                document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
-                    icon.classList.remove('active');
-                });
-                
-                const mobileActiveIcon = document.querySelector(`.mobile-nav-icon[data-page="${pageName}"]`);
-                if (mobileActiveIcon) {
-                    mobileActiveIcon.classList.add('active');
+                try {
+                    document.querySelectorAll('.nav-icon').forEach(icon => {
+                        icon.classList.remove('text-white', 'bg-purple-700');
+                        icon.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                    });
+                    
+                    const activeIcon = document.querySelector(`[data-page="${pageName}"]`);
+                    if (activeIcon) {
+                        activeIcon.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                        activeIcon.classList.add('text-white', 'bg-purple-700');
+                    }
+                    
+                    document.querySelectorAll('.mobile-nav-icon').forEach(icon => {
+                        icon.classList.remove('active');
+                    });
+                    
+                    const mobileActiveIcon = document.querySelector(`.mobile-nav-icon[data-page="${pageName}"]`);
+                    if (mobileActiveIcon) {
+                        mobileActiveIcon.classList.add('active');
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error updating active nav icon:', error);
                 }
             },
             
             checkIframeForFullscreenPage() {
-                if (!this.state.fullscreenPageDetectionEnabled || window.innerWidth >= 768) return;
-                
-                const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                if (!activeIframe) return;
-                
                 try {
-                    const iframeSrc = activeIframe.src || '';
-                    const iframeUrl = new URL(iframeSrc, window.location.origin);
+                    if (!this.state.fullscreenPageDetectionEnabled || window.innerWidth >= 768) return;
                     
-                    const fullscreenPatterns = [
-                        /chat-view/i,
-                        /conversation/i,
-                        /message-detail/i,
-                        /status-view/i,
-                        /status-detail/i,
-                        /call-view/i,
-                        /call-detail/i,
-                        /profile-view/i,
-                        /settings-view/i,
-                        /fullscreen/i,
-                        /\?fullscreen=true/i,
-                        /#fullscreen/i
-                    ];
+                    const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                    if (!activeIframe) return;
                     
-                    const isFullscreenPage = fullscreenPatterns.some(pattern => 
-                        pattern.test(iframeUrl.pathname) || pattern.test(iframeUrl.search) || pattern.test(iframeUrl.hash)
-                    );
-                    
-                    const hash = iframeUrl.hash.toLowerCase();
-                    const isFullscreenHash = hash.includes('chat') && !hash.includes('chats') || 
-                                            hash.includes('status') && !hash.includes('status-list') ||
-                                            hash.includes('call') && !hash.includes('calls-list') ||
-                                            hash.includes('profile') || hash.includes('detail') ||
-                                            hash.includes('group-chat') || hash.includes('create-status') ||
-                                            hash.includes('view-status');
-                    
-                    if (isFullscreenPage || isFullscreenHash) {
-                        this.hideBottomNavigation();
-                    } else {
-                        this.showBottomNavigation();
+                    try {
+                        const iframeSrc = activeIframe.src || '';
+                        const iframeUrl = new URL(iframeSrc, window.location.origin);
+                        
+                        const fullscreenPatterns = [
+                            /chat-view/i,
+                            /conversation/i,
+                            /message-detail/i,
+                            /status-view/i,
+                            /status-detail/i,
+                            /call-view/i,
+                            /call-detail/i,
+                            /profile-view/i,
+                            /settings-view/i,
+                            /fullscreen/i,
+                            /\?fullscreen=true/i,
+                            /#fullscreen/i
+                        ];
+                        
+                        const isFullscreenPage = fullscreenPatterns.some(pattern => 
+                            pattern.test(iframeUrl.pathname) || pattern.test(iframeUrl.search) || pattern.test(iframeUrl.hash)
+                        );
+                        
+                        const hash = iframeUrl.hash.toLowerCase();
+                        const isFullscreenHash = hash.includes('chat') && !hash.includes('chats') || 
+                                                hash.includes('status') && !hash.includes('status-list') ||
+                                                hash.includes('call') && !hash.includes('calls-list') ||
+                                                hash.includes('profile') || hash.includes('detail') ||
+                                                hash.includes('group-chat') || hash.includes('create-status') ||
+                                                hash.includes('view-status');
+                        
+                        if (isFullscreenPage || isFullscreenHash) {
+                            this.hideBottomNavigation();
+                        } else {
+                            this.showBottomNavigation();
+                        }
+                    } catch (e) {
+                        this.checkIframeForFullscreenViaMessages();
                     }
-                } catch (e) {
-                    this.checkIframeForFullscreenViaMessages();
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error checking iframe for fullscreen page:', error);
                 }
             },
             
             checkIframeForFullscreenViaMessages() {
-                const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
-                if (activeIframe && activeIframe.contentWindow) {
-                    try {
-                        this.state.sessionBroker.sendToFrame(activeIframe.id, 'GET_FULLSCREEN_STATUS', {});
-                    } catch (e) {}
+                try {
+                    const activeIframe = document.querySelector('.content-area:not(.hidden) .content-iframe');
+                    if (activeIframe && activeIframe.contentWindow && this.state.sessionBroker) {
+                        try {
+                            this.state.sessionBroker.sendToFrame(activeIframe.id, 'GET_FULLSCREEN_STATUS', {});
+                        } catch (e) {
+                            console.warn('Failed to send GET_FULLSCREEN_STATUS message');
+                        }
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error checking iframe via messages:', error);
                 }
             },
             
             hideLoadingScreen() {
-                const loadingScreen = document.getElementById('loadingScreen');
-                if (loadingScreen) {
-                    loadingScreen.style.opacity = '0';
-                    setTimeout(() => {
-                        loadingScreen.classList.add('hidden');
-                    }, 300);
+                try {
+                    const loadingScreen = document.getElementById('loadingScreen');
+                    if (loadingScreen) {
+                        loadingScreen.style.opacity = '0';
+                        setTimeout(() => {
+                            loadingScreen.classList.add('hidden');
+                        }, 300);
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error hiding loading screen:', error);
                 }
             },
             
             showGlobalNotification(message, type = 'info', duration = 5000) {
-                const container = document.getElementById('globalNotificationContainer');
-                if (!container) return;
-                
-                const notificationId = 'notification_' + Date.now();
-                const notification = document.createElement('div');
-                notification.id = notificationId;
-                notification.className = `global-notification ${type}`;
-                
-                let icon = 'fa-info-circle';
-                if (type === 'success') icon = 'fa-check-circle';
-                if (type === 'error') icon = 'fa-exclamation-circle';
-                if (type === 'warning') icon = 'fa-exclamation-triangle';
-                if (type === 'message') icon = 'fa-comment-alt';
-                
-                notification.innerHTML = `
-                    <div class="notification-content">
-                        <div class="flex items-center">
-                            <i class="fas ${icon} mr-2"></i>
-                            <span>${message}</span>
+                try {
+                    const container = document.getElementById('globalNotificationContainer');
+                    if (!container) return;
+                    
+                    const notificationId = 'notification_' + Date.now();
+                    const notification = document.createElement('div');
+                    notification.id = notificationId;
+                    notification.className = `global-notification ${type}`;
+                    
+                    let icon = 'fa-info-circle';
+                    if (type === 'success') icon = 'fa-check-circle';
+                    if (type === 'error') icon = 'fa-exclamation-circle';
+                    if (type === 'warning') icon = 'fa-exclamation-triangle';
+                    if (type === 'message') icon = 'fa-comment-alt';
+                    
+                    notification.innerHTML = `
+                        <div class="notification-content">
+                            <div class="flex items-center">
+                                <i class="fas ${icon} mr-2"></i>
+                                <span>${message}</span>
+                            </div>
                         </div>
-                    </div>
-                    <button class="notification-close" onclick="removeNotification('${notificationId}')">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-                
-                container.appendChild(notification);
-                
-                setTimeout(() => {
-                    this.removeNotification(notificationId);
-                }, duration);
+                        <button class="notification-close" onclick="removeNotification('${notificationId}')">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    
+                    container.appendChild(notification);
+                    
+                    setTimeout(() => {
+                        this.removeNotification(notificationId);
+                    }, duration);
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error showing global notification:', error);
+                }
             },
             
             removeNotification(notificationId) {
-                const notification = document.getElementById(notificationId);
-                if (notification) {
-                    notification.remove();
+                try {
+                    const notification = document.getElementById(notificationId);
+                    if (notification) {
+                        notification.remove();
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error removing notification:', error);
                 }
             },
             
             handleLogout() {
-                if (this.state.sessionBroker && this.state.sessionBroker.logout) {
-                    this.state.sessionBroker.logout();
-                } else {
+                try {
+                    if (this.state.sessionBroker && this.state.sessionBroker.logout) {
+                        this.state.sessionBroker.logout();
+                    } else {
+                        localStorage.clear();
+                        window.location.href = '../index.html';
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error handling logout:', error);
                     localStorage.clear();
                     window.location.href = '../index.html';
                 }
             },
             
             handleIframeMessage(event) {
-                if (event.data && event.data.type) {
-                    switch(event.data.type) {
-                        case 'navigate_to':
-                            if (event.data.page) {
-                                this.exitAllFullscreenViews();
-                                this.switchPage(event.data.page);
-                            }
-                            break;
-                            
-                        case 'enter_chat_view':
-                            this.setIsInChatView(true);
-                            this.state.chatHistory.push({
-                                page: this.state.currentPage,
-                                chatId: event.data.chatId,
-                                timestamp: Date.now()
-                            });
-                            break;
-                            
-                        case 'exit_chat_view':
-                            this.setIsInChatView(false);
-                            this.state.chatHistory = [];
-                            break;
-                            
-                        case 'enter_status_view':
-                            this.setIsInStatusView(true);
-                            break;
-                            
-                        case 'exit_status_view':
-                            this.setIsInStatusView(false);
-                            break;
-                            
-                        case 'enter_group_view':
-                            this.setIsInGroupView(true);
-                            break;
-                            
-                        case 'exit_group_view':
-                            this.setIsInGroupView(false);
-                            break;
-                            
-                        case 'enter_fullscreen_view':
-                            this.setIsInFullscreenView(true);
-                            break;
-                            
-                        case 'exit_fullscreen_view':
-                            this.setIsInFullscreenView(false);
-                            break;
-                            
-                        case 'back_button_clicked':
-                            window.goBack();
-                            break;
-                            
-                        case 'global_notification':
-                            if (event.data.message) {
-                                this.showGlobalNotification(
-                                    event.data.message, 
-                                    event.data.notificationType || 'info', 
-                                    event.data.duration || 5000
-                                );
-                            }
-                            break;
-                            
-                        case 'fullscreen_status':
-                            if (event.data.isFullscreen) {
-                                this.hideBottomNavigation();
-                            } else {
-                                this.showBottomNavigation();
-                            }
-                            break;
-                            
-                        case 'UPDATE_SETTINGS':
-                            if (event.data.settings) {
-                                localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
-                                
-                                document.querySelectorAll('.content-iframe').forEach(iframe => {
-                                    try {
-                                        if (iframe.contentWindow) {
-                                            iframe.contentWindow.postMessage({
-                                                type: 'UPDATE_SETTINGS',
-                                                settings: event.data.settings,
-                                                timestamp: Date.now()
-                                            }, '*');
-                                        }
-                                    } catch (e) {}
-                                });
-                            }
-                            break;
-                            
-                        case 'TOOL_ACTION':
-                            if (event.data.tool && this.state.sessionBroker) {
-                                this.state.sessionBroker.handleToolAction(event, event.data, null);
-                            }
-                            break;
-                            
-                        default:
-                            if (this.state.sessionBroker) {
-                                const sessionMessageTypes = [
-                                    'CHILD_READY',
-                                    'REQUEST_SESSION',
-                                    'PING_PARENT',
-                                    'SESSION_ACK',
-                                    'FRAME_UNLOAD',
-                                    'REQUEST_USER_DATA',
-                                    'iframe_loaded'
-                                ];
-                                
-                                if (sessionMessageTypes.includes(event.data.type)) {
-                                    return;
+                try {
+                    if (event.data && event.data.type) {
+                        switch(event.data.type) {
+                            case 'navigate_to':
+                                if (event.data.page) {
+                                    this.exitAllFullscreenViews();
+                                    this.switchPage(event.data.page);
                                 }
-                            }
-                            break;
+                                break;
+                                
+                            case 'enter_chat_view':
+                                this.setIsInChatView(true);
+                                this.state.chatHistory.push({
+                                    page: this.state.currentPage,
+                                    chatId: event.data.chatId,
+                                    timestamp: Date.now()
+                                });
+                                break;
+                                
+                            case 'exit_chat_view':
+                                this.setIsInChatView(false);
+                                this.state.chatHistory = [];
+                                break;
+                                
+                            case 'enter_status_view':
+                                this.setIsInStatusView(true);
+                                break;
+                                
+                            case 'exit_status_view':
+                                this.setIsInStatusView(false);
+                                break;
+                                
+                            case 'enter_group_view':
+                                this.setIsInGroupView(true);
+                                break;
+                                
+                            case 'exit_group_view':
+                                this.setIsInGroupView(false);
+                                break;
+                                
+                            case 'enter_fullscreen_view':
+                                this.setIsInFullscreenView(true);
+                                break;
+                                
+                            case 'exit_fullscreen_view':
+                                this.setIsInFullscreenView(false);
+                                break;
+                                
+                            case 'back_button_clicked':
+                                if (typeof window.goBack === 'function') {
+                                    window.goBack();
+                                }
+                                break;
+                                
+                            case 'global_notification':
+                                if (event.data.message) {
+                                    this.showGlobalNotification(
+                                        event.data.message, 
+                                        event.data.notificationType || 'info', 
+                                        event.data.duration || 5000
+                                    );
+                                }
+                                break;
+                                
+                            case 'fullscreen_status':
+                                if (event.data.isFullscreen) {
+                                    this.hideBottomNavigation();
+                                } else {
+                                    this.showBottomNavigation();
+                                }
+                                break;
+                                
+                            case 'UPDATE_SETTINGS':
+                                if (event.data.settings) {
+                                    try {
+                                        localStorage.setItem('app_settings', JSON.stringify(event.data.settings));
+                                        
+                                        document.querySelectorAll('.content-iframe').forEach(iframe => {
+                                            try {
+                                                if (iframe.contentWindow) {
+                                                    iframe.contentWindow.postMessage({
+                                                        type: 'UPDATE_SETTINGS',
+                                                        settings: event.data.settings,
+                                                        timestamp: Date.now()
+                                                    }, '*');
+                                                }
+                                            } catch (e) {}
+                                        });
+                                    } catch (e) {
+                                        console.warn('Failed to update settings:', e);
+                                    }
+                                }
+                                break;
+                                
+                            case 'TOOL_ACTION':
+                                if (event.data.tool && this.state.sessionBroker) {
+                                    this.state.sessionBroker.handleToolAction(event, event.data, null);
+                                }
+                                break;
+                                
+                            default:
+                                if (this.state.sessionBroker) {
+                                    const sessionMessageTypes = [
+                                        'CHILD_READY',
+                                        'REQUEST_SESSION',
+                                        'PING_PARENT',
+                                        'SESSION_ACK',
+                                        'FRAME_UNLOAD',
+                                        'REQUEST_USER_DATA',
+                                        'iframe_loaded'
+                                    ];
+                                    
+                                    if (sessionMessageTypes.includes(event.data.type)) {
+                                        return;
+                                    }
+                                }
+                                break;
+                        }
                     }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error handling iframe message:', error);
                 }
             },
             
             getCurrentUser() {
-                return this.state.sessionBroker ? this.state.sessionBroker.getUser() : null;
+                try {
+                    return this.state.sessionBroker ? this.state.sessionBroker.getUser() : null;
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error getting current user:', error);
+                    return null;
+                }
             },
             
             isUserDataLoaded() {
-                return this.state.sessionBroker ? this.state.sessionBroker.isAuthenticated() : false;
+                try {
+                    return this.state.sessionBroker ? this.state.sessionBroker.isAuthenticated() : false;
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error checking user data:', error);
+                    return false;
+                }
             },
             
             async waitForUserData() {
-                if (!this.state.sessionBroker) {
+                try {
+                    if (!this.state.sessionBroker) {
+                        return null;
+                    }
+                    
+                    await this.state.sessionBroker.ready();
+                    return this.state.sessionBroker.getUser();
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error waiting for user data:', error);
                     return null;
                 }
-                
-                await this.state.sessionBroker.ready();
-                return this.state.sessionBroker.getUser();
             },
             
             getSessionBroker() {
@@ -3902,12 +4513,16 @@
             
             // Cleanup method
             cleanup() {
-                if (this.state.sessionBroker && this.state.sessionBroker.cleanup) {
-                    this.state.sessionBroker.cleanup();
-                }
-                
-                if (this.state.loadingTimeout) {
-                    clearTimeout(this.state.loadingTimeout);
+                try {
+                    if (this.state.sessionBroker && this.state.sessionBroker.cleanup) {
+                        this.state.sessionBroker.cleanup();
+                    }
+                    
+                    if (this.state.loadingTimeout) {
+                        clearTimeout(this.state.loadingTimeout);
+                    }
+                } catch (error) {
+                    console.error('[ParentApplicationManager] Error during cleanup:', error);
                 }
             }
         };
@@ -3915,94 +4530,220 @@
         window.SessionBroker = SessionBroker;
         window.ParentApplicationManager = ParentApplicationManager;
         
-        window.getCurrentUser = () => ParentApplicationManager.getCurrentUser();
-        window.isUserDataLoaded = () => ParentApplicationManager.isUserDataLoaded();
-        window.waitForUserData = () => ParentApplicationManager.waitForUserData();
-        window.getSessionBroker = () => ParentApplicationManager.getSessionBroker();
-        
-        window.showGlobalNotification = (message, type, duration) => 
-            ParentApplicationManager.showGlobalNotification(message, type, duration);
-        
-        window.removeNotification = (id) => ParentApplicationManager.removeNotification(id);
-        
-        window.switchPage = (page) => ParentApplicationManager.switchPage(page);
-        window.goBack = () => window.goBack();
-        window.setIsInChatView = (value) => ParentApplicationManager.setIsInChatView(value);
-        window.setIsInStatusView = (value) => ParentApplicationManager.setIsInStatusView(value);
-        window.setIsInGroupView = (value) => ParentApplicationManager.setIsInGroupView(value);
-        window.setIsInFullscreenView = (value) => ParentApplicationManager.setIsInFullscreenView(value);
-        
-        window.toggleQuickToolsMenu = () => {
-            const quickToolsMenu = document.getElementById('quickToolsDropdownMenu');
-            if (quickToolsMenu) {
-                quickToolsMenu.classList.toggle('hidden');
+        window.getCurrentUser = () => {
+            try {
+                return ParentApplicationManager.getCurrentUser();
+            } catch (error) {
+                console.error('Error in getCurrentUser:', error);
+                return null;
             }
         };
         
-        window.closeQuickToolsMenu = () => ParentApplicationManager.closeQuickToolsMenu();
+        window.isUserDataLoaded = () => {
+            try {
+                return ParentApplicationManager.isUserDataLoaded();
+            } catch (error) {
+                console.error('Error in isUserDataLoaded:', error);
+                return false;
+            }
+        };
+        
+        window.waitForUserData = () => {
+            try {
+                return ParentApplicationManager.waitForUserData();
+            } catch (error) {
+                console.error('Error in waitForUserData:', error);
+                return Promise.resolve(null);
+            }
+        };
+        
+        window.getSessionBroker = () => {
+            try {
+                return ParentApplicationManager.getSessionBroker();
+            } catch (error) {
+                console.error('Error in getSessionBroker:', error);
+                return null;
+            }
+        };
+        
+        window.showGlobalNotification = (message, type, duration) => {
+            try {
+                ParentApplicationManager.showGlobalNotification(message, type, duration);
+            } catch (error) {
+                console.error('Error in showGlobalNotification:', error);
+            }
+        };
+        
+        window.removeNotification = (id) => {
+            try {
+                ParentApplicationManager.removeNotification(id);
+            } catch (error) {
+                console.error('Error in removeNotification:', error);
+            }
+        };
+        
+        window.switchPage = (page) => {
+            try {
+                ParentApplicationManager.switchPage(page);
+            } catch (error) {
+                console.error('Error in switchPage:', error);
+            }
+        };
+        
+        window.goBack = () => {
+            try {
+                if (typeof window.goBack === 'function') {
+                    return window.goBack();
+                }
+                return false;
+            } catch (error) {
+                console.error('Error in goBack:', error);
+                return false;
+            }
+        };
+        
+        window.setIsInChatView = (value) => {
+            try {
+                ParentApplicationManager.setIsInChatView(value);
+            } catch (error) {
+                console.error('Error in setIsInChatView:', error);
+            }
+        };
+        
+        window.setIsInStatusView = (value) => {
+            try {
+                ParentApplicationManager.setIsInStatusView(value);
+            } catch (error) {
+                console.error('Error in setIsInStatusView:', error);
+            }
+        };
+        
+        window.setIsInGroupView = (value) => {
+            try {
+                ParentApplicationManager.setIsInGroupView(value);
+            } catch (error) {
+                console.error('Error in setIsInGroupView:', error);
+            }
+        };
+        
+        window.setIsInFullscreenView = (value) => {
+            try {
+                ParentApplicationManager.setIsInFullscreenView(value);
+            } catch (error) {
+                console.error('Error in setIsInFullscreenView:', error);
+            }
+        };
+        
+        window.toggleQuickToolsMenu = () => {
+            try {
+                const quickToolsMenu = document.getElementById('quickToolsDropdownMenu');
+                if (quickToolsMenu) {
+                    quickToolsMenu.classList.toggle('hidden');
+                }
+            } catch (error) {
+                console.error('Error in toggleQuickToolsMenu:', error);
+            }
+        };
+        
+        window.closeQuickToolsMenu = () => {
+            try {
+                ParentApplicationManager.closeQuickToolsMenu();
+            } catch (error) {
+                console.error('Error in closeQuickToolsMenu:', error);
+            }
+        };
         
         window.toggleMobileQuickToolsMenu = () => {
-            const mobileQuickToolsMenu = document.getElementById('mobileQuickToolsDropdownMenu');
-            if (mobileQuickToolsMenu) {
-                mobileQuickToolsMenu.classList.toggle('hidden');
+            try {
+                const mobileQuickToolsMenu = document.getElementById('mobileQuickToolsDropdownMenu');
+                if (mobileQuickToolsMenu) {
+                    mobileQuickToolsMenu.classList.toggle('hidden');
+                }
+            } catch (error) {
+                console.error('Error in toggleMobileQuickToolsMenu:', error);
             }
         };
         
         document.addEventListener('DOMContentLoaded', () => {
             console.log('DOM loaded, initializing application...');
             
-            ParentApplicationManager.initialize().catch(error => {
-                console.error('Application initialization failed:', error);
+            try {
+                ParentApplicationManager.initialize().catch(error => {
+                    console.error('Application initialization failed:', error);
+                    
+                    // Try to setup basic UI even if initialization fails
+                    try {
+                        ParentApplicationManager.setupFallbackUI();
+                        ParentApplicationManager.hideLoadingScreen();
+                        
+                        ParentApplicationManager.showGlobalNotification(
+                            'Application initialization failed. Running in limited mode.',
+                            'error',
+                            5000
+                        );
+                    } catch (e) {
+                        console.error('Failed to setup fallback UI:', e);
+                    }
+                });
                 
-                ParentApplicationManager.setupUI();
-                ParentApplicationManager.hideLoadingScreen();
-                
-                ParentApplicationManager.showGlobalNotification(
-                    'Application initialization failed. Some features may be limited.',
-                    'error',
-                    5000
-                );
-            });
-            
-            ParentApplicationManager.state.loadingTimeout = setTimeout(() => {
-                ParentApplicationManager.hideLoadingScreen();
-            }, 3000);
+                ParentApplicationManager.state.loadingTimeout = setTimeout(() => {
+                    ParentApplicationManager.hideLoadingScreen();
+                }, 3000);
+            } catch (error) {
+                console.error('Critical error during DOMContentLoaded:', error);
+            }
         });
         
         window.addEventListener('message', (event) => {
-            ParentApplicationManager.handleIframeMessage(event);
+            try {
+                ParentApplicationManager.handleIframeMessage(event);
+            } catch (error) {
+                console.error('Error in message event listener:', error);
+            }
         });
         
         window.addEventListener('resize', () => {
-            if (window.innerWidth < 768) {
-                setTimeout(() => {
-                    ParentApplicationManager.checkIframeForFullscreenPage();
-                    
-                    if (!ParentApplicationManager.state.isInChatView && 
-                        !ParentApplicationManager.state.isInStatusView && 
-                        !ParentApplicationManager.state.isInGroupView && 
-                        !ParentApplicationManager.state.isInFullscreenView) {
-                        ParentApplicationManager.showBottomNavigation();
-                    }
-                }, 100);
-            } else {
-                document.getElementById('permanentSidebar')?.classList.remove('hidden');
-                document.getElementById('mobileNavBar')?.classList.add('hidden-nav');
-                ParentApplicationManager.closeQuickToolsMenu();
+            try {
+                if (window.innerWidth < 768) {
+                    setTimeout(() => {
+                        ParentApplicationManager.checkIframeForFullscreenPage();
+                        
+                        if (!ParentApplicationManager.state.isInChatView && 
+                            !ParentApplicationManager.state.isInStatusView && 
+                            !ParentApplicationManager.state.isInGroupView && 
+                            !ParentApplicationManager.state.isInFullscreenView) {
+                            ParentApplicationManager.showBottomNavigation();
+                        }
+                    }, 100);
+                } else {
+                    document.getElementById('permanentSidebar')?.classList.remove('hidden');
+                    document.getElementById('mobileNavBar')?.classList.add('hidden-nav');
+                    ParentApplicationManager.closeQuickToolsMenu();
+                }
+            } catch (error) {
+                console.error('Error in resize event:', error);
             }
         });
         
         window.addEventListener('beforeunload', () => {
-            ParentApplicationManager.cleanup();
-            
-            if (ParentApplicationManager.state.loadingTimeout) {
-                clearTimeout(ParentApplicationManager.state.loadingTimeout);
-            }
-            
-            if (ParentApplicationManager.state.sessionBroker) {
-                ParentApplicationManager.state.sessionBroker.broadcastToAllFrames('PARENT_UNLOADING', {
-                    timestamp: Date.now()
-                });
+            try {
+                ParentApplicationManager.cleanup();
+                
+                if (ParentApplicationManager.state.loadingTimeout) {
+                    clearTimeout(ParentApplicationManager.state.loadingTimeout);
+                }
+                
+                if (ParentApplicationManager.state.sessionBroker) {
+                    try {
+                        ParentApplicationManager.state.sessionBroker.broadcastToAllFrames('PARENT_UNLOADING', {
+                            timestamp: Date.now()
+                        });
+                    } catch (e) {
+                        console.warn('Failed to broadcast parent unloading');
+                    }
+                }
+            } catch (error) {
+                console.error('Error in beforeunload event:', error);
             }
         });
         
@@ -4011,189 +4752,246 @@
 
     <!-- Fallback script for older browsers -->
     <script>
-        if (typeof window.SessionBroker === 'undefined') {
-            window.currentUser = JSON.parse(localStorage.getItem('kynecta_user') || 'null');
-            window.userDataLoaded = !!window.currentUser;
-            
-            // Setup trusted origins for fallback mode
-            const trustedOrigins = [
-                window.location.origin,
-                'http://127.0.0.1:5500',
-                'http://localhost:5500',
-                'http://127.0.0.1:8080',
-                'http://localhost:8080',
-                'https://localhost',
-                'https://127.0.0.1'
-            ];
-            
-            // Track which frames have received session data
-            const sessionSentToFrames = new Set();
-            
-            window.addEventListener('message', function(event) {
-                // Check origin
-                if (!trustedOrigins.includes(event.origin) && event.origin !== 'null') {
-                    console.warn('Message from untrusted origin:', event.origin);
-                    return;
+        try {
+            if (typeof window.SessionBroker === 'undefined') {
+                console.log('Running in fallback mode for older browsers');
+                
+                // Safe user data access
+                let currentUser = null;
+                try {
+                    currentUser = JSON.parse(localStorage.getItem('kynecta_user') || 'null');
+                } catch (e) {
+                    console.warn('Failed to parse user data from localStorage');
                 }
                 
-                // Check message structure
-                if (!event.data || typeof event.data !== 'object') {
-                    return;
-                }
+                window.currentUser = currentUser;
+                window.userDataLoaded = !!window.currentUser;
                 
-                const { type, source, payload, frameId } = event.data;
+                // Setup trusted origins for fallback mode
+                const trustedOrigins = [
+                    window.location.origin,
+                    'http://127.0.0.1:5500',
+                    'http://localhost:5500',
+                    'http://127.0.0.1:8080',
+                    'http://localhost:8080',
+                    'https://localhost',
+                    'https://127.0.0.1'
+                ];
                 
-                // Handle SECURE_REQUEST_SESSION messages
-                if (type === 'SECURE_REQUEST_SESSION' && source === 'iframe' && window.currentUser) {
-                    // Prevent duplicate responses
-                    if (!sessionSentToFrames.has(frameId)) {
-                        sessionSentToFrames.add(frameId);
-                        
-                        const response = {
-                            type: 'SESSION_DATA',
-                            source: 'parent',
-                            token: localStorage.getItem('kynecta_token'),
-                            user: window.currentUser,
-                            timestamp: Date.now(),
-                            sessionId: 'fallback_session_' + Date.now()
-                        };
-                        
-                        try {
-                            event.source.postMessage(response, event.origin);
-                            console.log('📤 SESSION_DATA sent successfully (fallback mode)');
-                        } catch (error) {
-                            console.error('Failed to send SESSION_DATA (fallback):', error);
-                            sessionSentToFrames.delete(frameId); // Allow retry
-                        }
-                    }
-                }
+                // Track which frames have received session data
+                const sessionSentToFrames = new Set();
                 
-                // Legacy support
-                if (event.data && event.data.type === 'REQUEST_USER_DATA' && window.currentUser) {
-                    event.source.postMessage({
-                        type: 'USER_DATA',
-                        user: window.currentUser,
-                        timestamp: Date.now()
-                    }, '*');
-                }
-                
-                if (event.data && event.data.type === 'navigate_to') {
-                    if (window.switchPage && typeof window.switchPage === 'function') {
-                        window.switchPage(event.data.page);
-                    }
-                }
-            });
-            
-            window.closeModal = function(modalId) {
-                const modal = document.getElementById(modalId);
-                if (modal) {
-                    modal.classList.add('hidden');
-                }
-            };
-            
-            window.showBottomNavigation = function() {
-                if (window.innerWidth >= 768) return;
-                
-                const mobileNavBar = document.getElementById('mobileNavBar');
-                if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
-                    mobileNavBar.classList.remove('hidden-nav');
-                }
-            };
-            
-            window.hideBottomNavigation = function() {
-                if (window.innerWidth >= 768) return;
-                
-                const mobileNavBar = document.getElementById('mobileNavBar');
-                if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
-                    mobileNavBar.classList.add('hidden-nav');
-                }
-            };
-            
-            window.handleLogout = function() {
-                localStorage.clear();
-                window.currentUser = null;
-                window.userDataLoaded = false;
-                sessionSentToFrames.clear();
-                
-                document.querySelectorAll('.content-iframe').forEach(iframe => {
+                window.addEventListener('message', function(event) {
                     try {
-                        if (iframe.contentWindow) {
-                            iframe.contentWindow.postMessage({
-                                type: 'USER_LOGOUT',
-                                timestamp: Date.now()
-                            }, '*');
+                        // Check origin
+                        if (!trustedOrigins.includes(event.origin) && event.origin !== 'null') {
+                            console.warn('Message from untrusted origin:', event.origin);
+                            return;
                         }
-                    } catch (e) {
+                        
+                        // Check message structure
+                        if (!event.data || typeof event.data !== 'object') {
+                            return;
+                        }
+                        
+                        const { type, source, payload, frameId } = event.data;
+                        
+                        // Handle SECURE_REQUEST_SESSION messages
+                        if (type === 'SECURE_REQUEST_SESSION' && source === 'iframe' && window.currentUser) {
+                            // Prevent duplicate responses
+                            if (!sessionSentToFrames.has(frameId)) {
+                                sessionSentToFrames.add(frameId);
+                                
+                                const response = {
+                                    type: 'SESSION_DATA',
+                                    source: 'parent',
+                                    token: localStorage.getItem('kynecta_token'),
+                                    user: window.currentUser,
+                                    timestamp: Date.now(),
+                                    sessionId: 'fallback_session_' + Date.now()
+                                };
+                                
+                                try {
+                                    event.source.postMessage(response, event.origin);
+                                    console.log('📤 SESSION_DATA sent successfully (fallback mode)');
+                                } catch (error) {
+                                    console.error('Failed to send SESSION_DATA (fallback):', error);
+                                    sessionSentToFrames.delete(frameId); // Allow retry
+                                }
+                            }
+                        }
+                        
+                        // Legacy support
+                        if (event.data && event.data.type === 'REQUEST_USER_DATA' && window.currentUser) {
+                            try {
+                                event.source.postMessage({
+                                    type: 'USER_DATA',
+                                    user: window.currentUser,
+                                    timestamp: Date.now()
+                                }, '*');
+                            } catch (e) {
+                                console.warn('Failed to send USER_DATA (fallback):', e);
+                            }
+                        }
+                        
+                        if (event.data && event.data.type === 'navigate_to') {
+                            if (window.switchPage && typeof window.switchPage === 'function') {
+                                try {
+                                    window.switchPage(event.data.page);
+                                } catch (e) {
+                                    console.warn('Failed to switch page (fallback):', e);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error in fallback message handler:', error);
                     }
                 });
                 
-                setTimeout(() => {
-                    window.location.href = '../index.html';
-                }, 500);
-            };
-            
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(() => {
-                    const loadingScreen = document.getElementById('loadingScreen');
-                    if (loadingScreen) {
-                        loadingScreen.classList.add('hidden');
-                    }
-                    
-                    const sidebar = document.getElementById('permanentSidebar');
-                    if (sidebar) {
-                        sidebar.classList.remove('hidden');
-                    }
-                    
-                    if (window.innerWidth < 768) {
-                        const mobileNav = document.getElementById('mobileNavBar');
-                        if (mobileNav) {
-                            mobileNav.classList.remove('hidden');
+                window.closeModal = function(modalId) {
+                    try {
+                        const modal = document.getElementById(modalId);
+                        if (modal) {
+                            modal.classList.add('hidden');
                         }
+                    } catch (error) {
+                        console.error('Error closing modal:', error);
                     }
-                    
-                    const setupFallbackNavigation = () => {
-                        document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(icon => {
-                            icon.addEventListener('click', function() {
-                                const page = this.dataset.page;
-                                if (page) {
-                                    document.querySelectorAll('.content-area').forEach(area => {
-                                        area.classList.add('hidden');
-                                    });
-                                    
-                                    const content = document.getElementById(page + 'Content');
-                                    if (content) {
-                                        content.classList.remove('hidden');
-                                    }
-                                    
-                                    document.querySelectorAll('.nav-icon').forEach(nav => {
-                                        nav.classList.remove('text-white', 'bg-purple-700');
-                                        nav.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
-                                    });
-                                    
-                                    document.querySelectorAll('.mobile-nav-icon').forEach(mobile => {
-                                        mobile.classList.remove('active');
-                                    });
-                                    
-                                    if (this.classList.contains('nav-icon')) {
-                                        this.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
-                                        this.classList.add('text-white', 'bg-purple-700');
-                                    }
-                                    
-                                    if (this.classList.contains('mobile-nav-icon')) {
-                                        this.classList.add('active');
-                                    }
+                };
+                
+                window.showBottomNavigation = function() {
+                    try {
+                        if (window.innerWidth >= 768) return;
+                        
+                        const mobileNavBar = document.getElementById('mobileNavBar');
+                        if (mobileNavBar && mobileNavBar.classList.contains('hidden-nav')) {
+                            mobileNavBar.classList.remove('hidden-nav');
+                        }
+                    } catch (error) {
+                        console.error('Error showing bottom navigation:', error);
+                    }
+                };
+                
+                window.hideBottomNavigation = function() {
+                    try {
+                        if (window.innerWidth >= 768) return;
+                        
+                        const mobileNavBar = document.getElementById('mobileNavBar');
+                        if (mobileNavBar && !mobileNavBar.classList.contains('hidden-nav')) {
+                            mobileNavBar.classList.add('hidden-nav');
+                        }
+                    } catch (error) {
+                        console.error('Error hiding bottom navigation:', error);
+                    }
+                };
+                
+                window.handleLogout = function() {
+                    try {
+                        localStorage.clear();
+                        window.currentUser = null;
+                        window.userDataLoaded = false;
+                        sessionSentToFrames.clear();
+                        
+                        document.querySelectorAll('.content-iframe').forEach(iframe => {
+                            try {
+                                if (iframe.contentWindow) {
+                                    iframe.contentWindow.postMessage({
+                                        type: 'USER_LOGOUT',
+                                        timestamp: Date.now()
+                                    }, '*');
                                 }
-                            });
+                            } catch (e) {
+                                // Silent fail
+                            }
                         });
-                    };
-                    
-                    setupFallbackNavigation();
-                    
-                }, 500);
-            });
+                        
+                        setTimeout(() => {
+                            window.location.href = '../index.html';
+                        }, 500);
+                    } catch (error) {
+                        console.error('Error handling logout:', error);
+                        window.location.href = '../index.html';
+                    }
+                };
+                
+                document.addEventListener('DOMContentLoaded', function() {
+                    try {
+                        setTimeout(() => {
+                            const loadingScreen = document.getElementById('loadingScreen');
+                            if (loadingScreen) {
+                                loadingScreen.classList.add('hidden');
+                            }
+                            
+                            const sidebar = document.getElementById('permanentSidebar');
+                            if (sidebar) {
+                                sidebar.classList.remove('hidden');
+                            }
+                            
+                            if (window.innerWidth < 768) {
+                                const mobileNav = document.getElementById('mobileNavBar');
+                                if (mobileNav) {
+                                    mobileNav.classList.remove('hidden');
+                                }
+                            }
+                            
+                            const setupFallbackNavigation = () => {
+                                try {
+                                    document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(icon => {
+                                        icon.addEventListener('click', function() {
+                                            try {
+                                                const page = this.dataset.page;
+                                                if (page) {
+                                                    document.querySelectorAll('.content-area').forEach(area => {
+                                                        area.classList.add('hidden');
+                                                    });
+                                                    
+                                                    const content = document.getElementById(page + 'Content');
+                                                    if (content) {
+                                                        content.classList.remove('hidden');
+                                                    }
+                                                    
+                                                    document.querySelectorAll('.nav-icon').forEach(nav => {
+                                                        nav.classList.remove('text-white', 'bg-purple-700');
+                                                        nav.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                                                    });
+                                                    
+                                                    document.querySelectorAll('.mobile-nav-icon').forEach(mobile => {
+                                                        mobile.classList.remove('active');
+                                                    });
+                                                    
+                                                    if (this.classList.contains('nav-icon')) {
+                                                        this.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-gray-800');
+                                                        this.classList.add('text-white', 'bg-purple-700');
+                                                    }
+                                                    
+                                                    if (this.classList.contains('mobile-nav-icon')) {
+                                                        this.classList.add('active');
+                                                    }
+                                                }
+                                            } catch (error) {
+                                                console.error('Error in fallback navigation click:', error);
+                                            }
+                                        });
+                                    });
+                                } catch (error) {
+                                    console.error('Error setting up fallback navigation:', error);
+                                }
+                            };
+                            
+                            setupFallbackNavigation();
+                            
+                        }, 500);
+                    } catch (error) {
+                        console.error('Error in fallback DOMContentLoaded:', error);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Critical error in fallback script:', error);
         }
         
         console.log('Parent page loaded');
     </script>
+    
 </body>
 </html>
