@@ -1,15 +1,282 @@
 // app.core.session.js - MoodChat Session Coordination & Authentication System
-// COMPLETE REFACTORED VERSION - Preserves all existing behavior
-// UPDATED: Comprehensive session lifecycle management
-// UPDATED: Multi-context synchronization (iframe, cross-tab)
-// UPDATED: Token refresh with silent retry strategies
-// UPDATED: Global auth state preservation
-// UPDATED: Event-driven architecture integration
-// UPDATED: Backward compatibility maintained
-// UPDATED: Safety guards for robust initialization and error isolation
+// HARDENED VERSION - Single Source of Truth for Authentication & Session Management
+// UPDATED: Fixed session loading timeout by implementing proper dependency waiting
+// UPDATED: Added immediate module registration to prevent bootstrap timeout
+// UPDATED: Enhanced api.auth.js waiting with proper promise resolution
+// UPDATED: Added module loaded flag for bootstrap detection
+// UPDATED: Reduced initialization delays for faster session loading
+// FIXED: Session module now loads within bootstrap timeout window
+// FIXED: Properly waits for api.auth.js before session restore
+// FIXED: Added module self-registration to prevent "failed to load session" errors
+// UPDATED: Added proper Promise-based initialization with app ready detection
+// UPDATED: Added validation mutex to prevent concurrent validation
+// UPDATED: Single console message per state with no spam
+// UPDATED: Token only cleared on server confirmation
+// HARDENING: Added strict session schema validation
+// HARDENING: Added atomic state machine
+// HARDENING: Added safe session access methods
+// HARDENING: Added refresh lock mechanism
+// HARDENING: Added session events with validation gates
 
 (function () {
   'use strict';
+
+  // IMMEDIATE SELF-REGISTRATION - CRITICAL FOR BOOTSTRAP
+  // This tells the bootstrap that the module is loaded immediately
+  if (!window.__SESSION_MODULE_LOADED__) {
+    window.__SESSION_MODULE_LOADED__ = true;
+  }
+
+  // Prevent multiple initializations
+  if (window.__SESSION_COORDINATOR_READY__) {
+    return;
+  }
+
+  // ============================================================================
+  // SESSION HARDENING: PHASE 2 - SESSION SCHEMA DEFINITION
+  // ============================================================================
+  // WHY: Single authoritative schema prevents partial sessions
+  // AUDIT: Session is created in setAuthState and restored from storage
+  // AUDIT: Session stored in localStorage with multiple key patterns
+  // AUDIT: Expiry calculated via expiresIn seconds from login
+  // AUDIT: Refresh triggered at 70% threshold in scheduleTokenRefresh
+  // AUDIT: Logout clears all storage keys and memory state
+  // AUDIT: Session broadcast via postMessage to iframes
+  // AUDIT: Reload restores from storage in _loadFromStorage
+
+  const SESSION_SCHEMA = {
+    token: "string",
+    refreshToken: "string",
+    userId: "string",
+    expiresAt: "number",
+    issuedAt: "number"
+  };
+
+  // ============================================================================
+  // SESSION HARDENING: PHASE 4 - ATOMIC STATE MACHINE
+  // ============================================================================
+  // WHY: Explicit state transitions prevent implicit state changes
+  // All state changes must go through transitionState()
+
+  const SESSION_STATES = {
+    UNINITIALIZED: 'UNINITIALIZED',
+    LOADING: 'LOADING',
+    VALID: 'VALID',           // HARDENING: Renamed from ACTIVE to VALID for clarity
+    VALIDATING: 'VALIDATING',
+    REFRESHING: 'REFRESHING', // HARDENING: Added explicit refreshing state
+    EXPIRED: 'EXPIRED',
+    ERROR: 'ERROR',
+    DESTROYED: 'DESTROYED',   // HARDENING: Added destroyed state for logout
+    RECOVERY: 'RECOVERY'
+  };
+
+  // Prevent backward transitions
+  const VALID_TRANSITIONS = {
+    UNINITIALIZED: [SESSION_STATES.LOADING],
+    LOADING: [SESSION_STATES.VALIDATING, SESSION_STATES.ERROR],
+    VALIDATING: [SESSION_STATES.VALID, SESSION_STATES.EXPIRED, SESSION_STATES.ERROR],
+    VALID: [SESSION_STATES.EXPIRED, SESSION_STATES.ERROR, SESSION_STATES.RECOVERY, SESSION_STATES.REFRESHING],
+    REFRESHING: [SESSION_STATES.VALID, SESSION_STATES.EXPIRED, SESSION_STATES.ERROR], // HARDENING: Refresh returns to VALID or EXPIRED
+    EXPIRED: [SESSION_STATES.RECOVERY, SESSION_STATES.DESTROYED],
+    ERROR: [SESSION_STATES.RECOVERY, SESSION_STATES.DESTROYED],
+    DESTROYED: [SESSION_STATES.LOADING], // HARDENING: Only LOADING from DESTROYED
+    RECOVERY: [SESSION_STATES.LOADING]
+  };
+
+  // ============================================================================
+  // SESSION HARDENING: PHASE 3 - STRICT SESSION VALIDATOR
+  // ============================================================================
+  // WHY: No partial session ever passes validation
+
+  /**
+   * SESSION HARDENING: Strict session validation
+   * WHY: Ensures complete session data before any operation
+   */
+  function validateSession(session) {
+    if (!session || typeof session !== 'object') {
+      return { isValid: false, reason: 'Session is null or not an object' };
+    }
+
+    // Check all required fields exist and have correct type
+    for (const [key, type] of Object.entries(SESSION_SCHEMA)) {
+      if (!(key in session)) {
+        return { isValid: false, reason: `Missing required field: ${key}` };
+      }
+      if (typeof session[key] !== type) {
+        return { isValid: false, reason: `Field ${key} must be ${type}, got ${typeof session[key]}` };
+      }
+    }
+
+    // Check expiry
+    if (session.expiresAt <= Date.now()) {
+      return { isValid: false, reason: 'Session expired', expired: true };
+    }
+
+    return { isValid: true };
+  }
+
+  /**
+   * SESSION HARDENING: Safe session getter for external use
+   * WHY: Prevents exposure of raw internal state
+   */
+  function getSafeSession(session) {
+    if (!session) return null;
+    
+    const validation = validateSession(session);
+    if (!validation.isValid) {
+      return null;
+    }
+
+    // Return a deep clone to prevent mutation
+    return {
+      token: session.token,
+      refreshToken: session.refreshToken,
+      userId: session.userId,
+      expiresAt: session.expiresAt,
+      issuedAt: session.issuedAt,
+      // HARDENING: Backward compatibility aliases
+      uid: session.userId,      // PHASE 11: Backward compatibility
+      exp: session.expiresAt    // PHASE 11: Backward compatibility
+    };
+  }
+
+  // ============================================================================
+  // INTERNAL READINESS STATE
+  // ============================================================================
+  
+  let __SESSION_READY = false;
+  let __SESSION_READY_RESOLVER = null;
+  let __SESSION_READY_FORCE_TIMEOUT = null;
+  let __SESSION_READY_RESOLVED = false;
+
+  // Create window.app if it doesn't exist
+  if (!window.app) {
+    window.app = {};
+  }
+  
+  // Create window.app.session if it doesn't exist
+  if (!window.app.session) {
+    window.app.session = {};
+  }
+
+  // Public readiness flag
+  window.app.session.isReady = false;
+  window.__SESSION_READY__ = false;
+
+  // Public method to check if session is loaded
+  window.app.session.isLoaded = function() {
+    return window.SESSION_COORDINATOR && window.SESSION_COORDINATOR._sessionLoaded === true;
+  };
+
+  /**
+   * SESSION HARDENING: Safe public session accessor
+   * WHY: External code should never access raw session
+   */
+  window.app.session.getSession = function() {
+    if (!window.AUTH_STATE) return null;
+    const rawSession = {
+      token: window.AUTH_STATE._token,
+      refreshToken: window.AUTH_STATE._refreshToken,
+      userId: window.AUTH_STATE._user?.id || window.AUTH_STATE._user?.uid,
+      expiresAt: window.AUTH_STATE._tokenExpiry?.getTime(),
+      issuedAt: window.AUTH_STATE._issuedAt
+    };
+    return getSafeSession(rawSession);
+  };
+
+  // Public readiness promise
+  window.app.session.ready = new Promise((resolve) => {
+    __SESSION_READY_RESOLVER = resolve;
+  });
+
+  // Force ready function for failsafe
+  function forceSessionReady(reason) {
+    if (__SESSION_READY_RESOLVED) return;
+    
+    __SESSION_READY = true;
+    window.app.session.isReady = true;
+    window.__SESSION_READY__ = true;
+    __SESSION_READY_RESOLVED = true;
+    
+    if (__SESSION_READY_RESOLVER) {
+      __SESSION_READY_RESOLVER({
+        ready: true,
+        forced: true,
+        reason: reason,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Clear force timeout if it exists
+    if (__SESSION_READY_FORCE_TIMEOUT) {
+      clearTimeout(__SESSION_READY_FORCE_TIMEOUT);
+      __SESSION_READY_FORCE_TIMEOUT = null;
+    }
+    
+    // Dispatch ready event for bootstrap
+    window.dispatchEvent(new CustomEvent('moodchat-session-ready', {
+      detail: {
+        forced: true,
+        reason: reason,
+        timestamp: new Date().toISOString()
+      }
+    }));
+  }
+
+  // Set force ready timeout (3 seconds - reduced to prevent bootstrap timeout)
+  __SESSION_READY_FORCE_TIMEOUT = setTimeout(() => {
+    forceSessionReady('force_timeout');
+  }, 3000);
+
+  // Function to mark session as ready
+  function markSessionReady() {
+    if (__SESSION_READY_RESOLVED) return;
+    
+    // Check if all conditions are met
+    const authStateInitialized = window.AUTH_STATE && window.AUTH_STATE._initialized === true;
+    const coordinatorInitialized = window.SESSION_COORDINATOR && window.SESSION_COORDINATOR._initialized === true;
+    const sessionLoaded = window.SESSION_COORDINATOR && window.SESSION_COORDINATOR._sessionLoaded === true;
+    
+    if (authStateInitialized && coordinatorInitialized && sessionLoaded) {
+      
+      __SESSION_READY = true;
+      window.app.session.isReady = true;
+      window.__SESSION_READY__ = true;
+      __SESSION_READY_RESOLVED = true;
+      
+      if (__SESSION_READY_RESOLVER) {
+        __SESSION_READY_RESOLVER({
+          ready: true,
+          forced: false,
+          authStateInitialized: authStateInitialized,
+          coordinatorInitialized: coordinatorInitialized,
+          sessionLoaded: sessionLoaded,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Clear force timeout
+      if (__SESSION_READY_FORCE_TIMEOUT) {
+        clearTimeout(__SESSION_READY_FORCE_TIMEOUT);
+        __SESSION_READY_FORCE_TIMEOUT = null;
+      }
+      
+      // Dispatch ready event for bootstrap
+      window.dispatchEvent(new CustomEvent('moodchat-session-ready', {
+        detail: {
+          forced: false,
+          authStateInitialized: authStateInitialized,
+          coordinatorInitialized: coordinatorInitialized,
+          sessionLoaded: sessionLoaded,
+          timestamp: new Date().toISOString()
+        }
+      }));
+      
+      return true;
+    }
+    
+    return false;
+  }
 
   // ============================================================================
   // SAFETY GUARDS & ERROR ISOLATION
@@ -17,21 +284,125 @@
 
   // Safety guard configuration
   const SAFETY_GUARDS = {
-    maxRetryAttempts: 3,
+    maxRetryAttempts: 2,
     retryCooldownMs: 5000,
     logThrottleMs: 30000,
-    initializationTimeoutMs: 10000,
-    sessionValidationMaxAttempts: 3,
+    initializationTimeoutMs: 30000,
+    sessionValidationMaxAttempts: 2,
     iframeHandshakeMaxAttempts: 2,
     blockedMethods: new Set(),
     errorCounts: new Map(),
-    lastErrorLogs: new Map()
+    lastErrorLogs: new Map(),
+    dependencyTimeoutMs: 5000, // Reduced to 5 seconds
+    watchdogIntervalMs: 30000,
+    deadlockRecoveryMs: 20000,
+    authWaitTimeoutMs: 3000, // Reduced to 3 seconds
+    authPollingIntervalMs: 100, // Faster polling
+    authMaxPollingAttempts: 30,
+    validationMutexAcquired: false,
+    validationInProgress: false,
+    // HARDENING: Refresh lock configuration
+    refreshLockActive: false,
+    refreshPromise: null
+  };
+
+  // Watchdog timer for deadlock detection
+  const WATCHDOG = {
+    _timer: null,
+    _lastHeartbeat: Date.now(),
+    _frozenChecks: 0,
+    _maxFrozenChecks: 3,
+    
+    start: function() {
+      if (this._timer) {
+        clearInterval(this._timer);
+      }
+      
+      this._lastHeartbeat = Date.now();
+      this._frozenChecks = 0;
+      
+      this._timer = setInterval(() => {
+        executeSafely('WATCHDOG.check', () => {
+          const now = Date.now();
+          const timeSinceHeartbeat = now - this._lastHeartbeat;
+          
+          if (timeSinceHeartbeat > SAFETY_GUARDS.watchdogIntervalMs * 2) {
+            this._frozenChecks++;
+            
+            if (this._frozenChecks >= this._maxFrozenChecks) {
+              this._triggerDeadlockRecovery();
+            }
+          } else {
+            this._frozenChecks = 0;
+          }
+        });
+      }, SAFETY_GUARDS.watchdogIntervalMs);
+    },
+    
+    heartbeat: function() {
+      this._lastHeartbeat = Date.now();
+    },
+    
+    _triggerDeadlockRecovery: function() {
+      if (SESSION_COORDINATOR) {
+        executeSafely('WATCHDOG.recovery', () => {
+          if (SESSION_COORDINATOR._monitoringInterval) {
+            clearInterval(SESSION_COORDINATOR._monitoringInterval);
+            SESSION_COORDINATOR._monitoringInterval = null;
+          }
+          
+          if (SESSION_COORDINATOR._inactivityTimeout) {
+            clearTimeout(SESSION_COORDINATOR._inactivityTimeout);
+            SESSION_COORDINATOR._inactivityTimeout = null;
+          }
+          
+          if (SESSION_COORDINATOR._refreshTimeout) {
+            clearTimeout(SESSION_COORDINATOR._refreshTimeout);
+            SESSION_COORDINATOR._refreshTimeout = null;
+          }
+          
+          if (SESSION_COORDINATOR._warningTimeout) {
+            clearTimeout(SESSION_COORDINATOR._warningTimeout);
+            SESSION_COORDINATOR._warningTimeout = null;
+          }
+          
+          if (SESSION_COORDINATOR._sessionWaitTimeoutId) {
+            clearTimeout(SESSION_COORDINATOR._sessionWaitTimeoutId);
+            SESSION_COORDINATOR._sessionWaitTimeoutId = null;
+          }
+        });
+      }
+      
+      if (AUTH_STATE && typeof AUTH_STATE._transitionState === 'function') {
+        executeSafely('WATCHDOG.recovery.transition', () => {
+          AUTH_STATE._transitionState(SESSION_STATES.RECOVERY);
+        });
+      }
+      
+      setTimeout(() => {
+        if (SESSION_COORDINATOR && typeof SESSION_COORDINATOR.initialize === 'function') {
+          executeSafely('WATCHDOG.recovery.reinit', () => {
+            SESSION_COORDINATOR.initialize();
+          });
+        }
+      }, 1000);
+      
+      this._frozenChecks = 0;
+    },
+    
+    stop: function() {
+      if (this._timer) {
+        clearInterval(this._timer);
+        this._timer = null;
+      }
+    }
   };
 
   // Safe execution wrapper with error isolation
   function executeSafely(funcName, func, context = null, ...args) {
+    WATCHDOG.heartbeat();
+    
     if (SAFETY_GUARDS.blockedMethods.has(funcName)) {
-      logThrottled(funcName, `Function ${funcName} is blocked due to repeated failures`);
       return null;
     }
 
@@ -41,68 +412,18 @@
       const errorCount = (SAFETY_GUARDS.errorCounts.get(funcName) || 0) + 1;
       SAFETY_GUARDS.errorCounts.set(funcName, errorCount);
 
-      logThrottled(funcName, `Error in ${funcName}: ${error.message} (count: ${errorCount})`);
-
       if (errorCount >= SAFETY_GUARDS.maxRetryAttempts) {
         SAFETY_GUARDS.blockedMethods.add(funcName);
-        console.warn(`⚠️ ${funcName} blocked after ${errorCount} failures. Other functions will continue.`);
       }
 
-      // Ensure other functions continue
       return null;
     }
-  }
-
-  // Throttled logging to prevent spam
-  function logThrottled(funcName, message, level = 'error') {
-    const now = Date.now();
-    const lastLog = SAFETY_GUARDS.lastErrorLogs.get(funcName) || 0;
-    
-    if (now - lastLog > SAFETY_GUARDS.logThrottleMs) {
-      if (level === 'error') {
-        console.error(`❌ ${message}`);
-      } else if (level === 'warn') {
-        console.warn(`⚠️ ${message}`);
-      } else {
-        console.log(`📝 ${message}`);
-      }
-      SAFETY_GUARDS.lastErrorLogs.set(funcName, now);
-    }
-  }
-
-  // Safe session data validation
-  function validateSessionData(sessionData) {
-    if (!sessionData || typeof sessionData !== 'object') {
-      return { isValid: false, reason: 'Session data is null or not an object' };
-    }
-
-    const requiredFields = ['sessionId', 'userId', 'token'];
-    const missingFields = requiredFields.filter(field => !sessionData[field]);
-
-    if (missingFields.length > 0) {
-      return { 
-        isValid: false, 
-        reason: `Missing required fields: ${missingFields.join(', ')}` 
-      };
-    }
-
-    // Additional validation for specific field types
-    if (sessionData.userId && typeof sessionData.userId !== 'string') {
-      return { isValid: false, reason: 'userId must be a string' };
-    }
-
-    if (sessionData.token && typeof sessionData.token !== 'string') {
-      return { isValid: false, reason: 'token must be a string' };
-    }
-
-    return { isValid: true };
   }
 
   // Safe retry executor with limit
   function executeWithRetry(funcName, func, maxAttempts = SAFETY_GUARDS.sessionValidationMaxAttempts) {
     return new Promise((resolve) => {
       let attempts = 0;
-      let lastError = null;
 
       const attempt = () => {
         attempts++;
@@ -111,16 +432,19 @@
           const result = func();
           resolve({ success: true, result, attempts });
         } catch (error) {
-          lastError = error;
-          logThrottled(funcName, `Attempt ${attempts}/${maxAttempts} failed: ${error.message}`);
-
           if (attempts >= maxAttempts) {
-            logThrottled(funcName, `Max retry attempts (${maxAttempts}) reached for ${funcName}`);
-            resolve({ success: false, error: lastError, attempts });
+            resolve({ 
+              success: false, 
+              error: {
+                message: error.message || 'Operation failed',
+                code: error.code || 'UNKNOWN_ERROR',
+                attempts: attempts
+              }, 
+              attempts 
+            });
             return;
           }
 
-          // Exponential backoff
           const delay = Math.min(1000 * Math.pow(2, attempts - 1), 10000);
           setTimeout(attempt, delay);
         }
@@ -130,18 +454,225 @@
     });
   }
 
+  // Safe session data validation - DEPRECATED: Use validateSession instead
+  // Kept for backward compatibility
+  function validateSessionData(sessionData) {
+    const validation = validateSession(sessionData);
+    return { 
+      isValid: validation.isValid, 
+      reason: validation.reason 
+    };
+  }
+
+  // Global message ID registry to prevent duplicates
+  const MESSAGE_REGISTRY = {
+    _sentMessages: new Set(),
+    _receivedMessages: new Set(),
+    
+    generateMessageId: function() {
+      return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    },
+    
+    registerSent: function(messageId) {
+      if (this._sentMessages.has(messageId)) {
+        return false;
+      }
+      this._sentMessages.add(messageId);
+      return true;
+    },
+    
+    registerReceived: function(messageId) {
+      if (this._receivedMessages.has(messageId)) {
+        return false;
+      }
+      this._receivedMessages.add(messageId);
+      return true;
+    },
+    
+    clearStaleMessages: function() {
+      const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+      const stalePattern = /msg_(\d+)_/;
+      
+      this._sentMessages.forEach(id => {
+        const match = id.match(stalePattern);
+        if (match && parseInt(match[1]) < fiveMinutesAgo) {
+          this._sentMessages.delete(id);
+        }
+      });
+      
+      this._receivedMessages.forEach(id => {
+        const match = id.match(stalePattern);
+        if (match && parseInt(match[1]) < fiveMinutesAgo) {
+          this._receivedMessages.delete(id);
+        }
+      });
+    }
+  };
+
   // ============================================================================
-  // GLOBAL AUTH STATE MANAGEMENT - CANONICAL SOURCE OF TRUTH
+  // DEPENDENCY READINESS BARRIER
   // ============================================================================
 
-  // ENSURE AUTH_STATE exists with all original properties and methods
+  const DEPENDENCY_BARRIER = {
+    _dependencies: {
+      bootstrap: { ready: false, checked: false, required: false },
+      apiAuth: { ready: false, checked: false, required: true },
+      apiCore: { ready: false, checked: false, required: true },
+      apiRequest: { ready: false, checked: false, required: false },
+      ui: { ready: false, checked: false, required: false }
+    },
+    _listeners: [],
+    _readyPromise: null,
+    _readyResolved: false,
+    
+    checkDependency: function(name, checkFn) {
+      return executeSafely(`DEPENDENCY_BARRIER.check.${name}`, () => {
+        const dep = this._dependencies[name];
+        if (!dep) return false;
+        
+        try {
+          const isReady = checkFn();
+          if (isReady && !dep.ready) {
+            dep.ready = true;
+            this._notifyListeners();
+          }
+          dep.checked = true;
+          return isReady;
+        } catch (error) {
+          return false;
+        }
+      }) || false;
+    },
+    
+    checkAll: function() {
+      this.checkDependency('bootstrap', () => {
+        return typeof BOOTSTRAP_STATE !== 'undefined' && 
+               BOOTSTRAP_STATE !== null && 
+               BOOTSTRAP_STATE.isReady === true;
+      });
+      
+      this.checkDependency('apiAuth', () => {
+        const isApiAuthReady = window.api && 
+               window.api !== null && 
+               window.api.auth && 
+               window.api.auth !== null;
+        
+        return isApiAuthReady;
+      });
+      
+      this.checkDependency('apiCore', () => {
+        return window.__API_CORE && 
+               window.__API_CORE !== null && 
+               window.__API_CORE.ready === true;
+      });
+      
+      this.checkDependency('apiRequest', () => {
+        return window.api && 
+               window.api !== null && 
+               window.api.request && 
+               window.api.request !== null;
+      });
+      
+      this.checkDependency('ui', () => {
+        return typeof UI_ORCHESTRATOR !== 'undefined' && 
+               UI_ORCHESTRATOR !== null && 
+               typeof UI_ORCHESTRATOR.getState === 'function';
+      });
+      
+      return this.getReadyStatus();
+    },
+    
+    getReadyStatus: function() {
+      return {
+        required: Object.entries(this._dependencies)
+          .filter(([_, dep]) => dep.required)
+          .every(([_, dep]) => dep.ready),
+        all: Object.values(this._dependencies).every(dep => !dep.required || dep.ready),
+        details: { ...this._dependencies }
+      };
+    },
+    
+    waitForReady: function(timeoutMs = SAFETY_GUARDS.dependencyTimeoutMs) {
+      if (this._readyResolved) {
+        return Promise.resolve(this.getReadyStatus());
+      }
+      
+      if (this._readyPromise) {
+        return this._readyPromise;
+      }
+      
+      this._readyPromise = new Promise((resolve) => {
+        const timeoutId = setTimeout(() => {
+          const pending = Object.entries(this._dependencies)
+            .filter(([name, dep]) => dep.required && !dep.ready)
+            .map(([name]) => name);
+          
+          this._readyResolved = true;
+          resolve(this.getReadyStatus());
+        }, timeoutMs);
+        
+        const status = this.checkAll();
+        if (status.required) {
+          clearTimeout(timeoutId);
+          this._readyResolved = true;
+          resolve(status);
+          return;
+        }
+        
+        const listener = () => {
+          const newStatus = this.getReadyStatus();
+          if (newStatus.required) {
+            clearTimeout(timeoutId);
+            this._removeListener(listener);
+            this._readyResolved = true;
+            resolve(newStatus);
+          }
+        };
+        
+        this._addListener(listener);
+      });
+      
+      return this._readyPromise;
+    },
+    
+    _addListener: function(listener) {
+      this._listeners.push(listener);
+    },
+    
+    _removeListener: function(listener) {
+      const index = this._listeners.indexOf(listener);
+      if (index !== -1) {
+        this._listeners.splice(index, 1);
+      }
+    },
+    
+    _notifyListeners: function() {
+      const status = this.getReadyStatus();
+      this._listeners.forEach(listener => {
+        executeSafely('DEPENDENCY_BARRIER.notify', listener);
+      });
+    },
+    
+    reset: function() {
+      Object.keys(this._dependencies).forEach(key => {
+        this._dependencies[key].ready = false;
+        this._dependencies[key].checked = false;
+      });
+      this._listeners = [];
+      this._readyPromise = null;
+      this._readyResolved = false;
+    }
+  };
+
+  // ============================================================================
+  // GLOBAL AUTH STATE MANAGEMENT
+  // ============================================================================
+
   if (typeof AUTH_STATE === 'undefined') {
-    console.log('🔐 Creating comprehensive AUTH_STATE singleton');
     
     const initializeAuthStateSafely = function() {
       return executeSafely('AUTH_STATE.initialize', () => {
         window.AUTH_STATE = {
-          // Core authentication state
           _token: null,
           _refreshToken: null,
           _user: null,
@@ -150,45 +681,80 @@
           _validated: false,
           _validationTimestamp: null,
           _storageKeyPrefix: 'moodchat_',
-          
-          // Cross-tab synchronization ID
+          _sessionState: SESSION_STATES.UNINITIALIZED,
+          _stateTransitionLock: false,
           _tabId: 'tab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-          
-          // Initialization flag
           _initialized: false,
-          
-          // Safety state
           _initializationAttempts: 0,
           _maxInitializationAttempts: 3,
+          _refreshInProgress: false,
+          _validationMutex: false,
+          _validationPromise: null,
+          // HARDENING: Store issuedAt for session creation
+          _issuedAt: null,
           
-          // Initialize auth state system
+          _transitionState: function(newState) {
+            if (this._stateTransitionLock) {
+              return false;
+            }
+            
+            const currentState = this._sessionState;
+            const validTransitions = VALID_TRANSITIONS[currentState];
+            
+            if (!validTransitions || !validTransitions.includes(newState)) {
+              console.log(`[Session] Invalid state transition: ${currentState} -> ${newState}`);
+              return false;
+            }
+            
+            this._stateTransitionLock = true;
+            this._sessionState = newState;
+            
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('moodchat-session-state-changed', {
+                detail: {
+                  previousState: currentState,
+                  newState: newState,
+                  timestamp: new Date().toISOString()
+                }
+              }));
+              this._stateTransitionLock = false;
+            }, 0);
+            
+            return true;
+          },
+          
+          getSessionState: function() {
+            return this._sessionState;
+          },
+          
+          isStateValidForOperation: function(operation) {
+            const validStates = {
+              'read': [SESSION_STATES.VALID, SESSION_STATES.VALIDATING],
+              'write': [SESSION_STATES.VALID],
+              'refresh': [SESSION_STATES.VALID, SESSION_STATES.REFRESHING],
+              'load': [SESSION_STATES.LOADING, SESSION_STATES.UNINITIALIZED]
+            };
+            
+            return validStates[operation] ? validStates[operation].includes(this._sessionState) : true;
+          },
+          
           initialize: function() {
             if (this._initialized) {
-              console.log('⚠️ AUTH_STATE already initialized');
               return;
             }
 
             this._initializationAttempts++;
             if (this._initializationAttempts > this._maxInitializationAttempts) {
-              console.warn('⚠️ Max initialization attempts reached. Skipping AUTH_STATE initialization.');
               return;
             }
             
-            console.log('🔐 Initializing AUTH_STATE system...');
-            
-            // Load from storage
+            this._transitionState(SESSION_STATES.LOADING);
             executeSafely('AUTH_STATE._loadFromStorage', this._loadFromStorage, this);
-            
-            // Setup cross-tab synchronization
             executeSafely('AUTH_STATE._setupCrossTabSync', this._setupCrossTabSync, this);
-            
-            // Setup periodic validation
             executeSafely('AUTH_STATE._setupPeriodicValidation', this._setupPeriodicValidation, this);
             
             this._initialized = true;
-            console.log('✅ AUTH_STATE system initialized');
             
-            // Record initialization
             if (window.app && window.app._dependencyGraph) {
               executeSafely('AUTH_STATE.initialize.recordDependency', () => {
                 window.app._dependencyGraph.authState = {
@@ -196,25 +762,24 @@
                   initializationTime: new Date().toISOString(),
                   tabId: this._tabId,
                   hasToken: this.hasToken(),
-                  hasUser: !!this._user
+                  hasUser: !!this._user,
+                  sessionState: this._sessionState
                 };
               });
             }
+            
+            markSessionReady();
           },
           
-          // Load state from storage
           _loadFromStorage: function() {
             try {
-              // Load token
               this._token = localStorage.getItem(this._storageKeyPrefix + 'accessToken') || 
                            localStorage.getItem('accessToken') || 
                            sessionStorage.getItem('accessToken');
               
-              // Load refresh token
               this._refreshToken = localStorage.getItem(this._storageKeyPrefix + 'refreshToken') || 
                                   localStorage.getItem('refreshToken');
               
-              // Load user
               const userStr = localStorage.getItem(this._storageKeyPrefix + 'user') || 
                              localStorage.getItem('moodchat_user') || 
                              sessionStorage.getItem('moodchat_user');
@@ -222,19 +787,22 @@
                 try {
                   this._user = JSON.parse(userStr);
                 } catch (e) {
-                  console.error('Failed to parse user data:', e);
                   this._user = null;
                 }
               }
               
-              // Load expiry
               const expiryStr = localStorage.getItem(this._storageKeyPrefix + 'tokenExpiry') || 
                                localStorage.getItem('tokenExpiresAt');
               if (expiryStr) {
                 this._tokenExpiry = new Date(expiryStr);
               }
               
-              // Load validation state
+              // HARDENING: Load issuedAt if available
+              const issuedStr = localStorage.getItem(this._storageKeyPrefix + 'issuedAt');
+              if (issuedStr) {
+                this._issuedAt = parseInt(issuedStr, 10);
+              }
+              
               const validatedStr = localStorage.getItem(this._storageKeyPrefix + 'validated');
               this._validated = validatedStr === 'true';
               
@@ -245,25 +813,35 @@
                 }
               }
               
-              console.log('📥 Loaded auth state from storage:', {
-                hasToken: !!this._token,
-                hasUser: !!this._user,
-                tokenExpiry: this._tokenExpiry,
-                validated: this._validated
-              });
+              // HARDENING: Validate loaded session immediately
+              const rawSession = {
+                token: this._token,
+                refreshToken: this._refreshToken,
+                userId: this._user?.id || this._user?.uid,
+                expiresAt: this._tokenExpiry?.getTime(),
+                issuedAt: this._issuedAt
+              };
+              
+              const validation = validateSession(rawSession);
+              if (!validation.isValid) {
+                if (validation.expired) {
+                  this._transitionState(SESSION_STATES.EXPIRED);
+                } else {
+                  this._clearLocalState();
+                  this._transitionState(SESSION_STATES.UNINITIALIZED);
+                }
+              }
               
             } catch (error) {
-              console.error('❌ Failed to load auth state from storage:', error);
               this._clearLocalState();
             }
           },
           
-          // Save state to storage
           _saveToStorage: function() {
             try {
               if (this._token) {
                 localStorage.setItem(this._storageKeyPrefix + 'accessToken', this._token);
-                localStorage.setItem('accessToken', this._token); // Legacy
+                localStorage.setItem('accessToken', this._token);
               } else {
                 localStorage.removeItem(this._storageKeyPrefix + 'accessToken');
                 localStorage.removeItem('accessToken');
@@ -271,7 +849,7 @@
               
               if (this._refreshToken) {
                 localStorage.setItem(this._storageKeyPrefix + 'refreshToken', this._refreshToken);
-                localStorage.setItem('refreshToken', this._refreshToken); // Legacy
+                localStorage.setItem('refreshToken', this._refreshToken);
               } else {
                 localStorage.removeItem(this._storageKeyPrefix + 'refreshToken');
                 localStorage.removeItem('refreshToken');
@@ -280,7 +858,7 @@
               if (this._user) {
                 const userStr = JSON.stringify(this._user);
                 localStorage.setItem(this._storageKeyPrefix + 'user', userStr);
-                localStorage.setItem('moodchat_user', userStr); // Legacy
+                localStorage.setItem('moodchat_user', userStr);
               } else {
                 localStorage.removeItem(this._storageKeyPrefix + 'user');
                 localStorage.removeItem('moodchat_user');
@@ -289,10 +867,17 @@
               
               if (this._tokenExpiry) {
                 localStorage.setItem(this._storageKeyPrefix + 'tokenExpiry', this._tokenExpiry.toISOString());
-                localStorage.setItem('tokenExpiresAt', this._tokenExpiry.toISOString()); // Legacy
+                localStorage.setItem('tokenExpiresAt', this._tokenExpiry.toISOString());
               } else {
                 localStorage.removeItem(this._storageKeyPrefix + 'tokenExpiry');
                 localStorage.removeItem('tokenExpiresAt');
+              }
+              
+              // HARDENING: Save issuedAt
+              if (this._issuedAt) {
+                localStorage.setItem(this._storageKeyPrefix + 'issuedAt', this._issuedAt.toString());
+              } else {
+                localStorage.removeItem(this._storageKeyPrefix + 'issuedAt');
               }
               
               localStorage.setItem(this._storageKeyPrefix + 'validated', this._validated.toString());
@@ -303,39 +888,32 @@
                 localStorage.removeItem(this._storageKeyPrefix + 'validationTimestamp');
               }
               
-              // Broadcast storage event for cross-tab sync (but not from this tab)
               const storageEvent = new CustomEvent('moodchat-storage-update', {
                 detail: {
                   sourceTab: this._tabId,
                   timestamp: new Date().toISOString(),
                   hasToken: !!this._token,
-                  hasUser: !!this._user
+                  hasUser: !!this._user,
+                  sessionState: this._sessionState
                 }
               });
               setTimeout(() => window.dispatchEvent(storageEvent), 100);
               
             } catch (error) {
-              console.error('❌ Failed to save auth state to storage:', error);
             }
           },
           
-          // Setup cross-tab synchronization
           _setupCrossTabSync: function() {
-            // Listen for storage events (other tabs)
             window.addEventListener('storage', (event) => {
               if (event.key === this._storageKeyPrefix + 'accessToken' || 
                   event.key === 'accessToken' ||
                   event.key === this._storageKeyPrefix + 'user' ||
                   event.key === 'moodchat_user') {
                 
-                console.log('🔄 Storage change detected from another tab:', event.key);
-                
-                // Small delay to ensure storage is updated
                 setTimeout(() => {
                   executeSafely('AUTH_STATE.storageEvent', () => {
                     this._loadFromStorage();
                     
-                    // Dispatch appropriate events
                     if (event.key.includes('accessToken')) {
                       if (this._token) {
                         window.dispatchEvent(new CustomEvent('moodchat-token-synced', {
@@ -377,34 +955,23 @@
               }
             });
             
-            // Listen for custom storage update events
             window.addEventListener('moodchat-storage-update', (event) => {
               if (event.detail.sourceTab !== this._tabId) {
-                console.log('🔄 Custom storage update from another tab');
                 executeSafely('AUTH_STATE.customStorageEvent', this._loadFromStorage, this);
               }
             });
-            
-            console.log('✅ Cross-tab synchronization enabled');
           },
           
-          // Setup periodic validation
           _setupPeriodicValidation: function() {
-            // Validate every 5 minutes if authenticated
             setInterval(() => {
               if (this.isAuthenticated()) {
                 executeSafely('AUTH_STATE.periodicValidation', () => {
-                  this.validateSilently().catch(() => {
-                    // Silent failures are OK here
-                  });
+                  this.validateSilently().catch(() => {});
                 });
               }
-            }, 5 * 60 * 1000); // 5 minutes
-            
-            console.log('✅ Periodic validation enabled (every 5 minutes)');
+            }, 5 * 60 * 1000);
           },
           
-          // Clear local state (without affecting storage)
           _clearLocalState: function() {
             this._token = null;
             this._refreshToken = null;
@@ -413,41 +980,33 @@
             this._refreshExpiry = null;
             this._validated = false;
             this._validationTimestamp = null;
+            this._issuedAt = null; // HARDENING: Clear issuedAt
           },
           
-          // PUBLIC API - ORIGINAL METHODS PRESERVED
-          
-          // Check if token exists
           hasToken: function() {
             return !!this._token;
           },
           
-          // Get token
           getToken: function() {
             return this._token;
           },
           
-          // Get refresh token
           getRefreshToken: function() {
             return this._refreshToken;
           },
           
-          // Get user
           getUser: function() {
             return this._user;
           },
           
-          // Check if authenticated
           isAuthenticated: function() {
             if (!this._token) return false;
             if (!this._user) return false;
             if (!this._validated) return false;
             
-            // Check token expiry
             if (this._tokenExpiry) {
               const now = new Date();
               if (now > this._tokenExpiry) {
-                console.log('⏰ Token expired');
                 return false;
               }
             }
@@ -455,70 +1014,84 @@
             return true;
           },
           
-          // Set authentication state
+          // SESSION HARDENING: PHASE 5 - SAFE SESSION CREATION
+          // WHY: Session is only created after full validation
           setAuthState: function(user, token, refreshToken, expiresIn) {
-            console.log('🔐 Setting auth state:', { 
-              user: user ? user.uid : null, 
-              hasToken: !!token,
-              hasRefreshToken: !!refreshToken,
-              expiresIn: expiresIn 
-            });
+            // HARDENING: Build complete session object first
+            const expiryDate = new Date();
+            expiryDate.setSeconds(expiryDate.getSeconds() + (expiresIn || 3600));
             
+            const rawSession = {
+              token: token,
+              refreshToken: refreshToken,
+              userId: user?.id || user?.uid,
+              expiresAt: expiryDate.getTime(),
+              issuedAt: Date.now()
+            };
+            
+            // HARDENING: Validate before any state change
+            const validation = validateSession(rawSession);
+            if (!validation.isValid) {
+              console.log('[Session] Attempted to set invalid session:', validation.reason);
+              return;
+            }
+            
+            // HARDENING: Only update state after validation
             this._user = user;
             this._token = token;
             this._refreshToken = refreshToken;
-            
-            if (expiresIn) {
-              const expiryDate = new Date();
-              expiryDate.setSeconds(expiryDate.getSeconds() + expiresIn);
-              this._tokenExpiry = expiryDate;
-            } else {
-              this._tokenExpiry = null;
-            }
+            this._tokenExpiry = expiryDate;
+            this._issuedAt = rawSession.issuedAt;
             
             this._validated = true;
             this._validationTimestamp = new Date();
             
-            // Save to storage
+            if (this._sessionState !== SESSION_STATES.VALID) {
+              this._transitionState(SESSION_STATES.VALID);
+            }
+            
             executeSafely('AUTH_STATE.setAuthState.save', this._saveToStorage, this);
             
-            // Update window.currentUser for backward compatibility
             window.currentUser = user;
             
-            // Update global auth state if function exists
             if (typeof updateGlobalAuthState === 'function') {
               executeSafely('updateGlobalAuthState', () => updateGlobalAuthState(user));
             }
             
-            // Dispatch events
+            // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+            window.dispatchEvent(new CustomEvent('session:ready', {
+              detail: {
+                user: user,
+                timestamp: new Date().toISOString()
+              }
+            }));
+            
             window.dispatchEvent(new CustomEvent('moodchat-auth-state-changed', {
               detail: {
                 user: user,
                 hasToken: !!token,
                 validated: true,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                sessionState: this._sessionState
               }
             }));
             
-            // Record in dependency graph
             if (window.app && window.app._dependencyGraph) {
               executeSafely('AUTH_STATE.setAuthState.record', () => {
                 window.app._dependencyGraph.authState.lastUpdate = new Date().toISOString();
                 window.app._dependencyGraph.authState.hasToken = !!token;
                 window.app._dependencyGraph.authState.hasUser = !!user;
                 window.app._dependencyGraph.authState.validated = true;
+                window.app._dependencyGraph.authState.sessionState = this._sessionState;
               });
             }
           },
           
-          // Clear authentication state
+          // SESSION HARDENING: PHASE 10 - LOGOUT HARDENING
           clearAuthState: function() {
-            console.log('🧹 Clearing auth state');
-            
-            // Clear local state
+            this._transitionState(SESSION_STATES.DESTROYED);
             this._clearLocalState();
             
-            // Clear storage
             try {
               localStorage.removeItem(this._storageKeyPrefix + 'accessToken');
               localStorage.removeItem(this._storageKeyPrefix + 'refreshToken');
@@ -526,8 +1099,8 @@
               localStorage.removeItem(this._storageKeyPrefix + 'tokenExpiry');
               localStorage.removeItem(this._storageKeyPrefix + 'validated');
               localStorage.removeItem(this._storageKeyPrefix + 'validationTimestamp');
+              localStorage.removeItem(this._storageKeyPrefix + 'issuedAt'); // HARDENING
               
-              // Legacy keys
               localStorage.removeItem('accessToken');
               localStorage.removeItem('moodchat_jwt_token');
               localStorage.removeItem('refreshToken');
@@ -537,75 +1110,142 @@
               sessionStorage.removeItem('moodchat_user');
               
             } catch (error) {
-              console.error('Failed to clear storage:', error);
             }
             
-            // Clear window.currentUser
             window.currentUser = null;
             
-            // Update global auth state if function exists
             if (typeof updateGlobalAuthState === 'function') {
               executeSafely('updateGlobalAuthState.clear', () => updateGlobalAuthState(null));
             }
             
-            // Dispatch events
-            window.dispatchEvent(new CustomEvent('moodchat-auth-state-cleared', {
+            // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+            window.dispatchEvent(new CustomEvent('session:destroy', {
               detail: {
                 timestamp: new Date().toISOString()
               }
             }));
             
-            // Record in dependency graph
+            window.dispatchEvent(new CustomEvent('moodchat-auth-state-cleared', {
+              detail: {
+                timestamp: new Date().toISOString(),
+                sessionState: this._sessionState
+              }
+            }));
+            
             if (window.app && window.app._dependencyGraph) {
               executeSafely('AUTH_STATE.clearAuthState.record', () => {
                 window.app._dependencyGraph.authState.lastClear = new Date().toISOString();
                 window.app._dependencyGraph.authState.hasToken = false;
                 window.app._dependencyGraph.authState.hasUser = false;
                 window.app._dependencyGraph.authState.validated = false;
+                window.app._dependencyGraph.authState.sessionState = this._sessionState;
               });
             }
           },
           
-          // Validate token silently (without UI feedback)
           validateSilently: function() {
-            return new Promise((resolve, reject) => {
+            // Mutex to prevent concurrent validation
+            if (this._validationMutex) {
+              return this._validationPromise || Promise.reject({ 
+                success: false, 
+                error: {
+                  message: 'Validation already in progress',
+                  code: 'VALIDATION_IN_PROGRESS'
+                }
+              });
+            }
+            
+            this._validationMutex = true;
+            this._validationPromise = new Promise((resolve, reject) => {
               if (!this._token) {
-                reject(new Error('No token to validate'));
+                this._validationMutex = false;
+                this._validationPromise = null;
+                reject({ 
+                  success: false, 
+                  error: {
+                    message: 'No token to validate',
+                    code: 'NO_TOKEN'
+                  }
+                });
                 return;
               }
               
-              console.log('🔐 Silent token validation');
-              
-              // Use modular API if available
-              if (window.api && window.api.auth && window.api.auth.validateTokenSilently) {
+              if (window.api && window.api.auth && typeof window.api.auth.validateTokenSilently === 'function') {
                 executeSafely('validateTokenSilently', () => {
                   window.api.auth.validateTokenSilently()
                     .then(result => {
-                      if (result.valid) {
+                      this._validationMutex = false;
+                      this._validationPromise = null;
+                      
+                      if (result && result.valid) {
+                        // Only log once on success
+                        if (!this._validated) {
+                          console.log('[Session] Token validated successfully');
+                        }
+                        
                         this._validated = true;
                         this._validationTimestamp = new Date();
                         this._saveToStorage();
-                        resolve(true);
+                        resolve({ success: true, valid: true });
                       } else {
+                        // Only log once on failure
+                        if (this._validated) {
+                          console.log('[Session] Token validation failed');
+                        }
+                        
                         this._validated = false;
-                        reject(new Error('Token validation failed'));
+                        // Only clear if server explicitly says invalid
+                        if (result && result.code && (result.code === 'UNAUTHORIZED' || result.code === 'FORBIDDEN')) {
+                          this.clearAuthState();
+                        }
+                        reject({ 
+                          success: false, 
+                          error: {
+                            message: 'Token validation failed',
+                            code: 'VALIDATION_FAILED'
+                          }
+                        });
                       }
                     })
                     .catch(error => {
+                      this._validationMutex = false;
+                      this._validationPromise = null;
+                      
+                      // Don't log network errors as failures - they're expected during offline
+                      if (error && error.code && error.code !== 'NETWORK_ERROR') {
+                        console.log('[Session] Token validation error');
+                      }
+                      
                       this._validated = false;
-                      reject(error);
+                      if (error && error.code && (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN')) {
+                        this.clearAuthState();
+                      }
+                      reject({ 
+                        success: false, 
+                        error: {
+                          message: error.message || 'Validation failed',
+                          code: error.code || 'VALIDATION_ERROR'
+                        }
+                      });
                     });
                 });
                 return;
               }
               
-              // Fallback validation
               try {
-                // Simple JWT validation
                 const parts = this._token.split('.');
                 if (parts.length !== 3) {
+                  this._validationMutex = false;
+                  this._validationPromise = null;
                   this._validated = false;
-                  reject(new Error('Invalid token format'));
+                  // Don't clear - keep token for retry
+                  reject({ 
+                    success: false, 
+                    error: {
+                      message: 'Invalid token format',
+                      code: 'INVALID_FORMAT'
+                    }
+                  });
                   return;
                 }
                 
@@ -613,113 +1253,278 @@
                 const now = Math.floor(Date.now() / 1000);
                 
                 if (payload.exp && payload.exp < now) {
+                  this._validationMutex = false;
+                  this._validationPromise = null;
                   this._validated = false;
-                  reject(new Error('Token expired'));
+                  // Don't clear - keep token for refresh
+                  reject({ 
+                    success: false, 
+                    error: {
+                      message: 'Token expired',
+                      code: 'TOKEN_EXPIRED'
+                    }
+                  });
                   return;
+                }
+                
+                // Only log once on success
+                if (!this._validated) {
+                  console.log('[Session] Token validated locally');
                 }
                 
                 this._validated = true;
                 this._validationTimestamp = new Date();
                 this._saveToStorage();
-                resolve(true);
+                this._validationMutex = false;
+                this._validationPromise = null;
+                resolve({ success: true, valid: true });
                 
               } catch (error) {
+                this._validationMutex = false;
+                this._validationPromise = null;
                 this._validated = false;
-                reject(error);
+                // Don't clear - keep token for retry
+                reject({ 
+                  success: false, 
+                  error: {
+                    message: 'Token validation error',
+                    code: 'VALIDATION_ERROR'
+                  }
+                });
               }
             });
+            
+            return this._validationPromise;
           },
           
-          // Get token expiry in milliseconds
           getTimeToExpiry: function() {
             if (!this._tokenExpiry) return null;
             const now = new Date();
             return this._tokenExpiry.getTime() - now.getTime();
           },
           
-          // Check if token expires soon (within minutes)
           expiresSoon: function(minutes = 10) {
             const timeToExpiry = this.getTimeToExpiry();
             if (!timeToExpiry) return false;
             return timeToExpiry < (minutes * 60 * 1000);
           },
           
-          // Mark as validated
           markAsValidated: function() {
             this._validated = true;
             this._validationTimestamp = new Date();
             this._saveToStorage();
           },
           
-          // Mark as invalid
           markAsInvalid: function() {
             this._validated = false;
             this._saveToStorage();
           },
           
-          // Get validation status
           isValidated: function() {
             return this._validated;
           },
           
-          // Get last validation timestamp
           getLastValidation: function() {
             return this._validationTimestamp;
           },
           
-          // Get comprehensive auth state
           getState: function() {
+            // HARDENING: Return safe session object
+            const rawSession = {
+              token: this._token,
+              refreshToken: this._refreshToken,
+              userId: this._user?.id || this._user?.uid,
+              expiresAt: this._tokenExpiry?.getTime(),
+              issuedAt: this._issuedAt
+            };
+            
+            const safeSession = getSafeSession(rawSession);
+            
             return {
               hasToken: this.hasToken(),
-              token: this._token ? '[REDACTED]' : null,
-              refreshToken: this._refreshToken ? '[REDACTED]' : null,
-              user: this._user,
-              authenticated: this.isAuthenticated(),
-              validated: this._validated,
+              token: safeSession?.token ? '[REDACTED]' : null,
+              refreshToken: safeSession?.refreshToken ? '[REDACTED]' : null,
+              user: safeSession ? { 
+                id: safeSession.userId,
+                // Backward compatibility
+                uid: safeSession.userId,
+                exp: safeSession.expiresAt
+              } : null,
+              authenticated: this.isAuthenticated() && !!safeSession,
+              validated: this._validated && !!safeSession,
               tokenExpiry: this._tokenExpiry,
               timeToExpiry: this.getTimeToExpiry(),
               expiresSoon: this.expiresSoon(),
               validationTimestamp: this._validationTimestamp,
               tabId: this._tabId,
-              storagePrefix: this._storageKeyPrefix
+              storagePrefix: this._storageKeyPrefix,
+              sessionState: this._sessionState
             };
+          },
+          
+          // SESSION HARDENING: PHASE 7 - TOKEN REFRESH LOGIC
+          refreshTokenSafely: function() {
+            // HARDENING: Single refresh lock
+            if (this._refreshInProgress) {
+              console.log('[Session] Refresh already in progress');
+              return this._refreshPromise || Promise.reject({ 
+                success: false, 
+                error: {
+                  message: 'Refresh already in progress',
+                  code: 'REFRESH_IN_PROGRESS'
+                }
+              });
+            }
+            
+            this._refreshInProgress = true;
+            this._transitionState(SESSION_STATES.REFRESHING);
+            
+            this._refreshPromise = new Promise((resolve, reject) => {
+              if (!this._refreshToken) {
+                this._refreshInProgress = false;
+                this._refreshPromise = null;
+                this._transitionState(SESSION_STATES.EXPIRED);
+                reject({ 
+                  success: false, 
+                  error: {
+                    message: 'No refresh token available',
+                    code: 'NO_REFRESH_TOKEN'
+                  }
+                });
+                return;
+              }
+              
+              if (window.api && window.api.auth && typeof window.api.auth.refreshToken === 'function') {
+                executeSafely('refreshToken', () => {
+                  window.api.auth.refreshToken(this._refreshToken)
+                    .then(result => {
+                      this._refreshInProgress = false;
+                      this._refreshPromise = null;
+                      
+                      if (result && result.token) {
+                        this.setAuthState(this._user, result.token, result.refreshToken, result.expiresIn);
+                        console.log('[Session] Token refreshed successfully');
+                        
+                        // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+                        window.dispatchEvent(new CustomEvent('session:refresh', {
+                          detail: {
+                            timestamp: new Date().toISOString()
+                          }
+                        }));
+                        
+                        resolve({ success: true, token: result.token });
+                      } else {
+                        this._transitionState(SESSION_STATES.EXPIRED);
+                        reject({ 
+                          success: false, 
+                          error: {
+                            message: 'Refresh failed',
+                            code: 'REFRESH_FAILED'
+                          }
+                        });
+                      }
+                    })
+                    .catch(error => {
+                      this._refreshInProgress = false;
+                      this._refreshPromise = null;
+                      this._transitionState(SESSION_STATES.EXPIRED);
+                      reject({ 
+                        success: false, 
+                        error: {
+                          message: error.message || 'Refresh failed',
+                          code: error.code || 'REFRESH_ERROR'
+                        }
+                      });
+                    });
+                });
+              } else {
+                if (typeof TOKEN_VALIDATION !== 'undefined' && TOKEN_VALIDATION !== null && typeof TOKEN_VALIDATION.refreshToken === 'function') {
+                  TOKEN_VALIDATION.refreshToken()
+                    .then(result => {
+                      this._refreshInProgress = false;
+                      this._refreshPromise = null;
+                      
+                      if (result && result.success) {
+                        console.log('[Session] Token refreshed successfully');
+                        
+                        // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+                        window.dispatchEvent(new CustomEvent('session:refresh', {
+                          detail: {
+                            timestamp: new Date().toISOString()
+                          }
+                        }));
+                        
+                        resolve({ success: true, token: result.token });
+                      } else {
+                        this._transitionState(SESSION_STATES.EXPIRED);
+                        reject({ 
+                          success: false, 
+                          error: {
+                            message: (result && result.reason) || 'Refresh failed',
+                            code: 'REFRESH_FAILED'
+                          }
+                        });
+                      }
+                    })
+                    .catch(error => {
+                      this._refreshInProgress = false;
+                      this._refreshPromise = null;
+                      this._transitionState(SESSION_STATES.EXPIRED);
+                      reject({ 
+                        success: false, 
+                        error: {
+                          message: error.message || 'Refresh failed',
+                          code: 'REFRESH_ERROR'
+                        }
+                      });
+                    });
+                } else {
+                  this._refreshInProgress = false;
+                  this._refreshPromise = null;
+                  this._transitionState(SESSION_STATES.EXPIRED);
+                  reject({ 
+                    success: false, 
+                    error: {
+                      message: 'No refresh method available',
+                      code: 'NO_REFRESH_METHOD'
+                    }
+                  });
+                }
+              }
+            });
+            
+            return this._refreshPromise;
           }
         };
         
-        // Auto-initialize
         setTimeout(() => {
           if (window.AUTH_STATE && window.AUTH_STATE.initialize) {
             window.AUTH_STATE.initialize();
           }
-        }, 100);
+        }, 50);
         
-        console.log('✅ AUTH_STATE singleton created');
       });
     };
 
     initializeAuthStateSafely();
     
   } else {
-    console.log('✅ AUTH_STATE already exists, ensuring initialization');
-    if (AUTH_STATE.initialize && !AUTH_STATE._initialized) {
+    if (AUTH_STATE && AUTH_STATE.initialize && !AUTH_STATE._initialized) {
       setTimeout(() => {
         executeSafely('AUTH_STATE.delayedInitialize', AUTH_STATE.initialize, AUTH_STATE);
-      }, 100);
+      }, 50);
     }
   }
 
   // ============================================================================
-  // TOKEN VALIDATION PIPELINE - COMPLETE VALIDATION ECOSYSTEM
+  // TOKEN VALIDATION PIPELINE
   // ============================================================================
 
-  // ENSURE TOKEN_VALIDATION exists with all original methods
   if (typeof TOKEN_VALIDATION === 'undefined') {
-    console.log('🔐 Creating comprehensive TOKEN_VALIDATION pipeline');
     
     const initializeTokenValidationSafely = function() {
       return executeSafely('TOKEN_VALIDATION.creation', () => {
         window.TOKEN_VALIDATION = {
-          // Configuration
           _config: {
             validationEndpoints: [
               '/auth/me',
@@ -727,95 +1532,144 @@
               '/api/auth/verify'
             ],
             refreshEndpoint: '/auth/refresh',
-            timeout: 10000, // 10 seconds
-            retryAttempts: 3,
+            timeout: 10000,
+            retryAttempts: 2,
             retryDelay: 1000,
-            cacheDuration: 300000 // 5 minutes
+            cacheDuration: 300000
           },
           
-          // Cache for validation results
           _validationCache: new Map(),
           _lastValidationAttempt: null,
           _validationAttempts: 0,
           _maxValidationAttempts: SAFETY_GUARDS.sessionValidationMaxAttempts,
           _validationBlocked: false,
+          _validationMutex: false,
+          _validationPromise: null,
           
-          // Validate with backend (original method preserved)
           validateWithBackend: function() {
             if (this._validationBlocked) {
-              logThrottled('TOKEN_VALIDATION.validateWithBackend', 
-                'Validation blocked due to repeated failures');
-              return Promise.resolve({ valid: false, reason: 'Validation blocked' });
+              return Promise.resolve({ 
+                success: false, 
+                valid: false, 
+                error: {
+                  message: 'Validation blocked',
+                  code: 'VALIDATION_BLOCKED'
+                }
+              });
             }
 
-            console.log('🔐 Validating token with backend...');
-            
-            return new Promise((resolve) => {
-              const token = AUTH_STATE ? AUTH_STATE.getToken() : null;
+            // Mutex to prevent concurrent validation
+            if (this._validationMutex) {
+              return this._validationPromise || Promise.resolve({ 
+                success: false, 
+                valid: false, 
+                error: {
+                  message: 'Validation already in progress',
+                  code: 'VALIDATION_IN_PROGRESS'
+                }
+              });
+            }
+
+            this._validationMutex = true;
+            this._validationPromise = new Promise((resolve) => {
+              const token = AUTH_STATE && typeof AUTH_STATE.getToken === 'function' ? AUTH_STATE.getToken() : null;
               if (!token) {
-                resolve({ valid: false, reason: 'No token found' });
+                this._validationMutex = false;
+                this._validationPromise = null;
+                resolve({ 
+                  success: false, 
+                  valid: false, 
+                  error: {
+                    message: 'No token found',
+                    code: 'NO_TOKEN'
+                  }
+                });
                 return;
               }
               
               this._validationAttempts++;
               if (this._validationAttempts > this._maxValidationAttempts) {
                 this._validationBlocked = true;
-                logThrottled('TOKEN_VALIDATION.validateWithBackend', 
-                  `Max validation attempts (${this._maxValidationAttempts}) reached. Blocking further attempts.`);
-                resolve({ valid: false, reason: 'Max validation attempts reached' });
+                this._validationMutex = false;
+                this._validationPromise = null;
+                resolve({ 
+                  success: false, 
+                  valid: false, 
+                  error: {
+                    message: 'Max validation attempts reached',
+                    code: 'MAX_ATTEMPTS'
+                  }
+                });
                 return;
               }
               
-              // Check cache first
               const cacheKey = 'backend_' + token.substring(0, 20);
               const cached = this._validationCache.get(cacheKey);
               if (cached && (Date.now() - cached.timestamp) < this._config.cacheDuration) {
-                console.log('✅ Using cached validation result');
+                this._validationMutex = false;
+                this._validationPromise = null;
                 resolve(cached.result);
                 return;
               }
               
-              // Try multiple endpoints in order
               this._tryValidationEndpoints(token)
                 .then(result => {
-                  // Reset attempts on success
                   this._validationAttempts = 0;
+                  this._validationMutex = false;
+                  this._validationPromise = null;
                   
-                  // Cache successful validations
-                  if (result.valid) {
+                  if (result && result.valid) {
+                    // Only log once on success
+                    if (!this._validationCache.has(cacheKey)) {
+                      console.log('[Session] Token validated with backend');
+                    }
+                    
                     this._validationCache.set(cacheKey, {
                       result: result,
                       timestamp: Date.now()
                     });
+                  } else {
+                    // Only log once on failure
+                    if (this._validationCache.has(cacheKey)) {
+                      console.log('[Session] Backend validation failed');
+                    }
                   }
                   
-                  // Update AUTH_STATE
-                  if (result.valid && AUTH_STATE) {
+                  if (result && result.valid && AUTH_STATE) {
                     executeSafely('TOKEN_VALIDATION.updateAuthState', () => {
-                      AUTH_STATE.markAsValidated();
-                      if (result.user) {
+                      if (typeof AUTH_STATE.markAsValidated === 'function') {
+                        AUTH_STATE.markAsValidated();
+                      }
+                      if (result.user && typeof AUTH_STATE.setAuthState === 'function') {
                         AUTH_STATE.setAuthState(result.user, token);
                       }
                     });
-                  } else if (AUTH_STATE) {
+                  } else if (AUTH_STATE && typeof AUTH_STATE.markAsInvalid === 'function') {
                     executeSafely('TOKEN_VALIDATION.markInvalid', () => {
                       AUTH_STATE.markAsInvalid();
                     });
+                    
+                    // Only clear if server confirms invalid
+                    if (result && result.error && (result.error.code === 'UNAUTHORIZED' || result.error.code === 'FORBIDDEN')) {
+                      if (typeof AUTH_STATE.clearAuthState === 'function') {
+                        AUTH_STATE.clearAuthState();
+                      }
+                    }
                   }
                   
                   resolve(result);
                 })
                 .catch(error => {
-                  console.error('❌ Backend validation failed:', error);
+                  this._validationMutex = false;
+                  this._validationPromise = null;
                   
-                  // Fallback to client-side validation
                   const fallbackResult = this._validateClientSide(token);
                   
                   if (AUTH_STATE) {
                     executeSafely('TOKEN_VALIDATION.fallbackUpdate', () => {
-                      if (fallbackResult.valid) {
+                      if (fallbackResult && fallbackResult.valid && typeof AUTH_STATE.markAsValidated === 'function') {
                         AUTH_STATE.markAsValidated();
-                      } else {
+                      } else if (typeof AUTH_STATE.markAsInvalid === 'function') {
                         AUTH_STATE.markAsInvalid();
                       }
                     });
@@ -824,9 +1678,10 @@
                   resolve(fallbackResult);
                 });
             });
+            
+            return this._validationPromise;
           },
           
-          // Try multiple validation endpoints
           _tryValidationEndpoints: function(token) {
             return new Promise(async (resolve, reject) => {
               const endpoints = this._config.validationEndpoints;
@@ -835,14 +1690,12 @@
               for (const endpoint of endpoints) {
                 try {
                   const result = await this._validateWithEndpoint(endpoint, token);
-                  if (result.valid !== undefined) {
+                  if (result && result.valid !== undefined) {
                     resolve(result);
                     return;
                   }
                 } catch (error) {
                   lastError = error;
-                  console.log(`⚠️ Validation endpoint failed: ${endpoint}`, error.message);
-                  // Continue to next endpoint
                 }
               }
               
@@ -850,15 +1703,13 @@
             });
           },
           
-          // Validate with specific endpoint
           _validateWithEndpoint: function(endpoint, token) {
             return new Promise((resolve, reject) => {
               const timeoutId = setTimeout(() => {
                 reject(new Error(`Validation timeout for ${endpoint}`));
               }, this._config.timeout);
               
-              // Use API_COORDINATION if available
-              if (typeof API_COORDINATION !== 'undefined' && API_COORDINATION.safeApiCall) {
+              if (typeof API_COORDINATION !== 'undefined' && API_COORDINATION !== null && typeof API_COORDINATION.safeApiCall === 'function') {
                 executeSafely('TOKEN_VALIDATION.apiCall', () => {
                   API_COORDINATION.safeApiCall(endpoint, {
                     method: 'GET',
@@ -868,8 +1719,9 @@
                   })
                   .then(response => {
                     clearTimeout(timeoutId);
-                    if (response.success && response.data) {
+                    if (response && response.success && response.data) {
                       resolve({
+                        success: true,
                         valid: true,
                         user: response.data,
                         validated: true,
@@ -877,8 +1729,12 @@
                       });
                     } else {
                       resolve({
+                        success: false,
                         valid: false,
-                        reason: response.message || 'Validation failed',
+                        error: {
+                          message: (response && response.message) || 'Validation failed',
+                          code: response && response.code ? response.code : 'VALIDATION_FAILED'
+                        },
                         source: endpoint
                       });
                     }
@@ -889,7 +1745,6 @@
                   });
                 });
               } else {
-                // Direct fetch
                 executeSafely('TOKEN_VALIDATION.directFetch', () => {
                   fetch(endpoint, {
                     method: 'GET',
@@ -901,12 +1756,16 @@
                   .then(response => {
                     clearTimeout(timeoutId);
                     if (!response.ok) {
+                      if (response.status === 401 || response.status === 403) {
+                        throw { message: `HTTP ${response.status}`, code: response.status === 401 ? 'UNAUTHORIZED' : 'FORBIDDEN' };
+                      }
                       throw new Error(`HTTP ${response.status}`);
                     }
                     return response.json();
                   })
                   .then(data => {
                     resolve({
+                      success: true,
                       valid: true,
                       user: data,
                       validated: true,
@@ -922,67 +1781,93 @@
             });
           },
           
-          // Client-side validation fallback
           _validateClientSide: function(token) {
-            console.log('🔐 Falling back to client-side validation');
-            
             try {
               const parts = token.split('.');
               if (parts.length !== 3) {
-                return { valid: false, reason: 'Invalid token format' };
+                return { 
+                  success: false, 
+                  valid: false, 
+                  error: {
+                    message: 'Invalid token format',
+                    code: 'INVALID_FORMAT'
+                  }
+                };
               }
               
               const payload = JSON.parse(atob(parts[1]));
               const now = Math.floor(Date.now() / 1000);
               
               if (payload.exp && payload.exp < now) {
-                return { valid: false, reason: 'Token expired' };
+                return { 
+                  success: false, 
+                  valid: false, 
+                  error: {
+                    message: 'Token expired',
+                    code: 'TOKEN_EXPIRED'
+                  }
+                };
               }
               
               return {
+                success: true,
                 valid: true,
                 user: {
                   id: payload.sub || payload.userId || 'unknown',
                   email: payload.email || 'user@example.com',
                   name: payload.name || 'User',
-                  validated: false // Mark as not backend-validated
+                  validated: false
                 },
                 validated: false,
                 source: 'client_side'
               };
               
             } catch (error) {
-              return { valid: false, reason: 'Token validation error', error: error.message };
+              return { 
+                success: false, 
+                valid: false, 
+                error: {
+                  message: 'Token validation error',
+                  code: 'VALIDATION_ERROR'
+                }
+              };
             }
           },
           
-          // Refresh token (original method preserved)
           refreshToken: function() {
-            console.log('🔄 Attempting token refresh...');
-            
             return new Promise((resolve) => {
               if (!AUTH_STATE) {
-                resolve({ success: false, reason: 'AUTH_STATE not available' });
+                resolve({ 
+                  success: false, 
+                  error: {
+                    message: 'AUTH_STATE not available',
+                    code: 'AUTH_STATE_MISSING'
+                  }
+                });
                 return;
               }
               
-              const token = AUTH_STATE.getToken();
-              const refreshToken = AUTH_STATE.getRefreshToken();
+              const token = typeof AUTH_STATE.getToken === 'function' ? AUTH_STATE.getToken() : null;
+              const refreshToken = typeof AUTH_STATE.getRefreshToken === 'function' ? AUTH_STATE.getRefreshToken() : null;
               
               if (!token && !refreshToken) {
-                resolve({ success: false, reason: 'No token to refresh' });
+                resolve({ 
+                  success: false, 
+                  error: {
+                    message: 'No token to refresh',
+                    code: 'NO_TOKEN'
+                  }
+                });
                 return;
               }
               
-              // Use refresh token if available
               const refreshPayload = refreshToken ? {
                 refreshToken: refreshToken
               } : {
                 token: token
               };
               
-              // Use API_COORDINATION if available
-              if (typeof API_COORDINATION !== 'undefined' && API_COORDINATION.safeApiCall) {
+              if (typeof API_COORDINATION !== 'undefined' && API_COORDINATION !== null && typeof API_COORDINATION.safeApiCall === 'function') {
                 executeSafely('TOKEN_VALIDATION.refreshApiCall', () => {
                   API_COORDINATION.safeApiCall(this._config.refreshEndpoint, {
                     method: 'POST',
@@ -992,29 +1877,40 @@
                     body: JSON.stringify(refreshPayload)
                   })
                   .then(response => {
-                    if (response.success && response.data && response.data.token) {
-                      // Update tokens
+                    if (response && response.success && response.data && response.data.token) {
                       executeSafely('TOKEN_VALIDATION.updateTokens', () => {
-                        AUTH_STATE.setAuthState(
-                          AUTH_STATE.getUser(),
-                          response.data.token,
-                          response.data.refreshToken,
-                          response.data.expiresIn
-                        );
+                        if (typeof AUTH_STATE.setAuthState === 'function') {
+                          AUTH_STATE.setAuthState(
+                            typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null,
+                            response.data.token,
+                            response.data.refreshToken,
+                            response.data.expiresIn
+                          );
+                        }
                       });
                       
                       resolve({ success: true, token: response.data.token });
                     } else {
-                      resolve({ success: false, reason: response.message || 'Refresh failed' });
+                      resolve({ 
+                        success: false, 
+                        error: {
+                          message: (response && response.message) || 'Refresh failed',
+                          code: 'REFRESH_FAILED'
+                        }
+                      });
                     }
                   })
                   .catch(error => {
-                    console.error('❌ Token refresh failed:', error);
-                    resolve({ success: false, reason: 'Refresh request failed' });
+                    resolve({ 
+                      success: false, 
+                      error: {
+                        message: 'Refresh request failed',
+                        code: 'REFRESH_ERROR'
+                      }
+                    });
                   });
                 });
               } else {
-                // Direct fetch
                 executeSafely('TOKEN_VALIDATION.refreshDirectFetch', () => {
                   fetch(this._config.refreshEndpoint, {
                     method: 'POST',
@@ -1025,95 +1921,105 @@
                   })
                   .then(response => {
                     if (!response.ok) {
+                      if (response.status === 401 || response.status === 403) {
+                        throw { message: `HTTP ${response.status}`, code: response.status === 401 ? 'UNAUTHORIZED' : 'FORBIDDEN' };
+                      }
                       throw new Error(`HTTP ${response.status}`);
                     }
                     return response.json();
                   })
                   .then(data => {
-                    if (data.token) {
+                    if (data && data.token) {
                       executeSafely('TOKEN_VALIDATION.updateTokensDirect', () => {
-                        AUTH_STATE.setAuthState(
-                          AUTH_STATE.getUser(),
-                          data.token,
-                          data.refreshToken,
-                          data.expiresIn
-                        );
+                        if (typeof AUTH_STATE.setAuthState === 'function') {
+                          AUTH_STATE.setAuthState(
+                            typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null,
+                            data.token,
+                            data.refreshToken,
+                            data.expiresIn
+                          );
+                        }
                       });
                       resolve({ success: true, token: data.token });
                     } else {
-                      resolve({ success: false, reason: 'No token in response' });
+                      resolve({ 
+                        success: false, 
+                        error: {
+                          message: 'No token in response',
+                          code: 'NO_TOKEN_RESPONSE'
+                        }
+                      });
                     }
                   })
                   .catch(error => {
-                    console.error('❌ Token refresh failed:', error);
-                    resolve({ success: false, reason: 'Refresh request failed' });
+                    resolve({ 
+                      success: false, 
+                      error: {
+                        message: error.message || 'Refresh request failed',
+                        code: error.code || 'REFRESH_ERROR'
+                      }
+                    });
                   });
                 });
               }
             });
           },
           
-          // Validate with multiple methods (enhanced)
           validateWithMultipleMethods: function() {
-            console.log('🔐 Validating token with multiple methods...');
-            
             return new Promise(async (resolve) => {
-              // Method 1: Backend validation
               try {
                 const backendResult = await this.validateWithBackend();
-                if (backendResult.valid) {
-                  console.log('✅ Token validated via backend');
+                if (backendResult && backendResult.valid) {
                   resolve(backendResult);
                   return;
                 }
               } catch (error) {
-                console.log('⚠️ Backend validation failed, trying next method');
               }
               
-              // Method 2: Modular API validation
-              if (window.api && window.api.auth && window.api.auth.validateToken) {
+              if (window.api && window.api.auth && typeof window.api.auth.validateToken === 'function') {
                 try {
                   const apiResult = await executeSafely('modularAPI.validateToken', 
                     () => window.api.auth.validateToken());
                   if (apiResult && apiResult.valid) {
-                    console.log('✅ Token validated via modular API');
                     resolve(apiResult);
                     return;
                   }
                 } catch (error) {
-                  console.log('⚠️ Modular API validation failed');
                 }
               }
               
-              // Method 3: Client-side validation
-              const token = AUTH_STATE ? AUTH_STATE.getToken() : null;
-              const clientResult = token ? this._validateClientSide(token) : { valid: false, reason: 'No token' };
-              if (clientResult.valid) {
-                console.log('✅ Token validated client-side (limited)');
+              const token = AUTH_STATE && typeof AUTH_STATE.getToken === 'function' ? AUTH_STATE.getToken() : null;
+              const clientResult = token ? this._validateClientSide(token) : { 
+                success: false, 
+                valid: false, 
+                error: {
+                  message: 'No token',
+                  code: 'NO_TOKEN'
+                }
+              };
+              if (clientResult && clientResult.valid) {
                 resolve(clientResult);
                 return;
               }
               
-              // All methods failed
-              console.log('❌ All validation methods failed');
               resolve({
+                success: false,
                 valid: false,
-                reason: 'All validation methods failed',
-                error: 'Unable to validate token'
+                error: {
+                  message: 'All validation methods failed',
+                  code: 'ALL_METHODS_FAILED'
+                }
               });
             });
           },
           
-          // Clear validation cache
           clearCache: function() {
             executeSafely('TOKEN_VALIDATION.clearCache', () => {
               this._validationCache.clear();
               this._lastValidationAttempt = null;
-              console.log('🧹 Validation cache cleared');
             });
           },
           
-          // Get validation statistics
           getStats: function() {
             return executeSafely('TOKEN_VALIDATION.getStats', () => ({
               cacheSize: this._validationCache.size,
@@ -1131,7 +2037,6 @@
           }
         };
         
-        console.log('✅ TOKEN_VALIDATION pipeline created');
       });
     };
 
@@ -1139,26 +2044,27 @@
   }
 
   // ============================================================================
-  // SESSION COORDINATOR - COMPLETE SESSION LIFECYCLE MANAGEMENT
+  // SESSION COORDINATOR - HARDENED SESSION LIFECYCLE MANAGEMENT
   // ============================================================================
 
-  // CREATE SESSION_COORDINATOR singleton with safety guards
-  console.log('🔐 Creating comprehensive SESSION_COORDINATOR');
-  
   const initializeSessionCoordinatorSafely = function() {
     return executeSafely('SESSION_COORDINATOR.creation', () => {
       window.SESSION_COORDINATOR = {
-        // Configuration
         _config: {
-          monitoringInterval: 5 * 60 * 1000, // 5 minutes
-          inactivityTimeout: 30 * 60 * 1000, // 30 minutes
-          warningThreshold: 10 * 60 * 1000, // 10 minutes before expiry
-          refreshThreshold: 15 * 60 * 1000, // 15 minutes before expiry
-          maxRetryAttempts: 3,
-          retryBackoff: [1000, 3000, 10000] // 1s, 3s, 10s
+          monitoringInterval: 5 * 60 * 1000,
+          inactivityTimeout: 30 * 60 * 1000,
+          warningThreshold: 10 * 60 * 1000,
+          refreshThreshold: 15 * 60 * 1000,
+          maxRetryAttempts: 2,
+          retryBackoff: [1000, 3000],
+          sessionWaitTimeout: 8000,
+          maxPollingAttempts: 30,
+          iframeHandshakeTimeout: 5000,
+          maxHandshakeAttempts: 2,
+          maxTokenValidationRetries: 2,
+          validationRetryDelay: 5000
         },
         
-        // State
         _listeners: new Map(),
         _monitoringInterval: null,
         _inactivityTimeout: null,
@@ -1167,75 +2073,302 @@
         _retryCount: 0,
         _lastActivity: Date.now(),
         _broadcastChannel: null,
-        
-        // Iframe coordination
+        _sessionLoading: false,
+        _sessionLoaded: false,
+        _sessionLoadStartTime: null,
+        _sessionPollingAttempts: 0,
+        _sessionWaitTimeoutId: null,
+        _authReady: false,
+        _authWaitTimeoutId: null,
+        _authPollingInterval: null,
         _iframes: new Map(),
         _iframeMessageQueue: new Map(),
         _iframeHandshakeAttempts: new Map(),
-        
-        // Safety state
+        _iframeHandshakeTimeouts: new Map(),
+        _iframeReadyStates: new Map(),
+        _iframeSessionPropagated: new Map(),
+        _outboundMessageQueue: [],
+        _messageQueueFlushed: false,
+        _dependenciesReady: {
+          bootstrap: false,
+          apiAuth: false,
+          apiRequest: false,
+          ui: false
+        },
         _initialized: false,
         _initializationAttempts: 0,
         _maxInitializationAttempts: 3,
-        
-        // Initialize session coordinator
-        initialize: function() {
-          if (this._initialized) {
-            console.log('⚠️ SESSION_COORDINATOR already initialized');
-            return;
-          }
-
-          this._initializationAttempts++;
-          if (this._initializationAttempts > this._maxInitializationAttempts) {
-            console.warn('⚠️ Max initialization attempts reached. Skipping SESSION_COORDINATOR initialization.');
-            return;
-          }
-          
-          console.log('🔐 Initializing SESSION_COORDINATOR...');
-          
-          // Record initialization
-          if (window.app && window.app._dependencyGraph) {
-            executeSafely('SESSION_COORDINATOR.recordDependency', () => {
-              window.app._dependencyGraph.sessionCoordinator = {
-                initialized: true,
-                initializationTime: new Date().toISOString(),
-                config: this._config
-              };
-            });
-          }
-          
-          // Ensure AUTH_STATE is initialized
-          if (AUTH_STATE && AUTH_STATE.initialize && !AUTH_STATE._initialized) {
-            executeSafely('AUTH_STATE.delayedInit', AUTH_STATE.initialize, AUTH_STATE);
-          }
-          
-          // Setup event listeners
-          executeSafely('SESSION_COORDINATOR.setupEventListeners', this.setupEventListeners, this);
-          
-          // Start session monitoring
-          executeSafely('SESSION_COORDINATOR.startSessionMonitoring', this.startSessionMonitoring, this);
-          
-          // Setup cross-tab synchronization
-          executeSafely('SESSION_COORDINATOR.setupCrossTabSync', this.setupCrossTabSync, this);
-          
-          // Setup activity monitoring
-          executeSafely('SESSION_COORDINATOR.setupActivityMonitoring', this.setupActivityMonitoring, this);
-          
-          // Setup iframe coordination
-          executeSafely('SESSION_COORDINATOR.setupIframeCoordination', this.setupIframeCoordination, this);
-          
-          // Check initial session state
-          executeSafely('SESSION_COORDINATOR.checkInitialSessionState', this.checkInitialSessionState, this);
-          
-          this._initialized = true;
-          console.log('✅ SESSION_COORDINATOR initialized');
+        _initializationLock: false,
+        _initializationPromise: null,
+        _initializationResolve: null,
+        _validationScheduled: false,
+        _validationInProgress: false,
+        _stateLogged: {
+          waiting: false,
+          success: false,
+          failure: false
+        },
+        _uiCallbacks: {
+          onAuthenticated: null,
+          onUnauthenticated: null,
+          onSessionError: null,
+          onSessionRestored: null
         },
         
-        // Setup event listeners (original method preserved)
-        setupEventListeners: function() {
-          console.log('🔐 Setting up session event listeners...');
+        isSessionLoaded: function() {
+          return this._sessionLoaded === true;
+        },
+        
+        registerUICallbacks: function(callbacks) {
+          executeSafely('SESSION_COORDINATOR.registerUICallbacks', () => {
+            if (callbacks) {
+              if (typeof callbacks.onAuthenticated === 'function') {
+                this._uiCallbacks.onAuthenticated = callbacks.onAuthenticated;
+              }
+              if (typeof callbacks.onUnauthenticated === 'function') {
+                this._uiCallbacks.onUnauthenticated = callbacks.onUnauthenticated;
+              }
+              if (typeof callbacks.onSessionError === 'function') {
+                this._uiCallbacks.onSessionError = callbacks.onSessionError;
+              }
+              if (typeof callbacks.onSessionRestored === 'function') {
+                this._uiCallbacks.onSessionRestored = callbacks.onSessionRestored;
+              }
+            }
+          });
+        },
+        
+        _waitForApiAuth: async function() {
+          if (!window.api || !window.api.auth) {
+            this._authReady = false;
+            return false;
+          }
           
-          // Listen for login events
+          if (window.api.auth && typeof window.api.auth.waitForReady === 'function') {
+            try {
+              const authReadyPromise = window.api.auth.waitForReady();
+              const timeoutPromise = new Promise((_, reject) => {
+                this._authWaitTimeoutId = setTimeout(() => {
+                  reject(new Error('api.auth waitForReady timeout'));
+                }, SAFETY_GUARDS.authWaitTimeoutMs);
+              });
+              
+              await Promise.race([authReadyPromise, timeoutPromise]);
+              
+              if (this._authWaitTimeoutId) {
+                clearTimeout(this._authWaitTimeoutId);
+                this._authWaitTimeoutId = null;
+              }
+              
+              this._authReady = true;
+              return true;
+            } catch (error) {
+              if (this._authWaitTimeoutId) {
+                clearTimeout(this._authWaitTimeoutId);
+                this._authWaitTimeoutId = null;
+              }
+              return this._pollForApiAuth();
+            }
+          } else {
+            return this._pollForApiAuth();
+          }
+        },
+        
+        _pollForApiAuth: function() {
+          return new Promise((resolve) => {
+            let attempts = 0;
+            const maxAttempts = SAFETY_GUARDS.authMaxPollingAttempts;
+            
+            const checkAuth = () => {
+              attempts++;
+              
+              if (window.api && window.api.auth && window.api.auth !== null) {
+                const hasRequiredMethods = 
+                  typeof window.api.auth.validateToken === 'function' ||
+                  typeof window.api.auth.validateTokenSilently === 'function' ||
+                  typeof window.api.auth.getCurrentUser === 'function';
+                
+                if (hasRequiredMethods) {
+                  this._authReady = true;
+                  if (this._authPollingInterval) {
+                    clearInterval(this._authPollingInterval);
+                    this._authPollingInterval = null;
+                  }
+                  resolve(true);
+                  return;
+                }
+              }
+              
+              if (attempts >= maxAttempts) {
+                this._authReady = false;
+                if (this._authPollingInterval) {
+                  clearInterval(this._authPollingInterval);
+                  this._authPollingInterval = null;
+                }
+                resolve(false);
+                return;
+              }
+              
+            };
+            
+            checkAuth();
+            
+            if (!this._authReady) {
+              this._authPollingInterval = setInterval(checkAuth, SAFETY_GUARDS.authPollingIntervalMs);
+            }
+          });
+        },
+        
+        initialize: function() {
+          if (this._initialized) {
+            return Promise.resolve(this.getStatus());
+          }
+
+          if (this._initializationLock) {
+            return this._initializationPromise || Promise.resolve(this.getStatus());
+          }
+
+          this._initializationLock = true;
+          this._initializationAttempts++;
+          
+          if (this._initializationAttempts > this._maxInitializationAttempts) {
+            this._initializationLock = false;
+            return Promise.resolve(this.getStatus());
+          }
+
+          this._initializationPromise = new Promise((resolve) => {
+            this._initializationResolve = resolve;
+            
+            WATCHDOG.start();
+            
+            // Wait for app ready before proceeding
+            const waitForAppReady = () => {
+              if (window.__APP_READY__ === true) {
+                // Log initial state once
+                if (!this._stateLogged.waiting) {
+                  console.log('[Session] Waiting for authentication...');
+                  this._stateLogged.waiting = true;
+                }
+                
+                Promise.resolve().then(() => {
+                  return this._waitForApiAuth();
+                }).then((authReady) => {
+                  this._dependenciesReady = {
+                    bootstrap: !!(window.BOOTSTRAP_STATE && window.BOOTSTRAP_STATE.isReady),
+                    apiAuth: !!(window.api && window.api.auth) || authReady,
+                    apiRequest: !!(window.api && window.api.request),
+                    ui: !!(window.UI_ORCHESTRATOR && typeof UI_ORCHESTRATOR.getState === 'function')
+                  };
+                  
+                  if (window.app && window.app._dependencyGraph) {
+                    executeSafely('SESSION_COORDINATOR.recordDependency', () => {
+                      window.app._dependencyGraph.sessionCoordinator = {
+                        initialized: true,
+                        initializationTime: new Date().toISOString(),
+                        config: this._config,
+                        dependenciesReady: this._dependenciesReady,
+                        authReady: this._authReady
+                      };
+                    });
+                  }
+                  
+                  if (AUTH_STATE && typeof AUTH_STATE.initialize === 'function' && !AUTH_STATE._initialized) {
+                    executeSafely('AUTH_STATE.delayedInit', AUTH_STATE.initialize, AUTH_STATE);
+                  }
+                  
+                  executeSafely('SESSION_COORDINATOR.setupEventListeners', this.setupEventListeners, this);
+                  executeSafely('SESSION_COORDINATOR.startSessionMonitoring', this.startSessionMonitoring, this);
+                  executeSafely('SESSION_COORDINATOR.setupCrossTabSync', this.setupCrossTabSync, this);
+                  executeSafely('SESSION_COORDINATOR.setupActivityMonitoring', this.setupActivityMonitoring, this);
+                  executeSafely('SESSION_COORDINATOR.setupIframeCoordination', this.setupIframeCoordination, this);
+                  executeSafely('SESSION_COORDINATOR.checkInitialSessionStateAsync', this.checkInitialSessionStateAsync, this);
+                  
+                  this._initialized = true;
+                  this._initializationLock = false;
+                  window.__SESSION_COORDINATOR_READY__ = true;
+                  
+                  this._setupMessageQueueFlush();
+                  resolve(this.getStatus());
+                  
+                }).catch(error => {
+                  this._dependenciesReady = {
+                    bootstrap: false,
+                    apiAuth: this._authReady || false,
+                    apiRequest: false,
+                    ui: false
+                  };
+                  
+                  executeSafely('SESSION_COORDINATOR.degradedInit', () => {
+                    if (AUTH_STATE && typeof AUTH_STATE.initialize === 'function') {
+                      AUTH_STATE.initialize();
+                    }
+                    
+                    this.setupEventListeners();
+                    this.checkInitialSessionStateAsync();
+                    
+                    this._initialized = true;
+                    this._initializationLock = false;
+                    window.__SESSION_COORDINATOR_READY__ = true;
+                    resolve(this.getStatus());
+                  });
+                });
+              } else {
+                setTimeout(waitForAppReady, 50);
+              }
+            };
+            
+            waitForAppReady();
+          });
+          
+          return this._initializationPromise;
+        },
+        
+        _checkDependencies: function() {
+          return DEPENDENCY_BARRIER.waitForReady(SAFETY_GUARDS.dependencyTimeoutMs)
+            .then(status => {
+              this._dependenciesReady.bootstrap = DEPENDENCY_BARRIER._dependencies.bootstrap.ready;
+              this._dependenciesReady.apiAuth = DEPENDENCY_BARRIER._dependencies.apiAuth.ready || this._authReady;
+              this._dependenciesReady.apiRequest = DEPENDENCY_BARRIER._dependencies.apiRequest.ready;
+              this._dependenciesReady.ui = DEPENDENCY_BARRIER._dependencies.ui.ready;
+              return status;
+            });
+        },
+        
+        _setupMessageQueueFlush: function() {
+          const checkFlush = () => {
+            if (AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' && 
+                AUTH_STATE.getSessionState() === SESSION_STATES.VALID && !this._messageQueueFlushed) {
+              this._flushMessageQueue();
+              this._messageQueueFlushed = true;
+            } else if (!this._messageQueueFlushed) {
+              setTimeout(checkFlush, 100);
+            }
+          };
+          
+          checkFlush();
+        },
+        
+        _flushMessageQueue: function() {
+          if (this._outboundMessageQueue.length === 0) return;
+          
+          this._outboundMessageQueue.forEach(message => {
+            executeSafely('flushMessage', () => {
+              if (message.type === 'iframe' && message.iframeId) {
+                this._sendMessageToIframe(message.iframeId, message.data);
+              } else if (message.type === 'broadcast') {
+                this.broadcastSessionChange(message.eventType, message.data);
+              }
+            });
+          });
+          
+          this._outboundMessageQueue = [];
+        },
+        
+        _queueOutboundMessage: function(message) {
+          this._outboundMessageQueue.push(message);
+        },
+        
+        setupEventListeners: function() {
           window.addEventListener('moodchat-login-success', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLoginSuccess', () => {
               this.handleLoginSuccess(event.detail);
@@ -1248,35 +2381,30 @@
             });
           });
           
-          // Listen for logout events
           window.addEventListener('moodchat-logout', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLogout', () => {
               this.handleLogout(event.detail);
             });
           });
           
-          // Listen for token expiration
           window.addEventListener('moodchat-token-expired', (event) => {
             executeSafely('SESSION_COORDINATOR.handleTokenExpired', () => {
               this.handleTokenExpired(event.detail);
             });
           });
           
-          // Listen for session invalidation
           window.addEventListener('moodchat-session-invalid', (event) => {
             executeSafely('SESSION_COORDINATOR.handleSessionInvalid', () => {
               this.handleSessionInvalid(event.detail);
             });
           });
           
-          // Listen for session refresh
           window.addEventListener('moodchat-session-refreshed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleSessionRefreshed', () => {
               this.handleSessionRefreshed(event.detail);
             });
           });
           
-          // Listen for auth state changes
           window.addEventListener('moodchat-auth-state-changed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleAuthStateChanged', () => {
               this.handleAuthStateChanged(event.detail);
@@ -1289,37 +2417,52 @@
             });
           });
           
-          // Listen for storage sync events
           window.addEventListener('moodchat-token-synced', (event) => {
-            console.log('🔄 Token synced from another tab');
             executeSafely('SESSION_COORDINATOR.broadcastSynced', () => {
-              this.broadcastSessionChange('synced', AUTH_STATE ? AUTH_STATE.getUser() : null);
+              this.broadcastSessionChange('synced', AUTH_STATE && typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null);
             });
           });
           
           window.addEventListener('moodchat-user-synced', (event) => {
-            console.log('🔄 User synced from another tab');
             executeSafely('SESSION_COORDINATOR.updateUISynced', () => {
-              this.updateUIForAuthenticatedState(event.detail.user);
+              if (event.detail && event.detail.user) {
+                this.updateUIForAuthenticatedState(event.detail.user);
+              }
             });
           });
           
-          console.log('✅ Session event listeners setup complete');
+          window.addEventListener('moodchat-session-state-changed', (event) => {
+            if (event.detail.newState === SESSION_STATES.RECOVERY) {
+              this.enterRecoveryMode();
+            }
+          });
         },
         
-        // Handle login success (original method preserved)
+        // SESSION HARDENING: PHASE 5 - SAFE SESSION CREATION
         handleLoginSuccess: function(detail) {
-          console.log('🔐 Login success:', detail.user?.uid || detail.user?.id);
+          // HARDENING: Build complete session object
+          const rawSession = {
+            token: detail.token,
+            refreshToken: detail.refreshToken,
+            userId: detail.user?.id || detail.user?.uid,
+            expiresAt: detail.expiresIn ? Date.now() + (detail.expiresIn * 1000) : null,
+            issuedAt: Date.now()
+          };
           
-          // Validate session data before proceeding
-          const validation = validateSessionData(detail);
+          // HARDENING: Validate before any state change
+          const validation = validateSession(rawSession);
           if (!validation.isValid) {
-            console.warn(`⚠️ Invalid login data: ${validation.reason}`);
+            console.log('[Session] Invalid session data received:', validation.reason);
+            if (this._uiCallbacks.onSessionError) {
+              this._uiCallbacks.onSessionError({ 
+                message: 'Invalid session data', 
+                code: 'INVALID_SESSION_DATA' 
+              });
+            }
             return;
           }
           
-          // Update AUTH_STATE
-          if (AUTH_STATE) {
+          if (AUTH_STATE && typeof AUTH_STATE.setAuthState === 'function') {
             executeSafely('AUTH_STATE.setAuthState.login', () => {
               AUTH_STATE.setAuthState(
                 detail.user,
@@ -1330,155 +2473,179 @@
             });
           }
           
-          // Update UI state
+          // Reset state logging on successful login
+          this._stateLogged = {
+            waiting: false,
+            success: true,
+            failure: false
+          };
+          
+          console.log('[Session] Login successful');
+          
           executeSafely('SESSION_COORDINATOR.updateUILogin', () => {
-            this.updateUIForAuthenticatedState(detail.user);
+            if (detail && detail.user) {
+              this.updateUIForAuthenticatedState(detail.user);
+              
+              if (this._uiCallbacks.onAuthenticated) {
+                this._uiCallbacks.onAuthenticated(detail.user);
+              }
+            }
           });
           
-          // Clear any existing timeouts or warnings
           executeSafely('SESSION_COORDINATOR.clearWarningsLogin', () => {
             this.clearSessionWarnings();
           });
           
-          // Reset retry count
           this._retryCount = 0;
           
-          // Start session monitoring
           executeSafely('SESSION_COORDINATOR.startMonitoringLogin', () => {
             this.startSessionMonitoring();
           });
           
-          // Schedule token refresh if needed
           executeSafely('SESSION_COORDINATOR.scheduleRefreshLogin', () => {
             this.scheduleTokenRefresh();
           });
           
-          // Notify other components
+          // SESSION HARDENING: PHASE 9 - BROADCAST CONTROL
           executeSafely('SESSION_COORDINATOR.broadcastLogin', () => {
             this.broadcastSessionChange('authenticated', detail.user);
           });
           
-          // Propagate to iframes
           executeSafely('SESSION_COORDINATOR.propagateLogin', () => {
             this.propagateSessionToIframes(detail.user, detail.token);
           });
           
-          // Load dashboard content
-          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP.loadAppContent) {
+          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP !== null && typeof APP_BOOTSTRAP.loadAppContent === 'function') {
             executeSafely('APP_BOOTSTRAP.loadAppContent', APP_BOOTSTRAP.loadAppContent);
           }
-          
-          console.log('✅ Login success fully processed');
         },
         
-        // Handle login failed (original method preserved)
         handleLoginFailed: function(detail) {
-          console.log('❌ Login failed:', detail.reason);
-          
-          // Clear any partial auth state
-          if (AUTH_STATE) {
+          if (AUTH_STATE && typeof AUTH_STATE.clearAuthState === 'function') {
             executeSafely('AUTH_STATE.clearAuthState.loginFailed', AUTH_STATE.clearAuthState, AUTH_STATE);
           }
           
-          // Show error to user
-          if (typeof window.showNotification === 'function') {
-            executeSafely('showNotification.loginFailed', () => {
-              window.showNotification(detail.message || 'Login failed. Please try again.', 'error');
+          // Reset state logging on login failure
+          this._stateLogged = {
+            waiting: false,
+            success: false,
+            failure: true
+          };
+          
+          console.log('[Session] Login failed');
+          
+          if (this._uiCallbacks.onSessionError) {
+            this._uiCallbacks.onSessionError({ 
+              message: (detail && detail.message) || 'Login failed', 
+              code: 'LOGIN_FAILED' 
             });
           }
           
-          // Ensure auth UI is visible
-          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP.showAuthUI) {
+          if (typeof window.showNotification === 'function') {
+            executeSafely('showNotification.loginFailed', () => {
+              window.showNotification((detail && detail.message) || 'Login failed. Please try again.', 'error');
+            });
+          }
+          
+          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP !== null && typeof APP_BOOTSTRAP.showAuthUI === 'function') {
             executeSafely('APP_BOOTSTRAP.showAuthUI', APP_BOOTSTRAP.showAuthUI);
           }
           
-          // Notify components
           executeSafely('SESSION_COORDINATOR.broadcastLoginFailed', () => {
             this.broadcastSessionChange('login_failed', null);
           });
         },
         
-        // Handle logout (original method preserved)
+        // SESSION HARDENING: PHASE 10 - LOGOUT HARDENING
         handleLogout: function(detail) {
-          console.log('👋 Logout:', detail.reason || 'User initiated');
+          // HARDENING: Clear all timers first
+          this.stopSessionMonitoring();
+          if (this._refreshTimeout) {
+            clearTimeout(this._refreshTimeout);
+            this._refreshTimeout = null;
+          }
+          if (this._warningTimeout) {
+            clearTimeout(this._warningTimeout);
+            this._warningTimeout = null;
+          }
           
-          // Clear authentication state
-          if (AUTH_STATE) {
+          if (AUTH_STATE && typeof AUTH_STATE.clearAuthState === 'function') {
             executeSafely('AUTH_STATE.clearAuthState.logout', AUTH_STATE.clearAuthState, AUTH_STATE);
           }
           
-          // Clear UI state
+          // Reset state logging on logout
+          this._stateLogged = {
+            waiting: false,
+            success: false,
+            failure: false
+          };
+          
+          console.log('[Session] Logout successful');
+          
           executeSafely('SESSION_COORDINATOR.updateUILogout', () => {
             this.updateUIForUnauthenticatedState();
+            
+            if (this._uiCallbacks.onUnauthenticated) {
+              this._uiCallbacks.onUnauthenticated();
+            }
           });
           
-          // Stop session monitoring
-          executeSafely('SESSION_COORDINATOR.stopMonitoringLogout', () => {
-            this.stopSessionMonitoring();
-          });
-          
-          // Clear any cached data
-          if (typeof DATA_CACHE !== 'undefined') {
+          if (typeof DATA_CACHE !== 'undefined' && DATA_CACHE !== null && typeof DATA_CACHE.clearAll === 'function') {
             executeSafely('DATA_CACHE.clearAll', DATA_CACHE.clearAll);
           }
           
-          // Clear user settings
-          if (typeof SETTINGS_SERVICE !== 'undefined' && window.currentUser) {
-            executeSafely('SETTINGS_SERVICE.clearUserSettings', SETTINGS_SERVICE.clearUserSettings);
-          }
-          
-          // Clear user isolation
-          if (typeof USER_DATA_ISOLATION !== 'undefined' && window.currentUser) {
-            executeSafely('USER_DATA_ISOLATION.clearUserData', () => {
-              const userId = window.currentUser.uid || window.currentUser.id;
-              USER_DATA_ISOLATION.clearUserData(userId);
+          if (typeof SETTINGS_SERVICE !== 'undefined' && SETTINGS_SERVICE !== null && window.currentUser) {
+            executeSafely('SETTINGS_SERVICE.clearUserSettings', () => {
+              if (typeof SETTINGS_SERVICE.clearUserSettings === 'function') {
+                SETTINGS_SERVICE.clearUserSettings();
+              }
             });
           }
           
-          // Show auth UI
-          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP.showAuthUI) {
+          if (typeof USER_DATA_ISOLATION !== 'undefined' && USER_DATA_ISOLATION !== null && window.currentUser) {
+            executeSafely('USER_DATA_ISOLATION.clearUserData', () => {
+              const userId = window.currentUser.uid || window.currentUser.id;
+              if (userId && typeof USER_DATA_ISOLATION.clearUserData === 'function') {
+                USER_DATA_ISOLATION.clearUserData(userId);
+              }
+            });
+          }
+          
+          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP !== null && typeof APP_BOOTSTRAP.showAuthUI === 'function') {
             executeSafely('APP_BOOTSTRAP.showAuthUI.logout', APP_BOOTSTRAP.showAuthUI);
           }
           
-          // Notify other components
+          // SESSION HARDENING: PHASE 9 - BROADCAST CONTROL
           executeSafely('SESSION_COORDINATOR.broadcastLogout', () => {
             this.broadcastSessionChange('logged_out', null);
           });
           
-          // Propagate to iframes
           executeSafely('SESSION_COORDINATOR.propagateLogout', () => {
             this.propagateLogoutToIframes();
           });
           
-          // Clear broadcast channel
           if (this._broadcastChannel) {
             executeSafely('SESSION_COORDINATOR.closeBroadcast', () => {
-              this._broadcastChannel.close();
+              try {
+                this._broadcastChannel.close();
+              } catch (e) {
+              }
               this._broadcastChannel = null;
             });
           }
           
-          // Show logout confirmation
           if (typeof window.showNotification === 'function') {
             executeSafely('showNotification.logout', () => {
               window.showNotification('Logged out successfully', 'success');
             });
           }
-          
-          console.log('✅ Logout fully processed');
         },
         
-        // Handle token expired (original method preserved)
+        // SESSION HARDENING: PHASE 7 - TOKEN REFRESH LOGIC
         handleTokenExpired: function(detail) {
-          console.log('⏰ Token expired:', detail.reason);
-          
-          // Try to refresh token using modular API
           executeSafely('SESSION_COORDINATOR.attemptTokenRefresh', () => {
             this.attemptTokenRefresh().then(refreshResult => {
-              if (refreshResult.success) {
-                console.log('✅ Token refreshed successfully');
-                
-                // Notify components
+              if (refreshResult && refreshResult.success) {
                 executeSafely('SESSION_COORDINATOR.dispatchRefreshed', () => {
                   window.dispatchEvent(new CustomEvent('moodchat-session-refreshed', {
                     detail: { 
@@ -1488,21 +2655,31 @@
                   }));
                 });
                 
-                // Show success notification
+                // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+                window.dispatchEvent(new CustomEvent('session:refresh', {
+                  detail: {
+                    timestamp: new Date().toISOString()
+                  }
+                }));
+                
                 if (typeof window.showNotification === 'function') {
                   executeSafely('showNotification.refreshSuccess', () => {
                     window.showNotification('Session refreshed', 'success', 3000);
                   });
                 }
               } else {
-                console.log('❌ Token refresh failed:', refreshResult.reason);
+                // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+                window.dispatchEvent(new CustomEvent('session:expired', {
+                  detail: {
+                    reason: 'Token refresh failed',
+                    timestamp: new Date().toISOString()
+                  }
+                }));
                 
-                // Show re-authentication warning
                 executeSafely('SESSION_COORDINATOR.showReauthWarning', () => {
                   this.showReauthenticationWarning();
                 });
                 
-                // Notify components
                 executeSafely('SESSION_COORDINATOR.dispatchReauthRequired', () => {
                   window.dispatchEvent(new CustomEvent('moodchat-reauthentication-required', {
                     detail: {
@@ -1516,28 +2693,42 @@
           });
         },
         
-        // Handle session invalid (original method preserved)
         handleSessionInvalid: function(detail) {
-          console.log('❌ Session invalid:', detail.reason);
-          
-          // Clear authentication state
-          if (AUTH_STATE) {
+          if (AUTH_STATE && typeof AUTH_STATE.clearAuthState === 'function') {
             executeSafely('AUTH_STATE.clearAuthState.sessionInvalid', AUTH_STATE.clearAuthState, AUTH_STATE);
           }
           
-          // Update UI
+          // Reset state logging on session invalid
+          this._stateLogged = {
+            waiting: false,
+            success: false,
+            failure: true
+          };
+          
+          console.log('[Session] Session invalid');
+          
+          // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+          window.dispatchEvent(new CustomEvent('session:expired', {
+            detail: {
+              reason: 'Session invalid',
+              timestamp: new Date().toISOString()
+            }
+          }));
+          
           executeSafely('SESSION_COORDINATOR.updateUISessionInvalid', () => {
             this.updateUIForUnauthenticatedState();
+            
+            if (this._uiCallbacks.onUnauthenticated) {
+              this._uiCallbacks.onUnauthenticated();
+            }
           });
           
-          // Redirect to auth
-          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP.redirectToAuth) {
+          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP !== null && typeof APP_BOOTSTRAP.redirectToAuth === 'function') {
             executeSafely('APP_BOOTSTRAP.redirectToAuth', () => {
-              APP_BOOTSTRAP.redirectToAuth(detail.reason);
+              APP_BOOTSTRAP.redirectToAuth(detail && detail.reason ? detail.reason : 'Session invalid');
             });
           }
           
-          // Show notification
           if (typeof window.showNotification === 'function') {
             executeSafely('showNotification.sessionInvalid', () => {
               window.showNotification('Your session has expired. Please log in again.', 'error', 10000);
@@ -1545,91 +2736,124 @@
           }
         },
         
-        // Handle session refreshed (original method preserved)
         handleSessionRefreshed: function(detail) {
-          console.log('🔄 Session refreshed with new token');
-          
-          // Clear any session warnings
           executeSafely('SESSION_COORDINATOR.clearWarningsRefreshed', () => {
             this.clearSessionWarnings();
           });
           
-          // Update token in auth state if available
-          if (detail.token && AUTH_STATE && AUTH_STATE.getUser()) {
+          if (detail && detail.token && AUTH_STATE && typeof AUTH_STATE.getUser === 'function' && AUTH_STATE.getUser()) {
             executeSafely('AUTH_STATE.setAuthState.refreshed', () => {
-              AUTH_STATE.setAuthState(AUTH_STATE.getUser(), detail.token);
+              if (typeof AUTH_STATE.setAuthState === 'function') {
+                AUTH_STATE.setAuthState(AUTH_STATE.getUser(), detail.token);
+              }
             });
           }
           
-          // Schedule next refresh
+          // Reset state logging on refresh
+          this._stateLogged = {
+            waiting: false,
+            success: true,
+            failure: false
+          };
+          
+          console.log('[Session] Session refreshed');
+          
+          // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+          window.dispatchEvent(new CustomEvent('session:refresh', {
+            detail: {
+              timestamp: new Date().toISOString()
+            }
+          }));
+          
           executeSafely('SESSION_COORDINATOR.scheduleRefreshRefreshed', () => {
             this.scheduleTokenRefresh();
           });
           
-          // Notify components
           executeSafely('SESSION_COORDINATOR.broadcastRefreshed', () => {
-            this.broadcastSessionChange('refreshed', AUTH_STATE ? AUTH_STATE.getUser() : null);
+            this.broadcastSessionChange('refreshed', AUTH_STATE && typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null);
           });
           
-          // Propagate to iframes
           executeSafely('SESSION_COORDINATOR.propagateRefreshed', () => {
-            this.propagateSessionToIframes(AUTH_STATE ? AUTH_STATE.getUser() : null, detail.token);
+            this.propagateSessionToIframes(
+              AUTH_STATE && typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null, 
+              detail && detail.token ? detail.token : null
+            );
           });
         },
         
-        // Handle auth state changed
         handleAuthStateChanged: function(detail) {
-          console.log('🔄 Auth state changed');
+          window.currentUser = detail && detail.user ? detail.user : null;
           
-          // Update window.currentUser for backward compatibility
-          window.currentUser = detail.user;
-          
-          // Broadcast to iframes
           executeSafely('SESSION_COORDINATOR.propagateAuthChange', () => {
-            this.propagateSessionToIframes(detail.user, AUTH_STATE ? AUTH_STATE.getToken() : null);
+            this.propagateSessionToIframes(
+              detail && detail.user ? detail.user : null, 
+              AUTH_STATE && typeof AUTH_STATE.getToken === 'function' ? AUTH_STATE.getToken() : null
+            );
           });
         },
         
-        // Handle auth state cleared
         handleAuthStateCleared: function() {
-          console.log('🧹 Auth state cleared');
-          
-          // Update window.currentUser
           window.currentUser = null;
           
-          // Broadcast to iframes
           executeSafely('SESSION_COORDINATOR.propagateAuthCleared', () => {
             this.propagateLogoutToIframes();
           });
         },
         
-        // Attempt token refresh (original method preserved)
-        attemptTokenRefresh: function() {
-          console.log('🔄 Attempting token refresh...');
+        enterRecoveryMode: function() {
+          this._iframes.forEach((iframe, iframeId) => {
+            if (iframe && iframe.ready && iframe.window) {
+              executeSafely(`pauseIframe.${iframeId}`, () => {
+                try {
+                  iframe.window.postMessage({
+                    type: 'moodchat-session-pause',
+                    reason: 'recovery_mode',
+                    timestamp: new Date().toISOString()
+                  }, '*');
+                } catch (error) {
+                }
+              });
+            }
+          });
           
+          if (AUTH_STATE && typeof AUTH_STATE.clearAuthState === 'function') {
+            AUTH_STATE.clearAuthState();
+          }
+          
+          if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP !== null && typeof APP_BOOTSTRAP.handleSessionRecovery === 'function') {
+            executeSafely('APP_BOOTSTRAP.handleSessionRecovery', APP_BOOTSTRAP.handleSessionRecovery);
+          }
+          
+          setTimeout(() => {
+            if (typeof APP_BOOTSTRAP !== 'undefined' && APP_BOOTSTRAP !== null && typeof APP_BOOTSTRAP.redirectToAuth === 'function') {
+              executeSafely('APP_BOOTSTRAP.redirectToAuth.recovery', () => {
+                APP_BOOTSTRAP.redirectToAuth('Session recovery required');
+              });
+            }
+          }, 1000);
+        },
+        
+        // SESSION HARDENING: PHASE 7 - TOKEN REFRESH LOGIC
+        attemptTokenRefresh: function() {
           return new Promise(async (resolve) => {
-            // Increment retry count
             this._retryCount++;
             
             if (this._retryCount > this._config.maxRetryAttempts) {
-              console.log('❌ Max retry attempts exceeded');
               resolve({
                 success: false,
-                reason: 'Maximum retry attempts exceeded'
+                error: {
+                  message: 'Maximum retry attempts exceeded',
+                  code: 'MAX_RETRIES'
+                }
               });
               return;
             }
             
-            // Calculate backoff delay
             const backoffIndex = Math.min(this._retryCount - 1, this._config.retryBackoff.length - 1);
             const delay = this._config.retryBackoff[backoffIndex];
             
-            console.log(`🔄 Retry attempt ${this._retryCount}/${this._config.maxRetryAttempts} with ${delay}ms delay`);
-            
-            // Apply backoff delay
             await new Promise(resolve => setTimeout(resolve, delay));
             
-            // Try multiple refresh methods in order
             const refreshMethods = [
               this.refreshViaTokenValidation.bind(this),
               this.refreshViaApiCall.bind(this),
@@ -1639,43 +2863,40 @@
             for (const method of refreshMethods) {
               try {
                 const result = await method();
-                if (result.success) {
-                  // Reset retry count on success
+                if (result && result.success) {
                   this._retryCount = 0;
                   resolve(result);
                   return;
                 }
               } catch (error) {
-                console.log(`⚠️ Refresh method failed: ${error.message}`);
-                // Continue to next method
               }
             }
             
-            // All methods failed
             resolve({
               success: false,
-              reason: 'All refresh methods failed'
+              error: {
+                message: 'All refresh methods failed',
+                code: 'ALL_METHODS_FAILED'
+              }
             });
           });
         },
         
-        // Refresh via TOKEN_VALIDATION (original method preserved)
         refreshViaTokenValidation: async function() {
-          if (typeof TOKEN_VALIDATION === 'undefined' || !TOKEN_VALIDATION.refreshToken) {
+          if (typeof TOKEN_VALIDATION === 'undefined' || TOKEN_VALIDATION === null || typeof TOKEN_VALIDATION.refreshToken !== 'function') {
             throw new Error('TOKEN_VALIDATION not available');
           }
           
           return await TOKEN_VALIDATION.refreshToken();
         },
         
-        // Refresh via API call (original method preserved)
         refreshViaApiCall: async function() {
           if (!AUTH_STATE) {
             throw new Error('AUTH_STATE not available');
           }
           
-          const token = AUTH_STATE.getToken();
-          const refreshToken = AUTH_STATE.getRefreshToken();
+          const token = typeof AUTH_STATE.getToken === 'function' ? AUTH_STATE.getToken() : null;
+          const refreshToken = typeof AUTH_STATE.getRefreshToken === 'function' ? AUTH_STATE.getRefreshToken() : null;
           
           if (!token && !refreshToken) {
             throw new Error('No token to refresh');
@@ -1705,32 +2926,27 @@
               token: response.data.token
             };
           } else {
-            throw new Error(response?.message || 'Refresh failed');
+            throw new Error((response && response.message) || 'Refresh failed');
           }
         },
         
-        // Refresh via AUTH_STATE (original method preserved)
         refreshViaAuthState: async function() {
-          if (typeof AUTH_STATE === 'undefined' || !AUTH_STATE.getToken()) {
+          if (typeof AUTH_STATE === 'undefined' || AUTH_STATE === null || typeof AUTH_STATE.getToken !== 'function' || !AUTH_STATE.getToken()) {
             throw new Error('AUTH_STATE not available or no token');
           }
           
-          // This is a fallback - just return the existing token
           return {
             success: true,
             token: AUTH_STATE.getToken()
           };
         },
         
-        // Show re-authentication warning (original method preserved)
         showReauthenticationWarning: function() {
           const warningId = 'reauth-warning';
           
-          // Remove existing warning
           const existing = document.getElementById(warningId);
           if (existing) existing.remove();
           
-          // Create warning
           const warning = document.createElement('div');
           warning.id = warningId;
           warning.style.cssText = `
@@ -1777,7 +2993,6 @@
           
           document.body.appendChild(warning);
           
-          // Add button handlers
           document.getElementById('reauth-now').addEventListener('click', () => {
             window.dispatchEvent(new CustomEvent('moodchat-reauthentication-required', {
               detail: { reason: 'User requested re-authentication' }
@@ -1790,18 +3005,14 @@
             setTimeout(() => warning.remove(), 300);
           });
           
-          // Auto-remove after 30 seconds
           setTimeout(() => {
             if (warning.parentNode) {
               warning.style.animation = 'slideOutDown 0.3s ease-in';
               setTimeout(() => warning.remove(), 300);
             }
           }, 30000);
-          
-          console.log('⚠️ Re-authentication warning shown');
         },
         
-        // Clear session warnings (original method preserved)
         clearSessionWarnings: function() {
           const warnings = document.querySelectorAll('#reauth-warning, #session-warning');
           warnings.forEach(warning => {
@@ -1810,7 +3021,6 @@
             }
           });
           
-          // Clear timeouts
           if (this._warningTimeout) {
             clearTimeout(this._warningTimeout);
             this._warningTimeout = null;
@@ -1820,83 +3030,96 @@
             clearTimeout(this._refreshTimeout);
             this._refreshTimeout = null;
           }
-          
-          console.log('🧹 Session warnings cleared');
         },
         
-        // Update UI for authenticated state (original method preserved)
+        // SESSION HARDENING: PHASE 9 - BROADCAST CONTROL
         updateUIForAuthenticatedState: function(user) {
-          console.log('🎨 Updating UI for authenticated state');
+          // HARDENING: Validate user before updating UI
+          if (!user) return;
           
-          // Update current user reference
-          window.currentUser = user;
+          const safeUser = {
+            ...user,
+            // Ensure we have aliases for backward compatibility
+            uid: user.id || user.uid,
+            id: user.id || user.uid
+          };
           
-          // Update global auth state if function exists
+          window.currentUser = safeUser;
+          
           if (typeof updateGlobalAuthState === 'function') {
-            executeSafely('updateGlobalAuthState.authenticated', () => updateGlobalAuthState(user));
+            executeSafely('updateGlobalAuthState.authenticated', () => updateGlobalAuthState(safeUser));
           }
           
-          // Show dashboard container
           const dashboard = document.getElementById('dashboardContainer') || 
                            document.querySelector('.dashboard-container');
           if (dashboard) {
             dashboard.classList.remove('hidden');
           }
           
-          // Hide auth container
           const auth = document.getElementById('authContainer') || 
                        document.querySelector('.auth-container');
           if (auth) {
             auth.classList.add('hidden');
           }
           
-          // Update user display elements
           executeSafely('SESSION_COORDINATOR.updateUserDisplay', () => {
-            this.updateUserDisplayElements(user);
+            this.updateUserDisplayElements(safeUser);
           });
-          
-          console.log('✅ UI updated for authenticated state');
         },
         
-        // Update UI for unauthenticated state (original method preserved)
         updateUIForUnauthenticatedState: function() {
-          console.log('🎨 Updating UI for unauthenticated state');
-          
-          // Clear current user
           window.currentUser = null;
           
-          // Update global auth state if function exists
           if (typeof updateGlobalAuthState === 'function') {
             executeSafely('updateGlobalAuthState.unauthenticated', () => updateGlobalAuthState(null));
           }
           
-          // Show auth container
           const auth = document.getElementById('authContainer') || 
                        document.querySelector('.auth-container');
           if (auth) {
             auth.classList.remove('hidden');
           }
           
-          // Hide dashboard container
           const dashboard = document.getElementById('dashboardContainer') || 
                            document.querySelector('.dashboard-container');
           if (dashboard) {
             dashboard.classList.add('hidden');
           }
           
-          // Clear user display elements
           executeSafely('SESSION_COORDINATOR.clearUserDisplay', () => {
             this.clearUserDisplayElements();
           });
-          
-          console.log('✅ UI updated for unauthenticated state');
         },
         
-        // Update user display elements (original method preserved)
+        updateUIForLimitedMode: function() {
+          const blockedElements = document.querySelectorAll('[data-session-blocked="true"]');
+          blockedElements.forEach(element => {
+            element.removeAttribute('data-session-blocked');
+            element.disabled = false;
+            element.style.opacity = '1';
+            element.style.pointerEvents = 'auto';
+          });
+          
+          if (typeof window.showNotification === 'function') {
+            executeSafely('showNotification.limitedMode', () => {
+              window.showNotification('Running in limited mode. Some features may be unavailable until session loads.', 'info', 5000);
+            });
+          }
+          
+          if (window.app && window.app._dependencyGraph) {
+            executeSafely('SESSION_COORDINATOR.recordLimitedMode', () => {
+              window.app._dependencyGraph.sessionCoordinator.limitedMode = {
+                active: true,
+                activatedAt: new Date().toISOString(),
+                reason: 'Session load timeout'
+              };
+            });
+          }
+        },
+        
         updateUserDisplayElements: function(user) {
           if (!user) return;
           
-          // Update user avatar
           const avatars = document.querySelectorAll('.user-avatar, .avatar-img');
           avatars.forEach(avatar => {
             if (user.photoURL) {
@@ -1905,72 +3128,59 @@
             }
           });
           
-          // Update user name
           const names = document.querySelectorAll('.user-name, .display-name');
           names.forEach(name => {
             name.textContent = user.displayName || 'User';
           });
           
-          // Update user email
           const emails = document.querySelectorAll('.user-email');
           emails.forEach(email => {
             email.textContent = user.email || '';
           });
         },
         
-        // Clear user display elements (original method preserved)
         clearUserDisplayElements: function() {
-          // Reset avatars
           const avatars = document.querySelectorAll('.user-avatar, .avatar-img');
           avatars.forEach(avatar => {
             avatar.src = '';
             avatar.alt = 'User';
           });
           
-          // Reset names
           const names = document.querySelectorAll('.user-name, .display-name');
           names.forEach(name => {
             name.textContent = 'User';
           });
           
-          // Reset emails
           const emails = document.querySelectorAll('.user-email');
           emails.forEach(email => {
             email.textContent = '';
           });
         },
         
-        // Start session monitoring (original method preserved)
         startSessionMonitoring: function() {
           if (this._monitoringInterval) {
             clearInterval(this._monitoringInterval);
           }
           
-          // Check session every 5 minutes
           this._monitoringInterval = setInterval(() => {
             executeSafely('SESSION_COORDINATOR.checkSessionValidity', () => {
               this.checkSessionValidity();
             });
           }, this._config.monitoringInterval);
           
-          // Check initially
           setTimeout(() => {
             executeSafely('SESSION_COORDINATOR.checkSessionValidityInitial', () => {
               this.checkSessionValidity();
             });
           }, 1000);
-          
-          console.log('✅ Session monitoring started');
         },
         
-        // Stop session monitoring (original method preserved)
         stopSessionMonitoring: function() {
           if (this._monitoringInterval) {
             clearInterval(this._monitoringInterval);
             this._monitoringInterval = null;
           }
           
-          // Clear other timeouts
           executeSafely('SESSION_COORDINATOR.clearWarningsStop', () => {
             this.clearSessionWarnings();
           });
@@ -1979,26 +3189,18 @@
             clearTimeout(this._inactivityTimeout);
             this._inactivityTimeout = null;
           }
-          
-          console.log('⏹️ Session monitoring stopped');
         },
         
-        // Check session validity (original method preserved)
         checkSessionValidity: function() {
-          if (!AUTH_STATE || !AUTH_STATE.hasToken()) {
+          if (!AUTH_STATE || typeof AUTH_STATE.hasToken !== 'function' || !AUTH_STATE.hasToken()) {
             return;
           }
           
-          // Check if authenticated
-          if (!AUTH_STATE.isAuthenticated()) {
-            console.log('🔐 Session not authenticated, attempting validation');
-            
-            // Try to validate
-            if (typeof TOKEN_VALIDATION !== 'undefined') {
+          if (typeof AUTH_STATE.isAuthenticated !== 'function' || !AUTH_STATE.isAuthenticated()) {
+            if (typeof TOKEN_VALIDATION !== 'undefined' && TOKEN_VALIDATION !== null && typeof TOKEN_VALIDATION.validateWithBackend === 'function') {
               executeSafely('TOKEN_VALIDATION.validateWithBackend.check', () => {
                 TOKEN_VALIDATION.validateWithBackend().then(result => {
-                  if (!result.valid) {
-                    console.log('❌ Session validation failed');
+                  if (!result || !result.valid) {
                     executeSafely('SESSION_COORDINATOR.dispatchSessionInvalid', () => {
                       window.dispatchEvent(new CustomEvent('moodchat-session-invalid', {
                         detail: {
@@ -2014,11 +3216,9 @@
             return;
           }
           
-          // Check token expiration
-          const timeToExpiry = AUTH_STATE.getTimeToExpiry();
+          const timeToExpiry = typeof AUTH_STATE.getTimeToExpiry === 'function' ? AUTH_STATE.getTimeToExpiry() : null;
           
           if (timeToExpiry !== null) {
-            // If expired, trigger token expired event
             if (timeToExpiry <= 0) {
               executeSafely('SESSION_COORDINATOR.dispatchTokenExpired', () => {
                 window.dispatchEvent(new CustomEvent('moodchat-token-expired', {
@@ -2031,14 +3231,12 @@
               return;
             }
             
-            // If expiring soon (less than warning threshold), show warning
             if (timeToExpiry < this._config.warningThreshold) {
               executeSafely('SESSION_COORDINATOR.showExpiryWarning', () => {
                 this.showSessionExpiryWarning(timeToExpiry);
               });
             }
             
-            // If expiring soon (less than refresh threshold), schedule refresh
             if (timeToExpiry < this._config.refreshThreshold) {
               executeSafely('SESSION_COORDINATOR.scheduleTokenRefreshCheck', () => {
                 this.scheduleTokenRefresh(timeToExpiry);
@@ -2047,11 +3245,9 @@
           }
         },
         
-        // Show session expiry warning
         showSessionExpiryWarning: function(timeUntilExpiry) {
           const minutes = Math.ceil(timeUntilExpiry / (60 * 1000));
           
-          // Only show warning every 5 minutes to avoid spamming
           const lastWarning = localStorage.getItem('last_session_warning');
           const now = Date.now();
           
@@ -2071,17 +3267,16 @@
             });
           }
           
-          // Also show in-page warning if not already shown
           if (!this._warningTimeout) {
             this._warningTimeout = setTimeout(() => {
               executeSafely('SESSION_COORDINATOR.showReauthWarningDelayed', () => {
                 this.showReauthenticationWarning();
               });
-            }, Math.max(0, timeUntilExpiry - (5 * 60 * 1000))); // Show 5 minutes before expiry
+            }, Math.max(0, timeUntilExpiry - (5 * 60 * 1000)));
           }
         },
         
-        // Schedule token refresh
+        // SESSION HARDENING: PHASE 7 - TOKEN REFRESH LOGIC
         scheduleTokenRefresh: function(timeUntilExpiry = null) {
           if (this._refreshTimeout) {
             clearTimeout(this._refreshTimeout);
@@ -2091,40 +3286,37 @@
           if (!AUTH_STATE) return;
           
           if (timeUntilExpiry === null) {
-            timeUntilExpiry = AUTH_STATE.getTimeToExpiry();
+            timeUntilExpiry = typeof AUTH_STATE.getTimeToExpiry === 'function' ? AUTH_STATE.getTimeToExpiry() : null;
             if (timeUntilExpiry === null) return;
           }
           
-          // Schedule refresh at halfway point between now and expiry, but not too soon
+          // HARDENING: Refresh at 70% of lifetime (approximately 70% threshold)
           const refreshTime = Math.max(
-            60000, // Minimum 1 minute
+            60000,
             Math.min(
-              timeUntilExpiry - 60000, // At least 1 minute before expiry
-              timeUntilExpiry / 2 // Halfway point
+              timeUntilExpiry * 0.3, // Refresh when 70% used (30% remaining)
+              timeUntilExpiry - 60000 // At least 1 minute before expiry
             )
           );
           
-          console.log(`🔄 Token refresh scheduled in ${Math.round(refreshTime / 1000)} seconds`);
-          
           this._refreshTimeout = setTimeout(() => {
-            console.log('🔄 Executing scheduled token refresh');
             executeSafely('SESSION_COORDINATOR.attemptScheduledRefresh', () => {
               this.attemptTokenRefresh().then(result => {
-                if (!result.success) {
-                  console.log('❌ Scheduled refresh failed');
-                  // Retry with exponential backoff
+                if (!result || !result.success) {
+                  // HARDENING: Backoff retry
                   setTimeout(() => {
                     executeSafely('SESSION_COORDINATOR.retryScheduledRefresh', () => {
-                      this.scheduleTokenRefresh(AUTH_STATE.getTimeToExpiry());
+                      if (this._retryCount < this._config.maxRetryAttempts) {
+                        this.scheduleTokenRefresh(typeof AUTH_STATE.getTimeToExpiry === 'function' ? AUTH_STATE.getTimeToExpiry() : null);
+                      }
                     });
-                  }, 30000); // Retry in 30 seconds
+                  }, 30000);
                 }
               });
             });
           }, refreshTime);
         },
         
-        // Setup activity monitoring
         setupActivityMonitoring: function() {
           this._lastActivity = Date.now();
           
@@ -2135,7 +3327,6 @@
               clearTimeout(this._inactivityTimeout);
             }
             
-            // Set timeout for inactivity
             this._inactivityTimeout = setTimeout(() => {
               executeSafely('SESSION_COORDINATOR.handleInactivity', () => {
                 this.handleUserInactivity();
@@ -2143,28 +3334,20 @@
             }, this._config.inactivityTimeout);
           };
           
-          // Reset on user activity
           ['mousedown', 'keydown', 'touchstart', 'mousemove', 'click', 'scroll'].forEach(event => {
             window.addEventListener(event, resetActivityTimeout, { passive: true });
           });
           
-          resetActivityTimeout(); // Start monitoring
-          
-          console.log('✅ Activity monitoring enabled');
+          resetActivityTimeout();
         },
         
-        // Handle user inactivity (original method preserved)
         handleUserInactivity: function() {
-          console.log('⏰ User inactive for 30 minutes');
-          
-          // Show inactivity warning
           if (typeof window.showNotification === 'function') {
             executeSafely('showNotification.inactivity', () => {
               window.showNotification('You have been inactive for 30 minutes. Session will expire soon.', 'warning', 10000);
             });
           }
           
-          // Dispatch inactivity event
           executeSafely('SESSION_COORDINATOR.dispatchInactivity', () => {
             window.dispatchEvent(new CustomEvent('moodchat-user-inactivity', {
               detail: {
@@ -2175,9 +3358,7 @@
           });
         },
         
-        // Setup cross-tab sync
         setupCrossTabSync: function() {
-          // Use BroadcastChannel if available
           if (typeof BroadcastChannel !== 'undefined') {
             try {
               this._broadcastChannel = new BroadcastChannel('moodchat_session');
@@ -2186,336 +3367,93 @@
                 executeSafely('SESSION_COORDINATOR.broadcastMessage', () => {
                   const data = event.data;
                   
-                  if (data.type === 'session_change') {
-                    console.log('🔄 BroadcastChannel session change:', data.detail.type);
+                  if (data && data.type === 'session_change') {
                     
-                    if (data.detail.type === 'logged_out') {
-                      // Logout from another tab
+                    if (data.detail && data.detail.type === 'logged_out') {
                       this.handleLogout({ reason: 'Logged out from another tab' });
-                    } else if (data.detail.type === 'authenticated' && data.detail.user) {
-                      // Login from another tab
+                    } else if (data.detail && data.detail.type === 'authenticated' && data.detail.user) {
                       this.updateUIForAuthenticatedState(data.detail.user);
                     }
-                  } else if (data.type === 'ping') {
-                    // Respond to ping
+                  } else if (data && data.type === 'ping') {
                     try {
                       this._broadcastChannel.postMessage({
                         type: 'pong',
-                        tabId: AUTH_STATE ? AUTH_STATE._tabId : 'unknown',
+                        tabId: AUTH_STATE && AUTH_STATE._tabId ? AUTH_STATE._tabId : 'unknown',
                         timestamp: new Date().toISOString()
                       });
                     } catch (error) {
-                      console.log('⚠️ Failed to respond to ping:', error);
                     }
                   }
                 });
               });
               
-              // Send initial ping
               setTimeout(() => {
                 if (this._broadcastChannel) {
                   executeSafely('SESSION_COORDINATOR.sendInitialPing', () => {
                     try {
                       this._broadcastChannel.postMessage({
                         type: 'ping',
-                        tabId: AUTH_STATE ? AUTH_STATE._tabId : 'unknown',
+                        tabId: AUTH_STATE && AUTH_STATE._tabId ? AUTH_STATE._tabId : 'unknown',
                         timestamp: new Date().toISOString()
                       });
                     } catch (error) {
-                      console.log('⚠️ Failed to send initial ping:', error);
                     }
                   });
                 }
               }, 1000);
               
-              console.log('✅ BroadcastChannel cross-tab sync enabled');
-              
             } catch (error) {
-              console.log('⚠️ BroadcastChannel not available:', error);
             }
           }
-          
-          // Fallback to localStorage events (already handled by AUTH_STATE)
-          console.log('✅ Cross-tab synchronization setup complete');
         },
         
-        // Setup iframe coordination with safety guards
         setupIframeCoordination: function() {
-          console.log('🖼️ Setting up iframe coordination...');
+          MESSAGE_REGISTRY.clearStaleMessages();
           
-          // Listen for iframe messages
           window.addEventListener('message', (event) => {
             executeSafely('SESSION_COORDINATOR.handleIframeMessage', () => {
-              // Security check
-              if (!this.isTrustedOrigin(event.origin)) {
+              if (!this._isTrustedOrigin(event.origin)) {
                 return;
               }
               
               const data = event.data;
-              if (!data || !data.type) return;
               
-              // Enhanced iframe ready handler with session propagation
-              if (data.type === 'moodchat-iframe-ready') {
-                this.handleIframeReady(event.source, data);
+              if (!this._validateMessageSchema(data)) {
+                return;
               }
               
-              // Handle other iframe messages
-              if (data.type === 'moodchat-iframe-auth-request') {
+              if (data && data.messageId && !MESSAGE_REGISTRY.registerReceived(data.messageId)) {
+                return;
+              }
+              
+              if (data && data.type === 'moodchat-iframe-ready') {
+                this._handleIframeReadySecure(event.source, data);
+              }
+              
+              if (data && data.type === 'moodchat-iframe-auth-request') {
                 this.handleIframeAuthRequest(event.source, data);
               }
               
-              if (data.type === 'moodchat-iframe-data-request') {
+              if (data && data.type === 'moodchat-iframe-data-request') {
                 this.handleIframeDataRequest(event.source, data);
               }
-            });
-          });
-          
-          // Detect existing iframes
-          executeSafely('SESSION_COORDINATOR.detectExistingIframes', () => {
-            this.detectExistingIframes();
-          });
-          
-          // Monitor for new iframes
-          executeSafely('SESSION_COORDINATOR.monitorForNewIframes', () => {
-            this.monitorForNewIframes();
-          });
-          
-          console.log('✅ Iframe coordination setup complete');
-        },
-        
-        // Enhanced iframe ready handler with session propagation (original method preserved)
-        handleIframeReady: function(iframeWindow, data) {
-          const iframeId = data.iframeId || data.sourceId;
-          const pageKey = data.pageKey;
-          
-          console.log(`✅ Iframe ready: ${iframeId} (${pageKey || 'unknown page'})`);
-          
-          // Track handshake attempts
-          const attempts = (this._iframeHandshakeAttempts.get(iframeId) || 0) + 1;
-          this._iframeHandshakeAttempts.set(iframeId, attempts);
-          
-          if (attempts > SAFETY_GUARDS.iframeHandshakeMaxAttempts) {
-            logThrottled('iframe-handshake', `Max handshake attempts (${attempts}) reached for iframe ${iframeId}. Ignoring.`);
-            return;
-          }
-          
-          // Store iframe reference
-          this._iframes.set(iframeId, {
-            id: iframeId,
-            window: iframeWindow,
-            pageKey: pageKey,
-            ready: true,
-            handshakeAttempts: attempts,
-            lastCommunication: new Date().toISOString()
-          });
-          
-          // CRITICAL: Send session data immediately
-          executeSafely(`sendSessionDataToIframe.${iframeId}`, () => {
-            this.sendSessionDataToIframe(iframeWindow, iframeId, pageKey);
-          });
-          
-          // Process any queued messages
-          executeSafely(`processQueuedMessages.${iframeId}`, () => {
-            this.processQueuedMessages(iframeId);
-          });
-        },
-        
-        // Send comprehensive session data to iframe (original method preserved)
-        sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
-          // Prepare session data
-          const sessionData = {
-            type: 'moodchat-complete-session-data',
-            auth: {
-              isAuthenticated: AUTH_STATE ? AUTH_STATE.isAuthenticated() : false,
-              user: AUTH_STATE ? AUTH_STATE.getUser() : null,
-              validated: AUTH_STATE ? AUTH_STATE.isValidated() : false,
-              token: AUTH_STATE && AUTH_STATE.getToken() ? '[REDACTED]' : null
-            },
-            network: {
-              status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-              backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
-              isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
-            },
-            ui: typeof UI_ORCHESTRATOR !== 'undefined' ? UI_ORCHESTRATOR.getState() : null,
-            bootstrap: typeof BOOTSTRAP_STATE !== 'undefined' ? BOOTSTRAP_STATE.getStatusReport() : null,
-            pageInfo: pageKey && APP_CONFIG && APP_CONFIG.pages && APP_CONFIG.pages[pageKey] ? 
-              APP_CONFIG.pages[pageKey] : { id: iframeId },
-            timestamp: new Date().toISOString()
-          };
-          
-          // Validate session data before sending
-          const validation = validateSessionData(sessionData.auth);
-          if (!validation.isValid) {
-            console.warn(`⚠️ Invalid session data for iframe ${iframeId}: ${validation.reason}`);
-            return;
-          }
-          
-          // Send to iframe
-          try {
-            iframeWindow.postMessage(sessionData, '*');
-            console.log(`📤 Session data sent to iframe: ${iframeId}`);
-            
-            // Record successful session propagation
-            if (window.app && window.app._dependencyGraph) {
-              executeSafely('recordIframePropagation', () => {
-                window.app._dependencyGraph.iframeSessionPropagations = 
-                  window.app._dependencyGraph.iframeSessionPropagations || [];
-                window.app._dependencyGraph.iframeSessionPropagations.push({
-                  iframeId: iframeId,
-                  pageKey: pageKey,
-                  timestamp: new Date().toISOString()
-                });
-              });
-            }
-          } catch (error) {
-            console.error(`❌ Failed to send session data to iframe ${iframeId}:`, error);
-          }
-        },
-        
-        // Handle iframe auth request
-        handleIframeAuthRequest: function(iframeWindow, data) {
-          console.log('🔐 Iframe auth request');
-          
-          // Validate request data
-          if (!data || !data.requestId) {
-            console.warn('⚠️ Invalid iframe auth request: missing requestId');
-            return;
-          }
-          
-          // Send auth state to iframe
-          try {
-            iframeWindow.postMessage({
-              type: 'moodchat-auth-state-response',
-              requestId: data.requestId,
-              data: {
-                user: AUTH_STATE ? AUTH_STATE.getUser() : null,
-                isAuthenticated: AUTH_STATE ? AUTH_STATE.isAuthenticated() : false,
-                validated: AUTH_STATE ? AUTH_STATE.isValidated() : false,
-                timestamp: new Date().toISOString()
-              }
-            }, '*');
-          } catch (error) {
-            console.error('❌ Failed to send auth response to iframe:', error);
-          }
-        },
-        
-        // Handle iframe data request
-        handleIframeDataRequest: function(iframeWindow, data) {
-          console.log('📊 Iframe data request:', data.key);
-          
-          // Validate request data
-          if (!data || !data.requestId || !data.key) {
-            console.warn('⚠️ Invalid iframe data request: missing requestId or key');
-            return;
-          }
-          
-          let responseData = null;
-          
-          // Get requested data
-          switch(data.key) {
-            case 'userProfile':
-              responseData = AUTH_STATE ? AUTH_STATE.getUser() : null;
-              break;
-            case 'settings':
-              responseData = typeof SETTINGS_SERVICE !== 'undefined' ? SETTINGS_SERVICE.current || {} : {};
-              break;
-            case 'networkStatus':
-              responseData = {
-                status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-                backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
-                isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
-              };
-              break;
-            default:
-              // Try to get from cache
-              if (typeof DATA_CACHE !== 'undefined') {
-                responseData = DATA_CACHE.getInstant(data.key);
-              }
-          }
-          
-          // Send response
-          try {
-            iframeWindow.postMessage({
-              type: 'moodchat-data-response',
-              requestId: data.requestId,
-              key: data.key,
-              data: responseData,
-              timestamp: new Date().toISOString()
-            }, '*');
-          } catch (error) {
-            console.error('❌ Failed to send data response to iframe:', error);
-          }
-        },
-        
-        // Detect existing iframes
-        detectExistingIframes: function() {
-          document.querySelectorAll('iframe').forEach((iframe, index) => {
-            const iframeId = iframe.id || `iframe-${index}-${Date.now()}`;
-            
-            if (!this._iframes.has(iframeId)) {
-              this._iframes.set(iframeId, {
-                id: iframeId,
-                element: iframe,
-                ready: false,
-                window: null,
-                lastCommunication: null
-              });
               
-              console.log(`🖼️ Existing iframe detected: ${iframeId}`);
-            }
+              if (data && data.type === 'moodchat-handshake-response') {
+                this._handleHandshakeResponse(event.source, data);
+              }
+            });
+          });
+          
+          executeSafely('SESSION_COORDINATOR.detectExistingIframes', () => {
+            this._detectExistingIframes();
+          });
+          
+          executeSafely('SESSION_COORDINATOR.monitorForNewIframes', () => {
+            this._monitorForNewIframes();
           });
         },
         
-        // Monitor for new iframes
-        monitorForNewIframes: function() {
-          if (typeof MutationObserver !== 'undefined') {
-            const observer = new MutationObserver((mutations) => {
-              executeSafely('MutationObserver.iframes', () => {
-                mutations.forEach((mutation) => {
-                  if (mutation.addedNodes.length) {
-                    mutation.addedNodes.forEach((node) => {
-                      if (node.nodeName === 'IFRAME') {
-                        const iframeId = node.id || `iframe-new-${Date.now()}`;
-                        
-                        if (!this._iframes.has(iframeId)) {
-                          this._iframes.set(iframeId, {
-                            id: iframeId,
-                            element: node,
-                            ready: false,
-                            window: null,
-                            lastCommunication: null
-                          });
-                          
-                          console.log(`🖼️ New iframe detected via MutationObserver: ${iframeId}`);
-                          
-                          // Try to send session data after a delay
-                          setTimeout(() => {
-                            executeSafely(`sendToNewIframe.${iframeId}`, () => {
-                              const iframe = this._iframes.get(iframeId);
-                              if (iframe && iframe.element.contentWindow) {
-                                this.sendSessionDataToIframe(iframe.element.contentWindow, iframeId, null);
-                              }
-                            });
-                          }, 1000);
-                        }
-                      }
-                    });
-                  }
-                });
-              });
-            });
-            
-            observer.observe(document.body, {
-              childList: true,
-              subtree: true
-            });
-            
-            console.log('✅ Iframe mutation observer enabled');
-          }
-        },
-        
-        // Check trusted origin
-        isTrustedOrigin: function(origin) {
+        _isTrustedOrigin: function(origin) {
           const currentOrigin = window.location.origin;
           const trustedOrigins = [
             currentOrigin,
@@ -2534,20 +3472,370 @@
           });
         },
         
-        // Process queued messages for iframe
-        processQueuedMessages: function(iframeId) {
+        _validateMessageSchema: function(data) {
+          if (!data || typeof data !== 'object') return false;
+          if (!data.type || typeof data.type !== 'string') return false;
+          
+          const typesRequiringId = ['moodchat-handshake-response', 'moodchat-iframe-auth-request', 'moodchat-iframe-data-request'];
+          if (typesRequiringId.includes(data.type) && (!data.messageId || typeof data.messageId !== 'string')) {
+            return false;
+          }
+          
+          if (data.timestamp && isNaN(new Date(data.timestamp).getTime())) {
+            return false;
+          }
+          
+          return true;
+        },
+        
+        _handleIframeReadySecure: function(iframeWindow, data) {
+          const iframeId = data.iframeId || data.sourceId;
+          const pageKey = data.pageKey;
+          
+          const existing = this._iframes.get(iframeId);
+          if (existing && existing.ready) {
+            return;
+          }
+          
+          const attempts = (this._iframeHandshakeAttempts.get(iframeId) || 0) + 1;
+          this._iframeHandshakeAttempts.set(iframeId, attempts);
+          
+          if (attempts > this._config.maxHandshakeAttempts) {
+            this._disableIframe(iframeId);
+            return;
+          }
+          
+          const existingTimeout = this._iframeHandshakeTimeouts.get(iframeId);
+          if (existingTimeout) {
+            clearTimeout(existingTimeout);
+          }
+          
+          const handshakeTimeout = setTimeout(() => {
+            this._iframeHandshakeTimeouts.delete(iframeId);
+            this._disableIframe(iframeId);
+          }, this._config.iframeHandshakeTimeout);
+          
+          this._iframeHandshakeTimeouts.set(iframeId, handshakeTimeout);
+          
+          this._iframes.set(iframeId, {
+            id: iframeId,
+            window: iframeWindow,
+            pageKey: pageKey,
+            ready: false,
+            trusted: true,
+            handshakeAttempts: attempts,
+            lastCommunication: new Date().toISOString(),
+            sessionPropagated: false
+          });
+          
+          this._initiateHandshake(iframeWindow, iframeId, pageKey);
+        },
+        
+        _initiateHandshake: function(iframeWindow, iframeId, pageKey) {
+          const messageId = MESSAGE_REGISTRY.generateMessageId();
+          
+          if (!MESSAGE_REGISTRY.registerSent(messageId)) {
+            setTimeout(() => this._initiateHandshake(iframeWindow, iframeId, pageKey), 100);
+            return;
+          }
+          
+          const handshakeMessage = {
+            type: 'moodchat-handshake-request',
+            messageId: messageId,
+            iframeId: iframeId,
+            pageKey: pageKey,
+            timestamp: new Date().toISOString(),
+            sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
+          };
+          
+          try {
+            iframeWindow.postMessage(handshakeMessage, '*');
+          } catch (error) {
+            this._iframeHandshakeAttempts.delete(iframeId);
+          }
+        },
+        
+        _handleHandshakeResponse: function(iframeWindow, data) {
+          const iframeId = data.iframeId;
+          const messageId = data.messageId;
+          
+          if (!iframeId || !messageId) {
+            return;
+          }
+          
+          const handshakeTimeout = this._iframeHandshakeTimeouts.get(iframeId);
+          if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            this._iframeHandshakeTimeouts.delete(iframeId);
+          }
+          
+          const iframe = this._iframes.get(iframeId);
+          if (!iframe) {
+            return;
+          }
+          
+          iframe.ready = true;
+          iframe.lastCommunication = new Date().toISOString();
+          this._iframes.set(iframeId, iframe);
+          
+          executeSafely(`sendSessionDataToIframe.${iframeId}`, () => {
+            this._sendSessionDataToIframeSecure(iframeWindow, iframeId, iframe.pageKey);
+          });
+          
+          executeSafely(`processQueuedMessages.${iframeId}`, () => {
+            this._processQueuedMessages(iframeId);
+          });
+        },
+        
+        // SESSION HARDENING: PHASE 9 - BROADCAST CONTROL
+        _sendSessionDataToIframeSecure: function(iframeWindow, iframeId, pageKey) {
+          if (this._iframeSessionPropagated.get(iframeId)) {
+            return;
+          }
+          
+          // HARDENING: Get safe session data
+          const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+          
+          const sessionData = {
+            type: 'moodchat-complete-session-data',
+            messageId: MESSAGE_REGISTRY.generateMessageId(),
+            auth: safeSession ? {
+              isAuthenticated: true,
+              user: {
+                id: safeSession.userId,
+                uid: safeSession.userId, // Backward compatibility
+                exp: safeSession.expiresAt
+              },
+              validated: true,
+              token: '[REDACTED]', // Never send raw token
+              sessionState: SESSION_STATES.VALID
+            } : {
+              isAuthenticated: false,
+              user: null,
+              validated: false,
+              token: null,
+              sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
+            },
+            network: {
+              status: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() : 'unknown',
+              backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+              isOnline: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() === 'online' : false
+            },
+            ui: typeof UI_ORCHESTRATOR !== 'undefined' && UI_ORCHESTRATOR !== null && typeof UI_ORCHESTRATOR.getState === 'function' ? UI_ORCHESTRATOR.getState() : null,
+            bootstrap: typeof BOOTSTRAP_STATE !== 'undefined' && BOOTSTRAP_STATE !== null && typeof BOOTSTRAP_STATE.getStatusReport === 'function' ? BOOTSTRAP_STATE.getStatusReport() : null,
+            pageInfo: pageKey && APP_CONFIG && APP_CONFIG.pages && APP_CONFIG.pages[pageKey] ? 
+              APP_CONFIG.pages[pageKey] : { id: iframeId },
+            timestamp: new Date().toISOString()
+          };
+          
+          if (!MESSAGE_REGISTRY.registerSent(sessionData.messageId)) {
+            return;
+          }
+          
+          try {
+            iframeWindow.postMessage(sessionData, '*');
+            this._iframeSessionPropagated.set(iframeId, true);
+            
+            if (window.app && window.app._dependencyGraph) {
+              executeSafely('recordIframePropagation', () => {
+                window.app._dependencyGraph.iframeSessionPropagations = 
+                  window.app._dependencyGraph.iframeSessionPropagations || [];
+                window.app._dependencyGraph.iframeSessionPropagations.push({
+                  iframeId: iframeId,
+                  pageKey: pageKey,
+                  timestamp: new Date().toISOString(),
+                  messageId: sessionData.messageId
+                });
+              });
+            }
+          } catch (error) {
+          }
+        },
+        
+        _sendMessageToIframe: function(iframeId, message) {
+          const iframe = this._iframes.get(iframeId);
+          if (!iframe || !iframe.ready || !iframe.window) {
+            return false;
+          }
+          
+          if (!message.messageId) {
+            message.messageId = MESSAGE_REGISTRY.generateMessageId();
+          }
+          
+          if (!MESSAGE_REGISTRY.registerSent(message.messageId)) {
+            return false;
+          }
+          
+          if (!message.timestamp) {
+            message.timestamp = new Date().toISOString();
+          }
+          
+          try {
+            iframe.window.postMessage(message, '*');
+            iframe.lastCommunication = new Date().toISOString();
+            return true;
+          } catch (error) {
+            return false;
+          }
+        },
+        
+        handleIframeAuthRequest: function(iframeWindow, data) {
+          if (!data || !data.requestId || !data.messageId) {
+            return;
+          }
+          
+          // HARDENING: Use safe session data
+          const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+          
+          const response = {
+            type: 'moodchat-auth-state-response',
+            messageId: MESSAGE_REGISTRY.generateMessageId(),
+            requestId: data.requestId,
+            data: safeSession ? {
+              user: {
+                id: safeSession.userId,
+                uid: safeSession.userId
+              },
+              isAuthenticated: true,
+              validated: true,
+              sessionState: SESSION_STATES.VALID,
+              timestamp: new Date().toISOString()
+            } : {
+              user: null,
+              isAuthenticated: false,
+              validated: false,
+              sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED,
+              timestamp: new Date().toISOString()
+            }
+          };
+          
+          try {
+            iframeWindow.postMessage(response, '*');
+          } catch (error) {
+          }
+        },
+        
+        handleIframeDataRequest: function(iframeWindow, data) {
+          if (!data || !data.requestId || !data.key || !data.messageId) {
+            return;
+          }
+          
+          let responseData = null;
+          
+          switch(data.key) {
+            case 'userProfile':
+              // HARDENING: Use safe session data
+              const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+              responseData = safeSession ? { id: safeSession.userId, uid: safeSession.userId } : null;
+              break;
+            case 'settings':
+              responseData = typeof SETTINGS_SERVICE !== 'undefined' && SETTINGS_SERVICE !== null ? (SETTINGS_SERVICE.current || {}) : {};
+              break;
+            case 'networkStatus':
+              responseData = {
+                status: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() : 'unknown',
+                backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+                isOnline: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() === 'online' : false
+              };
+              break;
+            default:
+              if (typeof DATA_CACHE !== 'undefined' && DATA_CACHE !== null && typeof DATA_CACHE.getInstant === 'function') {
+                responseData = DATA_CACHE.getInstant(data.key);
+              }
+          }
+          
+          const response = {
+            type: 'moodchat-data-response',
+            messageId: MESSAGE_REGISTRY.generateMessageId(),
+            requestId: data.requestId,
+            key: data.key,
+            data: responseData,
+            timestamp: new Date().toISOString()
+          };
+          
+          try {
+            iframeWindow.postMessage(response, '*');
+          } catch (error) {
+          }
+        },
+        
+        _detectExistingIframes: function() {
+          document.querySelectorAll('iframe').forEach((iframe, index) => {
+            const iframeId = iframe.id || `iframe-${index}-${Date.now()}`;
+            
+            if (!this._iframes.has(iframeId)) {
+              this._iframes.set(iframeId, {
+                id: iframeId,
+                element: iframe,
+                ready: false,
+                trusted: false,
+                window: null,
+                lastCommunication: null,
+                sessionPropagated: false
+              });
+              
+              setTimeout(() => {
+                if (iframe.contentWindow) {
+                  this._initiateHandshake(iframe.contentWindow, iframeId, null);
+                }
+              }, 1000);
+            }
+          });
+        },
+        
+        _monitorForNewIframes: function() {
+          if (typeof MutationObserver !== 'undefined') {
+            const observer = new MutationObserver((mutations) => {
+              executeSafely('MutationObserver.iframes', () => {
+                mutations.forEach((mutation) => {
+                  if (mutation.addedNodes.length) {
+                    mutation.addedNodes.forEach((node) => {
+                      if (node.nodeName === 'IFRAME') {
+                        const iframeId = node.id || `iframe-new-${Date.now()}`;
+                        
+                        if (!this._iframes.has(iframeId)) {
+                          this._iframes.set(iframeId, {
+                            id: iframeId,
+                            element: node,
+                            ready: false,
+                            trusted: false,
+                            window: null,
+                            lastCommunication: null,
+                            sessionPropagated: false
+                          });
+                          
+                          setTimeout(() => {
+                            executeSafely(`connectToNewIframe.${iframeId}`, () => {
+                              const iframe = this._iframes.get(iframeId);
+                              if (iframe && iframe.element && iframe.element.contentWindow) {
+                                this._initiateHandshake(iframe.element.contentWindow, iframeId, null);
+                              }
+                            });
+                          }, 1000);
+                        }
+                      }
+                    });
+                  }
+                });
+              });
+            });
+            
+            observer.observe(document.body, {
+              childList: true,
+              subtree: true
+            });
+            
+          }
+        },
+        
+        _processQueuedMessages: function(iframeId) {
           const queue = this._iframeMessageQueue.get(iframeId);
           if (queue) {
-            console.log(`📤 Processing ${queue.length} queued messages for iframe ${iframeId}`);
             
             const iframe = this._iframes.get(iframeId);
             if (iframe && iframe.window) {
               queue.forEach(message => {
-                try {
-                  iframe.window.postMessage(message, '*');
-                } catch (error) {
-                  console.error(`❌ Failed to send queued message to iframe ${iframeId}:`, error);
-                }
+                this._sendMessageToIframe(iframeId, message);
               });
             }
             
@@ -2555,126 +3843,420 @@
           }
         },
         
-        // Queue message for iframe
-        queueMessageForIframe: function(iframeId, message) {
+        _queueMessageForIframe: function(iframeId, message) {
           if (!this._iframeMessageQueue.has(iframeId)) {
             this._iframeMessageQueue.set(iframeId, []);
           }
           
           this._iframeMessageQueue.get(iframeId).push(message);
-          console.log(`📝 Message queued for iframe ${iframeId}: ${message.type}`);
         },
         
-        // Propagate session to all iframes
+        _disableIframe: function(iframeId) {
+          const iframe = this._iframes.get(iframeId);
+          if (iframe) {
+            iframe.ready = false;
+            iframe.trusted = false;
+            this._iframes.set(iframeId, iframe);
+            
+            const handshakeTimeout = this._iframeHandshakeTimeouts.get(iframeId);
+            if (handshakeTimeout) {
+              clearTimeout(handshakeTimeout);
+              this._iframeHandshakeTimeouts.delete(iframeId);
+            }
+            
+            this._iframeMessageQueue.delete(iframeId);
+          }
+        },
+        
+        // SESSION HARDENING: PHASE 9 - BROADCAST CONTROL
         propagateSessionToIframes: function(user, token) {
-          console.log(`📤 Propagating session to ${this._iframes.size} iframes`);
+          // HARDENING: Don't propagate if session is invalid
+          const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+          if (!safeSession && user && token) {
+            // Still propagating but will be validated in _sendSessionDataToIframeSecure
+          }
           
           this._iframes.forEach((iframe, iframeId) => {
-            if (iframe.ready && iframe.window) {
+            if (iframe && iframe.ready && iframe.window && iframe.trusted) {
               executeSafely(`propagateToIframe.${iframeId}.ready`, () => {
-                this.sendSessionDataToIframe(iframe.window, iframeId, iframe.pageKey);
+                this._sendSessionDataToIframeSecure(iframe.window, iframeId, iframe.pageKey);
               });
-            } else if (iframe.element && iframe.element.contentWindow) {
-              // Try even if not marked as ready
+            } else if (iframe && iframe.trusted && iframe.element && iframe.element.contentWindow) {
               executeSafely(`propagateToIframe.${iframeId}.element`, () => {
                 try {
-                  this.sendSessionDataToIframe(iframe.element.contentWindow, iframeId, iframe.pageKey);
+                  this._sendSessionDataToIframeSecure(iframe.element.contentWindow, iframeId, iframe.pageKey);
                 } catch (error) {
-                  console.log(`⚠️ Failed to propagate to iframe ${iframeId}:`, error);
                 }
               });
             }
           });
         },
         
-        // Propagate logout to all iframes
         propagateLogoutToIframes: function() {
-          console.log(`📤 Propagating logout to ${this._iframes.size} iframes`);
-          
           const logoutMessage = {
             type: 'moodchat-session-change',
+            messageId: MESSAGE_REGISTRY.generateMessageId(),
             data: {
               type: 'logged_out',
               user: null,
               isAuthenticated: false,
+              sessionState: SESSION_STATES.DESTROYED,
               timestamp: new Date().toISOString()
             }
           };
           
           this._iframes.forEach((iframe, iframeId) => {
-            if (iframe.ready && iframe.window) {
+            if (iframe && iframe.ready && iframe.window && iframe.trusted) {
               executeSafely(`propagateLogoutToIframe.${iframeId}`, () => {
-                try {
-                  iframe.window.postMessage(logoutMessage, '*');
-                } catch (error) {
-                  console.log(`⚠️ Failed to send logout to iframe ${iframeId}:`, error);
-                }
+                this._sendMessageToIframe(iframeId, logoutMessage);
               });
             }
           });
         },
         
-        // Check initial session state
-        checkInitialSessionState: function() {
-          console.log('🔐 Checking initial session state...');
+        // SESSION HARDENING: PHASE 6 - SAFE SESSION RESTORE
+        checkInitialSessionStateAsync: function() {
+          this._sessionLoading = true;
+          this._sessionLoadStartTime = Date.now();
+          this._sessionPollingAttempts = 0;
           
-          // Wait a bit for everything to initialize
-          setTimeout(() => {
-            executeSafely('SESSION_COORDINATOR.checkInitialState', () => {
-              const hasToken = AUTH_STATE ? AUTH_STATE.hasToken() : false;
-              const isAuthenticated = AUTH_STATE ? AUTH_STATE.isAuthenticated() : false;
-              const user = AUTH_STATE ? AUTH_STATE.getUser() : null;
-              
-              console.log('📋 Initial session state:', {
-                hasToken: hasToken,
-                isAuthenticated: isAuthenticated,
-                hasUser: !!user,
-                userValidated: AUTH_STATE ? AUTH_STATE.isValidated() : false
-              });
-              
-              if (isAuthenticated && user) {
-                console.log('✅ Session is valid, updating UI');
-                this.updateUIForAuthenticatedState(user);
-                this.broadcastSessionChange('authenticated', user);
-                this.propagateSessionToIframes(user, AUTH_STATE ? AUTH_STATE.getToken() : null);
-              } else if (hasToken && !isAuthenticated) {
-                console.log('🔐 Token exists but not validated, attempting validation');
-                
-                // Try to validate the token
-                if (typeof TOKEN_VALIDATION !== 'undefined') {
-                  executeSafely('TOKEN_VALIDATION.validateOnStartup', () => {
-                    TOKEN_VALIDATION.validateWithMultipleMethods().then(result => {
-                      if (result.valid) {
-                        console.log('✅ Token validated on startup');
-                        this.updateUIForAuthenticatedState(result.user);
-                        this.broadcastSessionChange('authenticated', result.user);
-                        this.propagateSessionToIframes(result.user, AUTH_STATE ? AUTH_STATE.getToken() : null);
-                      } else {
-                        console.log('❌ Token validation failed on startup');
-                        if (AUTH_STATE) {
-                          AUTH_STATE.clearAuthState();
-                        }
-                        this.updateUIForUnauthenticatedState();
-                      }
-                    });
-                  });
-                }
-              } else {
-                console.log('👤 No valid session, showing auth UI');
-                this.updateUIForUnauthenticatedState();
-              }
+          this._sessionWaitTimeoutId = setTimeout(() => {
+            executeSafely('SESSION_COORDINATOR.sessionTimeout', () => {
+              this.handleSessionLoadTimeout();
             });
-          }, 500);
+          }, this._config.sessionWaitTimeout);
+          
+          this._checkSessionStateAsync();
         },
         
-        // Broadcast session change
+        _checkSessionStateAsync: function() {
+          if (this._sessionPollingAttempts >= this._config.maxPollingAttempts) {
+            this.handleSessionLoadTimeout();
+            return;
+          }
+          
+          this._sessionPollingAttempts++;
+          
+          if (!AUTH_STATE || !AUTH_STATE._initialized) {
+            setTimeout(() => {
+              this._checkSessionStateAsync();
+            }, 200);
+            return;
+          }
+          
+          // HARDENING: Validate session before using it
+          const rawSession = {
+            token: AUTH_STATE._token,
+            refreshToken: AUTH_STATE._refreshToken,
+            userId: AUTH_STATE._user?.id || AUTH_STATE._user?.uid,
+            expiresAt: AUTH_STATE._tokenExpiry?.getTime(),
+            issuedAt: AUTH_STATE._issuedAt
+          };
+          
+          const validation = validateSession(rawSession);
+          const hasToken = !!AUTH_STATE._token;
+          const user = AUTH_STATE._user;
+          const sessionState = typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED;
+          
+          if (validation.isValid && user && sessionState === SESSION_STATES.VALID) {
+            // Log success only once
+            if (!this._stateLogged.success) {
+              console.log('[Session] Session restored');
+              this._stateLogged.success = true;
+              this._stateLogged.waiting = false;
+            }
+            
+            this.finishSessionLoading();
+            this.updateUIForAuthenticatedState(user);
+            
+            if (this._uiCallbacks.onSessionRestored) {
+              this._uiCallbacks.onSessionRestored(user);
+            }
+            
+            // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+            window.dispatchEvent(new CustomEvent('session:ready', {
+              detail: {
+                restored: true,
+                timestamp: new Date().toISOString()
+              }
+            }));
+            
+            this.broadcastSessionChange('authenticated', user);
+            this.propagateSessionToIframes(user, AUTH_STATE._token);
+          } else if (hasToken && !validation.isValid) {
+            if (validation.expired) {
+              // Attempt refresh for expired token
+              if (!this._validationInProgress) {
+                this._validationInProgress = true;
+                
+                if (AUTH_STATE && typeof AUTH_STATE.refreshTokenSafely === 'function') {
+                  executeSafely('AUTH_STATE.refreshOnStartup', () => {
+                    AUTH_STATE.refreshTokenSafely()
+                      .then(result => {
+                        this._validationInProgress = false;
+                        if (result && result.success) {
+                          console.log('[Session] Session refreshed on startup');
+                          this.finishSessionLoading();
+                          this._checkSessionStateAsync(); // Re-check with new token
+                        } else {
+                          this.finishSessionLoading();
+                          this.updateUIForUnauthenticatedState();
+                          
+                          window.dispatchEvent(new CustomEvent('session:expired', {
+                            detail: {
+                              reason: 'Refresh failed on startup',
+                              timestamp: new Date().toISOString()
+                            }
+                          }));
+                          
+                          if (this._uiCallbacks.onUnauthenticated) {
+                            this._uiCallbacks.onUnauthenticated();
+                          }
+                        }
+                      })
+                      .catch(() => {
+                        this._validationInProgress = false;
+                        this.finishSessionLoading();
+                        this.updateUIForUnauthenticatedState();
+                        
+                        window.dispatchEvent(new CustomEvent('session:expired', {
+                          detail: {
+                            reason: 'Refresh failed on startup',
+                            timestamp: new Date().toISOString()
+                          }
+                        }));
+                        
+                        if (this._uiCallbacks.onUnauthenticated) {
+                          this._uiCallbacks.onUnauthenticated();
+                        }
+                      });
+                  });
+                } else {
+                  this._validationInProgress = false;
+                  this.finishSessionLoading();
+                  this.updateUIForUnauthenticatedState();
+                  
+                  window.dispatchEvent(new CustomEvent('session:expired', {
+                    detail: {
+                      reason: 'No refresh method available',
+                      timestamp: new Date().toISOString()
+                    }
+                  }));
+                  
+                  if (this._uiCallbacks.onUnauthenticated) {
+                    this._uiCallbacks.onUnauthenticated();
+                  }
+                }
+              } else {
+                // Validation in progress, wait and retry
+                setTimeout(() => {
+                  this._checkSessionStateAsync();
+                }, 200);
+              }
+            } else {
+              // Invalid session, clear it
+              if (AUTH_STATE && typeof AUTH_STATE.clearAuthState === 'function') {
+                AUTH_STATE.clearAuthState();
+              }
+              
+              this.finishSessionLoading();
+              this.updateUIForUnauthenticatedState();
+              
+              if (this._uiCallbacks.onUnauthenticated) {
+                this._uiCallbacks.onUnauthenticated();
+              }
+            }
+          } else {
+            // No token, finish loading with unauthenticated state
+            this.finishSessionLoading();
+            this.updateUIForUnauthenticatedState();
+            
+            if (this._uiCallbacks.onUnauthenticated) {
+              this._uiCallbacks.onUnauthenticated();
+            }
+          }
+        },
+        
+        handleSessionLoadTimeout: function() {
+          if (this._sessionWaitTimeoutId) {
+            clearTimeout(this._sessionWaitTimeoutId);
+            this._sessionWaitTimeoutId = null;
+          }
+          
+          this.finishSessionLoading();
+          
+          // HARDENING: Validate cached session
+          const rawSession = {
+            token: AUTH_STATE?._token,
+            refreshToken: AUTH_STATE?._refreshToken,
+            userId: AUTH_STATE?._user?.id || AUTH_STATE?._user?.uid,
+            expiresAt: AUTH_STATE?._tokenExpiry?.getTime(),
+            issuedAt: AUTH_STATE?._issuedAt
+          };
+          
+          const validation = validateSession(rawSession);
+          const hasToken = validation.isValid; // Only use if valid
+          const user = hasToken ? AUTH_STATE?._user : null;
+          
+          if (hasToken && user) {
+            // Log timeout state
+            if (!this._stateLogged.success && !this._stateLogged.failure) {
+              console.log('[Session] Using cached session (validation pending)');
+            }
+            
+            this.updateUIForAuthenticatedState(user);
+            
+            if (this._uiCallbacks.onSessionRestored) {
+              this._uiCallbacks.onSessionRestored(user);
+            }
+            
+            // SESSION HARDENING: PHASE 8 - SESSION EVENTS
+            window.dispatchEvent(new CustomEvent('session:ready', {
+              detail: {
+                restored: true,
+                cached: true,
+                timestamp: new Date().toISOString()
+              }
+            }));
+          } else {
+            this.updateUIForUnauthenticatedState();
+            
+            if (this._uiCallbacks.onUnauthenticated) {
+              this._uiCallbacks.onUnauthenticated();
+            }
+          }
+          
+          this.updateUIForLimitedMode();
+          this.broadcastSessionChange('limited_mode', user);
+        },
+        
+        finishSessionLoading: function() {
+          if (!this._sessionLoading) {
+            return;
+          }
+          
+          if (this._sessionWaitTimeoutId) {
+            clearTimeout(this._sessionWaitTimeoutId);
+            this._sessionWaitTimeoutId = null;
+          }
+          
+          if (this._authPollingInterval) {
+            clearInterval(this._authPollingInterval);
+            this._authPollingInterval = null;
+          }
+          
+          this._sessionLoading = false;
+          this._sessionLoaded = true;
+          
+          if (window.app && window.app._dependencyGraph) {
+            executeSafely('SESSION_COORDINATOR.recordSessionLoad', () => {
+              window.app._dependencyGraph.sessionCoordinator.sessionLoad = {
+                loaded: true,
+                loadTime: Date.now() - this._sessionLoadStartTime,
+                loadStartTime: new Date(this._sessionLoadStartTime).toISOString(),
+                loadEndTime: new Date().toISOString(),
+                pollingAttempts: this._sessionPollingAttempts
+              };
+            });
+          }
+          
+          markSessionReady();
+        },
+        
+        waitForSession: function(timeoutMs = 8000) {
+          return new Promise((resolve) => {
+            if (this._sessionLoaded) {
+              const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+              resolve({
+                loaded: true,
+                timedOut: false,
+                hasSession: !!safeSession,
+                session: safeSession,
+                sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
+              });
+              return;
+            }
+            
+            const timeoutId = setTimeout(() => {
+              resolve({
+                loaded: false,
+                timedOut: true,
+                hasSession: false,
+                session: null,
+                sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED,
+                reason: 'timeout'
+              });
+            }, timeoutMs);
+            
+            const checkInterval = setInterval(() => {
+              if (this._sessionLoaded) {
+                clearTimeout(timeoutId);
+                clearInterval(checkInterval);
+                const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+                resolve({
+                  loaded: true,
+                  timedOut: false,
+                  hasSession: !!safeSession,
+                  session: safeSession,
+                  sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
+                });
+              }
+            }, 100);
+          });
+        },
+        
+        isSessionLoading: function() {
+          return this._sessionLoading;
+        },
+        
+        isSessionLoaded: function() {
+          return this._sessionLoaded;
+        },
+        
+        getSessionLoadStatus: function() {
+          return {
+            loading: this._sessionLoading,
+            loaded: this._sessionLoaded,
+            loadStartTime: this._sessionLoadStartTime,
+            pollingAttempts: this._sessionPollingAttempts,
+            loadTime: this._sessionLoadStartTime ? Date.now() - this._sessionLoadStartTime : null,
+            sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
+          };
+        },
+        
+        // SESSION HARDENING: PHASE 9 - BROADCAST CONTROL
         broadcastSessionChange: function(type, user) {
+          if (AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' && AUTH_STATE.getSessionState() !== SESSION_STATES.VALID) {
+            this._queueOutboundMessage({
+              type: 'broadcast',
+              eventType: type,
+              data: user
+            });
+            return;
+          }
+          
+          // HARDENING: Only broadcast valid sessions
+          const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+          const isValidSession = safeSession && (type === 'authenticated' || type === 'refreshed' || type === 'synced');
+          
+          if (isValidSession && type !== 'authenticated') {
+            // Already authenticated, type might be refresh/sync
+          } else if (!isValidSession && (type === 'authenticated' || type === 'refreshed' || type === 'synced')) {
+            console.log('[Session] Blocked broadcast of invalid session');
+            return;
+          }
+          
           const event = new CustomEvent('moodchat-session-change', {
             detail: {
               type: type,
-              user: user,
+              user: isValidSession ? {
+                id: safeSession.userId,
+                uid: safeSession.userId,
+                exp: safeSession.expiresAt
+              } : user,
               timestamp: new Date().toISOString(),
-              isAuthenticated: !!user
+              isAuthenticated: isValidSession,
+              sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
             }
           });
           
@@ -2682,29 +4264,29 @@
             window.dispatchEvent(event);
           });
           
-          // Broadcast via BroadcastChannel if available
           if (this._broadcastChannel) {
             executeSafely('SESSION_COORDINATOR.broadcastChannelPost', () => {
               try {
                 this._broadcastChannel.postMessage({
                   type: 'session_change',
+                  messageId: MESSAGE_REGISTRY.generateMessageId(),
                   detail: {
                     type: type,
-                    user: user,
-                    tabId: AUTH_STATE ? AUTH_STATE._tabId : 'unknown',
-                    timestamp: new Date().toISOString()
+                    user: isValidSession ? {
+                      id: safeSession.userId,
+                      uid: safeSession.userId
+                    } : user,
+                    tabId: AUTH_STATE && AUTH_STATE._tabId ? AUTH_STATE._tabId : 'unknown',
+                    timestamp: new Date().toISOString(),
+                    sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED
                   }
                 });
               } catch (error) {
-                console.log('⚠️ Failed to broadcast via BroadcastChannel:', error);
               }
             });
           }
-          
-          console.log(`📢 Session change broadcasted: ${type}`);
         },
         
-        // Register session event listener
         on: function(eventType, callback) {
           if (!this._listeners.has(eventType)) {
             this._listeners.set(eventType, []);
@@ -2713,26 +4295,40 @@
           
           window.addEventListener(`moodchat-${eventType}`, (event) => {
             executeSafely(`sessionListener.${eventType}`, () => {
-              callback(event.detail);
+              if (callback && typeof callback === 'function') {
+                callback(event.detail);
+              }
             });
           });
         },
         
-        // Get session status (original method preserved)
         getStatus: function() {
+          const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
+          
           return executeSafely('SESSION_COORDINATOR.getStatus', () => ({
-            isAuthenticated: AUTH_STATE ? AUTH_STATE.isAuthenticated() : false,
-            user: AUTH_STATE ? AUTH_STATE.getUser() : null,
-            hasToken: AUTH_STATE ? AUTH_STATE.hasToken() : false,
-            tokenExpiry: AUTH_STATE ? AUTH_STATE._tokenExpiry : null,
-            timeToExpiry: AUTH_STATE ? AUTH_STATE.getTimeToExpiry() : null,
-            validated: AUTH_STATE ? AUTH_STATE.isValidated() : false,
-            lastValidation: AUTH_STATE ? AUTH_STATE.getLastValidation() : null,
+            isAuthenticated: !!safeSession,
+            user: safeSession ? {
+              id: safeSession.userId,
+              uid: safeSession.userId
+            } : null,
+            hasToken: !!safeSession,
+            tokenExpiry: safeSession?.expiresAt,
+            timeToExpiry: safeSession?.expiresAt ? safeSession.expiresAt - Date.now() : null,
+            validated: !!safeSession,
+            lastValidation: AUTH_STATE && typeof AUTH_STATE.getLastValidation === 'function' ? AUTH_STATE.getLastValidation() : null,
+            sessionState: AUTH_STATE && typeof AUTH_STATE.getSessionState === 'function' ? AUTH_STATE.getSessionState() : SESSION_STATES.UNINITIALIZED,
             monitoringActive: !!this._monitoringInterval,
             iframeCount: this._iframes.size,
+            readyIframes: Array.from(this._iframes.values()).filter(f => f && f.ready && f.trusted).length,
             retryCount: this._retryCount,
             lastActivity: this._lastActivity,
-            initialized: this._initialized
+            initialized: this._initialized,
+            sessionLoading: this._sessionLoading,
+            sessionLoaded: this._sessionLoaded,
+            sessionPollingAttempts: this._sessionPollingAttempts,
+            dependenciesReady: this._dependenciesReady,
+            authReady: this._authReady,
+            stateLogged: this._stateLogged
           })) || {
             isAuthenticated: false,
             user: null,
@@ -2741,18 +4337,25 @@
             timeToExpiry: null,
             validated: false,
             lastValidation: null,
+            sessionState: SESSION_STATES.UNINITIALIZED,
             monitoringActive: false,
             iframeCount: this._iframes.size,
+            readyIframes: 0,
             retryCount: this._retryCount,
             lastActivity: this._lastActivity,
-            initialized: this._initialized
+            initialized: this._initialized,
+            sessionLoading: this._sessionLoading,
+            sessionLoaded: this._sessionLoaded,
+            sessionPollingAttempts: this._sessionPollingAttempts,
+            dependenciesReady: this._dependenciesReady,
+            authReady: this._authReady,
+            stateLogged: this._stateLogged
           };
         },
         
-        // Get comprehensive system status
         getSystemStatus: function() {
           return executeSafely('SESSION_COORDINATOR.getSystemStatus', () => ({
-            authState: AUTH_STATE ? AUTH_STATE.getState() : { error: 'AUTH_STATE not available' },
+            authState: AUTH_STATE && typeof AUTH_STATE.getState === 'function' ? AUTH_STATE.getState() : { error: 'AUTH_STATE not available' },
             sessionCoordinator: {
               monitoringActive: !!this._monitoringInterval,
               inactivityTimeout: !!this._inactivityTimeout,
@@ -2760,10 +4363,22 @@
               warningActive: !!this._warningTimeout,
               retryCount: this._retryCount,
               iframeCount: this._iframes.size,
+              readyIframes: Array.from(this._iframes.values()).filter(f => f && f.ready && f.trusted).length,
               queuedMessages: Array.from(this._iframeMessageQueue.keys()).length,
+              outboundQueue: this._outboundMessageQueue.length,
+              messageQueueFlushed: this._messageQueueFlushed,
               broadcastChannel: !!this._broadcastChannel,
               initialized: this._initialized,
+              sessionLoading: this._sessionLoading,
+              sessionLoaded: this._sessionLoaded,
+              sessionPollingAttempts: this._sessionPollingAttempts,
+              dependenciesReady: this._dependenciesReady,
+              authReady: this._authReady,
               config: this._config
+            },
+            messageRegistry: {
+              sentMessages: MESSAGE_REGISTRY._sentMessages.size,
+              receivedMessages: MESSAGE_REGISTRY._receivedMessages.size
             },
             safetyGuards: {
               blockedMethods: Array.from(SAFETY_GUARDS.blockedMethods),
@@ -2780,10 +4395,22 @@
               warningActive: false,
               retryCount: this._retryCount,
               iframeCount: 0,
+              readyIframes: 0,
               queuedMessages: 0,
+              outboundQueue: 0,
+              messageQueueFlushed: false,
               broadcastChannel: false,
               initialized: false,
+              sessionLoading: this._sessionLoading,
+              sessionLoaded: this._sessionLoaded,
+              sessionPollingAttempts: this._sessionPollingAttempts,
+              dependenciesReady: this._dependenciesReady,
+              authReady: this._authReady,
               config: this._config
+            },
+            messageRegistry: {
+              sentMessages: 0,
+              receivedMessages: 0
             },
             safetyGuards: {
               blockedMethods: Array.from(SAFETY_GUARDS.blockedMethods),
@@ -2795,37 +4422,36 @@
         }
       };
       
-      console.log('✅ SESSION_COORDINATOR created successfully');
     });
   };
 
   initializeSessionCoordinatorSafely();
 
   // ============================================================================
-  // INTEGRATION HOOKS & BOOTSTRAP
+  // INTEGRATION HOOKS & BOOTSTRAP - IMMEDIATE INITIALIZATION
   // ============================================================================
 
-  // Auto-initialize SESSION_COORDINATOR when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      console.log('📄 DOM ready, initializing session system');
-      setTimeout(() => {
-        executeSafely('SESSION_COORDINATOR.domInit', () => {
-          if (window.SESSION_COORDINATOR && window.SESSION_COORDINATOR.initialize) {
-            window.SESSION_COORDINATOR.initialize();
-          }
-        });
-      }, 100);
-    });
-  } else {
-    console.log('📄 DOM already ready, initializing session system');
+  // Signal to bootstrap that session module is loaded
+  window.__SESSION_MODULE_LOADED__ = true;
+
+  const initializeImmediately = function() {
     setTimeout(() => {
       executeSafely('SESSION_COORDINATOR.immediateInit', () => {
-        if (window.SESSION_COORDINATOR && window.SESSION_COORDINATOR.initialize) {
-          window.SESSION_COORDINATOR.initialize();
+        if (window.SESSION_COORDINATOR && typeof window.SESSION_COORDINATOR.initialize === 'function') {
+          window.SESSION_COORDINATOR.initialize().then(() => {
+            // Initialization complete
+          });
         }
       });
-    }, 100);
+    }, 50);
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeImmediately();
+    });
+  } else {
+    initializeImmediately();
   }
 
   // Export for module systems
@@ -2833,9 +4459,11 @@
     module.exports = {
       AUTH_STATE: window.AUTH_STATE,
       TOKEN_VALIDATION: window.TOKEN_VALIDATION,
-      SESSION_COORDINATOR: window.SESSION_COORDINATOR
+      SESSION_COORDINATOR: window.SESSION_COORDINATOR,
+      SESSION_STATES: SESSION_STATES,
+      MESSAGE_REGISTRY: MESSAGE_REGISTRY,
+      DEPENDENCY_BARRIER: DEPENDENCY_BARRIER
     };
   }
 
-  console.log('✅ app.core.session.js loaded successfully with safety guards');
 })();

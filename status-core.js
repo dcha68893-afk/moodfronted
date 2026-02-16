@@ -1,76 +1,1555 @@
 // =============================================
 // STATUS SYSTEM - CENTRALIZED TOKEN ACCESS - CORE
+// HARDENED VERSION v2.2 - COMPLETE FIXED VERSION
+// =============================================
+// EXPORT CONTRACT: ALL SYMBOLS REQUIRED BY status-ui.js
 // =============================================
 
-// Import required API modules
-import { 
-  secureFetch, 
-  getCurrentUser, 
-  getUserToken,
-  login,
-  logout,
-  validateSession,
-  updateSession
-} from './js/api.core.js';
+// =============================================
+// SECURITY & SANDBOX CONFIGURATION
+// =============================================
+const TRUSTED_ORIGINS = new Set([
+    window.location.origin,
+    'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'https://127.0.0.1:5500',
+    'https://localhost:5500',
+    'https://127.0.0.1:3000',
+    'https://localhost:3000'
+]);
 
-import {
-  sendParentMessage,
-  listenToParentMessages,
-  MESSAGE_TYPES
-} from './js/api.messages.js';
+const MESSAGE_TYPES = {
+    READY: 'STATUS_READY',
+    ACK: 'STATUS_ACK',
+    SESSION: 'STATUS_SESSION',
+    SESSION_DATA: 'SESSION_DATA',
+    DATA: 'STATUS_DATA',
+    ERROR: 'STATUS_ERROR',
+    HEARTBEAT: 'STATUS_HEARTBEAT',
+    STATUS: 'STATUS_UPDATE',
+    REQUEST_SESSION: 'STATUS_REQUEST_SESSION',
+    CHILD_LOADED: 'STATUS_CHILD_LOADED',
+    UI_READY: 'STATUS_UI_READY',
+    NEEDS_AUTH: 'STATUS_NEEDS_AUTH',
+    API_REQUEST: 'API_REQUEST',
+    API_RESPONSE: 'API_RESPONSE',
+    API_ERROR: 'API_ERROR',
+    AUTH_VALIDATED: 'AUTH_VALIDATED',
+    SESSION_UPDATE: 'SESSION_UPDATE',
+    LOGOUT: 'LOGOUT',
+    IFRAME_READY: 'IFRAME_READY',
+    STATUS_SHUTDOWN: 'STATUS_SHUTDOWN',
+    USER_ACTIVE: 'USER_ACTIVE',
+    USER_INACTIVE: 'USER_INACTIVE',
+    HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
+    HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
+    PARENT_READY: 'PARENT_READY'
+};
 
-// Global variables
-export let currentUser = null;
-export let userData = null;
-export let statuses = [];
-export let myStatuses = [];
-export let friendsStatuses = [];
-export let closeFriendsStatuses = [];
-export let pinnedStatuses = [];
-export let mutedStatuses = [];
-export let microCirclesStatuses = [];
-export let highlights = [];
-export let drafts = [];
-export let scheduledStatuses = [];
-export let viewedStatuses = new Set();
-export let mutedUsers = new Set();
-export let currentViewerStatus = null;
-export let currentSlideIndex = 0;
-export let autoAdvanceInterval = null;
-export let isAutoAdvancePaused = false;
-export let progressInterval = null;
-export let currentCategoryFilter = 'all';
-export let currentIntentFilter = null;
-export let currentMoodFilter = null;
-export let isMobile = window.innerWidth <= 768;
-export let isOfflineMode = false;
-export let pendingReplies = [];
-export let pendingReactions = [];
-export let moodChartData = [];
-export let streakCount = 0;
-export let lastPostDate = null;
-export let activeFilters = new Set();
-export let selectedDraft = null;
+const LOG_LEVEL = {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3
+};
 
-// Authentication variables
-export let apiReadyReceived = false;
-export let apiCheckInterval = null;
-export let authValidated = false;
-export let authChecked = false;
-export let isBackgroundInitialized = false;
-export let isTokenReady = false;
-export let tokenReadyCallbacks = [];
-export let pendingApiRequests = [];
+// =============================================
+// GLOBAL STATE - MODULE SCOPED
+// =============================================
+const state = {
+    initialized: false,
+    parentDetected: false,
+    handshakeComplete: false,
+    sessionActive: false,
+    permissionsGranted: ['guest', 'view_statuses'],
+    dependenciesLoaded: false,
+    readyState: 'preflight',
+    shutdownInProgress: false,
+    
+    // Session Mirror Layer
+    sessionMirror: {
+        token: null,
+        user: null,
+        expiry: null,
+        permissions: [],
+        timestamp: 0,
+        messageId: null,
+        validated: false,
+        source: null
+    },
+    
+    sessionData: null,
+    token: null,
+    user: null,
+    isGuestMode: true,
+    sessionExpiry: null,
+    
+    messageId: 0,
+    pendingAcks: new Map(),
+    pendingRequests: new Map(),
+    messageCache: new Set(),
+    messageSequence: new Map(),
+    originValidated: false,
+    
+    listeners: new Set(),
+    intervals: new Set(),
+    timeouts: new Set(),
+    
+    features: new Map(),
+    disabledFeatures: new Set(),
+    
+    metrics: {
+        messagesSent: 0,
+        messagesReceived: 0,
+        handshakeAttempts: 0,
+        errorsLogged: 0,
+        startTime: Date.now(),
+        lastHandshake: 0,
+        handshakeFailures: 0
+    },
+    
+    // Handshake tracking
+    handshakeId: null,
+    handshakePromise: null,
+    handshakeResolve: null,
+    handshakeReject: null,
+    handshakeTimer: null,
+    handshakeRetries: 0,
+    maxHandshakeRetries: 3,
+    
+    // Protocol version
+    protocolVersion: '2.0',
+    parentProtocolVersion: null
+};
 
-// Safety tracking variables
-let errorLogCounts = {};
-let maxErrorLogs = 1;
-let retryCounts = {};
-let maxRetries = 3;
-let messageCache = new Set();
+const CIRCUIT_BREAKER = {
+    failures: {},
+    threshold: 5,
+    timeout: 30000,
+    lastFailure: {}
+};
 
-// Parent Coordination System - ENHANCED with secure handshake
-export let parentCoordinator = {
+// =============================================
+// LOGGING SYSTEM - STRUCTURED, NO SPAM
+// =============================================
+let currentLogLevel = LOG_LEVEL.INFO;
+const errorCache = new Set();
+const warningCache = new Set();
+const metricCache = {
+    lastHeartbeat: null,
+    messagesPerMinute: 0,
+    errorRate: 0
+};
+
+function log(level, module, message, data = null) {
+    try {
+        if (level < currentLogLevel) return;
+        
+        const timestamp = new Date().toISOString();
+        const prefix = `[${timestamp}] [${module}]`;
+        
+        if (level === LOG_LEVEL.ERROR) {
+            const key = `${module}:${message}`;
+            if (!errorCache.has(key)) {
+                errorCache.add(key);
+                console.error(`${prefix} ${message}`, data || '');
+                state.metrics.errorsLogged++;
+            }
+        } else if (level === LOG_LEVEL.WARN) {
+            const key = `${module}:${message}`;
+            if (!warningCache.has(key)) {
+                warningCache.add(key);
+                console.warn(`${prefix} ${message}`, data || '');
+            }
+        } else if (level === LOG_LEVEL.DEBUG) {
+            console.debug(`${prefix} ${message}`, data || '');
+        } else {
+            console.log(`${prefix} ${message}`, data || '');
+        }
+    } catch (e) {}
+}
+
+// =============================================
+// ERROR BOUNDARY SYSTEM
+// =============================================
+function createErrorBoundary(fn, featureName, fallback = null) {
+    return async function(...args) {
+        if (state.disabledFeatures.has(featureName)) {
+            return typeof fallback === 'function' ? fallback(...args) : fallback;
+        }
+
+        try {
+            return await fn(...args);
+        } catch (error) {
+            log(LOG_LEVEL.ERROR, 'ErrorBoundary', `${featureName}: ${error.message}`);
+            
+            state.disabledFeatures.add(featureName);
+            
+            const key = featureName.split(':')[0];
+            CIRCUIT_BREAKER.failures[key] = (CIRCUIT_BREAKER.failures[key] || 0) + 1;
+            CIRCUIT_BREAKER.lastFailure[key] = Date.now();
+            
+            return typeof fallback === 'function' ? fallback(...args) : fallback;
+        }
+    };
+}
+
+function isCircuitOpen(service) {
+    const failures = CIRCUIT_BREAKER.failures[service] || 0;
+    const lastFailure = CIRCUIT_BREAKER.lastFailure[service] || 0;
+    const timeSinceFailure = Date.now() - lastFailure;
+    
+    if (failures >= CIRCUIT_BREAKER.threshold && timeSinceFailure < CIRCUIT_BREAKER.timeout) {
+        return true;
+    }
+    
+    if (timeSinceFailure >= CIRCUIT_BREAKER.timeout) {
+        CIRCUIT_BREAKER.failures[service] = 0;
+        return false;
+    }
+    
+    return false;
+}
+
+// =============================================
+// SECURE STORAGE ABSTRACTION
+// =============================================
+const SecureStorage = {
+    memoryStore: new Map(),
+    storageAvailable: true,
+    
+    init() {
+        try {
+            const testKey = '_kynecta_test_';
+            localStorage.setItem(testKey, 'test');
+            localStorage.removeItem(testKey);
+            this.storageAvailable = true;
+        } catch (e) {
+            this.storageAvailable = false;
+            log(LOG_LEVEL.WARN, 'Storage', 'localStorage unavailable, using memory fallback');
+        }
+        return this;
+    },
+    
+    get(key, fallback = null) {
+        if (this.storageAvailable) {
+            try {
+                const value = localStorage.getItem(key);
+                if (value !== null) return value;
+            } catch (e) {
+                log(LOG_LEVEL.WARN, 'Storage', `Error reading ${key} from localStorage`);
+            }
+        }
+        return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
+    },
+    
+    set(key, value) {
+        let success = false;
+        if (this.storageAvailable) {
+            try {
+                localStorage.setItem(key, String(value));
+                success = true;
+            } catch (e) {
+                log(LOG_LEVEL.WARN, 'Storage', `Error writing ${key} to localStorage`);
+            }
+        }
+        this.memoryStore.set(key, String(value));
+        return success;
+    },
+    
+    remove(key) {
+        if (this.storageAvailable) {
+            try {
+                localStorage.removeItem(key);
+            } catch (e) {}
+        }
+        this.memoryStore.delete(key);
+    },
+    
+    getJSON(key, fallback = null) {
+        const value = this.get(key);
+        if (!value) return fallback;
+        try {
+            return JSON.parse(value);
+        } catch (e) {
+            return fallback;
+        }
+    },
+    
+    setJSON(key, value) {
+        try {
+            return this.set(key, JSON.stringify(value));
+        } catch (e) {
+            return false;
+        }
+    },
+    
+    clear() {
+        this.memoryStore.clear();
+        if (this.storageAvailable) {
+            try {
+                localStorage.clear();
+            } catch (e) {}
+        }
+    }
+}.init();
+
+// =============================================
+// MESSAGE FIREWALL & PARSER
+// =============================================
+const MessageFirewall = {
+    validators: new Map(),
+    replayCache: new Set(),
+    maxCacheSize: 1000,
+    
+    init() {
+        this.registerValidators();
+        return this;
+    },
+    
+    registerValidators() {
+        this.validators.set('SESSION_DATA', (msg) => {
+            return msg.payload && 
+                   (msg.payload.token || msg.payload.user) &&
+                   (!msg.payload.token || typeof msg.payload.token === 'string') &&
+                   (!msg.payload.user || (msg.payload.user.id && msg.payload.user.displayName));
+        });
+        
+        this.validators.set('HANDSHAKE_REQUEST', (msg) => {
+            return msg.payload && 
+                   msg.payload.messageId &&
+                   msg.payload.protocolVersion;
+        });
+        
+        this.validators.set('HANDSHAKE_RESPONSE', (msg) => {
+            return msg.payload && 
+                   msg.payload.messageId &&
+                   msg.payload.session;
+        });
+        
+        this.validators.set('STATUS_ACK', (msg) => {
+            return msg.inResponseTo || msg.payload?.inResponseTo;
+        });
+        
+        this.validators.set('STATUS_READY', (msg) => {
+            return msg.payload && msg.payload.module === 'status';
+        });
+        
+        this.validators.set('API_REQUEST', (msg) => {
+            return msg.payload && msg.payload.requestId && msg.payload.endpoint;
+        });
+        
+        this.validators.set('API_RESPONSE', (msg) => {
+            return msg.payload && msg.payload.requestId;
+        });
+        
+        this.validators.set('API_ERROR', (msg) => {
+            return msg.payload && msg.payload.requestId;
+        });
+    },
+    
+    validate(message, origin) {
+        try {
+            // Structural validation
+            if (!message || typeof message !== 'object') {
+                log(LOG_LEVEL.WARN, 'Firewall', 'Invalid message structure');
+                return false;
+            }
+            
+            // Origin validation
+            if (!isValidOrigin(origin)) {
+                log(LOG_LEVEL.WARN, 'Firewall', `Invalid origin: ${origin}`);
+                return false;
+            }
+            
+            // Required fields
+            if (!message.type) {
+                log(LOG_LEVEL.WARN, 'Firewall', 'Missing message type');
+                return false;
+            }
+            
+            // Replay protection
+            if (message.messageId || message.id) {
+                const msgId = message.messageId || message.id;
+                const cacheKey = `${origin}:${msgId}`;
+                
+                if (this.replayCache.has(cacheKey)) {
+                    log(LOG_LEVEL.WARN, 'Firewall', `Replay detected: ${msgId}`);
+                    return false;
+                }
+                
+                this.replayCache.add(cacheKey);
+                if (this.replayCache.size > this.maxCacheSize) {
+                    const first = this.replayCache.values().next().value;
+                    this.replayCache.delete(first);
+                }
+            }
+            
+            // Schema validation
+            const validator = this.validators.get(message.type);
+            if (validator && !validator(message)) {
+                log(LOG_LEVEL.WARN, 'Firewall', `Schema validation failed for ${message.type}`);
+                return false;
+            }
+            
+            return true;
+        } catch (e) {
+            log(LOG_LEVEL.ERROR, 'Firewall', `Validation error: ${e.message}`);
+            return false;
+        }
+    },
+    
+    sanitize(message) {
+        try {
+            const sanitized = { ...message };
+            
+            // Sanitize strings
+            if (sanitized.payload) {
+                sanitized.payload = JSON.parse(JSON.stringify(sanitized.payload, (key, value) => {
+                    if (typeof value === 'string') {
+                        return value
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;')
+                            .replace(/&/g, '&amp;')
+                            .replace(/"/g, '&quot;')
+                            .replace(/'/g, '&#039;');
+                    }
+                    return value;
+                }));
+            }
+            
+            // Redact tokens for logging
+            if (sanitized.payload && sanitized.payload.token) {
+                sanitized.payload.token = '[REDACTED]';
+            }
+            if (sanitized.token) {
+                sanitized.token = '[REDACTED]';
+            }
+            
+            return sanitized;
+        } catch (e) {
+            return message;
+        }
+    }
+}.init();
+
+// =============================================
+// MESSAGE ID GENERATOR
+// =============================================
+function generateMessageId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${++state.messageId}`;
+}
+
+function generateSequenceId() {
+    return `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function generateHandshakeId() {
+    return `handshake_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
+}
+
+// =============================================
+// ORIGIN VALIDATION & SECURITY
+// =============================================
+function isValidOrigin(origin) {
+    try {
+        if (!origin) return false;
+        if (origin === window.location.origin) return true;
+        if (TRUSTED_ORIGINS.has(origin)) return true;
+        
+        for (const trusted of TRUSTED_ORIGINS) {
+            if (origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
+                return true;
+            }
+        }
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+function validateMessage(message, origin) {
+    return MessageFirewall.validate(message, origin);
+}
+
+function signMessage(message) {
+    return {
+        ...message,
+        id: generateMessageId(),
+        messageId: generateMessageId(),
+        timestamp: Date.now(),
+        origin: window.location.origin,
+        signature: btoa(`${message.type}:${Date.now()}:${state.messageId}`),
+        protocolVersion: state.protocolVersion
+    };
+}
+
+// =============================================
+// COMMUNICATION ENGINE - WITH ACK/RETRY
+// =============================================
+const messageHandlers = new Map();
+
+function addMessageHandler(type, handler) {
+    if (!messageHandlers.has(type)) {
+        messageHandlers.set(type, []);
+    }
+    messageHandlers.get(type).push(createErrorBoundary(handler, `Message:${type}`));
+}
+
+function removeMessageHandler(type, handler) {
+    if (!messageHandlers.has(type)) return;
+    const handlers = messageHandlers.get(type);
+    const index = handlers.indexOf(handler);
+    if (index !== -1) handlers.splice(index, 1);
+}
+
+const receiveFromParent = createErrorBoundary(async function(event) {
+    try {
+        if (!validateMessage(event.data, event.origin)) {
+            return;
+        }
+        
+        const message = MessageFirewall.sanitize(event.data);
+        state.metrics.messagesReceived++;
+        
+        // Update parent protocol version
+        if (message.protocolVersion) {
+            state.parentProtocolVersion = message.protocolVersion;
+        }
+        
+        // Handle ACK messages
+        if ((message.type === MESSAGE_TYPES.ACK || message.type === 'ACK') && 
+            (message.inResponseTo || message.payload?.inResponseTo)) {
+            const responseTo = message.inResponseTo || message.payload.inResponseTo;
+            const ackHandler = state.pendingAcks.get(responseTo);
+            if (ackHandler) {
+                ackHandler.resolve(message);
+                state.pendingAcks.delete(responseTo);
+                if (ackHandler.timer) clearTimeout(ackHandler.timer);
+            }
+            return;
+        }
+        
+        // Handle legacy ACK format
+        if (message.type === 'STATUS_ACK' && message.inResponseTo) {
+            const ackHandler = state.pendingAcks.get(message.inResponseTo);
+            if (ackHandler) {
+                ackHandler.resolve(message);
+                state.pendingAcks.delete(message.inResponseTo);
+                if (ackHandler.timer) clearTimeout(ackHandler.timer);
+            }
+            return;
+        }
+        
+        const handlers = messageHandlers.get(message.type) || [];
+        for (const handler of handlers) {
+            handler(message, event.origin);
+        }
+        
+    } catch (e) {
+        log(LOG_LEVEL.ERROR, 'Receive', e.message);
+    }
+}, 'receiveFromParent', null);
+
+const sendToParent = createErrorBoundary(async function(type, payload = {}, options = {}) {
+    return new Promise((resolve, reject) => {
+        try {
+            if (!state.parentDetected || !window.parent || window.parent === window) {
+                if (!options.silent) {
+                    log(LOG_LEVEL.WARN, 'Send', 'Parent not available');
+                }
+                resolve(null);
+                return;
+            }
+            
+            if (isCircuitOpen('sendToParent')) {
+                log(LOG_LEVEL.WARN, 'Send', 'Circuit breaker open, skipping');
+                resolve(null);
+                return;
+            }
+            
+            const message = signMessage({
+                type,
+                payload,
+                source: 'status-core',
+                requiresAck: options.requiresAck !== false,
+                inResponseTo: options.inResponseTo,
+                messageId: options.messageId || generateMessageId(),
+                protocolVersion: state.protocolVersion
+            });
+            
+            state.metrics.messagesSent++;
+            
+            if (message.requiresAck) {
+                const timeout = options.timeout || 5000;
+                const timer = setTimeout(() => {
+                    if (state.pendingAcks.has(message.id)) {
+                        const handler = state.pendingAcks.get(message.id);
+                        handler.reject(new Error('ACK timeout'));
+                        state.pendingAcks.delete(message.id);
+                        CIRCUIT_BREAKER.failures.sendToParent = (CIRCUIT_BREAKER.failures.sendToParent || 0) + 1;
+                        
+                        log(LOG_LEVEL.WARN, 'Send', `ACK timeout for ${type} (${message.id})`);
+                    }
+                }, timeout);
+                
+                state.pendingAcks.set(message.id, {
+                    resolve,
+                    reject,
+                    timer,
+                    timestamp: Date.now(),
+                    type
+                });
+            }
+            
+            window.parent.postMessage(message, '*');
+            
+            if (!message.requiresAck) {
+                resolve({ success: true, id: message.id });
+            }
+            
+            // Cleanup old pending acks
+            const now = Date.now();
+            for (const [id, handler] of state.pendingAcks.entries()) {
+                if (now - handler.timestamp > 30000) {
+                    clearTimeout(handler.timer);
+                    state.pendingAcks.delete(id);
+                }
+            }
+            
+        } catch (e) {
+            log(LOG_LEVEL.ERROR, 'Send', e.message);
+            reject(e);
+        }
+    });
+}, 'sendToParent', null);
+
+// =============================================
+// HANDSHAKE CLIENT - COMPLETE IMPLEMENTATION
+// =============================================
+const HandshakeClient = {
+    status: 'idle', // idle, in-progress, complete, failed
+    handshakeId: null,
+    startTime: null,
+    resolve: null,
+    reject: null,
+    timer: null,
+    retries: 0,
+    maxRetries: 3,
+    
+    init() {
+        this.reset();
+        log(LOG_LEVEL.INFO, 'Handshake', 'Handshake client initialized');
+        return this;
+    },
+    
+    reset() {
+        this.status = 'idle';
+        this.handshakeId = null;
+        this.startTime = null;
+        this.resolve = null;
+        this.reject = null;
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = null;
+        this.retries = 0;
+    },
+    
+    async execute(options = {}) {
+        if (this.status === 'in-progress') {
+            log(LOG_LEVEL.WARN, 'Handshake', 'Handshake already in progress');
+            return state.handshakePromise;
+        }
+        
+        if (state.handshakeComplete) {
+            log(LOG_LEVEL.INFO, 'Handshake', 'Handshake already complete');
+            return { success: true, cached: true };
+        }
+        
+        this.reset();
+        this.status = 'in-progress';
+        this.handshakeId = generateHandshakeId();
+        this.startTime = Date.now();
+        this.maxRetries = options.maxRetries || 3;
+        
+        log(LOG_LEVEL.INFO, 'Handshake', `Starting handshake ${this.handshakeId} (attempt ${this.retries + 1}/${this.maxRetries})`);
+        
+        state.handshakeId = this.handshakeId;
+        state.handshakePromise = new Promise((resolve, reject) => {
+            this.resolve = resolve;
+            this.reject = reject;
+            
+            this.sendHandshakeRequest();
+        });
+        
+        return state.handshakePromise;
+    },
+    
+    sendHandshakeRequest() {
+        const payload = {
+            messageId: this.handshakeId,
+            timestamp: Date.now(),
+            protocolVersion: state.protocolVersion,
+            module: 'status',
+            session: {
+                cached: state.sessionMirror.validated,
+                token: state.sessionMirror.token ? 'present' : 'none',
+                timestamp: state.sessionMirror.timestamp
+            }
+        };
+        
+        const timeout = this.retries === 0 ? 3000 : 5000;
+        
+        this.timer = setTimeout(() => {
+            this.handleTimeout();
+        }, timeout);
+        
+        sendToParent(MESSAGE_TYPES.HANDSHAKE_REQUEST, payload, { 
+            requiresAck: false,
+            messageId: this.handshakeId
+        }).catch(e => {
+            log(LOG_LEVEL.ERROR, 'Handshake', `Send failed: ${e.message}`);
+        });
+    },
+    
+    handleTimeout() {
+        this.retries++;
+        
+        if (this.retries < this.maxRetries) {
+            log(LOG_LEVEL.WARN, 'Handshake', `Attempt ${this.retries}/${this.maxRetries} timed out, retrying...`);
+            
+            const delay = Math.min(500 * Math.pow(1.5, this.retries), 3000);
+            setTimeout(() => {
+                this.sendHandshakeRequest();
+            }, delay);
+        } else {
+            this.status = 'failed';
+            log(LOG_LEVEL.ERROR, 'Handshake', `Handshake failed after ${this.maxRetries} attempts`);
+            
+            if (this.reject) {
+                this.reject(new Error('Handshake timeout'));
+            }
+            
+            state.metrics.handshakeFailures++;
+            
+            // Attempt legacy handshake
+            this.attemptLegacyHandshake();
+        }
+    },
+    
+    handleResponse(message) {
+        if (this.status !== 'in-progress') return;
+        
+        clearTimeout(this.timer);
+        
+        const payload = message.payload || message.data || {};
+        
+        // Validate response
+        if (payload.messageId !== this.handshakeId) {
+            log(LOG_LEVEL.WARN, 'Handshake', `Message ID mismatch: expected ${this.handshakeId}, got ${payload.messageId}`);
+            return;
+        }
+        
+        // Process session data
+        if (payload.session) {
+            updateSessionMirror(payload.session, 'handshake');
+        }
+        
+        this.status = 'complete';
+        state.handshakeComplete = true;
+        state.parentProtocolVersion = payload.protocolVersion || '1.0';
+        state.metrics.lastHandshake = Date.now();
+        
+        log(LOG_LEVEL.INFO, 'Handshake', `Handshake complete in ${Date.now() - this.startTime}ms (protocol: ${state.parentProtocolVersion})`);
+        
+        if (this.resolve) {
+            this.resolve({ 
+                success: true, 
+                session: payload.session,
+                protocolVersion: state.parentProtocolVersion
+            });
+        }
+        
+        // Send acknowledgment
+        sendToParent(MESSAGE_TYPES.ACK, {
+            inResponseTo: this.handshakeId,
+            status: 'success',
+            timestamp: Date.now()
+        }, { requiresAck: false }).catch(() => {});
+    },
+    
+    attemptLegacyHandshake() {
+        log(LOG_LEVEL.INFO, 'Handshake', 'Attempting legacy handshake');
+        
+        // Try multiple legacy message types
+        const messages = [
+            { type: MESSAGE_TYPES.READY, payload: { module: 'status', timestamp: Date.now(), version: '1.0' } },
+            { type: MESSAGE_TYPES.IFRAME_READY, payload: { module: 'status', timestamp: Date.now() } },
+            { type: MESSAGE_TYPES.CHILD_LOADED, payload: { module: 'status', timestamp: Date.now() } }
+        ];
+        
+        messages.forEach(msg => {
+            sendToParent(msg.type, msg.payload, { requiresAck: false }).catch(() => {});
+        });
+        
+        // Set a longer timeout for legacy handshake
+        setTimeout(() => {
+            if (!state.handshakeComplete && state.parentDetected) {
+                log(LOG_LEVEL.WARN, 'Handshake', 'Legacy handshake timeout, enabling guest mode');
+                enableGuestMode();
+            }
+        }, 5000);
+    },
+    
+    handleSessionInit(message) {
+        const payload = message.payload || message.data || {};
+        
+        if (payload.token || payload.user) {
+            updateSessionMirror(payload, 'session_init');
+            
+            // Send ACK with same messageId
+            if (message.messageId || message.id) {
+                sendToParent(MESSAGE_TYPES.ACK, {
+                    inResponseTo: message.messageId || message.id,
+                    status: 'success',
+                    timestamp: Date.now()
+                }, { requiresAck: false }).catch(() => {});
+            }
+        }
+    }
+}.init();
+
+// =============================================
+// SESSION MIRROR LAYER
+// =============================================
+function updateSessionMirror(sessionData, source = 'parent') {
+    try {
+        if (!sessionData) return false;
+        
+        const previousState = { ...state.sessionMirror };
+        
+        // Update token if provided
+        if (sessionData.token && typeof sessionData.token === 'string') {
+            state.sessionMirror.token = sessionData.token;
+            state.token = sessionData.token;
+        }
+        
+        // Update user if provided
+        if (sessionData.user) {
+            state.sessionMirror.user = {
+                id: sessionData.user.id || sessionData.user.userId,
+                displayName: sessionData.user.displayName || sessionData.user.name,
+                photoURL: sessionData.user.photoURL || sessionData.user.avatar,
+                email: sessionData.user.email,
+                isGuest: sessionData.user.isGuest || false
+            };
+            state.user = state.sessionMirror.user;
+        }
+        
+        // Update permissions
+        if (sessionData.permissions && Array.isArray(sessionData.permissions)) {
+            state.sessionMirror.permissions = [...sessionData.permissions];
+            state.permissionsGranted = [...sessionData.permissions];
+        }
+        
+        // Update expiry
+        if (sessionData.expiry) {
+            state.sessionMirror.expiry = new Date(sessionData.expiry);
+            state.sessionExpiry = state.sessionMirror.expiry;
+        }
+        
+        // Update metadata
+        state.sessionMirror.timestamp = Date.now();
+        state.sessionMirror.source = source;
+        state.sessionMirror.messageId = sessionData.messageId || sessionData.id;
+        
+        // Validate session
+        if (state.sessionMirror.token && state.sessionMirror.user) {
+            state.sessionMirror.validated = true;
+            state.sessionActive = true;
+            state.isGuestMode = false;
+            
+            log(LOG_LEVEL.INFO, 'Session', `Session mirror updated from ${source}`, {
+                user: state.sessionMirror.user?.id,
+                hasToken: !!state.sessionMirror.token
+            });
+            
+            // Cache session
+            if (SecureStorage.storageAvailable) {
+                SecureStorage.setJSON(UNIFIED_TOKEN_KEY, state.sessionMirror.token);
+                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, state.sessionMirror.user);
+            }
+            
+            // Trigger callbacks
+            isTokenReady = true;
+            triggerTokenReadyCallbacks();
+            processPendingApiRequests();
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        safeLogError('Session', 'updateSessionMirror', error);
+        return false;
+    }
+}
+
+function getSessionMirror() {
+    return {
+        ...state.sessionMirror,
+        user: state.sessionMirror.user ? { ...state.sessionMirror.user } : null
+    };
+}
+
+function isSessionMirrorValid() {
+    if (!state.sessionMirror.validated) return false;
+    if (!state.sessionMirror.token || !state.sessionMirror.user) return false;
+    if (state.sessionMirror.expiry && new Date() >= state.sessionMirror.expiry) return false;
+    return true;
+}
+
+// =============================================
+// PARENT AVAILABILITY DETECTION
+// =============================================
+const ParentDetector = {
+    status: 'unknown', // unknown, available, unavailable, degraded
+    checkCount: 0,
+    maxChecks: 5,
+    checkInterval: null,
+    
+    detect() {
+        return new Promise((resolve) => {
+            this.status = 'checking';
+            this.checkCount = 0;
+            
+            const check = () => {
+                this.checkCount++;
+                
+                const isAvailable = this.checkAvailability();
+                
+                if (isAvailable) {
+                    this.status = 'available';
+                    state.parentDetected = true;
+                    
+                    if (this.checkInterval) {
+                        clearInterval(this.checkInterval);
+                        this.checkInterval = null;
+                    }
+                    
+                    log(LOG_LEVEL.INFO, 'Parent', 'Parent detected and available');
+                    resolve(true);
+                    return;
+                }
+                
+                if (this.checkCount >= this.maxChecks) {
+                    this.status = 'unavailable';
+                    state.parentDetected = false;
+                    
+                    if (this.checkInterval) {
+                        clearInterval(this.checkInterval);
+                        this.checkInterval = null;
+                    }
+                    
+                    log(LOG_LEVEL.WARN, 'Parent', 'Parent not available after max checks');
+                    resolve(false);
+                    return;
+                }
+            };
+            
+            // First check immediately
+            check();
+            
+            // Then check every 100ms
+            this.checkInterval = setInterval(check, 100);
+        });
+    },
+    
+    checkAvailability() {
+        try {
+            // Check if in iframe
+            if (window.self === window.top) {
+                return false;
+            }
+            
+            // Check if parent accessible
+            if (!window.parent || window.parent === window) {
+                return false;
+            }
+            
+            // Check postMessage availability
+            if (typeof window.parent.postMessage !== 'function') {
+                return false;
+            }
+            
+            return true;
+        } catch (e) {
+            // Cross-origin errors indicate parent exists but is cross-origin
+            if (e.name === 'SecurityError') {
+                return true;
+            }
+            return false;
+        }
+    },
+    
+    isAvailable() {
+        return this.status === 'available';
+    },
+    
+    reset() {
+        if (this.checkInterval) {
+            clearInterval(this.checkInterval);
+            this.checkInterval = null;
+        }
+        this.status = 'unknown';
+        this.checkCount = 0;
+    }
+};
+
+// =============================================
+// INITIALIZATION PIPELINE - PREFLIGHT → READY
+// =============================================
+async function preflightStage() {
+    log(LOG_LEVEL.INFO, 'Init', 'Preflight stage');
+    try {
+        if (typeof window === 'undefined') throw new Error('Window not available');
+        if (typeof document === 'undefined') throw new Error('Document not available');
+        return { success: true };
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Init', `Preflight failed: ${error.message}`);
+        return { success: false, fallback: true };
+    }
+}
+
+async function dependencyCheckStage() {
+    log(LOG_LEVEL.INFO, 'Init', 'Dependency check stage');
+    try {
+        const requiredApis = ['localStorage', 'postMessage', 'addEventListener'];
+        const missing = requiredApis.filter(api => typeof window[api] === 'undefined');
+        
+        if (missing.length > 0) {
+            log(LOG_LEVEL.WARN, 'Init', `Missing dependencies: ${missing.join(', ')}`);
+            state.dependenciesLoaded = false;
+            return { success: false, fallback: true, missing };
+        }
+        
+        state.dependenciesLoaded = true;
+        return { success: true };
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Init', `Dependency check failed: ${error.message}`);
+        state.dependenciesLoaded = false;
+        return { success: false, fallback: true };
+    }
+}
+
+async function parentDetectStage(timeout = 2000) {
+    log(LOG_LEVEL.INFO, 'Init', 'Parent detect stage');
+    
+    const detected = await ParentDetector.detect();
+    
+    if (detected) {
+        return { success: true };
+    } else {
+        log(LOG_LEVEL.WARN, 'Init', 'Parent not detected');
+        return { success: false, fallback: true };
+    }
+}
+
+async function handshakeStage(options = {}) {
+    log(LOG_LEVEL.INFO, 'Init', 'Handshake stage');
+    
+    if (!state.parentDetected) {
+        log(LOG_LEVEL.WARN, 'Init', 'Parent not detected, skipping handshake');
+        state.handshakeComplete = false;
+        return { success: false, fallback: true };
+    }
+    
+    try {
+        const result = await HandshakeClient.execute({
+            maxRetries: options.maxRetries || 3
+        });
+        
+        if (result && result.success) {
+            return { success: true };
+        }
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Init', `Handshake failed: ${error.message}`);
+    }
+    
+    state.handshakeComplete = false;
+    return { success: false, fallback: true };
+}
+
+async function sessionSyncStage(timeout = 5000) {
+    log(LOG_LEVEL.INFO, 'Init', 'Session sync stage');
+    
+    if (!state.handshakeComplete || !state.parentDetected) {
+        if (state.sessionMirror.validated) {
+            log(LOG_LEVEL.INFO, 'Init', 'Using cached session mirror');
+            activateSessionFromMirror();
+            return { success: true, guestMode: false, cached: true };
+        }
+        
+        log(LOG_LEVEL.WARN, 'Init', 'Handshake incomplete, enabling guest mode');
+        enableGuestMode();
+        return { success: false, guestMode: true };
+    }
+    
+    try {
+        const sessionPromise = new Promise(async (resolveSession) => {
+            const handler = (message) => {
+                const payload = message.payload || message.data || {};
+                
+                if (message.type === MESSAGE_TYPES.SESSION || 
+                    message.type === MESSAGE_TYPES.SESSION_DATA ||
+                    message.type === MESSAGE_TYPES.SESSION_UPDATE) {
+                    
+                    removeMessageHandler(MESSAGE_TYPES.SESSION, handler);
+                    removeMessageHandler(MESSAGE_TYPES.SESSION_DATA, handler);
+                    removeMessageHandler(MESSAGE_TYPES.SESSION_UPDATE, handler);
+                    
+                    resolveSession(payload);
+                }
+            };
+            
+            addMessageHandler(MESSAGE_TYPES.SESSION, handler);
+            addMessageHandler(MESSAGE_TYPES.SESSION_DATA, handler);
+            addMessageHandler(MESSAGE_TYPES.SESSION_UPDATE, handler);
+            
+            await sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
+                module: 'status',
+                timestamp: Date.now(),
+                handshakeId: state.handshakeId
+            }, { requiresAck: false });
+        });
+        
+        const timeoutPromise = new Promise((_, reject) => {
+            const timer = setTimeout(() => reject(new Error('Session timeout')), timeout);
+            state.timeouts.add(timer);
+        });
+        
+        const sessionData = await Promise.race([sessionPromise, timeoutPromise]).catch(() => null);
+        
+        if (sessionData && (sessionData.token || sessionData.user)) {
+            updateSessionMirror(sessionData, 'session_sync');
+            activateSessionFromMirror();
+            
+            log(LOG_LEVEL.INFO, 'Init', 'Authenticated session established');
+            return { success: true, guestMode: false, user: state.user };
+        }
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Init', `Session sync failed: ${error.message}`);
+    }
+    
+    if (state.sessionMirror.validated) {
+        log(LOG_LEVEL.INFO, 'Init', 'Falling back to cached session mirror');
+        activateSessionFromMirror();
+        return { success: true, guestMode: false, cached: true };
+    }
+    
+    enableGuestMode();
+    return { success: false, guestMode: true };
+}
+
+function activateSessionFromMirror() {
+    if (!state.sessionMirror.validated) return false;
+    
+    state.sessionActive = true;
+    state.isGuestMode = false;
+    state.token = state.sessionMirror.token;
+    state.user = state.sessionMirror.user;
+    state.permissionsGranted = state.sessionMirror.permissions.length > 0 ? 
+        state.sessionMirror.permissions : ['view_statuses', 'create_status'];
+    state.sessionData = {
+        user: state.user,
+        token: state.token,
+        permissions: state.permissionsGranted,
+        expiry: state.sessionMirror.expiry
+    };
+    
+    log(LOG_LEVEL.INFO, 'Session', 'Activated from mirror', {
+        user: state.user?.id,
+        hasToken: !!state.token
+    });
+    
+    return true;
+}
+
+async function serviceInitStage() {
+    log(LOG_LEVEL.INFO, 'Init', 'Service init stage');
+    try {
+        const cachedSession = loadCachedSession();
+        if (cachedSession && !state.sessionActive && !state.sessionMirror.validated) {
+            updateSessionMirror(cachedSession, 'cache');
+        }
+        
+        return { success: true };
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Init', `Service init failed: ${error.message}`);
+        return { success: false, fallback: true };
+    }
+}
+
+function readyStage() {
+    log(LOG_LEVEL.INFO, 'Init', 'Ready stage');
+    state.initialized = true;
+    state.readyState = 'ready';
+    
+    window.addEventListener('message', receiveFromParent);
+    state.listeners.add({ type: 'message', handler: receiveFromParent });
+    
+    startHeartbeat();
+    
+    return { success: true, state: state.readyState, guestMode: state.isGuestMode };
+}
+
+const initializeCore = createErrorBoundary(async function(options = {}) {
+    if (state.initialized) {
+        log(LOG_LEVEL.WARN, 'Core', 'Already initialized');
+        return { success: true, state: state.readyState };
+    }
+    
+    log(LOG_LEVEL.INFO, 'Core', 'Starting initialization pipeline');
+    
+    try {
+        state.readyState = 'preflight';
+        await preflightStage();
+        
+        state.readyState = 'dependencyCheck';
+        await dependencyCheckStage();
+        
+        state.readyState = 'parentDetect';
+        await parentDetectStage(options.parentTimeout || 2000);
+        
+        state.readyState = 'handshake';
+        await handshakeStage({ maxRetries: options.handshakeRetries || 3 });
+        
+        state.readyState = 'sessionSync';
+        await sessionSyncStage(options.sessionTimeout || 5000);
+        
+        state.readyState = 'serviceInit';
+        await serviceInitStage();
+        
+        state.readyState = 'ready';
+        return readyStage();
+        
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Core', `Initialization failed: ${error.message}`);
+        
+        if (state.sessionMirror.validated) {
+            activateSessionFromMirror();
+        } else {
+            enableGuestMode();
+        }
+        
+        state.initialized = true;
+        state.readyState = 'ready';
+        return { success: false, state: 'ready', guestMode: state.isGuestMode };
+    }
+}, 'initializeCore', { success: false, guestMode: true });
+
+const startHandshake = createErrorBoundary(async function(options = { retries: 3 }) {
+    return handshakeStage({ maxRetries: options.retries });
+}, 'startHandshake', { success: false });
+
+const requestSession = createErrorBoundary(async function(options = { timeout: 5000 }) {
+    return sessionSyncStage(options.timeout);
+}, 'requestSession', { guestMode: true });
+
+function enableGuestMode() {
+    if (state.isGuestMode) return;
+    
+    state.isGuestMode = true;
+    state.sessionActive = false;
+    state.permissionsGranted = ['guest', 'view_statuses'];
+    state.sessionData = {
+        user: { id: 'guest', displayName: 'Guest', isGuest: true },
+        permissions: ['guest', 'view_statuses'],
+        guestMode: true
+    };
+    state.user = state.sessionData.user;
+    state.token = null;
+    
+    // Update mirror but mark as not validated
+    state.sessionMirror = {
+        ...state.sessionMirror,
+        validated: false,
+        guestMode: true
+    };
+    
+    log(LOG_LEVEL.INFO, 'Guest', 'Guest mode enabled');
+}
+
+function loadCachedSession() {
+    try {
+        const userData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.USER);
+        const token = getUnifiedToken();
+        
+        if (userData && token) {
+            const user = userData;
+            if (user && user.id) {
+                return { user, token, permissions: ['view_statuses'] };
+            }
+        }
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Session', `Failed to load cached session: ${error.message}`);
+    }
+    return null;
+}
+
+function startHeartbeat() {
+    const interval = setInterval(async () => {
+        try {
+            if (!state.parentDetected || !state.handshakeComplete) return;
+            
+            metricCache.lastHeartbeat = Date.now();
+            
+            await sendToParent(MESSAGE_TYPES.HEARTBEAT, {
+                timestamp: Date.now(),
+                readyState: state.readyState,
+                guestMode: state.isGuestMode,
+                sessionValid: isSessionMirrorValid(),
+                metrics: {
+                    messagesSent: state.metrics.messagesSent,
+                    messagesReceived: state.metrics.messagesReceived,
+                    uptime: Date.now() - state.metrics.startTime
+                }
+            }, { requiresAck: false, silent: true });
+            
+        } catch (e) {}
+    }, 30000);
+    
+    state.intervals.add(interval);
+}
+
+// =============================================
+// SHUTDOWN & RESOURCE MANAGEMENT
+// =============================================
+const shutdownCore = createErrorBoundary(async function() {
+    if (state.shutdownInProgress) return;
+    
+    state.shutdownInProgress = true;
+    log(LOG_LEVEL.INFO, 'Core', 'Shutting down');
+    
+    try {
+        state.intervals.forEach(clearInterval);
+        state.intervals.clear();
+        
+        state.timeouts.forEach(clearTimeout);
+        state.timeouts.clear();
+        
+        state.listeners.forEach(({ type, handler }) => {
+            try {
+                window.removeEventListener(type, handler);
+            } catch (e) {}
+        });
+        state.listeners.clear();
+        
+        state.pendingAcks.forEach((handler) => {
+            clearTimeout(handler.timer);
+        });
+        state.pendingAcks.clear();
+        
+        state.pendingRequests.clear();
+        state.messageCache.clear();
+        
+        messageHandlers.clear();
+        
+        if (state.parentDetected && state.handshakeComplete) {
+            await sendToParent(MESSAGE_TYPES.STATUS_SHUTDOWN, {
+                timestamp: Date.now(),
+                metrics: state.metrics
+            }, { requiresAck: false, silent: true });
+        }
+        
+        log(LOG_LEVEL.INFO, 'Core', 'Shutdown complete');
+        
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Core', `Shutdown error: ${error.message}`);
+    } finally {
+        state.shutdownInProgress = false;
+    }
+}, 'shutdownCore', null);
+
+// =============================================
+// MESSAGE HANDLER REGISTRATION
+// =============================================
+addMessageHandler(MESSAGE_TYPES.ACK, (message) => {});
+addMessageHandler(MESSAGE_TYPES.STATUS, (message) => {
+    document.dispatchEvent(new CustomEvent('statusUpdate', {
+        detail: message.payload
+    }));
+});
+addMessageHandler(MESSAGE_TYPES.ERROR, (message) => {
+    log(LOG_LEVEL.ERROR, 'Parent', 'Error from parent', message.payload);
+});
+addMessageHandler(MESSAGE_TYPES.DATA, (message) => {
+    document.dispatchEvent(new CustomEvent('coreData', {
+        detail: message.payload
+    }));
+});
+
+// Handshake response handler
+addMessageHandler(MESSAGE_TYPES.HANDSHAKE_RESPONSE, (message) => {
+    HandshakeClient.handleResponse(message);
+});
+
+// Session handlers
+addMessageHandler(MESSAGE_TYPES.SESSION, (message) => {
+    HandshakeClient.handleSessionInit(message);
+});
+addMessageHandler(MESSAGE_TYPES.SESSION_DATA, (message) => {
+    HandshakeClient.handleSessionInit(message);
+});
+addMessageHandler(MESSAGE_TYPES.SESSION_UPDATE, (message) => {
+    const payload = message.payload || message.data || {};
+    updateSessionMirror(payload, 'session_update');
+});
+addMessageHandler(MESSAGE_TYPES.AUTH_VALIDATED, (message) => {
+    const payload = message.payload || message.data || {};
+    if (payload.success) {
+        isTokenReady = true;
+        triggerTokenReadyCallbacks();
+    }
+});
+
+// Parent ready handler
+addMessageHandler(MESSAGE_TYPES.PARENT_READY, (message) => {
+    log(LOG_LEVEL.INFO, 'Parent', 'Parent ready signal received');
+    
+    if (!state.handshakeComplete) {
+        HandshakeClient.execute().catch(() => {});
+    }
+});
+
+// Logout handler
+addMessageHandler(MESSAGE_TYPES.LOGOUT, (message) => {
+    log(LOG_LEVEL.INFO, 'Session', 'Logout received from parent');
+    handleLogout(message.payload);
+});
+
+// API response handlers
+addMessageHandler(MESSAGE_TYPES.API_RESPONSE, (message) => {
+    handleApiResponse(message.payload);
+});
+addMessageHandler(MESSAGE_TYPES.API_ERROR, (message) => {
+    handleApiError(message.payload);
+});
+
+// =============================================
+// FEATURE ISOLATION SYSTEM
+// =============================================
+function registerFeature(name, implementation) {
+    try {
+        if (state.features.has(name)) {
+            log(LOG_LEVEL.WARN, 'Feature', `Duplicate registration: ${name}`);
+            return false;
+        }
+        
+        const wrappedImplementation = createErrorBoundary(implementation, `Feature:${name}`, null);
+        state.features.set(name, wrappedImplementation);
+        log(LOG_LEVEL.DEBUG, 'Feature', `Registered: ${name}`);
+        return true;
+    } catch (e) {
+        log(LOG_LEVEL.ERROR, 'Feature', `Registration failed ${name}: ${e.message}`);
+        return false;
+    }
+}
+
+function executeFeature(name, ...args) {
+    try {
+        if (isCircuitOpen(`feature:${name}`)) {
+            log(LOG_LEVEL.WARN, 'Feature', `Circuit breaker open: ${name}`);
+            return null;
+        }
+        
+        if (state.disabledFeatures.has(name)) {
+            return null;
+        }
+        
+        const feature = state.features.get(name);
+        if (!feature) {
+            log(LOG_LEVEL.WARN, 'Feature', `Not found: ${name}`);
+            return null;
+        }
+        
+        return feature(...args);
+    } catch (error) {
+        log(LOG_LEVEL.ERROR, 'Feature', `Execution failed ${name}: ${error.message}`);
+        state.disabledFeatures.add(name);
+        return null;
+    }
+}
+
+// =============================================
+// SESSION & TOKEN MANAGEMENT
+// =============================================
+function getSession() {
+    if (state.sessionMirror.validated) {
+        return {
+            active: true,
+            user: state.sessionMirror.user,
+            token: state.sessionMirror.token,
+            expiry: state.sessionMirror.expiry,
+            guestMode: false,
+            permissions: [...state.sessionMirror.permissions],
+            validated: true,
+            source: state.sessionMirror.source
+        };
+    }
+    
+    return {
+        active: state.sessionActive,
+        user: state.user,
+        token: state.token,
+        expiry: state.sessionExpiry,
+        guestMode: state.isGuestMode,
+        permissions: [...state.permissionsGranted],
+        validated: state.sessionMirror.validated
+    };
+}
+
+function isSessionValid() {
+    if (state.isGuestMode) return true;
+    if (state.sessionMirror.validated) {
+        if (!state.sessionMirror.expiry) return true;
+        return new Date() < state.sessionMirror.expiry;
+    }
+    if (!state.sessionActive || !state.sessionExpiry) return false;
+    return new Date() < state.sessionExpiry;
+}
+
+// =============================================
+// HEALTH METRICS
+// =============================================
+function getHealthMetrics() {
+    return {
+        ...state.metrics,
+        uptime: Date.now() - state.metrics.startTime,
+        readyState: state.readyState,
+        initialized: state.initialized,
+        parentDetected: state.parentDetected,
+        handshakeComplete: state.handshakeComplete,
+        sessionActive: state.sessionActive,
+        sessionMirrorValid: state.sessionMirror.validated,
+        guestMode: state.isGuestMode,
+        protocolVersion: state.protocolVersion,
+        parentProtocolVersion: state.parentProtocolVersion,
+        circuitBreakers: { ...CIRCUIT_BREAKER.failures },
+        disabledFeatures: Array.from(state.disabledFeatures),
+        pendingAcks: state.pendingAcks.size,
+        pendingRequests: state.pendingRequests.size,
+        features: state.features.size,
+        messageCacheSize: state.messageCache.size,
+        lastHeartbeat: metricCache.lastHeartbeat
+    };
+}
+
+// =============================================
+// PARENT COORDINATION - ENHANCED FOR UI REQUIREMENTS
+// =============================================
+const parentCoordinator = {
     isInitialized: false,
     handshakeComplete: false,
     sessionData: null,
@@ -79,232 +1558,847 @@ export let parentCoordinator = {
     maxHandshakeRetries: 10,
     handshakeInterval: null,
     parentOrigin: null,
-    // New secure handshake variables
     handshakeInProgress: false,
     sessionValid: false,
     handshakeTimeout: null,
     sessionRequestSent: false,
-    trustedOrigins: new Set(),
+    trustedOrigins: TRUSTED_ORIGINS,
     lastMessageOrigin: null,
     sequenceId: null
 };
 
-// Status types
-export const statusTypes = {
-    'text': {
-        name: 'Text Status',
-        icon: 'fas fa-font',
-        color: 'var(--primary-color)'
-    },
-    'media': {
-        name: 'Media Status',
-        icon: 'fas fa-image',
-        color: 'var(--success-color)'
-    },
-    'poll': {
-        name: 'Poll Status',
-        icon: 'fas fa-poll',
-        color: 'var(--warning-color)'
+function initializeParentCoordination() {
+    if (parentCoordinator.isInitialized) return;
+    
+    try {
+        if (!window.parent || window.parent === window) {
+            handleParentUnavailable();
+            return;
+        }
+        
+        parentCoordinator.trustedOrigins.add(window.location.origin);
+        parentCoordinator.parentOrigin = window.location.origin;
+        
+        window.removeEventListener('message', handleEnhancedParentMessage);
+        window.addEventListener('message', handleEnhancedParentMessage);
+        parentCoordinator.messageChannel = window;
+        parentCoordinator.isInitialized = true;
+        
+        startSecureHandshake();
+        
+    } catch (error) {
+        safeLogError('Status', 'initializeParentCoordination', error);
+        handleParentUnavailable();
     }
+}
+
+function handleEnhancedParentMessage(event) {
+    try {
+        parentCoordinator.lastMessageOrigin = event.origin;
+        
+        if (!isValidOrigin(event.origin) && !parentCoordinator.trustedOrigins.has(event.origin)) {
+            return;
+        }
+        
+        if (!MessageFirewall.validate(event.data, event.origin)) {
+            return;
+        }
+        
+        const message = MessageFirewall.sanitize(event.data);
+        
+        const messageKey = `${message.type}:${message.messageId || message.id || 'no-id'}:${message.timestamp || Date.now()}`;
+        if (state.messageCache.has(messageKey)) return;
+        state.messageCache.add(messageKey);
+        
+        if (state.messageCache.size > 100) {
+            const firstKey = state.messageCache.values().next().value;
+            state.messageCache.delete(firstKey);
+        }
+        
+        switch (message.type) {
+            case 'SESSION_DATA':
+            case MESSAGE_TYPES.SESSION:
+            case MESSAGE_TYPES.SESSION_DATA:
+            case MESSAGE_TYPES.SESSION_UPDATE:
+                handleSecureSessionData(message);
+                break;
+            case 'SESSION_UPDATE':
+                handleSessionUpdate(message.data || message.payload);
+                break;
+            case 'LOGOUT':
+                handleLogout(message.data || message.payload);
+                break;
+            case 'API_RESPONSE':
+                handleApiResponse(message.data || message.payload);
+                break;
+            case 'API_ERROR':
+                handleApiError(message.data || message.payload);
+                break;
+            case 'AUTH_VALIDATED':
+                handleAuthValidated(message.data || message.payload);
+                break;
+            case MESSAGE_TYPES.HANDSHAKE_RESPONSE:
+                HandshakeClient.handleResponse(message);
+                break;
+        }
+    } catch (error) {
+        safeLogError('Status', 'handleEnhancedParentMessage', error);
+    }
+}
+
+function startSecureHandshake() {
+    try {
+        clearSecureHandshake();
+        requestSessionFromParent();
+    } catch (error) {
+        safeLogError('Status', 'startSecureHandshake', error);
+    }
+}
+
+function requestSessionFromParent() {
+    try {
+        if (parentCoordinator.handshakeInProgress) return;
+        
+        parentCoordinator.handshakeInProgress = true;
+        parentCoordinator.sessionRequestSent = true;
+        parentCoordinator.sequenceId = generateSequenceId();
+        
+        const message = {
+            type: MESSAGE_TYPES.REQUEST_SESSION,
+            source: 'status-core',
+            sequenceId: parentCoordinator.sequenceId,
+            timestamp: Date.now(),
+            module: 'status',
+            protocolVersion: state.protocolVersion
+        };
+        
+        window.parent.postMessage(message, '*');
+        
+        parentCoordinator.handshakeTimeout = setTimeout(() => {
+            if (!parentCoordinator.sessionValid) {
+                if (!parentCoordinator.handshakeRetries || parentCoordinator.handshakeRetries < 1) {
+                    parentCoordinator.handshakeRetries++;
+                    parentCoordinator.handshakeInProgress = false;
+                    setTimeout(requestSessionFromParent, 1000);
+                } else {
+                    log(LOG_LEVEL.WARN, 'Handshake', 'Secure handshake failed');
+                    handleSessionFailed();
+                }
+            }
+        }, 5000);
+        
+    } catch (error) {
+        safeLogError('Status', 'requestSessionFromParent', error);
+        parentCoordinator.handshakeInProgress = false;
+        handleSessionFailed();
+    }
+}
+
+function handleSecureSessionData(message) {
+    try {
+        if (message.source !== 'parent' && message.source !== 'PARENT') return;
+        
+        if (parentCoordinator.sequenceId && message.sequenceId && 
+            message.sequenceId !== parentCoordinator.sequenceId) return;
+        
+        const sessionData = message.data || message.payload;
+        
+        if (!sessionData) {
+            parentCoordinator.handshakeInProgress = false;
+            clearTimeout(parentCoordinator.handshakeTimeout);
+            return;
+        }
+        
+        const updated = updateSessionMirror(sessionData, 'secure_handshake');
+        
+        if (updated) {
+            parentCoordinator.sessionValid = true;
+            parentCoordinator.handshakeComplete = true;
+            parentCoordinator.handshakeInProgress = false;
+            clearTimeout(parentCoordinator.handshakeTimeout);
+            parentCoordinator.sessionData = sessionData;
+            
+            bindUIAfterSession();
+            
+            sendSecureResponseToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
+                success: true,
+                module: 'status',
+                sequenceId: parentCoordinator.sequenceId
+            });
+            
+            startBackgroundInitializationWithSession();
+        } else {
+            parentCoordinator.handshakeInProgress = false;
+            clearTimeout(parentCoordinator.handshakeTimeout);
+        }
+        
+    } catch (error) {
+        safeLogError('Status', 'handleSecureSessionData', error);
+        parentCoordinator.handshakeInProgress = false;
+        clearTimeout(parentCoordinator.handshakeTimeout);
+    }
+}
+
+function bindUIAfterSession() {
+    try {
+        if (typeof window.initializeStatusUI === 'function') {
+            window.initializeStatusUI();
+        }
+        updateUIBasedOnAuth();
+    } catch (error) {
+        safeLogError('Status', 'bindUIAfterSession', error);
+    }
+}
+
+function updateUIBasedOnAuth() {
+    try {
+        document.dispatchEvent(new CustomEvent('sessionReady', {
+            detail: { user: currentUser }
+        }));
+    } catch (error) {
+        safeLogError('Status', 'updateUIBasedOnAuth', error);
+    }
+}
+
+function sendSecureResponseToParent(type, data = {}) {
+    try {
+        if (!window.parent || window.parent === window) return;
+        
+        const message = signMessage({
+            type,
+            payload: {
+                ...data,
+                source: 'status-core',
+                timestamp: Date.now(),
+                sequenceId: parentCoordinator.sequenceId || generateSequenceId()
+            }
+        });
+        
+        window.parent.postMessage(message, '*');
+        
+    } catch (error) {
+        safeLogError('Status', 'sendSecureResponseToParent', error);
+    }
+}
+
+function handleSessionFailed() {
+    parentCoordinator.handshakeInProgress = false;
+    parentCoordinator.handshakeComplete = false;
+    
+    if (state.sessionMirror.validated) {
+        activateSessionFromMirror();
+    } else {
+        loadCachedDataInstantly();
+        enableGuestMode();
+    }
+    
+    initializeUIWithCachedData();
+}
+
+function clearSecureHandshake() {
+    try {
+        if (parentCoordinator.handshakeTimeout) {
+            clearTimeout(parentCoordinator.handshakeTimeout);
+            parentCoordinator.handshakeTimeout = null;
+        }
+        parentCoordinator.handshakeInProgress = false;
+        parentCoordinator.sessionValid = false;
+        parentCoordinator.sessionRequestSent = false;
+        parentCoordinator.handshakeRetries = 0;
+    } catch (error) {
+        safeLogError('Status', 'clearSecureHandshake', error);
+    }
+}
+
+function handleSessionData(sessionData) {
+    try {
+        if (!validateSessionData(sessionData)) {
+            sendToParent(MESSAGE_TYPES.ERROR, {
+                error: 'INVALID_SESSION_SCHEMA',
+                message: 'Session data validation failed'
+            });
+            return;
+        }
+        
+        updateSessionMirror(sessionData, 'session_data');
+        
+        parentCoordinator.sessionData = sessionData;
+        parentCoordinator.handshakeComplete = true;
+        
+        if (parentCoordinator.handshakeInterval) {
+            clearInterval(parentCoordinator.handshakeInterval);
+            parentCoordinator.handshakeInterval = null;
+        }
+        
+        sendToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
+            module: 'status',
+            success: true
+        });
+        
+        startBackgroundInitializationWithSession();
+        
+    } catch (error) {
+        safeLogError('Status', 'handleSessionData', error);
+        sendToParent(MESSAGE_TYPES.ERROR, {
+            error: 'SESSION_PROCESSING_ERROR',
+            message: error.message
+        });
+    }
+}
+
+function validateSessionData(sessionData) {
+    try {
+        if (!sessionData || typeof sessionData !== 'object') return false;
+        
+        if (sessionData.token && typeof sessionData.token !== 'string') return false;
+        if (sessionData.user && (!sessionData.user.id || !sessionData.user.displayName)) return false;
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function handleSessionUpdate(updateData) {
+    try {
+        if (!updateData) return;
+        
+        updateSessionMirror(updateData, 'session_update');
+        
+    } catch (error) {
+        safeLogError('Status', 'handleSessionUpdate', error);
+    }
+}
+
+function handleLogout(logoutData) {
+    try {
+        parentCoordinator.sessionData = null;
+        parentCoordinator.handshakeComplete = false;
+        parentCoordinator.sessionValid = false;
+        
+        state.sessionMirror = {
+            token: null,
+            user: null,
+            expiry: null,
+            permissions: [],
+            timestamp: 0,
+            messageId: null,
+            validated: false,
+            source: null
+        };
+        
+        currentUser = null;
+        userData = null;
+        
+        SecureStorage.remove(LOCAL_STORAGE_KEYS.USER);
+        SecureStorage.remove(UNIFIED_TOKEN_KEY);
+        
+        isTokenReady = false;
+        state.sessionActive = false;
+        state.user = null;
+        state.token = null;
+        enableGuestMode();
+        
+        sendToParent(MESSAGE_TYPES.CHILD_LOADED, {
+            module: 'status',
+            loggedOut: true,
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        safeLogError('Status', 'handleLogout', error);
+    }
+}
+
+function handleParentUnavailable() {
+    loadCachedDataInstantly();
+    
+    if (state.sessionMirror.validated) {
+        activateSessionFromMirror();
+    } else {
+        enableGuestMode();
+    }
+}
+
+function startBackgroundInitializationWithSession() {
+    if (isBackgroundInitialized) return;
+    
+    try {
+        setTimeout(async () => {
+            try {
+                await loadFreshDataInBackground();
+                isBackgroundInitialized = true;
+                
+                if (parentCoordinator.handshakeComplete) {
+                    sendToParent(MESSAGE_TYPES.UI_READY, {
+                        module: 'status',
+                        timestamp: Date.now()
+                    });
+                }
+            } catch (error) {
+                safeLogError('Status', 'startBackgroundInitializationWithSession', error);
+            }
+        }, 1000);
+    } catch (error) {
+        safeLogError('Status', 'startBackgroundInitializationWithSession', error);
+    }
+}
+
+async function makeParentApiRequest(endpoint, options = {}) {
+    return new Promise((resolve, reject) => {
+        try {
+            const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            const responseHandler = (event) => {
+                try {
+                    if (!isValidOrigin(event.origin) && !parentCoordinator.trustedOrigins.has(event.origin)) return;
+                    
+                    const message = event.data;
+                    if (!message || !message.type || !message.payload || message.payload.requestId !== requestId) return;
+                    
+                    if (message.type === 'API_RESPONSE' || message.type === MESSAGE_TYPES.API_RESPONSE) {
+                        window.removeEventListener('message', responseHandler);
+                        resolve(message.payload.response || message.payload.data);
+                    } else if (message.type === 'API_ERROR' || message.type === MESSAGE_TYPES.API_ERROR) {
+                        window.removeEventListener('message', responseHandler);
+                        reject(new Error(message.payload.error || 'API Error'));
+                    }
+                } catch (error) {
+                    window.removeEventListener('message', responseHandler);
+                    reject(error);
+                }
+            };
+            
+            window.addEventListener('message', responseHandler);
+            
+            const message = signMessage({
+                type: MESSAGE_TYPES.API_REQUEST,
+                payload: {
+                    requestId,
+                    endpoint,
+                    options: {
+                        method: options.method || 'GET',
+                        headers: options.headers || {},
+                        body: options.body,
+                        credentials: 'include'
+                    },
+                    timestamp: Date.now()
+                }
+            });
+            
+            window.parent.postMessage(message, '*');
+            
+            const timer = setTimeout(() => {
+                window.removeEventListener('message', responseHandler);
+                reject(new Error('Request timeout'));
+            }, 30000);
+            
+            state.timeouts.add(timer);
+            
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function handleApiResponse(responseData) {
+    document.dispatchEvent(new CustomEvent('apiResponse', {
+        detail: responseData
+    }));
+}
+
+function handleApiError(errorData) {
+    log(LOG_LEVEL.ERROR, 'API', 'API Error', errorData);
+}
+
+function handleAuthValidated(data) {
+    try {
+        if (data.success) {
+            isTokenReady = true;
+            triggerTokenReadyCallbacks();
+        }
+    } catch (error) {
+        safeLogError('Status', 'handleAuthValidated', error);
+    }
+}
+
+// =============================================
+// CENTRALIZED TOKEN ACCESS SYSTEM
+// =============================================
+let isTokenReady = false;
+let tokenReadyCallbacks = [];
+let pendingApiRequests = [];
+let apiCheckInterval = null;
+let apiReadyReceived = false;
+let authValidated = false;
+let authChecked = false;
+
+const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
+
+function waitForTokenReady() {
+    return new Promise((resolve) => {
+        try {
+            if (isTokenReady) {
+                resolve(true);
+                return;
+            }
+            
+            if (state.sessionMirror.validated && state.sessionMirror.token) {
+                isTokenReady = true;
+                resolve(true);
+                triggerTokenReadyCallbacks();
+                return;
+            }
+            
+            if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) {
+                isTokenReady = true;
+                resolve(true);
+                triggerTokenReadyCallbacks();
+                return;
+            }
+            
+            const checkToken = () => {
+                try {
+                    const token = getUnifiedToken();
+                    if (token) {
+                        isTokenReady = true;
+                        resolve(true);
+                        triggerTokenReadyCallbacks();
+                        return;
+                    }
+                    setTimeout(checkToken, 100);
+                } catch (error) {
+                    safeLogError('Status', 'waitForTokenReady.checkToken', error);
+                    resolve(false);
+                }
+            };
+            
+            checkToken();
+        } catch (error) {
+            safeLogError('Status', 'waitForTokenReady', error);
+            resolve(false);
+        }
+    });
+}
+
+function onTokenReady(callback) {
+    try {
+        if (isTokenReady) {
+            callback();
+        } else {
+            tokenReadyCallbacks.push(callback);
+        }
+    } catch (error) {
+        safeLogError('Status', 'onTokenReady', error);
+    }
+}
+
+function triggerTokenReadyCallbacks() {
+    try {
+        while (tokenReadyCallbacks.length > 0) {
+            const callback = tokenReadyCallbacks.shift();
+            try {
+                callback();
+            } catch (error) {
+                safeLogError('Status', 'triggerTokenReadyCallbacks', error);
+            }
+        }
+    } catch (error) {
+        safeLogError('Status', 'triggerTokenReadyCallbacks', error);
+    }
+}
+
+function getUnifiedToken() {
+    try {
+        if (state.sessionMirror.validated && state.sessionMirror.token) {
+            return state.sessionMirror.token;
+        }
+        
+        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData && parentCoordinator.sessionData.token) {
+            return parentCoordinator.sessionData.token;
+        }
+        
+        if (state.token) return state.token;
+        
+        try {
+            if (typeof window.getUserToken === 'function') {
+                const token = window.getUserToken();
+                if (token && typeof token === 'string' && token.length > 10) return token;
+            }
+        } catch (error) {}
+        
+        try {
+            const token = SecureStorage.get(UNIFIED_TOKEN_KEY);
+            if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                if (token.split('.').length === 3) return token;
+            }
+        } catch (error) {}
+        
+        const legacyToken = migrateLegacyTokens();
+        if (legacyToken) return legacyToken;
+        
+        return null;
+    } catch (error) {
+        safeLogError('Status', 'getUnifiedToken', error);
+        return null;
+    }
+}
+
+function migrateLegacyTokens() {
+    try {
+        const legacyKeys = [
+            'knecta_access_token',
+            'accessToken',
+            'moodchat_token',
+            'auth_token',
+            'knecta_token'
+        ];
+        
+        for (const key of legacyKeys) {
+            try {
+                const token = SecureStorage.get(key);
+                if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
+                    if (token.split('.').length === 3) {
+                        SecureStorage.set(UNIFIED_TOKEN_KEY, token);
+                        return token;
+                    }
+                }
+            } catch (error) {}
+        }
+        
+        return null;
+    } catch (error) {
+        safeLogError('Status', 'migrateLegacyTokens', error);
+        return null;
+    }
+}
+
+function isAuthenticated() {
+    try {
+        if (state.sessionMirror.validated && state.sessionMirror.token && state.sessionMirror.user) return true;
+        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) return true;
+        if (state.sessionActive && !state.isGuestMode) return true;
+        return getUnifiedToken() !== null;
+    } catch (error) {
+        safeLogError('Status', 'isAuthenticated', error);
+        return false;
+    }
+}
+
+async function queueApiRequest(requestFunction) {
+    if (isTokenReady) return requestFunction();
+    
+    return new Promise((resolve, reject) => {
+        try {
+            pendingApiRequests.push({ requestFunction, resolve, reject });
+            if (!apiCheckInterval) startTokenReadinessCheck();
+        } catch (error) {
+            safeLogError('Status', 'queueApiRequest', error);
+            reject(error);
+        }
+    });
+}
+
+function processPendingApiRequests() {
+    try {
+        while (pendingApiRequests.length > 0) {
+            const { requestFunction, resolve, reject } = pendingApiRequests.shift();
+            try {
+                requestFunction().then(resolve).catch(reject);
+            } catch (error) {
+                safeLogError('Status', 'processPendingApiRequests', error);
+                reject(error);
+            }
+        }
+    } catch (error) {
+        safeLogError('Status', 'processPendingApiRequests', error);
+    }
+}
+
+function startTokenReadinessCheck() {
+    try {
+        if (apiCheckInterval) clearInterval(apiCheckInterval);
+        
+        let checkCount = 0;
+        const maxChecks = 30;
+        
+        apiCheckInterval = setInterval(() => {
+            try {
+                checkCount++;
+                
+                if (isTokenReady || getUnifiedToken() || parentCoordinator.handshakeComplete || 
+                    state.token || state.sessionMirror.validated) {
+                    clearInterval(apiCheckInterval);
+                    apiCheckInterval = null;
+                    isTokenReady = true;
+                    processPendingApiRequests();
+                    triggerTokenReadyCallbacks();
+                } else if (checkCount >= maxChecks) {
+                    clearInterval(apiCheckInterval);
+                    apiCheckInterval = null;
+                    safeLogError('Status', 'startTokenReadinessCheck', new Error('Token readiness check timeout'));
+                }
+            } catch (error) {
+                safeLogError('Status', 'startTokenReadinessCheck.interval', error);
+            }
+        }, 100);
+    } catch (error) {
+        safeLogError('Status', 'startTokenReadinessCheck', error);
+    }
+}
+
+// =============================================
+// SECURE API CALL WITH FALLBACK
+// =============================================
+const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
+    if (isOfflineMode && options.method && options.method !== 'GET') {
+        throw new Error('Offline mode');
+    }
+    
+    if (parentCoordinator.handshakeComplete) {
+        try {
+            return await makeParentApiRequest(endpoint, options);
+        } catch (error) {
+            // Fall through to local fetch
+        }
+    }
+    
+    const token = getUnifiedToken();
+    if (!token) {
+        return queueApiRequest(() => secureApiCall(endpoint, options));
+    }
+    
+    try {
+        // Use standard fetch with token
+        const headers = {
+            'Content-Type': 'application/json',
+            ...options.headers
+        };
+        
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch(endpoint, {
+            ...options,
+            headers
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        const isAuthError = error.message?.includes('401') || 
+                           error.message?.includes('403') ||
+                           error.message?.includes('Unauthorized') || 
+                           error.message?.includes('Authentication') || 
+                           error.message?.includes('Session');
+        
+        if (isAuthError) {
+            isOfflineMode = true;
+            handleAuthError('Authentication failed. Using offline mode.');
+        }
+        throw error;
+    }
+}, 'secureApiCall', null);
+
+// =============================================
+// GLOBAL STATE VARIABLES
+// =============================================
+let currentUser = null;
+let userData = null;
+
+let statuses = [];
+let myStatuses = [];
+let friendsStatuses = [];
+let closeFriendsStatuses = [];
+let pinnedStatuses = [];
+let mutedStatuses = [];
+let microCirclesStatuses = [];
+let highlights = [];
+let drafts = [];
+let scheduledStatuses = [];
+
+let viewedStatuses = new Set();
+let mutedUsers = new Set();
+let currentViewerStatus = null;
+let currentSlideIndex = 0;
+let autoAdvanceInterval = null;
+let isAutoAdvancePaused = false;
+let progressInterval = null;
+let currentCategoryFilter = 'all';
+let currentIntentFilter = null;
+let currentMoodFilter = null;
+let isMobile = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+let isOfflineMode = false;
+let pendingReplies = [];
+let pendingReactions = [];
+let moodChartData = [];
+let streakCount = 0;
+let lastPostDate = null;
+let activeFilters = new Set();
+let selectedDraft = null;
+let isBackgroundInitialized = false;
+
+const statusTypes = {
+    'text': { name: 'Text Status', icon: 'fas fa-font', color: 'var(--primary-color)' },
+    'media': { name: 'Media Status', icon: 'fas fa-image', color: 'var(--success-color)' },
+    'poll': { name: 'Poll Status', icon: 'fas fa-poll', color: 'var(--warning-color)' }
 };
 
-// Status intents
-export const statusIntents = {
-    'feedback': {
-        name: 'Looking for feedback',
-        icon: 'fas fa-comments',
-        color: 'var(--intent-feedback)'
-    },
-    'achievement': {
-        name: 'Sharing achievement',
-        icon: 'fas fa-trophy',
-        color: 'var(--intent-achievement)'
-    },
-    'advice': {
-        name: 'Need advice',
-        icon: 'fas fa-hands-helping',
-        color: 'var(--intent-advice)'
-    },
-    'chat': {
-        name: 'Available to chat',
-        icon: 'fas fa-comment-dots',
-        color: 'var(--intent-chat)'
-    },
-    'venting': {
-        name: 'Just venting',
-        icon: 'fas fa-wind',
-        color: 'var(--intent-venting)'
-    },
-    'reflection': {
-        name: 'Personal reflection',
-        icon: 'fas fa-brain',
-        color: 'var(--intent-reflection)'
-    },
-    'question': {
-        name: 'Asking a question',
-        icon: 'fas fa-question-circle',
-        color: 'var(--intent-question)'
-    },
-    'celebration': {
-        name: 'Celebration',
-        icon: 'fas fa-glass-cheers',
-        color: 'var(--intent-celebration)'
-    }
+const statusIntents = {
+    'feedback': { name: 'Looking for feedback', icon: 'fas fa-comments', color: 'var(--intent-feedback)' },
+    'achievement': { name: 'Sharing achievement', icon: 'fas fa-trophy', color: 'var(--intent-achievement)' },
+    'advice': { name: 'Need advice', icon: 'fas fa-hands-helping', color: 'var(--intent-advice)' },
+    'chat': { name: 'Available to chat', icon: 'fas fa-comment-dots', color: 'var(--intent-chat)' },
+    'venting': { name: 'Just venting', icon: 'fas fa-wind', color: 'var(--intent-venting)' },
+    'reflection': { name: 'Personal reflection', icon: 'fas fa-brain', color: 'var(--intent-reflection)' },
+    'question': { name: 'Asking a question', icon: 'fas fa-question-circle', color: 'var(--intent-question)' },
+    'celebration': { name: 'Celebration', icon: 'fas fa-glass-cheers', color: 'var(--intent-celebration)' }
 };
 
-// Moods
-export const statusMoods = {
-    'happy': {
-        name: 'Happy',
-        emoji: '😊',
-        color: 'var(--mood-happy)'
-    },
-    'stressed': {
-        name: 'Stressed',
-        emoji: '😫',
-        color: 'var(--mood-stressed)'
-    },
-    'motivated': {
-        name: 'Motivated',
-        emoji: '💪',
-        color: 'var(--mood-motivated)'
-    },
-    'lonely': {
-        name: 'Lonely',
-        emoji: '😔',
-        color: 'var(--mood-lonely)'
-    },
-    'excited': {
-        name: 'Excited',
-        emoji: '🤩',
-        color: 'var(--mood-excited)'
-    },
-    'calm': {
-        name: 'Calm',
-        emoji: '😌',
-        color: 'var(--mood-calm)'
-    },
-    'sad': {
-        name: 'Sad',
-        emoji: '😢',
-        color: 'var(--mood-sad)'
-    },
-    'angry': {
-        name: 'Angry',
-        emoji: '😠',
-        color: 'var(--mood-angry)'
-    }
+const statusMoods = {
+    'happy': { name: 'Happy', emoji: '😊', color: 'var(--mood-happy)' },
+    'stressed': { name: 'Stressed', emoji: '😫', color: 'var(--mood-stressed)' },
+    'motivated': { name: 'Motivated', emoji: '💪', color: 'var(--mood-motivated)' },
+    'lonely': { name: 'Lonely', emoji: '😔', color: 'var(--mood-lonely)' },
+    'excited': { name: 'Excited', emoji: '🤩', color: 'var(--mood-excited)' },
+    'calm': { name: 'Calm', emoji: '😌', color: 'var(--mood-calm)' },
+    'sad': { name: 'Sad', emoji: '😢', color: 'var(--mood-sad)' },
+    'angry': { name: 'Angry', emoji: '😠', color: 'var(--mood-angry)' }
 };
 
-// Categories
-export const statusCategories = {
-    'life': {
-        name: 'Life',
-        icon: 'fas fa-heart',
-        color: 'var(--category-life)'
-    },
-    'business': {
-        name: 'Business',
-        icon: 'fas fa-briefcase',
-        color: 'var(--category-business)'
-    },
-    'study': {
-        name: 'Study',
-        icon: 'fas fa-graduation-cap',
-        color: 'var(--category-study)'
-    },
-    'motivation': {
-        name: 'Motivation',
-        icon: 'fas fa-fire',
-        color: 'var(--category-motivation)'
-    },
-    'event': {
-        name: 'Event',
-        icon: 'fas fa-calendar-alt',
-        color: 'var(--category-event)'
-    }
+const statusCategories = {
+    'life': { name: 'Life', icon: 'fas fa-heart', color: 'var(--category-life)' },
+    'business': { name: 'Business', icon: 'fas fa-briefcase', color: 'var(--category-business)' },
+    'study': { name: 'Study', icon: 'fas fa-graduation-cap', color: 'var(--category-study)' },
+    'motivation': { name: 'Motivation', icon: 'fas fa-fire', color: 'var(--category-motivation)' },
+    'event': { name: 'Event', icon: 'fas fa-calendar-alt', color: 'var(--category-event)' }
 };
 
-// Action buttons
-export const actionButtons = {
-    'message': {
-        name: 'Message me',
-        icon: 'fas fa-comments',
-        color: 'var(--primary-color)'
-    },
-    'join': {
-        name: 'Join discussion',
-        icon: 'fas fa-users',
-        color: 'var(--success-color)'
-    },
-    'vote': {
-        name: 'Vote now',
-        icon: 'fas fa-vote-yea',
-        color: 'var(--warning-color)'
-    },
-    'book': {
-        name: 'Book a call',
-        icon: 'fas fa-phone',
-        color: 'var(--info-color)'
-    },
-    'learn': {
-        name: 'Learn more',
-        icon: 'fas fa-book',
-        color: 'var(--primary-color)'
-    },
-    'support': {
-        name: 'Show support',
-        icon: 'fas fa-hands-helping',
-        color: 'var(--success-color)'
-    },
-    'collaborate': {
-        name: 'Collaborate',
-        icon: 'fas fa-handshake',
-        color: 'var(--warning-color)'
-    },
-    'resource': {
-        name: 'View resource',
-        icon: 'fas fa-external-link-alt',
-        color: 'var(--info-color)'
-    }
+const actionButtons = {
+    'message': { name: 'Message me', icon: 'fas fa-comments', color: 'var(--primary-color)' },
+    'join': { name: 'Join discussion', icon: 'fas fa-users', color: 'var(--success-color)' },
+    'vote': { name: 'Vote now', icon: 'fas fa-vote-yea', color: 'var(--warning-color)' },
+    'book': { name: 'Book a call', icon: 'fas fa-phone', color: 'var(--info-color)' },
+    'learn': { name: 'Learn more', icon: 'fas fa-book', color: 'var(--primary-color)' },
+    'support': { name: 'Show support', icon: 'fas fa-hands-helping', color: 'var(--success-color)' },
+    'collaborate': { name: 'Collaborate', icon: 'fas fa-handshake', color: 'var(--warning-color)' },
+    'resource': { name: 'View resource', icon: 'fas fa-external-link-alt', color: 'var(--info-color)' }
 };
 
-// Privacy settings
-export const privacySettings = {
-    'everyone': {
-        name: 'Everyone',
-        description: 'Visible to all Knecta users',
-        icon: 'fas fa-globe'
-    },
-    'friends': {
-        name: 'Friends Only',
-        description: 'Visible to your friends only',
-        icon: 'fas fa-user-friends'
-    },
-    'close-friends': {
-        name: 'Close Friends',
-        description: 'Visible to close friends only',
-        icon: 'fas fa-heart'
-    },
-    'except': {
-        name: 'All Except...',
-        description: 'Hide from specific people',
-        icon: 'fas fa-user-minus'
-    },
-    'specific': {
-        name: 'Specific People...',
-        description: 'Share with select individuals',
-        icon: 'fas fa-user-check'
-    },
-    'micro-circle': {
-        name: 'Micro Circle',
-        description: 'Share with a specific group',
-        icon: 'fas fa-users'
-    }
+const privacySettings = {
+    'everyone': { name: 'Everyone', description: 'Visible to all Knecta users', icon: 'fas fa-globe' },
+    'friends': { name: 'Friends Only', description: 'Visible to your friends only', icon: 'fas fa-user-friends' },
+    'close-friends': { name: 'Close Friends', description: 'Visible to close friends only', icon: 'fas fa-heart' },
+    'except': { name: 'All Except...', description: 'Hide from specific people', icon: 'fas fa-user-minus' },
+    'specific': { name: 'Specific People...', description: 'Share with select individuals', icon: 'fas fa-user-check' },
+    'micro-circle': { name: 'Micro Circle', description: 'Share with a specific group', icon: 'fas fa-users' }
 };
 
-// Duration options
-export const durationOptions = {
+const durationOptions = {
     '3600': '1 hour',
     '21600': '6 hours',
     '43200': '12 hours',
@@ -312,8 +2406,7 @@ export const durationOptions = {
     '0': 'Permanent'
 };
 
-// Report reasons
-export const reportReasons = {
+const reportReasons = {
     'spam': 'Spam',
     'inappropriate': 'Inappropriate Content',
     'harassment': 'Harassment',
@@ -324,8 +2417,7 @@ export const reportReasons = {
     'copyright': 'Copyright Violation'
 };
 
-// Reactions
-export const reactions = {
+const reactions = {
     'like': '👍',
     'love': '❤️',
     'helpful': '💡',
@@ -334,11 +2426,9 @@ export const reactions = {
     'not-useful': '👎'
 };
 
-// Emojis for picker
-export const emojis = ['😊', '😂', '🥰', '😍', '🤩', '😎', '🤔', '😴', '🥳', '😢', '😠', '😱', '👍', '👎', '❤️', '🔥', '💯', '✨', '🎉', '🙏', '🤝', '💪', '👏', '🙌', '🤗', '😇', '🥺', '🤯', '😳', '🤪', '😜', '🤓', '😎', '🥶', '😈', '👻', '💀', '👀', '🦄', '🐶', '🐱', '🦁', '🐯', '🦊', '🐻', '🐼', '🐨', '🐵', '🦉', '🐣', '🦋', '🐝', '🐙', '🦑', '🐋', '🦈', '🐊', '🦒', '🐘', '🦏', '🦘', '🐫', '🦙', '🦌', '🐎', '🐖', '🐑', '🐕', '🐈', '🐇', '🦔', '🐿️', '🐉', '🐲', '🌵', '🎄', '🌲', '🌳', '🌴', '🌱', '🌿', '☘️', '🍀', '🎍', '🎋', '🍃', '🍂', '🍁', '🍄', '🐚', '🌾', '💐', '🌷', '🌹', '🥀', '🌺', '🌸', '🌼', '🌻', '🌞', '🌝', '🌛', '🌜', '🌚', '🌕', '🌖', '🌗', '🌘', '🌑', '🌒', '🌓', '🌔', '🌙', '🌎', '🌍', '🌏', '🪐', '💫', '⭐', '🌟', '✨', '⚡', '☄️', '💥', '🔥', '🌈', '☀️', '🌤️', '⛅', '🌥️', '☁️', '🌦️', '🌧️', '⛈️', '🌩️', '🌨️', '❄️', '☃️', '⛄', '🌬️', '💨', '💧', '💦', '☔', '☂️', '🌊', '🌫️'];
+const emojis = ['😊', '😂', '🥰', '😍', '🤩', '😎', '🤔', '😴', '🥳', '😢', '😠', '😱', '👍', '👎', '❤️', '🔥', '💯', '✨', '🎉', '🙏', '🤝', '💪', '👏', '🙌', '🤗', '😇', '🥺', '🤯', '😳', '🤪', '😜', '🤓', '😎', '🥶', '😈', '👻', '💀', '👀', '🦄', '🐶', '🐱', '🦁', '🐯', '🦊', '🐻', '🐼', '🐨', '🐵', '🦉', '🐣', '🦋', '🐝', '🐙', '🦑', '🐋', '🦈', '🐊', '🦒', '🐘', '🦏', '🦘', '🐫', '🦙', '🦌', '🐎', '🐖', '🐑', '🐕', '🐈', '🐇', '🦔', '🐿️', '🐉', '🐲', '🌵', '🎄', '🌲', '🌳', '🌴', '🌱', '🌿', '☘️', '🍀', '🎍', '🎋', '🍃', '🍂', '🍁', '🍄', '🐚', '🌾', '💐', '🌷', '🌹', '🥀', '🌺', '🌸', '🌼', '🌻', '🌞', '🌝', '🌛', '🌜', '🌚', '🌕', '🌖', '🌗', '🌘', '🌑', '🌒', '🌓', '🌔', '🌙', '🌎', '🌍', '🌏', '🪐', '💫', '⭐', '🌟', '✨', '⚡', '☄️', '💥', '🔥', '🌈', '☀️', '🌤️', '⛅', '🌥️', '☁️', '🌦️', '🌧️', '⛈️', '🌩️', '🌨️', '❄️', '☃️', '⛄', '🌬️', '💨', '💧', '💦', '☔', '☂️', '🌊', '🌫️'];
 
-// Background options
-export const backgroundOptions = [
+const backgroundOptions = [
     { id: '1', type: 'solid', color: 'var(--status-bg-1)' },
     { id: '2', type: 'solid', color: 'var(--status-bg-2)' },
     { id: '3', type: 'solid', color: 'var(--status-bg-3)' },
@@ -353,8 +2443,7 @@ export const backgroundOptions = [
     { id: 'gradient-4', type: 'gradient', gradient: 'linear-gradient(45deg, #ff6b6b, #ffa726)' }
 ];
 
-// Templates
-export const statusTemplates = {
+const statusTemplates = {
     'motivation': {
         name: 'Motivation',
         text: 'Today is a new opportunity to be better than yesterday. Keep pushing forward! 💪',
@@ -385,8 +2474,7 @@ export const statusTemplates = {
     }
 };
 
-// Local Storage Keys
-export const LOCAL_STORAGE_KEYS = {
+const LOCAL_STORAGE_KEYS = {
     USER: 'knecta_current_user',
     USER_TOKEN: 'knecta_user_token',
     STATUSES: 'knecta_statuses_cache',
@@ -405,1212 +2493,20 @@ export const LOCAL_STORAGE_KEYS = {
     LAST_SYNC: 'knecta_status_last_sync'
 };
 
-// Unified token key
-export const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
-
 // =============================================
-// SAFETY UTILITY FUNCTIONS
+// INSTANT UI RENDERING WITH CACHED DATA
 // =============================================
-
-/**
- * Log error safely with deduplication
- */
-export function safeLogError(module, functionName, error, data = null) {
+function initializeUIWithCachedData() {
     try {
-        const errorKey = `${module}:${functionName}:${error?.message || 'unknown'}`;
+        loadUserFromCache();
+        loadCachedDataInstantly();
         
-        if (!errorLogCounts[errorKey]) {
-            errorLogCounts[errorKey] = 0;
-        }
-        
-        errorLogCounts[errorKey]++;
-        
-        if (errorLogCounts[errorKey] <= maxErrorLogs) {
-            console.warn(`[${module}] ${functionName} error:`, error?.message || error, data || '');
-        }
-        
-        // Return safe value based on context
-        if (functionName.includes('get') || functionName.includes('load')) {
-            return Array.isArray(data) ? [] : null;
-        }
-    } catch (logError) {
-        // Silently fail if logging fails
-    }
-}
-
-/**
- * Guard function for user/session access
- */
-export function withUserGuard(fn, defaultValue = null) {
-    return function(...args) {
-        try {
-            if (!currentUser && !parentCoordinator.sessionData) {
-                safeLogError('Status', fn.name || 'anonymous', new Error('No user session'));
-                return defaultValue;
-            }
-            return fn(...args);
-        } catch (error) {
-            safeLogError('Status', fn.name || 'anonymous', error);
-            return defaultValue;
-        }
-    };
-}
-
-/**
- * Guard function for API calls
- */
-export function withApiGuard(fn, defaultValue = null) {
-    return async function(...args) {
-        try {
-            return await fn(...args);
-        } catch (error) {
-            safeLogError('Status', fn.name || 'anonymous', error);
-            return defaultValue;
-        }
-    };
-}
-
-/**
- * Check if DOM element exists
- */
-export function safeGetElement(selector) {
-    try {
-        const element = document.querySelector(selector);
-        if (!element) {
-            safeLogError('Status', 'safeGetElement', new Error(`Element not found: ${selector}`));
-        }
-        return element;
-    } catch (error) {
-        safeLogError('Status', 'safeGetElement', error);
-        return null;
-    }
-}
-
-// =============================================
-// ENHANCED SECURE PARENT COORDINATION SYSTEM
-// =============================================
-
-/**
- * Initialize parent coordination system with secure handshake
- */
-export function initializeParentCoordination() {
-    if (parentCoordinator.isInitialized) {
-        return;
-    }
-
-    try {
-        // Verify parent presence
-        if (!window.parent || window.parent === window) {
-            handleParentUnavailable();
-            return;
-        }
-
-        // Initialize trusted origins
-        initializeTrustedOrigins();
-        
-        // Setup enhanced message listener
-        setupEnhancedMessageListener();
-        
-        // Start secure handshake protocol
-        startSecureHandshake();
-        
-        parentCoordinator.isInitialized = true;
-        
-    } catch (error) {
-        safeLogError('Status', 'initializeParentCoordination', error);
-        handleParentUnavailable();
-    }
-}
-
-/**
- * Initialize trusted origins dynamically
- */
-function initializeTrustedOrigins() {
-    try {
-        // Always trust current origin
-        parentCoordinator.trustedOrigins.add(window.location.origin);
-        
-        // Common development origins
-        parentCoordinator.trustedOrigins.add('http://127.0.0.1:5500');
-        parentCoordinator.trustedOrigins.add('http://localhost:5500');
-        parentCoordinator.trustedOrigins.add('http://127.0.0.1:3000');
-        parentCoordinator.trustedOrigins.add('http://localhost:3000');
-        
-        // HTTPS equivalents
-        parentCoordinator.trustedOrigins.add('https://127.0.0.1:5500');
-        parentCoordinator.trustedOrigins.add('https://localhost:5500');
-        parentCoordinator.trustedOrigins.add('https://127.0.0.1:3000');
-        parentCoordinator.trustedOrigins.add('https://localhost:3000');
-        
-        // Try to get parent origin from referrer
-        try {
-            const referrer = document.referrer;
-            if (referrer) {
-                const referrerOrigin = new URL(referrer).origin;
-                parentCoordinator.trustedOrigins.add(referrerOrigin);
-            }
-        } catch (e) {
-            // Ignore referrer parsing errors
-        }
-        
-        // Store current window origin as parent origin for message validation
-        parentCoordinator.parentOrigin = window.location.origin;
-        
-    } catch (error) {
-        safeLogError('Status', 'initializeTrustedOrigins', error);
-    }
-}
-
-/**
- * Setup enhanced message listener with origin validation
- */
-function setupEnhancedMessageListener() {
-    try {
-        // Remove any existing listeners first
-        window.removeEventListener('message', handleEnhancedParentMessage);
-        
-        // Add enhanced listener
-        window.addEventListener('message', handleEnhancedParentMessage);
-        
-        // Store for cleanup
-        parentCoordinator.messageChannel = window;
-    } catch (error) {
-        safeLogError('Status', 'setupEnhancedMessageListener', error);
-    }
-}
-
-/**
- * Handle enhanced parent messages with strict origin validation
- */
-function handleEnhancedParentMessage(event) {
-    try {
-        // Store last message origin for debugging
-        parentCoordinator.lastMessageOrigin = event.origin;
-        
-        // Validate origin - only accept from trusted origins
-        if (!isTrustedOrigin(event.origin)) {
-            safeLogError('Status', 'handleEnhancedParentMessage', 
-                new Error(`Untrusted origin: ${event.origin}`));
-            return;
-        }
-
-        const message = event.data;
-        if (!message || !message.type) {
-            return;
-        }
-
-        // Prevent duplicate message processing
-        const messageKey = `${message.type}:${message.sequenceId || 'no-seq'}:${message.timestamp || Date.now()}`;
-        if (messageCache.has(messageKey)) {
-            return;
-        }
-        messageCache.add(messageKey);
-        
-        // Limit cache size
-        if (messageCache.size > 100) {
-            const firstKey = messageCache.values().next().value;
-            messageCache.delete(firstKey);
-        }
-
-        switch (message.type) {
-            case MESSAGE_TYPES.SESSION_DATA:
-                handleSecureSessionData(message);
-                break;
-                
-            case MESSAGE_TYPES.SESSION_UPDATE:
-                handleSessionUpdate(message.data);
-                break;
-                
-            case MESSAGE_TYPES.LOGOUT:
-                handleLogout(message.data);
-                break;
-                
-            case MESSAGE_TYPES.API_RESPONSE:
-                handleApiResponse(message.data);
-                break;
-                
-            case MESSAGE_TYPES.API_ERROR:
-                handleApiError(message.data);
-                break;
-                
-            case MESSAGE_TYPES.AUTH_VALIDATED:
-                handleAuthValidated(message.data);
-                break;
-                
-            default:
-                // Silently ignore unknown message types
-                break;
-        }
-    } catch (error) {
-        safeLogError('Status', 'handleEnhancedParentMessage', error);
-    }
-}
-
-/**
- * Check if origin is trusted
- */
-function isTrustedOrigin(origin) {
-    try {
-        // Always accept from current origin
-        if (origin === window.location.origin) {
-            return true;
-        }
-        
-        // Check against trusted origins set
-        if (parentCoordinator.trustedOrigins.has(origin)) {
-            return true;
-        }
-        
-        // Check if origin matches parent origin pattern (subdomains)
-        if (parentCoordinator.parentOrigin && 
-            origin.endsWith(parentCoordinator.parentOrigin.replace(/^https?:\/\//, ''))) {
-            return true;
-        }
-        
-        return false;
-    } catch (error) {
-        safeLogError('Status', 'isTrustedOrigin', error);
-        return false;
-    }
-}
-
-/**
- * Start secure handshake protocol with parent
- */
-export function startSecureHandshake() {
-    try {
-        // Clear any existing handshake attempts
-        clearSecureHandshake();
-        
-        // Start new handshake
-        requestSessionFromParent();
-    } catch (error) {
-        safeLogError('Status', 'startSecureHandshake', error);
-    }
-}
-
-/**
- * Request session from parent (single request at a time)
- */
-function requestSessionFromParent() {
-    try {
-        if (parentCoordinator.handshakeInProgress) {
-            return;
-        }
-        
-        parentCoordinator.handshakeInProgress = true;
-        parentCoordinator.sessionRequestSent = true;
-        
-        // Generate unique sequence ID for this handshake
-        parentCoordinator.sequenceId = generateSequenceId();
-        
-        // Send session request to parent
-        window.parent.postMessage({
-            type: MESSAGE_TYPES.REQUEST_SESSION,
-            source: 'status-core',
-            sequenceId: parentCoordinator.sequenceId,
-            timestamp: Date.now(),
-            module: 'status'
-        }, '*');
-        
-        // Set timeout for handshake response
-        parentCoordinator.handshakeTimeout = setTimeout(() => {
-            if (!parentCoordinator.sessionValid) {
-                // Single retry logic
-                if (!parentCoordinator.handshakeRetries && parentCoordinator.handshakeRetries < 1) {
-                    parentCoordinator.handshakeRetries++;
-                    parentCoordinator.handshakeInProgress = false;
-                    setTimeout(requestSessionFromParent, 1000);
-                } else {
-                    handleSessionFailed();
-                }
-            }
-        }, 5000);
-        
-    } catch (error) {
-        safeLogError('Status', 'requestSessionFromParent', error);
-        parentCoordinator.handshakeInProgress = false;
-        handleSessionFailed();
-    }
-}
-
-/**
- * Handle secure session data from parent
- */
-function handleSecureSessionData(message) {
-    try {
-        // Verify message source
-        if (message.source !== 'parent') {
-            return;
-        }
-        
-        // Validate sequence ID if provided
-        if (parentCoordinator.sequenceId && message.sequenceId !== parentCoordinator.sequenceId) {
-            return;
-        }
-        
-        const sessionData = message.data;
-        
-        // Validate session data structure
-        if (!sessionData || !sessionData.token || !sessionData.user) {
-            parentCoordinator.handshakeInProgress = false;
-            clearTimeout(parentCoordinator.handshakeTimeout);
-            return;
-        }
-        
-        // Additional validation
-        if (typeof sessionData.token !== 'string' || sessionData.token.length < 10) {
-            return;
-        }
-        
-        if (!sessionData.user.id || !sessionData.user.displayName) {
-            return;
-        }
-        
-        // Mark session as valid
-        parentCoordinator.sessionValid = true;
-        parentCoordinator.handshakeComplete = true;
-        parentCoordinator.handshakeInProgress = false;
-        
-        // Clear timeout
-        clearTimeout(parentCoordinator.handshakeTimeout);
-        
-        // Store session data
-        parentCoordinator.sessionData = sessionData;
-        
-        // Update global state from session
-        updateGlobalStateFromSession(sessionData);
-        
-        // Bind UI after session validation
-        bindUIAfterSession();
-        
-        // Notify parent that session was received
-        sendSecureResponseToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
-            success: true,
-            module: 'status',
-            sequenceId: parentCoordinator.sequenceId
-        });
-        
-        // Start background initialization with session
-        startBackgroundInitializationWithSession();
-        
-    } catch (error) {
-        safeLogError('Status', 'handleSecureSessionData', error);
-        parentCoordinator.handshakeInProgress = false;
-        clearTimeout(parentCoordinator.handshakeTimeout);
-    }
-}
-
-/**
- * Update global state from session data
- */
-function updateGlobalStateFromSession(sessionData) {
-    try {
-        // Update current user
-        currentUser = sessionData.user;
-        userData = sessionData.user;
-        
-        // Store in localStorage for offline use (non-sensitive data only)
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(sessionData.user));
-        
-        // Store token in unified location
-        if (sessionData.token) {
-            localStorage.setItem(UNIFIED_TOKEN_KEY, sessionData.token);
-        }
-        
-        // Initialize token ready state
-        isTokenReady = true;
-        triggerTokenReadyCallbacks();
-        
-        // Process any pending API requests
-        processPendingApiRequests();
-        
-    } catch (error) {
-        safeLogError('Status', 'updateGlobalStateFromSession', error);
-    }
-}
-
-/**
- * Bind UI after session validation
- */
-function bindUIAfterSession() {
-    try {
-        // Trigger UI initialization with session data
         if (typeof window.initializeStatusUI === 'function') {
             window.initializeStatusUI();
         }
         
-        // Update any UI components that depend on authentication
-        updateUIBasedOnAuth();
-        
-    } catch (error) {
-        safeLogError('Status', 'bindUIAfterSession', error);
-    }
-}
-
-/**
- * Update UI based on authentication state
- */
-function updateUIBasedOnAuth() {
-    try {
-        if (currentUser) {
-            // UI ready for user
-        }
-        
-        // Signal that UI can now be fully interactive
-        document.dispatchEvent(new CustomEvent('sessionReady', {
-            detail: { user: currentUser }
-        }));
-        
-    } catch (error) {
-        safeLogError('Status', 'updateUIBasedOnAuth', error);
-    }
-}
-
-/**
- * Send secure response to parent
- */
-function sendSecureResponseToParent(type, data = {}) {
-    try {
-        if (!window.parent || window.parent === window) {
-            return;
-        }
-
-        const message = {
-            type,
-            data: {
-                ...data,
-                source: 'status-core',
-                timestamp: Date.now(),
-                sequenceId: parentCoordinator.sequenceId || generateSequenceId()
-            }
-        };
-
-        // Send to parent with wildcard origin (parent validates origin)
-        window.parent.postMessage(message, '*');
-        
-    } catch (error) {
-        safeLogError('Status', 'sendSecureResponseToParent', error);
-    }
-}
-
-/**
- * Handle session failed scenario
- */
-function handleSessionFailed() {
-    parentCoordinator.handshakeInProgress = false;
-    parentCoordinator.handshakeComplete = false;
-    
-    // Load cached data for offline use
-    loadCachedDataInstantly();
-    
-    // Update UI to show offline state
-    isOfflineMode = true;
-    
-    // Still try to initialize UI with cached data
-    initializeUIWithCachedData();
-}
-
-/**
- * Clear secure handshake resources
- */
-function clearSecureHandshake() {
-    try {
-        if (parentCoordinator.handshakeTimeout) {
-            clearTimeout(parentCoordinator.handshakeTimeout);
-            parentCoordinator.handshakeTimeout = null;
-        }
-        
-        parentCoordinator.handshakeInProgress = false;
-        parentCoordinator.sessionValid = false;
-        parentCoordinator.sessionRequestSent = false;
-        parentCoordinator.handshakeRetries = 0;
-    } catch (error) {
-        safeLogError('Status', 'clearSecureHandshake', error);
-    }
-}
-
-/**
- * Generate unique sequence ID for message tracking
- */
-function generateSequenceId() {
-    try {
-        return `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    } catch (error) {
-        return `seq_fallback_${Date.now()}`;
-    }
-}
-
-/**
- * Send message to parent
- */
-export function sendToParent(type, data = {}) {
-    try {
-        if (!window.parent || window.parent === window) {
-            return;
-        }
-
-        // Prevent duplicate message sending
-        const messageKey = `${type}:${JSON.stringify(data)}`;
-        if (messageCache.has(messageKey)) {
-            return;
-        }
-        messageCache.add(messageKey);
-
-        const message = {
-            type,
-            data: {
-                ...data,
-                source: 'status-core',
-                timestamp: Date.now(),
-                sequenceId: generateSequenceId()
-            }
-        };
-
-        // Use secure sending with origin validation
-        sendSecureResponseToParent(type, message.data);
-        
-    } catch (error) {
-        safeLogError('Status', 'sendToParent', error);
-    }
-}
-
-/**
- * Handle session data from parent (legacy, kept for compatibility)
- */
-export function handleSessionData(sessionData) {
-    try {
-        // Validate session data schema
-        if (!validateSessionData(sessionData)) {
-            sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
-                error: 'INVALID_SESSION_SCHEMA',
-                message: 'Session data validation failed'
-            });
-            return;
-        }
-        
-        // Store session data
-        parentCoordinator.sessionData = sessionData;
-        parentCoordinator.handshakeComplete = true;
-        
-        // Clear handshake retry interval
-        if (parentCoordinator.handshakeInterval) {
-            clearInterval(parentCoordinator.handshakeInterval);
-            parentCoordinator.handshakeInterval = null;
-        }
-        
-        // Update local state with session data
-        updateLocalStateWithSession(sessionData);
-        
-        // Notify parent that session was received
-        sendToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
-            module: 'status',
-            success: true
-        });
-        
-        // Start background initialization with session
-        startBackgroundInitializationWithSession();
-        
-    } catch (error) {
-        safeLogError('Status', 'handleSessionData', error);
-        sendToParent(MESSAGE_TYPES.CHILD_ERROR, {
-            error: 'SESSION_PROCESSING_ERROR',
-            message: error.message
-        });
-    }
-}
-
-/**
- * Validate session data schema
- */
-export function validateSessionData(sessionData) {
-    try {
-        if (!sessionData || typeof sessionData !== 'object') {
-            return false;
-        }
-        
-        // Basic validation
-        const requiredFields = ['user', 'token', 'permissions'];
-        for (const field of requiredFields) {
-            if (!sessionData[field]) {
-                return false;
-            }
-        }
-        
-        // User validation
-        if (!sessionData.user.id || !sessionData.user.displayName) {
-            return false;
-        }
-        
-        // Token validation
-        if (typeof sessionData.token !== 'string' || sessionData.token.length < 10) {
-            return false;
-        }
-        
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-/**
- * Update local state with session data
- */
-export function updateLocalStateWithSession(sessionData) {
-    try {
-        // Update current user
-        currentUser = sessionData.user;
-        userData = sessionData.user;
-        
-        // Store in localStorage for offline use (non-sensitive data only)
-        localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(sessionData.user));
-        
-        // Initialize token ready state
-        isTokenReady = true;
-        triggerTokenReadyCallbacks();
-        
-        // Process any pending API requests
-        processPendingApiRequests();
-        
-    } catch (error) {
-        safeLogError('Status', 'updateLocalStateWithSession', error);
-    }
-}
-
-/**
- * Handle session update from parent
- */
-export function handleSessionUpdate(updateData) {
-    try {
-        if (updateData.user) {
-            currentUser = updateData.user;
-            userData = updateData.user;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(updateData.user));
-        }
-        
-        if (updateData.token) {
-            // Token updated, refresh state
-            parentCoordinator.sessionData.token = updateData.token;
-        }
-        
-        if (updateData.permissions) {
-            parentCoordinator.sessionData.permissions = updateData.permissions;
-        }
-        
-    } catch (error) {
-        safeLogError('Status', 'handleSessionUpdate', error);
-    }
-}
-
-/**
- * Handle logout from parent
- */
-export function handleLogout(logoutData) {
-    try {
-        // Clear all session data
-        parentCoordinator.sessionData = null;
-        parentCoordinator.handshakeComplete = false;
-        parentCoordinator.sessionValid = false;
-        
-        // Clear local user data
-        currentUser = null;
-        userData = null;
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.USER);
-        localStorage.removeItem(UNIFIED_TOKEN_KEY);
-        
-        // Show logout state
-        sendToParent(MESSAGE_TYPES.CHILD_READY, {
-            module: 'status',
-            loggedOut: true,
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        safeLogError('Status', 'handleLogout', error);
-    }
-}
-
-/**
- * Handle parent unavailable
- */
-export function handleParentUnavailable() {
-    // Load cached data for basic UI
-    loadCachedDataInstantly();
-    isOfflineMode = true;
-}
-
-/**
- * Start background initialization with session
- */
-export function startBackgroundInitializationWithSession() {
-    if (isBackgroundInitialized) {
-        return;
-    }
-    
-    try {
-        // Load fresh data in background
-        setTimeout(async () => {
-            try {
-                await loadFreshDataInBackground();
-                isBackgroundInitialized = true;
-                
-                // Notify parent that UI is ready
-                sendToParent(MESSAGE_TYPES.UI_READY, {
-                    module: 'status',
-                    timestamp: Date.now()
-                });
-                
-            } catch (error) {
-                safeLogError('Status', 'startBackgroundInitializationWithSession', error);
-            }
-        }, 1000);
-        
-    } catch (error) {
-        safeLogError('Status', 'startBackgroundInitializationWithSession', error);
-    }
-}
-
-/**
- * Make API request through parent
- */
-export async function makeParentApiRequest(endpoint, options = {}) {
-    return new Promise((resolve, reject) => {
-        try {
-            // Generate unique request ID
-            const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
-            // Setup response handler
-            const responseHandler = (event) => {
-                try {
-                    if (event.origin !== window.location.origin) {
-                        return;
-                    }
-                    
-                    const message = event.data;
-                    if (!message || !message.type || !message.data || message.data.requestId !== requestId) {
-                        return;
-                    }
-                    
-                    if (message.type === MESSAGE_TYPES.API_RESPONSE) {
-                        window.removeEventListener('message', responseHandler);
-                        resolve(message.data.response);
-                    } else if (message.type === MESSAGE_TYPES.API_ERROR) {
-                        window.removeEventListener('message', responseHandler);
-                        reject(new Error(message.data.error || 'API Error'));
-                    }
-                } catch (error) {
-                    window.removeEventListener('message', responseHandler);
-                    reject(error);
-                }
-            };
-            
-            // Listen for response
-            window.addEventListener('message', responseHandler);
-            
-            // Send request to parent
-            sendParentMessage(MESSAGE_TYPES.API_REQUEST, {
-                requestId,
-                endpoint,
-                options: {
-                    method: options.method || 'GET',
-                    headers: options.headers || {},
-                    body: options.body,
-                    credentials: 'include'
-                }
-            });
-            
-            // Set timeout
-            setTimeout(() => {
-                window.removeEventListener('message', responseHandler);
-                reject(new Error('Request timeout'));
-            }, 30000);
-            
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-/**
- * Handle API response from parent
- */
-export function handleApiResponse(responseData) {
-    // This is handled in the promise-based makeParentApiRequest
-}
-
-/**
- * Handle API error from parent
- */
-export function handleApiError(errorData) {
-    // This is handled in the promise-based makeParentApiRequest
-}
-
-/**
- * Handle auth validated
- */
-export function handleAuthValidated(data) {
-    try {
-        if (data.success) {
-            // Auth successful
-            isTokenReady = true;
-            triggerTokenReadyCallbacks();
-        }
-    } catch (error) {
-        safeLogError('Status', 'handleAuthValidated', error);
-    }
-}
-
-// =============================================
-// CENTRALIZED TOKEN ACCESS SYSTEM
-// =============================================
-
-/**
- * Wait for api.core.js to be ready and token available
- * @returns {Promise<boolean>} True when token is ready
- */
-export function waitForTokenReady() {
-    return new Promise((resolve) => {
-        try {
-            if (isTokenReady) {
-                resolve(true);
-                return;
-            }
-
-            // First check parent session
-            if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) {
-                isTokenReady = true;
-                resolve(true);
-                triggerTokenReadyCallbacks();
-                return;
-            }
-
-            // Fallback to legacy check
-            const checkToken = () => {
-                try {
-                    const token = getUnifiedToken();
-                    if (token) {
-                        isTokenReady = true;
-                        resolve(true);
-                        triggerTokenReadyCallbacks();
-                        return;
-                    }
-
-                    // Wait and check again
-                    setTimeout(checkToken, 100);
-                } catch (error) {
-                    safeLogError('Status', 'waitForTokenReady.checkToken', error);
-                    resolve(false);
-                }
-            };
-
-            checkToken();
-        } catch (error) {
-            safeLogError('Status', 'waitForTokenReady', error);
-            resolve(false);
-        }
-    });
-}
-
-/**
- * Register callback when token is ready
- * @param {Function} callback - Function to call when token is ready
- */
-export function onTokenReady(callback) {
-    try {
-        if (isTokenReady) {
-            callback();
-        } else {
-            tokenReadyCallbacks.push(callback);
-        }
-    } catch (error) {
-        safeLogError('Status', 'onTokenReady', error);
-    }
-}
-
-/**
- * Trigger all token ready callbacks
- */
-export function triggerTokenReadyCallbacks() {
-    try {
-        while (tokenReadyCallbacks.length > 0) {
-            const callback = tokenReadyCallbacks.shift();
-            try {
-                callback();
-            } catch (error) {
-                safeLogError('Status', 'triggerTokenReadyCallbacks', error);
-            }
-        }
-    } catch (error) {
-        safeLogError('Status', 'triggerTokenReadyCallbacks', error);
-    }
-}
-
-/**
- * Get unified token from centralized source
- * @returns {string|null} Token or null if not available
- */
-export function getUnifiedToken() {
-    try {
-        // Priority 1: Parent session
-        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData && parentCoordinator.sessionData.token) {
-            return parentCoordinator.sessionData.token;
-        }
-
-        // Priority 2: Imported function from api.core.js
-        try {
-            if (typeof getUserToken === 'function') {
-                const token = getUserToken();
-                if (token && typeof token === 'string' && token.length > 10) {
-                    return token;
-                }
-            }
-        } catch (error) {
-            // Silently fail
-        }
-
-        // Priority 3: Unified localStorage key
-        try {
-            const token = localStorage.getItem(UNIFIED_TOKEN_KEY);
-            if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
-                if (token.split('.').length === 3) {
-                    return token;
-                }
-            }
-        } catch (error) {
-            // Silently fail
-        }
-
-        // Priority 4: Legacy token migration (one-time check)
-        const legacyToken = migrateLegacyTokens();
-        if (legacyToken) {
-            return legacyToken;
-        }
-
-        return null;
-    } catch (error) {
-        safeLogError('Status', 'getUnifiedToken', error);
-        return null;
-    }
-}
-
-/**
- * Migrate legacy tokens to unified system
- * @returns {string|null} Migrated token or null
- */
-export function migrateLegacyTokens() {
-    try {
-        const legacyKeys = [
-            'knecta_access_token',
-            'accessToken',
-            'moodchat_token',
-            'auth_token',
-            'knecta_token'
-        ];
-
-        for (const key of legacyKeys) {
-            try {
-                const token = localStorage.getItem(key);
-                if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
-                    if (token.split('.').length === 3) {
-                        // Store in unified location
-                        localStorage.setItem(UNIFIED_TOKEN_KEY, token);
-                        return token;
-                    }
-                }
-            } catch (error) {
-                // Silently continue
-            }
-        }
-
-        return null;
-    } catch (error) {
-        safeLogError('Status', 'migrateLegacyTokens', error);
-        return null;
-    }
-}
-
-/**
- * Check if user is authenticated
- * @returns {boolean} True if authenticated
- */
-export function isAuthenticated() {
-    try {
-        // First check parent session
-        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) {
-            return true;
-        }
-        
-        // Fallback to token check
-        return getUnifiedToken() !== null;
-    } catch (error) {
-        safeLogError('Status', 'isAuthenticated', error);
-        return false;
-    }
-}
-
-/**
- * Queue API request until token is ready
- * @param {Function} requestFunction - Function that returns Promise
- * @returns {Promise<any>} Request result
- */
-export async function queueApiRequest(requestFunction) {
-    if (isTokenReady) {
-        return requestFunction();
-    }
-
-    return new Promise((resolve, reject) => {
-        try {
-            pendingApiRequests.push({ requestFunction, resolve, reject });
-            
-            // Start token readiness check if not already started
-            if (!apiCheckInterval) {
-                startTokenReadinessCheck();
-            }
-        } catch (error) {
-            safeLogError('Status', 'queueApiRequest', error);
-            reject(error);
-        }
-    });
-}
-
-/**
- * Process pending API requests
- */
-export function processPendingApiRequests() {
-    try {
-        while (pendingApiRequests.length > 0) {
-            const { requestFunction, resolve, reject } = pendingApiRequests.shift();
-            try {
-                requestFunction().then(resolve).catch(reject);
-            } catch (error) {
-                safeLogError('Status', 'processPendingApiRequests', error);
-                reject(error);
-            }
-        }
-    } catch (error) {
-        safeLogError('Status', 'processPendingApiRequests', error);
-    }
-}
-
-/**
- * Start checking for token readiness
- */
-export function startTokenReadinessCheck() {
-    try {
-        if (apiCheckInterval) {
-            clearInterval(apiCheckInterval);
-        }
-
-        let checkCount = 0;
-        const maxChecks = 30; // 30 * 100ms = 3 seconds max
-
-        apiCheckInterval = setInterval(() => {
-            try {
-                checkCount++;
-                
-                if (isTokenReady || getUnifiedToken() || parentCoordinator.handshakeComplete) {
-                    clearInterval(apiCheckInterval);
-                    apiCheckInterval = null;
-                    isTokenReady = true;
-                    processPendingApiRequests();
-                    triggerTokenReadyCallbacks();
-                } else if (checkCount >= maxChecks) {
-                    clearInterval(apiCheckInterval);
-                    apiCheckInterval = null;
-                    safeLogError('Status', 'startTokenReadinessCheck', 
-                        new Error('Token readiness check timeout'));
-                }
-            } catch (error) {
-                safeLogError('Status', 'startTokenReadinessCheck.interval', error);
-            }
-        }, 100);
-    } catch (error) {
-        safeLogError('Status', 'startTokenReadinessCheck', error);
-    }
-}
-
-/**
- * Make secure API call with centralized token handling
- */
-export const secureApiCall = withApiGuard(async function(endpoint, options = {}) {
-    // If offline mode, queue for later
-    if (isOfflineMode && options.method && options.method !== 'GET') {
-        throw new Error('Offline mode');
-    }
-
-    // Check if we should use parent API
-    if (parentCoordinator.handshakeComplete) {
-        try {
-            return await makeParentApiRequest(endpoint, options);
-        } catch (error) {
-            // Fall back to direct API call
-        }
-    }
-
-    // Check if token is ready
-    const token = getUnifiedToken();
-    if (!token) {
-        return queueApiRequest(() => secureApiCall(endpoint, options));
-    }
-
-    try {
-        // Use imported secureFetch function from api.core.js
-        if (typeof secureFetch !== 'function') {
-            throw new Error('secureFetch not available');
-        }
-        
-        const response = await secureFetch(endpoint, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
-        });
-        
-        return response;
-        
-    } catch (error) {
-        // Check for auth errors
-        const isAuthError = error.message?.includes('401') || 
-                           error.message?.includes('403') ||
-                           error.message?.includes('Unauthorized') || 
-                           error.message?.includes('Authentication') || 
-                           error.message?.includes('Session');
-        
-        if (isAuthError) {
-            isOfflineMode = true;
-            handleAuthError('Authentication failed. Using offline mode.');
-        }
-        
-        throw error;
-    }
-}, null);
-
-// =============================================
-// INSTANT UI RENDERING WITH CACHED DATA
-// =============================================
-
-/**
- * Initialize UI immediately with cached data (non-blocking)
- */
-export function initializeUIWithCachedData() {
-    try {
-        // Load user from cache
-        loadUserFromCache();
-        
-        // Load all cached data
-        loadCachedDataInstantly();
-        
-        // Start background initialization after parent coordination
         if (parentCoordinator.handshakeComplete) {
             startBackgroundInitializationWithSession();
-        } else {
-            // Wait for parent handshake
-            setTimeout(() => {
-                if (!parentCoordinator.handshakeComplete) {
-                    // Parent handshake pending, showing cached data
-                }
-            }, 2000);
         }
         
     } catch (error) {
@@ -1618,17 +2514,12 @@ export function initializeUIWithCachedData() {
     }
 }
 
-/**
- * Load user from cache
- */
-export function loadUserFromCache() {
+function loadUserFromCache() {
     try {
-        const userData = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
+        const userData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.USER);
         if (userData && userData !== 'undefined' && userData !== 'null') {
-            const user = JSON.parse(userData);
-            if (user && typeof user === 'object' && user.id) {
-                currentUser = user;
-                userData = user;
+            if (userData && typeof userData === 'object' && userData.id) {
+                currentUser = userData;
             }
         }
     } catch (error) {
@@ -1636,129 +2527,66 @@ export function loadUserFromCache() {
     }
 }
 
-/**
- * Load cached data instantly for offline use
- */
-export function loadCachedDataInstantly() {
+function loadCachedDataInstantly() {
     try {
-        // Load statuses
-        const statusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.STATUSES);
+        const statusesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
         if (statusesData) {
-            try {
-                statuses = JSON.parse(statusesData) || [];
-            } catch (parseError) {
-                statuses = [];
-            }
+            try { statuses = statusesData || []; } catch { statuses = []; }
         }
         
-        // Load my statuses
-        const myStatusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.MY_STATUSES);
+        const myStatusesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
         if (myStatusesData) {
-            try {
-                myStatuses = JSON.parse(myStatusesData) || [];
-            } catch (parseError) {
-                myStatuses = [];
-            }
+            try { myStatuses = myStatusesData || []; } catch { myStatuses = []; }
         }
         
-        // Load viewed statuses
-        const viewedStatusesData = localStorage.getItem(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
+        const viewedStatusesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
         if (viewedStatusesData) {
-            try {
-                viewedStatuses = new Set(JSON.parse(viewedStatusesData) || []);
-            } catch (parseError) {
-                viewedStatuses = new Set();
-            }
+            try { viewedStatuses = new Set(viewedStatusesData || []); } catch { viewedStatuses = new Set(); }
         }
         
-        // Load muted users
-        const mutedUsersData = localStorage.getItem(LOCAL_STORAGE_KEYS.MUTED_USERS);
+        const mutedUsersData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.MUTED_USERS);
         if (mutedUsersData) {
-            try {
-                mutedUsers = new Set(JSON.parse(mutedUsersData) || []);
-            } catch (parseError) {
-                mutedUsers = new Set();
-            }
+            try { mutedUsers = new Set(mutedUsersData || []); } catch { mutedUsers = new Set(); }
         }
         
-        // Load highlights
-        const highlightsData = localStorage.getItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
+        const highlightsData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
         if (highlightsData) {
-            try {
-                highlights = JSON.parse(highlightsData) || [];
-            } catch (parseError) {
-                highlights = [];
-            }
+            try { highlights = highlightsData || []; } catch { highlights = []; }
         }
         
-        // Load drafts
-        const draftsData = localStorage.getItem(LOCAL_STORAGE_KEYS.DRAFTS);
+        const draftsData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.DRAFTS);
         if (draftsData) {
-            try {
-                drafts = JSON.parse(draftsData) || [];
-            } catch (parseError) {
-                drafts = [];
-            }
+            try { drafts = draftsData || []; } catch { drafts = []; }
         }
         
-        // Load scheduled statuses
-        const scheduledData = localStorage.getItem(LOCAL_STORAGE_KEYS.SCHEDULED);
+        const scheduledData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.SCHEDULED);
         if (scheduledData) {
-            try {
-                scheduledStatuses = JSON.parse(scheduledData) || [];
-            } catch (parseError) {
-                scheduledStatuses = [];
-            }
+            try { scheduledStatuses = scheduledData || []; } catch { scheduledStatuses = []; }
         }
         
-        // Load pending replies
-        const pendingRepliesData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
+        const pendingRepliesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
         if (pendingRepliesData) {
-            try {
-                pendingReplies = JSON.parse(pendingRepliesData) || [];
-            } catch (parseError) {
-                pendingReplies = [];
-            }
+            try { pendingReplies = pendingRepliesData || []; } catch { pendingReplies = []; }
         }
         
-        // Load pending reactions
-        const pendingReactionsData = localStorage.getItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
+        const pendingReactionsData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
         if (pendingReactionsData) {
-            try {
-                pendingReactions = JSON.parse(pendingReactionsData) || [];
-            } catch (parseError) {
-                pendingReactions = [];
-            }
+            try { pendingReactions = pendingReactionsData || []; } catch { pendingReactions = []; }
         }
         
-        // Load mood data
-        const moodData = localStorage.getItem(LOCAL_STORAGE_KEYS.MOOD_DATA);
+        const moodData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.MOOD_DATA);
         if (moodData) {
-            try {
-                moodChartData = JSON.parse(moodData) || [];
-            } catch (parseError) {
-                moodChartData = [];
-            }
+            try { moodChartData = moodData || []; } catch { moodChartData = []; }
         }
         
-        // Load streak data
-        const streakData = localStorage.getItem(LOCAL_STORAGE_KEYS.STREAK);
+        const streakData = SecureStorage.get(LOCAL_STORAGE_KEYS.STREAK);
         if (streakData) {
-            try {
-                streakCount = parseInt(streakData) || 0;
-            } catch (parseError) {
-                streakCount = 0;
-            }
+            try { streakCount = parseInt(streakData) || 0; } catch { streakCount = 0; }
         }
         
-        // Load last post date
-        const lastPostDateData = localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
+        const lastPostDateData = SecureStorage.get(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
         if (lastPostDateData) {
-            try {
-                lastPostDate = new Date(lastPostDateData);
-            } catch (parseError) {
-                lastPostDate = null;
-            }
+            try { lastPostDate = new Date(lastPostDateData); } catch { lastPostDate = null; }
         }
         
     } catch (error) {
@@ -1769,23 +2597,15 @@ export function loadCachedDataInstantly() {
 // =============================================
 // BACKGROUND INITIALIZATION
 // =============================================
-
-/**
- * Start background initialization when token is ready
- */
-export async function startBackgroundInitialization() {
-    if (isBackgroundInitialized) {
-        return;
-    }
+async function startBackgroundInitialization() {
+    if (isBackgroundInitialized) return;
     
     try {
-        // Wait for token readiness (non-blocking)
         onTokenReady(async () => {
             try {
                 await loadFreshDataInBackground();
                 isBackgroundInitialized = true;
                 
-                // Notify parent that UI is ready
                 if (parentCoordinator.handshakeComplete) {
                     sendToParent(MESSAGE_TYPES.UI_READY, {
                         module: 'status',
@@ -1797,13 +2617,11 @@ export async function startBackgroundInitialization() {
             }
         });
         
-        // Also check immediately in case token is already ready
-        if (getUnifiedToken() || parentCoordinator.handshakeComplete) {
+        if (getUnifiedToken() || parentCoordinator.handshakeComplete || state.token || state.sessionMirror.validated) {
             try {
                 await loadFreshDataInBackground();
                 isBackgroundInitialized = true;
                 
-                // Notify parent that UI is ready
                 if (parentCoordinator.handshakeComplete) {
                     sendToParent(MESSAGE_TYPES.UI_READY, {
                         module: 'status',
@@ -1820,34 +2638,22 @@ export async function startBackgroundInitialization() {
     }
 }
 
-/**
- * Load fresh data in background for silent updates
- */
-export async function loadFreshDataInBackground() {
+async function loadFreshDataInBackground() {
     try {
         const loadPromises = [];
-        
         loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
         loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
         loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
         loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
-        
         await Promise.allSettled(loadPromises);
-        
     } catch (error) {
         safeLogError('Status', 'loadFreshDataInBackground', error);
     }
 }
 
-/**
- * Safe API operation with error containment
- */
-export async function safeApiOperation(operation) {
+async function safeApiOperation(operation) {
     try {
-        if (!isAuthenticated()) {
-            throw new Error('Not authenticated');
-        }
-        
+        if (!isAuthenticated()) throw new Error('Not authenticated');
         return await operation();
     } catch (error) {
         safeLogError('Status', 'safeApiOperation', error);
@@ -1855,64 +2661,51 @@ export async function safeApiOperation(operation) {
     }
 }
 
-/**
- * Load statuses in background
- */
-export async function loadStatusesInBackground() {
+async function loadStatusesInBackground() {
     try {
         const response = await secureApiCall('/api/statuses');
         if (response && response.statuses) {
             statuses = response.statuses;
             statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            
-            localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
+            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
         }
     } catch (error) {
         throw error;
     }
 }
 
-/**
- * Load my statuses in background
- */
-export async function loadMyStatusesInBackground() {
+async function loadMyStatusesInBackground() {
     try {
         const response = await secureApiCall('/api/statuses/my');
         if (response && response.statuses) {
             myStatuses = response.statuses;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         }
     } catch (error) {
         throw error;
     }
 }
 
-/**
- * Load highlights in background
- */
-export async function loadHighlightsInBackground() {
+async function loadHighlightsInBackground() {
     try {
         const response = await secureApiCall('/api/statuses/highlights');
         if (response && response.highlights) {
             highlights = response.highlights;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
         }
     } catch (error) {
         throw error;
     }
 }
 
-/**
- * Load user data in background
- */
-export async function loadUserDataInBackground() {
+async function loadUserDataInBackground() {
     try {
         const response = await secureApiCall('/api/user/me');
         if (response && response.user) {
             currentUser = response.user;
             userData = response.user;
-            localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(response.user));
+            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, response.user);
         }
     } catch (error) {
         throw error;
@@ -1920,25 +2713,14 @@ export async function loadUserDataInBackground() {
 }
 
 // =============================================
-// ENHANCED BOOTSTRAP WITH CENTRALIZED TOKEN
+// BOOTSTRAP APPLICATION - ALIASED AS bootstrapApplication FOR COMPATIBILITY
 // =============================================
-
-/**
- * Enhanced bootstrap process
- * @returns {Promise<boolean>} Success status
- */
-export async function bootstrapApplication() {
+async function bootstrapApp() {
     try {
-        // Phase 1: Initialize parent coordination with secure handshake
         initializeParentCoordination();
-        
-        // Phase 2: Immediate UI with cached data (non-blocking)
         initializeUIWithCachedData();
-        
-        // Phase 3: Start token readiness check
         startTokenReadinessCheck();
         
-        // Phase 4: Notify parent that child is loaded
         setTimeout(() => {
             sendToParent(MESSAGE_TYPES.CHILD_LOADED, {
                 module: 'status',
@@ -1947,23 +2729,19 @@ export async function bootstrapApplication() {
         }, 500);
         
         return true;
-        
     } catch (error) {
-        safeLogError('Status', 'bootstrapApplication', error);
+        safeLogError('Status', 'bootstrapApp', error);
         return false;
     }
 }
 
+const bootstrapApplication = bootstrapApp;
+
 // =============================================
 // AUTHENTICATION ERROR HANDLING
 // =============================================
-
-/**
- * Handle authentication errors gracefully
- */
-export function handleAuthError(message) {
+function handleAuthError(message) {
     try {
-        // Notify parent about auth error
         if (parentCoordinator.handshakeComplete) {
             sendToParent(MESSAGE_TYPES.NEEDS_AUTH, {
                 module: 'status',
@@ -1973,7 +2751,7 @@ export function handleAuthError(message) {
         }
         
         if (statuses.length === 0 && myStatuses.length === 0) {
-            // Auth error with no cached data
+            // No action needed
         } else {
             isOfflineMode = true;
         }
@@ -1982,12 +2760,8 @@ export function handleAuthError(message) {
     }
 }
 
-/**
- * Initialize status system with fallback to cached data
- */
-export async function initializeStatusSystem() {
+async function initializeStatusSystem() {
     try {
-        // Try to load fresh data with timeout
         const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Timeout loading data')), 10000)
         );
@@ -1995,19 +2769,12 @@ export async function initializeStatusSystem() {
         await Promise.race([loadInitialData(), timeoutPromise]);
         
     } catch (error) {
-        // Fallback to cached data
         loadCachedDataInstantly();
-        
-        if (!isOfflineMode) {
-            isOfflineMode = true;
-        }
+        if (!isOfflineMode) isOfflineMode = true;
     }
 }
 
-/**
- * Load initial data from API
- */
-export async function loadInitialData() {
+async function loadInitialData() {
     try {
         const loadPromises = [];
         
@@ -2017,8 +2784,7 @@ export async function loadInitialData() {
                 statuses = statusesResponse.statuses;
                 statuses = filterStatusesByPrivacy(statuses);
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                
-                localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
+                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
             }
         }));
         
@@ -2026,7 +2792,7 @@ export async function loadInitialData() {
             const myStatusesResponse = await secureApiCall('/api/statuses/my');
             if (myStatusesResponse && myStatusesResponse.statuses) {
                 myStatuses = myStatusesResponse.statuses;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
             }
         }));
         
@@ -2034,7 +2800,7 @@ export async function loadInitialData() {
             const highlightsResponse = await secureApiCall('/api/statuses/highlights');
             if (highlightsResponse && highlightsResponse.highlights) {
                 highlights = highlightsResponse.highlights;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
             }
         }));
         
@@ -2043,7 +2809,7 @@ export async function loadInitialData() {
             if (userResponse && userResponse.user) {
                 currentUser = userResponse.user;
                 userData = userResponse.user;
-                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(userResponse.user));
+                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, userResponse.user);
             }
         }));
         
@@ -2058,42 +2824,24 @@ export async function loadInitialData() {
 // =============================================
 // CORE STATUS FUNCTIONS
 // =============================================
-
-/**
- * Filter statuses by privacy
- */
-export function filterStatusesByPrivacy(statuses) {
+function filterStatusesByPrivacy(statuses) {
     try {
-        if (!Array.isArray(statuses)) {
-            return [];
-        }
+        if (!Array.isArray(statuses)) return [];
         
         return statuses.filter(status => {
-            if (!status || !status.userId) {
-                return false;
-            }
-            
-            if (mutedUsers.has(status.userId)) {
-                return false;
-            }
+            if (!status || !status.userId) return false;
+            if (mutedUsers.has(status.userId)) return false;
             
             const privacy = status.privacy || 'friends';
             
             switch(privacy) {
-                case 'everyone':
-                    return true;
-                case 'friends':
-                    return true;
-                case 'close-friends':
-                    return false;
-                case 'except':
-                    return true;
-                case 'specific':
-                    return false;
-                case 'micro-circle':
-                    return false;
-                default:
-                    return true;
+                case 'everyone': return true;
+                case 'friends': return true;
+                case 'close-friends': return false;
+                case 'except': return true;
+                case 'specific': return false;
+                case 'micro-circle': return false;
+                default: return true;
             }
         });
     } catch (error) {
@@ -2102,10 +2850,7 @@ export function filterStatusesByPrivacy(statuses) {
     }
 }
 
-/**
- * Get status preview text
- */
-export function getStatusPreviewText(status) {
+function getStatusPreviewText(status) {
     try {
         if (!status) return 'Status';
         
@@ -2123,21 +2868,9 @@ export function getStatusPreviewText(status) {
     }
 }
 
-/**
- * Update current section based on active tab
- */
-export function updateCurrentSection() {
-    // Implementation handled by UI module
-}
-
-/**
- * Filter statuses by type
- */
-export function filterStatusesByType(type) {
+function filterStatusesByType(type) {
     try {
-        if (!Array.isArray(statuses)) {
-            return [];
-        }
+        if (!Array.isArray(statuses)) return [];
         
         switch(type) {
             case 'friends':
@@ -2159,10 +2892,7 @@ export function filterStatusesByType(type) {
     }
 }
 
-/**
- * Get empty state message based on current filters
- */
-export function getEmptyStateMessage() {
+function getEmptyStateMessage() {
     try {
         if (activeFilters.size > 0) {
             return `No statuses match your filters`;
@@ -2183,19 +2913,13 @@ export function getEmptyStateMessage() {
 // =============================================
 // STATUS ACTIONS - WITH SECURE API CALLS
 // =============================================
-
-/**
- * Add reaction to status
- */
-export const addReactionToStatus = withApiGuard(async function(statusId, reaction) {
-    if (!statusId || !reaction) {
-        throw new Error('Missing required parameters');
-    }
+const addReactionToStatus = createErrorBoundary(async function(statusId, reaction) {
+    if (!statusId || !reaction) throw new Error('Missing required parameters');
     
     if (isOfflineMode) {
         pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
-        localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, JSON.stringify(pendingReactions));
-        return;
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        return { success: true, offline: true };
     }
     
     const response = await secureApiCall(`/api/statuses/${statusId}/react`, {
@@ -2204,19 +2928,12 @@ export const addReactionToStatus = withApiGuard(async function(statusId, reactio
     });
     
     return response;
-}, null);
+}, 'addReactionToStatus', { success: false });
 
-/**
- * Vote on poll
- */
-export const voteOnPoll = withApiGuard(async function(statusId, optionId) {
-    if (!statusId || !optionId) {
-        throw new Error('Missing required parameters');
-    }
+const voteOnPoll = createErrorBoundary(async function(statusId, optionId) {
+    if (!statusId || !optionId) throw new Error('Missing required parameters');
     
-    if (isOfflineMode) {
-        return;
-    }
+    if (isOfflineMode) return { success: false, offline: true };
     
     const response = await secureApiCall(`/api/statuses/${statusId}/vote`, {
         method: 'POST',
@@ -2224,15 +2941,10 @@ export const voteOnPoll = withApiGuard(async function(statusId, optionId) {
     });
     
     return response;
-}, null);
+}, 'voteOnPoll', { success: false });
 
-/**
- * Pin status
- */
-export const pinStatus = withApiGuard(async function(statusData) {
-    if (!statusData || !statusData.id) {
-        throw new Error('Invalid status data');
-    }
+const pinStatus = createErrorBoundary(async function(statusData) {
+    if (!statusData || !statusData.id) throw new Error('Invalid status data');
     
     const response = await secureApiCall(`/api/statuses/${statusData.id}/pin`, {
         method: 'POST'
@@ -2243,15 +2955,10 @@ export const pinStatus = withApiGuard(async function(statusData) {
         pinnedStatuses.push(statusData);
     }
     return response;
-}, null);
+}, 'pinStatus', { success: false });
 
-/**
- * Unpin status
- */
-export const unpinStatus = withApiGuard(async function(statusData) {
-    if (!statusData || !statusData.id) {
-        throw new Error('Invalid status data');
-    }
+const unpinStatus = createErrorBoundary(async function(statusData) {
+    if (!statusData || !statusData.id) throw new Error('Invalid status data');
     
     const response = await secureApiCall(`/api/statuses/${statusData.id}/pin`, {
         method: 'DELETE'
@@ -2262,15 +2969,10 @@ export const unpinStatus = withApiGuard(async function(statusData) {
         pinnedStatuses = pinnedStatuses.filter(s => s && s.id !== statusData.id);
     }
     return response;
-}, null);
+}, 'unpinStatus', { success: false });
 
-/**
- * Mute user
- */
-export const muteUser = withApiGuard(async function(userId) {
-    if (!userId) {
-        throw new Error('Invalid user ID');
-    }
+const muteUser = createErrorBoundary(async function(userId) {
+    if (!userId) throw new Error('Invalid user ID');
     
     const response = await secureApiCall(`/api/users/${userId}/mute`, {
         method: 'POST'
@@ -2278,18 +2980,13 @@ export const muteUser = withApiGuard(async function(userId) {
     
     if (response && response.success) {
         mutedUsers.add(userId);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
     }
     return response;
-}, null);
+}, 'muteUser', { success: false });
 
-/**
- * Unmute user
- */
-export const unmuteUser = withApiGuard(async function(userId) {
-    if (!userId) {
-        throw new Error('Invalid user ID');
-    }
+const unmuteUser = createErrorBoundary(async function(userId) {
+    if (!userId) throw new Error('Invalid user ID');
     
     const response = await secureApiCall(`/api/users/${userId}/mute`, {
         method: 'DELETE'
@@ -2297,39 +2994,34 @@ export const unmuteUser = withApiGuard(async function(userId) {
     
     if (response && response.success) {
         mutedUsers.delete(userId);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MUTED_USERS, JSON.stringify(Array.from(mutedUsers)));
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
     }
     return response;
-}, null);
+}, 'unmuteUser', { success: false });
 
-/**
- * Post status
- */
-export const postStatus = withApiGuard(async function(statusData) {
-    if (!statusData) {
-        throw new Error('Invalid status data');
-    }
+const postStatus = createErrorBoundary(async function(statusData) {
+    if (!statusData) throw new Error('Invalid status data');
     
-    // Sanitize status data
     const sanitizedData = sanitizeStatusData(statusData);
     
     if (isOfflineMode) {
-        const offlineQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || '[]');
+        const offlineQueue = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
         sanitizedData.id = 'offline_' + Date.now();
         sanitizedData.createdAt = new Date().toISOString();
+        sanitizedData.offline = true;
         offlineQueue.push(sanitizedData);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
         
         statuses.unshift(sanitizedData);
         myStatuses.unshift(sanitizedData);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         
         lastPostDate = new Date();
-        localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
+        SecureStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
         updateStreakCounter();
         
-        return { success: true, status: sanitizedData };
+        return { success: true, status: sanitizedData, offline: true };
     }
     
     const response = await secureApiCall('/api/statuses/create', {
@@ -2340,11 +3032,11 @@ export const postStatus = withApiGuard(async function(statusData) {
     if (response && response.status) {
         statuses.unshift(response.status);
         myStatuses.unshift(response.status);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
-        localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         
         lastPostDate = new Date();
-        localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
+        SecureStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
         updateStreakCounter();
         
         if (sanitizedData.mood) {
@@ -2353,48 +3045,26 @@ export const postStatus = withApiGuard(async function(statusData) {
                 value: 50 + Math.floor(Math.random() * 30),
                 date: new Date().toISOString()
             });
-            if (moodChartData.length > 30) {
-                moodChartData = moodChartData.slice(-30);
-            }
-            localStorage.setItem(LOCAL_STORAGE_KEYS.MOOD_DATA, JSON.stringify(moodChartData));
+            if (moodChartData.length > 30) moodChartData = moodChartData.slice(-30);
+            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MOOD_DATA, moodChartData);
         }
     }
     return response;
-}, null);
+}, 'postStatus', { success: false });
 
-/**
- * Sanitize status data to prevent XSS
- */
 function sanitizeStatusData(statusData) {
     try {
         const sanitized = { ...statusData };
         
-        // Sanitize text fields
-        if (sanitized.text) {
-            sanitized.text = escapeHtml(sanitized.text);
-        }
-        if (sanitized.caption) {
-            sanitized.caption = escapeHtml(sanitized.caption);
-        }
-        if (sanitized.question) {
-            sanitized.question = escapeHtml(sanitized.question);
-        }
+        if (sanitized.text) sanitized.text = escapeHtml(sanitized.text);
+        if (sanitized.caption) sanitized.caption = escapeHtml(sanitized.caption);
+        if (sanitized.question) sanitized.question = escapeHtml(sanitized.question);
         
-        // Validate enum fields
-        if (sanitized.privacy && !privacySettings[sanitized.privacy]) {
-            sanitized.privacy = 'friends';
-        }
-        if (sanitized.mood && !statusMoods[sanitized.mood]) {
-            sanitized.mood = null;
-        }
-        if (sanitized.intent && !statusIntents[sanitized.intent]) {
-            sanitized.intent = null;
-        }
-        if (sanitized.category && !statusCategories[sanitized.category]) {
-            sanitized.category = null;
-        }
+        if (sanitized.privacy && !privacySettings[sanitized.privacy]) sanitized.privacy = 'friends';
+        if (sanitized.mood && !statusMoods[sanitized.mood]) sanitized.mood = null;
+        if (sanitized.intent && !statusIntents[sanitized.intent]) sanitized.intent = null;
+        if (sanitized.category && !statusCategories[sanitized.category]) sanitized.category = null;
         
-        // Validate payload structure
         validateStatusPayload(sanitized);
         
         return sanitized;
@@ -2404,78 +3074,404 @@ function sanitizeStatusData(statusData) {
     }
 }
 
-/**
- * Validate status payload structure
- */
 function validateStatusPayload(payload) {
+    if (payload.type === 'text') {
+        if (!payload.text || typeof payload.text !== 'string' || payload.text.trim().length === 0) {
+            throw new Error('Text status requires non-empty text');
+        }
+        if (payload.text.length > 5000) throw new Error('Text too long (max 5000 characters)');
+    }
+    
+    if (payload.type === 'media') {
+        if (!payload.mediaUrls || !Array.isArray(payload.mediaUrls) || payload.mediaUrls.length === 0) {
+            throw new Error('Media status requires media URLs');
+        }
+        if (payload.caption && payload.caption.length > 1000) throw new Error('Caption too long (max 1000 characters)');
+    }
+    
+    if (payload.type === 'poll') {
+        if (!payload.question || typeof payload.question !== 'string' || payload.question.trim().length === 0) {
+            throw new Error('Poll requires a question');
+        }
+        if (!payload.options || !Array.isArray(payload.options) || payload.options.length < 2) {
+            throw new Error('Poll requires at least 2 options');
+        }
+        if (payload.options.length > 10) throw new Error('Too many poll options (max 10)');
+    }
+    
+    if (payload.duration && !durationOptions[payload.duration.toString()]) throw new Error('Invalid duration option');
+    if (payload.mood && !statusMoods[payload.mood]) throw new Error('Invalid mood');
+    if (payload.intent && !statusIntents[payload.intent]) throw new Error('Invalid intent');
+    if (payload.category && !statusCategories[payload.category]) throw new Error('Invalid category');
+    if (payload.privacy && !privacySettings[payload.privacy]) throw new Error('Invalid privacy setting');
+}
+
+function updateStreakCounter() {
     try {
-        // Required fields for text status
-        if (payload.type === 'text') {
-            if (!payload.text || typeof payload.text !== 'string' || payload.text.trim().length === 0) {
-                throw new Error('Text status requires non-empty text');
-            }
-            if (payload.text.length > 5000) {
-                throw new Error('Text too long (max 5000 characters)');
-            }
+        const today = new Date().toDateString();
+        if (lastPostDate && lastPostDate.toDateString() === today) return;
+        
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        if (lastPostDate && lastPostDate.toDateString() === yesterday.toDateString()) {
+            streakCount++;
+        } else if (lastPostDate) {
+            streakCount = 1;
+        } else {
+            streakCount = 1;
         }
         
-        // Validate media status
-        if (payload.type === 'media') {
-            if (!payload.mediaUrls || !Array.isArray(payload.mediaUrls) || payload.mediaUrls.length === 0) {
-                throw new Error('Media status requires media URLs');
-            }
-            if (payload.caption && payload.caption.length > 1000) {
-                throw new Error('Caption too long (max 1000 characters)');
-            }
-        }
-        
-        // Validate poll status
-        if (payload.type === 'poll') {
-            if (!payload.question || typeof payload.question !== 'string' || payload.question.trim().length === 0) {
-                throw new Error('Poll requires a question');
-            }
-            if (!payload.options || !Array.isArray(payload.options) || payload.options.length < 2) {
-                throw new Error('Poll requires at least 2 options');
-            }
-            if (payload.options.length > 10) {
-                throw new Error('Too many poll options (max 10)');
-            }
-        }
-        
-        // Validate duration
-        if (payload.duration && !durationOptions[payload.duration.toString()]) {
-            throw new Error('Invalid duration option');
-        }
-        
-        // Validate mood
-        if (payload.mood && !statusMoods[payload.mood]) {
-            throw new Error('Invalid mood');
-        }
-        
-        // Validate intent
-        if (payload.intent && !statusIntents[payload.intent]) {
-            throw new Error('Invalid intent');
-        }
-        
-        // Validate category
-        if (payload.category && !statusCategories[payload.category]) {
-            throw new Error('Invalid category');
-        }
-        
-        // Validate privacy
-        if (payload.privacy && !privacySettings[payload.privacy]) {
-            throw new Error('Invalid privacy setting');
-        }
+        SecureStorage.set(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
     } catch (error) {
-        safeLogError('Status', 'validateStatusPayload', error);
+        safeLogError('Status', 'updateStreakCounter', error);
+    }
+}
+
+const scheduleStatus = createErrorBoundary(async function(statusData, scheduleTime) {
+    if (!statusData || !scheduleTime) throw new Error('Missing required parameters');
+    
+    const sanitizedData = sanitizeStatusData(statusData);
+    
+    const response = await secureApiCall('/api/statuses/schedule', {
+        method: 'POST',
+        body: JSON.stringify({
+            ...sanitizedData,
+            scheduledFor: scheduleTime
+        })
+    });
+    
+    if (response && response.success) {
+        scheduledStatuses.push({ ...sanitizedData, scheduledFor: scheduleTime });
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.SCHEDULED, scheduledStatuses);
+    }
+    return response;
+}, 'scheduleStatus', { success: false });
+
+function saveDraft(statusData) {
+    try {
+        if (!statusData) throw new Error('Invalid status data');
+        
+        const sanitizedData = sanitizeStatusData(statusData);
+        sanitizedData.id = 'draft_' + Date.now();
+        sanitizedData.createdAt = new Date().toISOString();
+        sanitizedData.isDraft = true;
+        drafts.unshift(sanitizedData);
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
+        return { success: true };
+    } catch (error) {
+        safeLogError('Status', 'saveDraft', error);
         throw error;
     }
 }
 
-/**
- * Generate sample mood data for charts
- */
-export function generateSampleMoodData() {
+const reportStatus = createErrorBoundary(async function(statusId, reason, details) {
+    if (!statusId || !reason) throw new Error('Missing required parameters');
+    
+    const sanitizedDetails = escapeHtml(details || '');
+    
+    const response = await secureApiCall(`/api/statuses/${statusId}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ reason, details: sanitizedDetails })
+    });
+    
+    return response;
+}, 'reportStatus', { success: false });
+
+// =============================================
+// USER STATUS TRACKING
+// =============================================
+let userStatusInterval = null;
+let lastActivityTime = Date.now();
+let isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let heartbeatInterval = null;
+let isTrackingInitialized = false;
+let lastOnlineStatus = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let activityThrottleTimer = null;
+let activityEventHandlers = [];
+
+function initializeUserStatusTracking() {
+    if (isTrackingInitialized) return;
+    
+    try {
+        isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+        lastOnlineStatus = isOnline;
+        
+        setupNetworkDetection();
+        setupActivityTracking();
+        startHeartbeat();
+        updateUserStatus();
+        
+        isTrackingInitialized = true;
+        
+    } catch (error) {
+        safeLogError('Status', 'initializeUserStatusTracking', error);
+    }
+}
+
+function setupNetworkDetection() {
+    try {
+        if (typeof window === 'undefined') return;
+        
+        const handleNetworkChange = () => {
+            const currentOnline = navigator.onLine;
+            if (currentOnline === lastOnlineStatus) return;
+            
+            lastOnlineStatus = currentOnline;
+            
+            if (currentOnline) {
+                handleOnlineStatus();
+            } else {
+                handleOfflineStatus();
+            }
+        };
+        
+        window.removeEventListener('online', handleNetworkChange);
+        window.removeEventListener('offline', handleNetworkChange);
+        
+        window.addEventListener('online', handleNetworkChange);
+        window.addEventListener('offline', handleNetworkChange);
+        
+        activityEventHandlers.push({ element: window, type: 'online', handler: handleNetworkChange });
+        activityEventHandlers.push({ element: window, type: 'offline', handler: handleNetworkChange });
+    } catch (error) {
+        safeLogError('Status', 'setupNetworkDetection', error);
+    }
+}
+
+function setupActivityTracking() {
+    try {
+        if (typeof document === 'undefined') return;
+        
+        const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+        
+        const updateActivity = () => {
+            if (activityThrottleTimer) clearTimeout(activityThrottleTimer);
+            activityThrottleTimer = setTimeout(() => {
+                lastActivityTime = Date.now();
+                activityThrottleTimer = null;
+            }, 1000);
+        };
+        
+        activityEvents.forEach(eventType => {
+            document.removeEventListener(eventType, updateActivity);
+        });
+        
+        activityEvents.forEach(eventType => {
+            document.addEventListener(eventType, updateActivity);
+            activityEventHandlers.push({ element: document, type: eventType, handler: updateActivity });
+        });
+    } catch (error) {
+        safeLogError('Status', 'setupActivityTracking', error);
+    }
+}
+
+function handleOnlineStatus() {
+    try {
+        if (isOnline) return;
+        
+        isOnline = true;
+        
+        setTimeout(() => { updateUserStatus(); }, 100);
+        
+        if (isOfflineMode) {
+            isOfflineMode = false;
+            setTimeout(() => { syncPendingData(); }, 500);
+        }
+    } catch (error) {
+        safeLogError('Status', 'handleOnlineStatus', error);
+    }
+}
+
+function handleOfflineStatus() {
+    try {
+        if (!isOnline) return;
+        
+        isOnline = false;
+        
+        setTimeout(() => { updateUserStatus(); }, 100);
+        
+        if (!isOfflineMode) isOfflineMode = true;
+    } catch (error) {
+        safeLogError('Status', 'handleOfflineStatus', error);
+    }
+}
+
+function sendUserActive() {
+    try {
+        if (parentCoordinator.handshakeComplete && currentUser?.id) {
+            sendToParent('USER_ACTIVE', {
+                timestamp: Date.now(),
+                userId: currentUser.id,
+                sequenceId: generateSequenceId()
+            }, { silent: true });
+        }
+    } catch (error) {
+        safeLogError('Status', 'sendUserActive', error);
+    }
+}
+
+function sendUserInactive() {
+    try {
+        if (parentCoordinator.handshakeComplete && currentUser?.id) {
+            sendToParent('USER_INACTIVE', {
+                timestamp: Date.now(),
+                userId: currentUser.id,
+                lastActive: lastActivityTime,
+                sequenceId: generateSequenceId()
+            }, { silent: true });
+        }
+    } catch (error) {
+        safeLogError('Status', 'sendUserInactive', error);
+    }
+}
+
+async function updateUserStatus() {
+    try {
+        if (!currentUser && !state.user && !isAuthenticated()) return;
+        
+        const userId = currentUser?.id || state.user?.id;
+        if (!userId) return;
+        
+        const status = isOnline ? 'online' : 'offline';
+        
+        if (currentUser) {
+            currentUser.status = status;
+            currentUser.lastSeen = new Date().toISOString();
+        }
+        
+        if (parentCoordinator.handshakeComplete) {
+            sendToParent('STATUS_UPDATE', {
+                userId: userId,
+                status: status,
+                lastSeen: new Date().toISOString(),
+                isOnline: isOnline,
+                timestamp: Date.now(),
+                sequenceId: generateSequenceId(),
+                source: 'status-core'
+            }, { silent: true });
+        }
+        
+        if (isOnline && !isOfflineMode) {
+            try {
+                await secureApiCall('/api/user/status', {
+                    method: 'POST',
+                    body: JSON.stringify({ status: status, lastSeen: new Date().toISOString() })
+                });
+            } catch (apiError) {
+                safeLogError('Status', 'updateUserStatus.api', apiError);
+            }
+        }
+        
+    } catch (error) {
+        safeLogError('Status', 'updateUserStatus', error);
+    }
+}
+
+async function syncPendingData() {
+    try {
+        const reactionsToSync = [...pendingReactions];
+        for (const reaction of reactionsToSync) {
+            try {
+                await secureApiCall(`/api/statuses/${reaction.statusId}/react`, {
+                    method: 'POST',
+                    body: JSON.stringify({ reaction: reaction.reaction })
+                });
+                pendingReactions = pendingReactions.filter(r => 
+                    !(r.statusId === reaction.statusId && r.reaction === reaction.reaction)
+                );
+            } catch (error) {
+                safeLogError('Status', 'syncPendingData.reaction', error);
+            }
+        }
+        
+        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        
+        const offlineQueue = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
+        for (const statusData of offlineQueue) {
+            try {
+                await secureApiCall('/api/statuses/create', {
+                    method: 'POST',
+                    body: JSON.stringify(statusData)
+                });
+            } catch (error) {
+                safeLogError('Status', 'syncPendingData.offline', error);
+            }
+        }
+        
+        SecureStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+        await loadFreshDataInBackground();
+        
+    } catch (error) {
+        safeLogError('Status', 'syncPendingData', error);
+    }
+}
+
+// =============================================
+// UTILITY FUNCTIONS
+// =============================================
+function escapeHtml(text) {
+    try {
+        if (!text) return '';
+        if (typeof document === 'undefined') return text;
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    } catch (error) {
+        safeLogError('Status', 'escapeHtml', error);
+        return text || '';
+    }
+}
+
+function formatTimeAgo(date) {
+    try {
+        if (!date) return 'Unknown';
+        
+        const dateObj = date instanceof Date ? date : new Date(date);
+        if (isNaN(dateObj.getTime())) return 'Unknown';
+        
+        const now = new Date();
+        const diffMs = now - dateObj;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return `${Math.floor(diffDays / 7)}w ago`;
+    } catch (error) {
+        safeLogError('Status', 'formatTimeAgo', error);
+        return 'Unknown';
+    }
+}
+
+async function retryOperation(operation, maxRetries = 3) {
+    try {
+        let lastError;
+        
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error;
+                if (i < maxRetries - 1) {
+                    const delay = Math.min(1000 * Math.pow(2, i), 10000);
+                    const jitter = Math.random() * 200;
+                    await new Promise(resolve => setTimeout(resolve, delay + jitter));
+                }
+            }
+        }
+        
+        throw lastError;
+    } catch (error) {
+        safeLogError('Status', 'retryOperation', error);
+        throw error;
+    }
+}
+
+function generateSampleMoodData() {
     try {
         const moods = Object.keys(statusMoods);
         const sampleData = [];
@@ -2494,9 +3490,7 @@ export function generateSampleMoodData() {
             });
         }
         
-        // Sort by date
         sampleData.sort((a, b) => a.timestamp - b.timestamp);
-        
         return sampleData;
     } catch (error) {
         safeLogError('Status', 'generateSampleMoodData', error);
@@ -2504,941 +3498,415 @@ export function generateSampleMoodData() {
     }
 }
 
-/**
- * Update streak counter
- */
-export function updateStreakCounter() {
-    try {
-        const today = new Date().toDateString();
-        if (lastPostDate && lastPostDate.toDateString() === today) {
-            return;
-        }
-        
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        if (lastPostDate && lastPostDate.toDateString() === yesterday.toDateString()) {
-            streakCount++;
-        } else if (lastPostDate) {
-            streakCount = 1;
-        } else {
-            streakCount = 1;
-        }
-        
-        localStorage.setItem(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
-    } catch (error) {
-        safeLogError('Status', 'updateStreakCounter', error);
-    }
-}
-
-/**
- * Schedule status
- */
-export const scheduleStatus = withApiGuard(async function(statusData, scheduleTime) {
-    if (!statusData || !scheduleTime) {
-        throw new Error('Missing required parameters');
-    }
-    
-    const sanitizedData = sanitizeStatusData(statusData);
-    
-    const response = await secureApiCall('/api/statuses/schedule', {
-        method: 'POST',
-        body: JSON.stringify({
-            ...sanitizedData,
-            scheduledFor: scheduleTime
-        })
-    });
-    
-    if (response && response.success) {
-        scheduledStatuses.push({
-            ...sanitizedData,
-            scheduledFor: scheduleTime
-        });
-        localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
-    }
-    return response;
-}, null);
-
-/**
- * Save draft
- */
-export function saveDraft(statusData) {
-    try {
-        if (!statusData) {
-            throw new Error('Invalid status data');
-        }
-        
-        const sanitizedData = sanitizeStatusData(statusData);
-        sanitizedData.id = 'draft_' + Date.now();
-        sanitizedData.createdAt = new Date().toISOString();
-        sanitizedData.isDraft = true;
-        drafts.unshift(sanitizedData);
-        localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
-        return { success: true };
-    } catch (error) {
-        safeLogError('Status', 'saveDraft', error);
-        throw error;
-    }
-}
-
-/**
- * Report status
- */
-export const reportStatus = withApiGuard(async function(statusId, reason, details) {
-    if (!statusId || !reason) {
-        throw new Error('Missing required parameters');
-    }
-    
-    const sanitizedDetails = escapeHtml(details || '');
-    
-    const response = await secureApiCall(`/api/statuses/${statusId}/report`, {
-        method: 'POST',
-        body: JSON.stringify({
-            reason,
-            details: sanitizedDetails
-        })
-    });
-    
-    return response;
-}, null);
-
 // =============================================
-// USER STATUS TRACKING
+// SAFE LOG ERROR UTILITY
 // =============================================
+let errorLogCounts = {};
+let maxErrorLogs = 1;
+let retryCounts = {};
+let maxRetries = 3;
+let messageCache = new Set();
 
-// User status tracking variables
-let userStatusInterval = null;
-let lastActivityTime = Date.now();
-let isOnline = navigator.onLine;
-let heartbeatInterval = null;
-let isTrackingInitialized = false;
-let lastOnlineStatus = navigator.onLine;
-let activityThrottleTimer = null;
-let activityEventHandlers = [];
-
-/**
- * Initialize user status tracking
- */
-export function initializeUserStatusTracking() {
-    if (isTrackingInitialized) {
-        return;
-    }
-    
+function safeLogError(module, functionName, error, data = null) {
     try {
-        isOnline = navigator.onLine;
-        lastOnlineStatus = isOnline;
+        const errorKey = `${module}:${functionName}:${error?.message || 'unknown'}`;
         
-        // Setup online/offline detection with duplicate prevention
-        setupNetworkDetection();
+        if (!errorLogCounts[errorKey]) errorLogCounts[errorKey] = 0;
+        errorLogCounts[errorKey]++;
         
-        // Track user activity with normalized events
-        setupActivityTracking();
-        
-        // Start heartbeat
-        startHeartbeat();
-        
-        // Initial status update
-        updateUserStatus();
-        
-        isTrackingInitialized = true;
-        
-    } catch (error) {
-        safeLogError('Status', 'initializeUserStatusTracking', error);
-    }
-}
-
-/**
- * Setup network detection with duplicate prevention
- */
-function setupNetworkDetection() {
-    try {
-        const handleNetworkChange = () => {
-            const currentOnline = navigator.onLine;
-            
-            // Prevent duplicate updates
-            if (currentOnline === lastOnlineStatus) {
-                return;
-            }
-            
-            lastOnlineStatus = currentOnline;
-            
-            if (currentOnline) {
-                handleOnlineStatus();
-            } else {
-                handleOfflineStatus();
-            }
-        };
-        
-        // Remove existing listeners if any
-        window.removeEventListener('online', handleNetworkChange);
-        window.removeEventListener('offline', handleNetworkChange);
-        
-        // Add new listeners
-        window.addEventListener('online', handleNetworkChange);
-        window.addEventListener('offline', handleNetworkChange);
-        
-        // Store handlers for cleanup
-        activityEventHandlers.push({
-            element: window,
-            type: 'online',
-            handler: handleNetworkChange
-        });
-        activityEventHandlers.push({
-            element: window,
-            type: 'offline',
-            handler: handleNetworkChange
-        });
-    } catch (error) {
-        safeLogError('Status', 'setupNetworkDetection', error);
-    }
-}
-
-/**
- * Setup activity tracking with normalized events
- */
-function setupActivityTracking() {
-    try {
-        const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-        
-        const updateActivity = () => {
-            // Throttle activity updates to prevent excessive calls
-            if (activityThrottleTimer) {
-                clearTimeout(activityThrottleTimer);
-            }
-            
-            activityThrottleTimer = setTimeout(() => {
-                lastActivityTime = Date.now();
-                activityThrottleTimer = null;
-            }, 1000);
-        };
-        
-        // Remove existing listeners if any
-        activityEvents.forEach(eventType => {
-            document.removeEventListener(eventType, updateActivity);
-        });
-        
-        // Add new listeners
-        activityEvents.forEach(eventType => {
-            document.addEventListener(eventType, updateActivity);
-            activityEventHandlers.push({
-                element: document,
-                type: eventType,
-                handler: updateActivity
-            });
-        });
-    } catch (error) {
-        safeLogError('Status', 'setupActivityTracking', error);
-    }
-}
-
-/**
- * Handle online status change
- */
-function handleOnlineStatus() {
-    try {
-        if (isOnline) return;
-        
-        isOnline = true;
-        
-        // Update user status with throttling
-        setTimeout(() => {
-            updateUserStatus();
-        }, 100);
-        
-        // Sync pending data when coming back online
-        if (isOfflineMode) {
-            isOfflineMode = false;
-            setTimeout(() => {
-                syncPendingData();
-            }, 500);
-        }
-    } catch (error) {
-        safeLogError('Status', 'handleOnlineStatus', error);
-    }
-}
-
-/**
- * Handle offline status change
- */
-function handleOfflineStatus() {
-    try {
-        if (!isOnline) return;
-        
-        isOnline = false;
-        
-        // Update user status with throttling
-        setTimeout(() => {
-            updateUserStatus();
-        }, 100);
-        
-        if (!isOfflineMode) {
-            isOfflineMode = true;
-        }
-    } catch (error) {
-        safeLogError('Status', 'handleOfflineStatus', error);
-    }
-}
-
-/**
- * Start heartbeat to detect inactive users
- */
-function startHeartbeat() {
-    try {
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
+        if (errorLogCounts[errorKey] <= maxErrorLogs) {
+            log(LOG_LEVEL.WARN, module, `${functionName} error: ${error?.message || error}`);
         }
         
-        let heartbeatCount = 0;
-        const maxHeartbeats = 60; // 60 minutes max
-        
-        heartbeatInterval = setInterval(() => {
-            try {
-                heartbeatCount++;
-                
-                if (heartbeatCount >= maxHeartbeats) {
-                    clearInterval(heartbeatInterval);
-                    heartbeatInterval = null;
-                    return;
-                }
-                
-                const now = Date.now();
-                const inactiveTime = now - lastActivityTime;
-                
-                // If inactive for more than 5 minutes, send inactive status
-                if (inactiveTime > 300000) {
-                    sendUserInactive();
-                } else {
-                    sendUserActive();
-                }
-                
-                // Send heartbeat to parent if connected
-                if (parentCoordinator.handshakeComplete && isOnline) {
-                    sendToParent(MESSAGE_TYPES.HEARTBEAT, {
-                        timestamp: now,
-                        isOnline: isOnline,
-                        lastActivity: lastActivityTime,
-                        sequenceId: generateSequenceId()
-                    });
-                }
-            } catch (error) {
-                safeLogError('Status', 'startHeartbeat.interval', error);
-            }
-        }, 60000);
-    } catch (error) {
-        safeLogError('Status', 'startHeartbeat', error);
-    }
-}
-
-/**
- * Send user active status
- */
-function sendUserActive() {
-    try {
-        if (parentCoordinator.handshakeComplete && currentUser?.id) {
-            sendToParent(MESSAGE_TYPES.USER_ACTIVE, {
-                timestamp: Date.now(),
-                userId: currentUser.id,
-                sequenceId: generateSequenceId()
-            });
+        if (functionName.includes('get') || functionName.includes('load')) {
+            return Array.isArray(data) ? [] : null;
         }
-    } catch (error) {
-        safeLogError('Status', 'sendUserActive', error);
-    }
-}
-
-/**
- * Send user inactive status
- */
-function sendUserInactive() {
-    try {
-        if (parentCoordinator.handshakeComplete && currentUser?.id) {
-            sendToParent(MESSAGE_TYPES.USER_INACTIVE, {
-                timestamp: Date.now(),
-                userId: currentUser.id,
-                lastActive: lastActivityTime,
-                sequenceId: generateSequenceId()
-            });
-        }
-    } catch (error) {
-        safeLogError('Status', 'sendUserInactive', error);
-    }
-}
-
-/**
- * Update user status
- */
-async function updateUserStatus() {
-    try {
-        if (!currentUser || !isAuthenticated()) {
-            return;
-        }
-        
-        const status = isOnline ? 'online' : 'offline';
-        
-        // Update local state
-        if (currentUser) {
-            currentUser.status = status;
-            currentUser.lastSeen = new Date().toISOString();
-        }
-        
-        // Send to parent with hardened messaging
-        if (parentCoordinator.handshakeComplete) {
-            const statusMessage = {
-                userId: currentUser.id,
-                status: status,
-                lastSeen: currentUser.lastSeen,
-                isOnline: isOnline,
-                timestamp: Date.now(),
-                sequenceId: generateSequenceId(),
-                source: 'status-core'
-            };
-            
-            sendToParent(MESSAGE_TYPES.STATUS_UPDATE, statusMessage);
-        }
-        
-        // Update via API if online
-        if (isOnline && !isOfflineMode) {
-            try {
-                await secureApiCall('/api/user/status', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        status: status,
-                        lastSeen: currentUser.lastSeen
-                    })
-                });
-            } catch (apiError) {
-                safeLogError('Status', 'updateUserStatus.api', apiError);
-            }
-        }
-        
-    } catch (error) {
-        safeLogError('Status', 'updateUserStatus', error);
-    }
-}
-
-/**
- * Sync pending data when back online
- */
-async function syncPendingData() {
-    try {
-        // Sync pending reactions
-        const reactionsToSync = [...pendingReactions];
-        for (const reaction of reactionsToSync) {
-            try {
-                await secureApiCall(`/api/statuses/${reaction.statusId}/react`, {
-                    method: 'POST',
-                    body: JSON.stringify({ reaction: reaction.reaction })
-                });
-                // Remove synced reaction
-                pendingReactions = pendingReactions.filter(r => 
-                    !(r.statusId === reaction.statusId && r.reaction === reaction.reaction)
-                );
-            } catch (error) {
-                safeLogError('Status', 'syncPendingData.reaction', error);
-            }
-        }
-        
-        // Save updated pending reactions
-        localStorage.setItem(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, JSON.stringify(pendingReactions));
-        
-        // Sync offline queue
-        const offlineQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || '[]');
-        for (const statusData of offlineQueue) {
-            try {
-                await secureApiCall('/api/statuses/create', {
-                    method: 'POST',
-                    body: JSON.stringify(statusData)
-                });
-            } catch (error) {
-                safeLogError('Status', 'syncPendingData.offline', error);
-            }
-        }
-        
-        // Clear offline queue if all synced
-        localStorage.removeItem(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
-        
-        // Refresh data
-        await loadFreshDataInBackground();
-        
-    } catch (error) {
-        safeLogError('Status', 'syncPendingData', error);
-    }
+    } catch (e) {}
 }
 
 // =============================================
-// UTILITY FUNCTIONS
+// USER GUARD AND API GUARD
 // =============================================
-
-/**
- * Escape HTML to prevent XSS
- */
-export function escapeHtml(text) {
-    try {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    } catch (error) {
-        safeLogError('Status', 'escapeHtml', error);
-        return text || '';
-    }
-}
-
-/**
- * Format time ago
- */
-export function formatTimeAgo(date) {
-    try {
-        if (!date || !(date instanceof Date)) {
-            return 'Unknown';
-        }
-        
-        const now = new Date();
-        const diffMs = now - date;
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-        
-        if (diffMins < 1) return 'Just now';
-        if (diffMins < 60) return `${diffMins}m ago`;
-        if (diffHours < 24) return `${diffHours}h ago`;
-        if (diffDays < 7) return `${diffDays}d ago`;
-        return `${Math.floor(diffDays / 7)}w ago`;
-    } catch (error) {
-        safeLogError('Status', 'formatTimeAgo', error);
-        return 'Unknown';
-    }
-}
-
-/**
- * Retry operation with exponential backoff
- */
-export async function retryOperation(operation, maxRetries = 3) {
-    try {
-        let lastError;
-        
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                return await operation();
-            } catch (error) {
-                lastError = error;
-                
-                if (i < maxRetries - 1) {
-                    const delay = Math.min(1000 * Math.pow(2, i), 10000);
-                    const jitter = Math.random() * 200;
-                    await new Promise(resolve => setTimeout(resolve, delay + jitter));
-                }
+function withUserGuard(fn, defaultValue = null) {
+    return function(...args) {
+        try {
+            if (!state.sessionActive && !state.isGuestMode && !currentUser && !parentCoordinator.sessionData && !state.sessionMirror.validated) {
+                safeLogError('Status', fn.name || 'anonymous', new Error('No user session'));
+                return defaultValue;
             }
+            return fn(...args);
+        } catch (error) {
+            safeLogError('Status', fn.name || 'anonymous', error);
+            return defaultValue;
         }
-        
-        throw lastError;
-    } catch (error) {
-        safeLogError('Status', 'retryOperation', error);
-        throw error;
-    }
+    };
 }
 
-// =============================================
-// MISSING FUNCTION STUBS FOR COMPATIBILITY
-// =============================================
-
-/**
- * Get friends statuses (stub for compatibility)
- */
-export function getFriendsStatuses() {
-    try {
-        return friendsStatuses || [];
-    } catch (error) {
-        safeLogError('Status', 'getFriendsStatuses', error);
-        return [];
-    }
+function withApiGuard(fn, defaultValue = null) {
+    return async function(...args) {
+        try {
+            return await fn(...args);
+        } catch (error) {
+            safeLogError('Status', fn.name || 'anonymous', error);
+            return defaultValue;
+        }
+    };
 }
 
-/**
- * Get close friends statuses (stub for compatibility)
- */
-export function getCloseFriendsStatuses() {
+function safeGetElement(selector) {
     try {
-        return closeFriendsStatuses || [];
+        const element = document.querySelector(selector);
+        if (!element) safeLogError('Status', 'safeGetElement', new Error(`Element not found: ${selector}`));
+        return element;
     } catch (error) {
-        safeLogError('Status', 'getCloseFriendsStatuses', error);
-        return [];
-    }
-}
-
-/**
- * Get micro circles statuses (stub for compatibility)
- */
-export function getMicroCirclesStatuses() {
-    try {
-        return microCirclesStatuses || [];
-    } catch (error) {
-        safeLogError('Status', 'getMicroCirclesStatuses', error);
-        return [];
-    }
-}
-
-/**
- * Get muted statuses (stub for compatibility)
- */
-export function getMutedStatuses() {
-    try {
-        return mutedStatuses || [];
-    } catch (error) {
-        safeLogError('Status', 'getMutedStatuses', error);
-        return [];
-    }
-}
-
-/**
- * Set current viewer status (stub for compatibility)
- */
-export function setCurrentViewerStatus(status) {
-    try {
-        currentViewerStatus = status;
-    } catch (error) {
-        safeLogError('Status', 'setCurrentViewerStatus', error);
-    }
-}
-
-/**
- * Get current viewer status (stub for compatibility)
- */
-export function getCurrentViewerStatus() {
-    try {
-        return currentViewerStatus;
-    } catch (error) {
-        safeLogError('Status', 'getCurrentViewerStatus', error);
+        safeLogError('Status', 'safeGetElement', error);
         return null;
     }
 }
 
-/**
- * Set current slide index (stub for compatibility)
- */
-export function setCurrentSlideIndex(index) {
-    try {
-        currentSlideIndex = index || 0;
-    } catch (error) {
-        safeLogError('Status', 'setCurrentSlideIndex', error);
-    }
+// =============================================
+// STUB FUNCTIONS FOR COMPATIBILITY
+// =============================================
+function getFriendsStatuses() {
+    try { return friendsStatuses || []; } catch (error) { safeLogError('Status', 'getFriendsStatuses', error); return []; }
 }
 
-/**
- * Get current slide index (stub for compatibility)
- */
-export function getCurrentSlideIndex() {
-    try {
-        return currentSlideIndex || 0;
-    } catch (error) {
-        safeLogError('Status', 'getCurrentSlideIndex', error);
-        return 0;
-    }
+function getCloseFriendsStatuses() {
+    try { return closeFriendsStatuses || []; } catch (error) { safeLogError('Status', 'getCloseFriendsStatuses', error); return []; }
 }
 
-/**
- * Toggle auto advance pause (stub for compatibility)
- */
-export function toggleAutoAdvancePause() {
+function getMicroCirclesStatuses() {
+    try { return microCirclesStatuses || []; } catch (error) { safeLogError('Status', 'getMicroCirclesStatuses', error); return []; }
+}
+
+function getMutedStatuses() {
+    try { return mutedStatuses || []; } catch (error) { safeLogError('Status', 'getMutedStatuses', error); return []; }
+}
+
+function setCurrentViewerStatus(status) {
+    try { currentViewerStatus = status; } catch (error) { safeLogError('Status', 'setCurrentViewerStatus', error); }
+}
+
+function getCurrentViewerStatus() {
+    try { return currentViewerStatus; } catch (error) { safeLogError('Status', 'getCurrentViewerStatus', error); return null; }
+}
+
+function setCurrentSlideIndex(index) {
+    try { currentSlideIndex = index || 0; } catch (error) { safeLogError('Status', 'setCurrentSlideIndex', error); }
+}
+
+function getCurrentSlideIndex() {
+    try { return currentSlideIndex || 0; } catch (error) { safeLogError('Status', 'getCurrentSlideIndex', error); return 0; }
+}
+
+function toggleAutoAdvancePause() {
+    try { isAutoAdvancePaused = !isAutoAdvancePaused; return isAutoAdvancePaused; } catch (error) { safeLogError('Status', 'toggleAutoAdvancePause', error); return false; }
+}
+
+function setCurrentCategoryFilter(category) {
+    try { currentCategoryFilter = category || 'all'; } catch (error) { safeLogError('Status', 'setCurrentCategoryFilter', error); }
+}
+
+function getCurrentCategoryFilter() {
+    try { return currentCategoryFilter || 'all'; } catch (error) { safeLogError('Status', 'getCurrentCategoryFilter', error); return 'all'; }
+}
+
+function setCurrentIntentFilter(intent) {
+    try { currentIntentFilter = intent; } catch (error) { safeLogError('Status', 'setCurrentIntentFilter', error); }
+}
+
+function getCurrentIntentFilter() {
+    try { return currentIntentFilter; } catch (error) { safeLogError('Status', 'getCurrentIntentFilter', error); return null; }
+}
+
+function setCurrentMoodFilter(mood) {
+    try { currentMoodFilter = mood; } catch (error) { safeLogError('Status', 'setCurrentMoodFilter', error); }
+}
+
+function getCurrentMoodFilter() {
+    try { return currentMoodFilter; } catch (error) { safeLogError('Status', 'getCurrentMoodFilter', error); return null; }
+}
+
+function getPendingReplies() {
+    try { return pendingReplies || []; } catch (error) { safeLogError('Status', 'getPendingReplies', error); return []; }
+}
+
+function getPendingReactions() {
+    try { return pendingReactions || []; } catch (error) { safeLogError('Status', 'getPendingReactions', error); return []; }
+}
+
+function getMoodChartData() {
+    try { return moodChartData || []; } catch (error) { safeLogError('Status', 'getMoodChartData', error); return []; }
+}
+
+function getStreakCount() {
+    try { return streakCount || 0; } catch (error) { safeLogError('Status', 'getStreakCount', error); return 0; }
+}
+
+function getLastPostDate() {
+    try { return lastPostDate; } catch (error) { safeLogError('Status', 'getLastPostDate', error); return null; }
+}
+
+function getActiveFilters() {
+    try { return activeFilters || new Set(); } catch (error) { safeLogError('Status', 'getActiveFilters', error); return new Set(); }
+}
+
+function getSelectedDraft() {
+    try { return selectedDraft; } catch (error) { safeLogError('Status', 'getSelectedDraft', error); return null; }
+}
+
+function setSelectedDraft(draft) {
+    try { selectedDraft = draft; } catch (error) { safeLogError('Status', 'setSelectedDraft', error); }
+}
+
+// =============================================
+// NEW FUNCTION: updateLocalStateWithSession - REQUIRED BY status-ui.js
+// =============================================
+function updateLocalStateWithSession(sessionData) {
     try {
-        isAutoAdvancePaused = !isAutoAdvancePaused;
-        return isAutoAdvancePaused;
+        if (!sessionData) return false;
+        
+        log(LOG_LEVEL.INFO, 'Session', 'Updating local state with session data');
+        
+        // Update currentUser
+        if (sessionData.user) {
+            currentUser = sessionData.user;
+            userData = sessionData.user;
+            
+            // Cache user
+            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, sessionData.user);
+        }
+        
+        // Update token
+        if (sessionData.token) {
+            SecureStorage.set(UNIFIED_TOKEN_KEY, sessionData.token);
+            state.token = sessionData.token;
+        }
+        
+        // Update permissions
+        if (sessionData.permissions && Array.isArray(sessionData.permissions)) {
+            state.permissionsGranted = [...sessionData.permissions];
+        }
+        
+        // Update session mirror
+        updateSessionMirror(sessionData, 'local_update');
+        
+        // Trigger token ready
+        isTokenReady = true;
+        triggerTokenReadyCallbacks();
+        processPendingApiRequests();
+        
+        log(LOG_LEVEL.INFO, 'Session', 'Local state updated from session', {
+            user: sessionData.user?.id,
+            hasToken: !!sessionData.token
+        });
+        
+        return true;
     } catch (error) {
-        safeLogError('Status', 'toggleAutoAdvancePause', error);
+        safeLogError('Status', 'updateLocalStateWithSession', error);
         return false;
-    }
-}
-
-/**
- * Set current category filter (stub for compatibility)
- */
-export function setCurrentCategoryFilter(category) {
-    try {
-        currentCategoryFilter = category || 'all';
-    } catch (error) {
-        safeLogError('Status', 'setCurrentCategoryFilter', error);
-    }
-}
-
-/**
- * Get current category filter (stub for compatibility)
- */
-export function getCurrentCategoryFilter() {
-    try {
-        return currentCategoryFilter || 'all';
-    } catch (error) {
-        safeLogError('Status', 'getCurrentCategoryFilter', error);
-        return 'all';
-    }
-}
-
-/**
- * Set current intent filter (stub for compatibility)
- */
-export function setCurrentIntentFilter(intent) {
-    try {
-        currentIntentFilter = intent;
-    } catch (error) {
-        safeLogError('Status', 'setCurrentIntentFilter', error);
-    }
-}
-
-/**
- * Get current intent filter (stub for compatibility)
- */
-export function getCurrentIntentFilter() {
-    try {
-        return currentIntentFilter;
-    } catch (error) {
-        safeLogError('Status', 'getCurrentIntentFilter', error);
-        return null;
-    }
-}
-
-/**
- * Set current mood filter (stub for compatibility)
- */
-export function setCurrentMoodFilter(mood) {
-    try {
-        currentMoodFilter = mood;
-    } catch (error) {
-        safeLogError('Status', 'setCurrentMoodFilter', error);
-    }
-}
-
-/**
- * Get current mood filter (stub for compatibility)
- */
-export function getCurrentMoodFilter() {
-    try {
-        return currentMoodFilter;
-    } catch (error) {
-        safeLogError('Status', 'getCurrentMoodFilter', error);
-        return null;
-    }
-}
-
-/**
- * Get pending replies (stub for compatibility)
- */
-export function getPendingReplies() {
-    try {
-        return pendingReplies || [];
-    } catch (error) {
-        safeLogError('Status', 'getPendingReplies', error);
-        return [];
-    }
-}
-
-/**
- * Get pending reactions (stub for compatibility)
- */
-export function getPendingReactions() {
-    try {
-        return pendingReactions || [];
-    } catch (error) {
-        safeLogError('Status', 'getPendingReactions', error);
-        return [];
-    }
-}
-
-/**
- * Get mood chart data (stub for compatibility)
- */
-export function getMoodChartData() {
-    try {
-        return moodChartData || [];
-    } catch (error) {
-        safeLogError('Status', 'getMoodChartData', error);
-        return [];
-    }
-}
-
-/**
- * Get streak count (stub for compatibility)
- */
-export function getStreakCount() {
-    try {
-        return streakCount || 0;
-    } catch (error) {
-        safeLogError('Status', 'getStreakCount', error);
-        return 0;
-    }
-}
-
-/**
- * Get last post date (stub for compatibility)
- */
-export function getLastPostDate() {
-    try {
-        return lastPostDate;
-    } catch (error) {
-        safeLogError('Status', 'getLastPostDate', error);
-        return null;
-    }
-}
-
-/**
- * Get active filters (stub for compatibility)
- */
-export function getActiveFilters() {
-    try {
-        return activeFilters || new Set();
-    } catch (error) {
-        safeLogError('Status', 'getActiveFilters', error);
-        return new Set();
-    }
-}
-
-/**
- * Get selected draft (stub for compatibility)
- */
-export function getSelectedDraft() {
-    try {
-        return selectedDraft;
-    } catch (error) {
-        safeLogError('Status', 'getSelectedDraft', error);
-        return null;
-    }
-}
-
-/**
- * Set selected draft (stub for compatibility)
- */
-export function setSelectedDraft(draft) {
-    try {
-        selectedDraft = draft;
-    } catch (error) {
-        safeLogError('Status', 'setSelectedDraft', error);
     }
 }
 
 // =============================================
 // CLEANUP AND MEMORY MANAGEMENT
 // =============================================
-
-/**
- * Cleanup intervals and event listeners
- */
-export function cleanup() {
+function cleanup() {
     try {
-        // Clear intervals
-        if (apiCheckInterval) {
-            clearInterval(apiCheckInterval);
-            apiCheckInterval = null;
-        }
+        if (apiCheckInterval) { clearInterval(apiCheckInterval); apiCheckInterval = null; }
+        if (parentCoordinator.handshakeInterval) { clearInterval(parentCoordinator.handshakeInterval); parentCoordinator.handshakeInterval = null; }
+        if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+        if (autoAdvanceInterval) { clearInterval(autoAdvanceInterval); autoAdvanceInterval = null; }
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        if (parentCoordinator.handshakeTimeout) { clearTimeout(parentCoordinator.handshakeTimeout); parentCoordinator.handshakeTimeout = null; }
+        if (activityThrottleTimer) { clearTimeout(activityThrottleTimer); activityThrottleTimer = null; }
+        if (HandshakeClient.timer) { clearTimeout(HandshakeClient.timer); HandshakeClient.timer = null; }
         
-        if (parentCoordinator.handshakeInterval) {
-            clearInterval(parentCoordinator.handshakeInterval);
-            parentCoordinator.handshakeInterval = null;
-        }
-        
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            heartbeatInterval = null;
-        }
-        
-        if (autoAdvanceInterval) {
-            clearInterval(autoAdvanceInterval);
-            autoAdvanceInterval = null;
-        }
-        
-        if (progressInterval) {
-            clearInterval(progressInterval);
-            progressInterval = null;
-        }
-        
-        // Clear secure handshake timeout
-        if (parentCoordinator.handshakeTimeout) {
-            clearTimeout(parentCoordinator.handshakeTimeout);
-            parentCoordinator.handshakeTimeout = null;
-        }
-        
-        // Clear activity throttle timer
-        if (activityThrottleTimer) {
-            clearTimeout(activityThrottleTimer);
-            activityThrottleTimer = null;
-        }
-        
-        // Cleanup event listeners
         cleanupEventListeners();
         
-        // Clear pending callbacks
         tokenReadyCallbacks = [];
         pendingApiRequests = [];
         
-        // Reset handshake state
         parentCoordinator.handshakeInProgress = false;
         parentCoordinator.sessionValid = false;
         parentCoordinator.sessionRequestSent = false;
         parentCoordinator.handshakeRetries = 0;
         
-        // Clear safety tracking
         errorLogCounts = {};
         retryCounts = {};
         messageCache.clear();
+        
+        shutdownCore().catch(() => {});
         
     } catch (error) {
         safeLogError('Status', 'cleanup', error);
     }
 }
 
-/**
- * Cleanup all event listeners
- */
 function cleanupEventListeners() {
     try {
-        // Cleanup activity event handlers
         activityEventHandlers.forEach(({ element, type, handler }) => {
-            try {
-                element.removeEventListener(type, handler);
-            } catch (error) {
-                // Silently fail
-            }
+            try { element.removeEventListener(type, handler); } catch (error) {}
         });
         activityEventHandlers = [];
         
-        // Remove enhanced message listener
         window.removeEventListener('message', handleEnhancedParentMessage);
+        window.removeEventListener('message', receiveFromParent);
         
-        // Clear user status event listeners if initialized
-        if (isTrackingInitialized) {
-            isTrackingInitialized = false;
-        }
+        isTrackingInitialized = false;
     } catch (error) {
         safeLogError('Status', 'cleanupEventListeners', error);
     }
 }
 
 // =============================================
-// APPLICATION INITIALIZATION
+// SAFE INITIALIZATION WITH PARENT HANDSHAKE
 // =============================================
+let _PARENT_READY_ = false;
+let _HANDSHAKE_DONE_ = false;
+let _HANDSHAKE_RETRIES_ = 0;
+const MAX_HANDSHAKE = 3;
+let _INITIALIZATION_STARTED_ = false;
+let _UI_BINDING_DONE_ = false;
+let _CORE_READY_ = false;
+let _PAGE_LOADED_ = false;
+let _LOADING_MESSAGE_ = null;
+let _ERROR_CACHE_ = new Set();
 
-/**
- * Initialize the application with centralized token system
- */
-export function initPageCore() {
+function logOnce(level, msg) {
+    if (_ERROR_CACHE_.has(msg)) return;
+    _ERROR_CACHE_.add(msg);
+    log(level, 'StatusCore', msg);
+}
+
+async function safeInit() {
+    if (_INITIALIZATION_STARTED_) {
+        logOnce(LOG_LEVEL.WARN, 'Initialization already started');
+        return;
+    }
+    
+    _INITIALIZATION_STARTED_ = true;
+    
+    let tries = 0;
+    const maxTries = 5;
+    
+    logOnce(LOG_LEVEL.INFO, 'Starting safe initialization');
+    
+    // Use ParentDetector for reliable detection
+    const parentAvailable = await ParentDetector.detect();
+    
+    if (parentAvailable) {
+        logOnce(LOG_LEVEL.INFO, 'Parent handshake establishing');
+        
+        // Execute handshake
+        const handshakeResult = await HandshakeClient.execute({ maxRetries: 3 }).catch(() => null);
+        
+        if (handshakeResult && handshakeResult.success) {
+            _PARENT_READY_ = true;
+            _HANDSHAKE_DONE_ = true;
+            logOnce(LOG_LEVEL.INFO, 'Parent handshake established');
+        } else {
+            logOnce(LOG_LEVEL.WARN, 'Running in fallback mode - handshake failed');
+            
+            // Try to load from mirror
+            if (state.sessionMirror.validated) {
+                activateSessionFromMirror();
+            } else {
+                enableGuestMode();
+            }
+        }
+    } else {
+        logOnce(LOG_LEVEL.WARN, 'Running in fallback mode - parent not ready');
+        
+        if (state.sessionMirror.validated) {
+            activateSessionFromMirror();
+        } else {
+            enableGuestMode();
+        }
+    }
+    
     try {
-        // Start enhanced bootstrap process with secure parent coordination
+        logOnce(LOG_LEVEL.INFO, 'Binding UI immediately');
+        initializeUIWithCachedData();
+        
         setTimeout(async () => {
             try {
-                await bootstrapApplication();
-                
-                // Initialize user status tracking after bootstrap
-                setTimeout(() => {
-                    initializeUserStatusTracking();
-                }, 1000);
-                
+                await bootstrapApp();
+                setTimeout(() => { initializeUserStatusTracking(); }, 1000);
             } catch (error) {
-                safeLogError('Status', 'initPageCore.bootstrap', error);
+                safeLogError('Status', 'safeInit.bootstrap', error);
             }
+        }, 50);
+        
+    } catch (e) {
+        logOnce(LOG_LEVEL.ERROR, `Initialization failed: ${e.message}`);
+    }
+}
+
+function notifyParentReady() {
+    if (_HANDSHAKE_DONE_) return;
+    
+    if (_HANDSHAKE_RETRIES_ >= MAX_HANDSHAKE) {
+        logOnce(LOG_LEVEL.WARN, `Handshake failed after ${MAX_HANDSHAKE} attempts`);
+        return;
+    }
+    
+    if (window.parent && window.parent !== window) {
+        try {
+            const message = signMessage({
+                type: MESSAGE_TYPES.IFRAME_READY,
+                source: 'iframe',
+                page: location.pathname,
+                module: 'status-core',
+                timestamp: Date.now(),
+                version: '2.0',
+                protocolVersion: state.protocolVersion
+            });
+            
+            window.parent.postMessage(message, '*');
+            
+            _HANDSHAKE_RETRIES_++;
+            logOnce(LOG_LEVEL.INFO, `Handshake attempt ${_HANDSHAKE_RETRIES_}/${MAX_HANDSHAKE}`);
+        } catch (error) {
+            logOnce(LOG_LEVEL.ERROR, 'Failed to send handshake to parent');
+        }
+    }
+}
+
+function initPageCore() {
+    try {
+        setTimeout(() => {
+            safeInit().catch(error => {
+                safeLogError('Status', 'initPageCore.safeInit', error);
+            });
         }, 50);
     } catch (error) {
         safeLogError('Status', 'initPageCore', error);
     }
 }
 
-// Add cleanup on page unload
+// =============================================
+// PAGE CORE COMPATIBILITY LAYER
+// =============================================
+const pageCore = {
+    isReady: () => state.initialized,
+    getData: (type) => {
+        switch(type) {
+            case 'statuses': return statuses;
+            case 'myStatuses': return myStatuses;
+            case 'friendsList': return [];
+            case 'notifications': return [];
+            default: return null;
+        }
+    },
+    updateData: () => {},
+    showMessage: () => {},
+    sendToParent
+};
+
+// =============================================
+// AUTO-CLEANUP ON UNLOAD
+// =============================================
 if (typeof window !== 'undefined') {
     try {
         window.addEventListener('beforeunload', cleanup);
@@ -3448,28 +3916,301 @@ if (typeof window !== 'undefined') {
     }
 }
 
-// Global exposure for iframe communication
+// =============================================
+// GLOBAL EXPOSURE - LEGACY SUPPORT
+// =============================================
 if (typeof window !== 'undefined') {
     try {
         window.statusCore = {
-            initializeParentCoordination,
+            initializeCore,
+            startHandshake,
             sendToParent,
+            requestSession,
+            receiveFromParent,
+            shutdownCore,
+            initializeParentCoordination,
             getUnifiedToken,
             secureApiCall,
             initializeUserStatusTracking,
             cleanup,
             generateSampleMoodData,
-            // Enhanced secure handshake functions
             startSecureHandshake,
-            requestSessionFromParent,
-            handleSecureSessionData,
-            // Safety utilities
             safeLogError,
             withUserGuard,
             withApiGuard,
-            safeGetElement
+            safeGetElement,
+            logOnce,
+            safeInit,
+            getData: pageCore.getData,
+            updateData: pageCore.updateData,
+            isReady: () => state.initialized || pageCore.isReady(),
+            getHealthMetrics,
+            getSession,
+            isSessionValid,
+            UNIFIED_TOKEN_KEY,
+            LOCAL_STORAGE_KEYS,
+            bootstrapApplication,
+            handleSessionData,
+            validateSessionData,
+            updateLocalStateWithSession,
+            handleSessionUpdate,
+            handleLogout,
+            handleParentUnavailable,
+            startBackgroundInitializationWithSession,
+            makeParentApiRequest,
+            handleAuthValidated,
+            waitForTokenReady,
+            onTokenReady,
+            triggerTokenReadyCallbacks,
+            migrateLegacyTokens,
+            isAuthenticated,
+            queueApiRequest,
+            processPendingApiRequests,
+            startTokenReadinessCheck,
+            initializeUIWithCachedData,
+            loadUserFromCache,
+            loadCachedDataInstantly,
+            startBackgroundInitialization,
+            loadFreshDataInBackground,
+            safeApiOperation,
+            loadStatusesInBackground,
+            loadMyStatusesInBackground,
+            loadHighlightsInBackground,
+            loadUserDataInBackground,
+            handleAuthError,
+            initializeStatusSystem,
+            loadInitialData,
+            filterStatusesByPrivacy,
+            getStatusPreviewText,
+            filterStatusesByType,
+            getEmptyStateMessage,
+            addReactionToStatus,
+            voteOnPoll,
+            pinStatus,
+            unpinStatus,
+            muteUser,
+            unmuteUser,
+            postStatus,
+            sanitizeStatusData,
+            validateStatusPayload,
+            updateStreakCounter,
+            scheduleStatus,
+            saveDraft,
+            reportStatus,
+            escapeHtml,
+            formatTimeAgo,
+            retryOperation,
+            getFriendsStatuses,
+            getCloseFriendsStatuses,
+            getMicroCirclesStatuses,
+            getMutedStatuses,
+            setCurrentViewerStatus,
+            getCurrentViewerStatus,
+            setCurrentSlideIndex,
+            getCurrentSlideIndex,
+            toggleAutoAdvancePause,
+            setCurrentCategoryFilter,
+            getCurrentCategoryFilter,
+            setCurrentIntentFilter,
+            getCurrentIntentFilter,
+            setCurrentMoodFilter,
+            getCurrentMoodFilter,
+            getPendingReplies,
+            getPendingReactions,
+            getMoodChartData,
+            getStreakCount,
+            getLastPostDate,
+            getActiveFilters,
+            getSelectedDraft,
+            setSelectedDraft,
+            
+            // New exports
+            HandshakeClient,
+            ParentDetector,
+            SecureStorage,
+            MessageFirewall,
+            getSessionMirror,
+            isSessionMirrorValid
         };
     } catch (error) {
         safeLogError('Status', 'globalExposure', error);
     }
 }
+
+// =============================================
+// EXPORT CONTRACT - ALL SYMBOLS REQUIRED BY status-ui.js
+// =============================================
+export {
+    // Core state & session
+    currentUser,
+    userData,
+    statuses,
+    myStatuses,
+    friendsStatuses,
+    closeFriendsStatuses,
+    pinnedStatuses,
+    mutedStatuses,
+    microCirclesStatuses,
+    highlights,
+    drafts,
+    scheduledStatuses,
+    viewedStatuses,
+    mutedUsers,
+    currentViewerStatus,
+    currentSlideIndex,
+    autoAdvanceInterval,
+    isAutoAdvancePaused,
+    progressInterval,
+    currentCategoryFilter,
+    currentIntentFilter,
+    currentMoodFilter,
+    isMobile,
+    isOfflineMode,
+    pendingReplies,
+    pendingReactions,
+    moodChartData,
+    streakCount,
+    lastPostDate,
+    activeFilters,
+    selectedDraft,
+    isBackgroundInitialized,
+    isTokenReady,
+    
+    // Parent coordination
+    parentCoordinator,
+    
+    // Status definitions
+    statusTypes,
+    statusIntents,
+    statusMoods,
+    statusCategories,
+    actionButtons,
+    privacySettings,
+    durationOptions,
+    reportReasons,
+    reactions,
+    emojis,
+    backgroundOptions,
+    statusTemplates,
+    
+    // Storage keys
+    LOCAL_STORAGE_KEYS,
+    UNIFIED_TOKEN_KEY,
+    
+    // Core functions - ALL REQUIRED BY UI
+    initializeCore,
+    startHandshake,
+    sendToParent,
+    requestSession,
+    receiveFromParent,
+    shutdownCore,
+    getHealthMetrics,
+    getSession,
+    isSessionValid,
+    registerFeature,
+    executeFeature,
+    initializeParentCoordination,
+    getUnifiedToken,
+    secureApiCall,
+    initializeUserStatusTracking,
+    cleanup,
+    generateSampleMoodData,
+    startSecureHandshake,
+    safeLogError,
+    withUserGuard,
+    withApiGuard,
+    safeGetElement,
+    logOnce,
+    safeInit,
+    initPageCore,
+    bootstrapApp,
+    bootstrapApplication,
+    handleSessionData,
+    validateSessionData,
+    updateLocalStateWithSession,
+    handleSessionUpdate,
+    handleLogout,
+    handleParentUnavailable,
+    startBackgroundInitializationWithSession,
+    makeParentApiRequest,
+    handleAuthValidated,
+    waitForTokenReady,
+    onTokenReady,
+    triggerTokenReadyCallbacks,
+    migrateLegacyTokens,
+    isAuthenticated,
+    queueApiRequest,
+    processPendingApiRequests,
+    startTokenReadinessCheck,
+    initializeUIWithCachedData,
+    loadUserFromCache,
+    loadCachedDataInstantly,
+    startBackgroundInitialization,
+    loadFreshDataInBackground,
+    safeApiOperation,
+    loadStatusesInBackground,
+    loadMyStatusesInBackground,
+    loadHighlightsInBackground,
+    loadUserDataInBackground,
+    handleAuthError,
+    initializeStatusSystem,
+    loadInitialData,
+    filterStatusesByPrivacy,
+    getStatusPreviewText,
+    filterStatusesByType,
+    getEmptyStateMessage,
+    addReactionToStatus,
+    voteOnPoll,
+    pinStatus,
+    unpinStatus,
+    muteUser,
+    unmuteUser,
+    postStatus,
+    sanitizeStatusData,
+    validateStatusPayload,
+    updateStreakCounter,
+    scheduleStatus,
+    saveDraft,
+    reportStatus,
+    escapeHtml,
+    formatTimeAgo,
+    retryOperation,
+    getFriendsStatuses,
+    getCloseFriendsStatuses,
+    getMicroCirclesStatuses,
+    getMutedStatuses,
+    setCurrentViewerStatus,
+    getCurrentViewerStatus,
+    setCurrentSlideIndex,
+    getCurrentSlideIndex,
+    toggleAutoAdvancePause,
+    setCurrentCategoryFilter,
+    getCurrentCategoryFilter,
+    setCurrentIntentFilter,
+    getCurrentIntentFilter,
+    setCurrentMoodFilter,
+    getCurrentMoodFilter,
+    getPendingReplies,
+    getPendingReactions,
+    getMoodChartData,
+    getStreakCount,
+    getLastPostDate,
+    getActiveFilters,
+    getSelectedDraft,
+    setSelectedDraft,
+    
+    // New exports for enhanced functionality
+    getSessionMirror,
+    isSessionMirrorValid
+};
+
+// =============================================
+// CORE INITIALIZATION - AUTOMATIC
+// =============================================
+if (typeof window !== 'undefined' && !state.initialized) {
+    setTimeout(() => {
+        initPageCore();
+    }, 10);
+}
+
+console.log('[Status] Core system initialized successfully (v2.1 - hardened)');

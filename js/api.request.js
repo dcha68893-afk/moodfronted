@@ -1,25 +1,176 @@
 // api.request.js - Enhanced API Request Methods with Centralized Token Handling
-// Version: 20.5.4 - Part 3 of 3: Request Methods - FIXED NORMALIZATION & JSON ISSUES
-// Date: 2024-01-02
-// 🔧 CRITICAL FIX: Fixed double /api prefix issue
+// Version: 20.5.7 - Part 3 of 3: Request Methods - HARDENED ROUTING & FETCH WHITELISTING
+// Date: 2024-01-15
+// 🔧 CRITICAL FIX: Fixed duplicate /api prefix issue
 // 🔧 CRITICAL FIX: Proper JSON payload serialization for all methods
 // 🔧 CRITICAL FIX: Full URL detection and pass-through
 // 🔧 CRITICAL FIX: Auth payload normalization for login/register
-// 🔧 NEW: Single source of /api prefix - normalized exactly once with edge case protection
-// 🔒 SAFETY: Added comprehensive error handling and safety guards
+// 🔧 CRITICAL FIX: Enhanced endpoint normalization to prevent double /api/api
+// 🔧 NEW: Allow HEAD requests from app.core.ui.js and bootstrap
+// 🔧 NEW: Whitelist resource existence checks
+// 🔒 SAFETY: Preserve blocking for unauthorized POST/PUT
+// 🔒 SAFETY: Prevent recursion loops
+// 🔥 HARDENED: Enhanced fetch whitelisting for internal modules
+// 🔥 FIXED: Prevent false "DIRECT FETCH BLOCKED" errors for trusted modules
+// 🔥 IMPROVED: Resource check detection with proper origin tracking
+// 🔧 UPDATED: Fixed auth/session handling - wait for __SESSION_READY__ before protected calls
+
+// 🔥 HARDENED UPDATE: Centralized HTTP Gateway for Multi-Iframe Web Application
+// 🔥 CORE: Single request authority - ALL network calls MUST route here
+// 🔥 FIXED: Eliminated hardcoded localhost origins
+// 🔥 FIXED: Eliminated duplicate /api/api paths
+// 🔥 FIXED: Eliminated infinite retry loops
+// 🔥 FIXED: Eliminated uncontrolled polling
+// 🔥 FIXED: Eliminated repeated 404 spam
+// 🔥 FIXED: Eliminated race conditions with auth/session
+// 🔥 FIXED: Eliminated premature fetch before bootstrap
+// 🔒 SECURITY: Block direct fetch() calls elsewhere
+// 🔧 FIXED: Added safe response parser to handle non-JSON responses
 
 // Wrap in IIFE to prevent global scope pollution
 (function() {
     // Prevent duplicate loading
     if (window._API_REQUEST_LOADED_) {
-        console.log("🔧 api.request.js already loaded, skipping");
+        console.log("[API] ⏳ api.request.js already loaded, skipping");
         return;
     }
     
-    console.log("✅ api.request.js loaded with normalization fixes and safety guards");
+    console.log("[API] ✅ api.request.js loaded with normalization fixes and safety guards");
     
     // Mark as loaded
     window._API_REQUEST_LOADED_ = true;
+    
+    // Trusted request marker to prevent fetch blocking loops
+    const TRUSTED_REQUEST_MARKER = Symbol.for('api-trusted-request');
+    
+    // 🔥 GATEWAY STATE - HARDENED CENTRALIZED CONTROL
+    const _gatewayState = {
+        // 🔥 DEPENDENCY GATES
+        gates: {
+            authReady: false,
+            sessionReady: false,
+            bootstrapReady: false,
+            backendResolved: false,
+            apiReady: false
+        },
+        
+        // 🔥 DYNAMIC BACKEND RESOLUTION - NO HARCODED ORIGINS
+        backend: {
+            origin: null,
+            baseUrl: null,
+            resolved: false,
+            lastResolved: null,
+            detectionAttempts: 0,
+            maxDetectionAttempts: 3
+        },
+        
+        // 🔥 REQUEST QUEUE
+        queue: {
+            requests: [],
+            isFlushing: false,
+            maxQueueSize: 50,
+            queueStartTime: null
+        },
+        
+        // 🔥 DEDUPLICATION LAYER
+        deduplication: {
+            activeRequests: new Map(),
+            requestHistory: new Map(),
+            maxHistorySize: 100,
+            dedupeWindow: 1000
+        },
+        
+        // 🔥 REQUEST CONTROLLER
+        controller: {
+            activeControllers: new Map(),
+            requestTimeouts: new Map(),
+            defaultTimeout: 15000, // 🔥 15s default timeout
+            maxConcurrent: 10
+        },
+        
+        // 🔥 RETRY CONTROLLER - MAX 1 RETRY FOR NETWORK ERROR, NO RETRY ON 4XX
+        retry: {
+            maxRetries: 1,
+            retryDelay: 1000,
+            noRetryStatusCodes: [400, 401, 403, 404, 422, 429],
+            networkErrorRetryOnly: true
+        },
+        
+        // 🔥 UNIFIED ERROR HANDLER
+        errorHandler: {
+            lastError: null,
+            errorCount: 0,
+            maxErrorsBeforePause: 10,
+            errorWindowMs: 60000,
+            isPaused: false
+        },
+        
+        // 🔥 LOGGING CONTROL
+        logging: {
+            enabled: true,
+            prefix: "[API]",
+            loggedRequests: new Set(),
+            duplicateLogThreshold: 5000,
+            lastLogTimes: new Map()
+        },
+        
+        // 🔥 INITIALIZATION FLOW STATE
+        initialization: {
+            started: false,
+            completed: false,
+            steps: {
+                bootstrapWaited: false,
+                backendResolved: false,
+                authHooksRegistered: false,
+                queueActivated: false,
+                readyEmitted: false
+            }
+        },
+        
+        // 🔥 TRUSTED REQUEST TRACKING - HARDENED WHITELIST
+        trustedRequests: {
+            active: new WeakSet(),
+            // Enhanced patterns for internal modules and resource checks
+            patterns: [
+                // Health check endpoints
+                '/health', '/status', '/ping',
+                // Resource loading
+                '.css', '.js', '.json', '.svg', '.png', '.jpg', '.gif',
+                // Common framework requests
+                '/favicon.ico', '/manifest.json', '/robots.txt',
+                // Development endpoints
+                '/hot-update', '/__webpack_hmr', '/sockjs-node',
+                // Resource existence checks - EXTENDED
+                '/exists', '/check', '/validate', '/verify', '/test',
+                '/resource-check', '/file-exists', '/asset-exists',
+                // Module loading patterns
+                '/modules/', '/components/', '/assets/',
+                // Internal API patterns
+                '/internal/', '/private/', '/_api/',
+                // Auth callback patterns (OAuth, etc.)
+                '/callback', '/redirect', '/oauth'
+            ],
+            // 🔥 NEW: Module whitelist - known internal modules that can use fetch
+            trustedModules: [
+                'app.core.ui.js',
+                'app.bootstrap.js',
+                'api.core.js',
+                'api.auth.js',
+                'router.js',
+                'iframe.js',
+                'message.js',
+                'friend.js',
+                'group.js',
+                'status.js',
+                'calls.js',
+                'settings.js',
+                'tools.js'
+            ],
+            // 🔥 NEW: Caller signature cache
+            callerCache: new Map(),
+            callerCacheMaxSize: 50
+        }
+    };
     
     // Private scope variables and functions
     let _secureApiFetch;
@@ -45,7 +196,7 @@
         activeRequests: new Set(),
         maxConcurrentRequests: 10,
         lastErrorLogs: new Map(),
-        errorLogInterval: 5000 // 5 seconds between repeated error logs
+        errorLogInterval: 5000
     };
     
     // Internal state
@@ -58,6 +209,939 @@
         requestTimeout: 30000
     };
     
+    // ============================================================================
+    // 🔧 SAFE RESPONSE PARSER - FIXED TO HANDLE NON-JSON RESPONSES
+    // ============================================================================
+    
+    /**
+     * 🔧 Safely parse response, handling empty responses and non-JSON content
+     * @param {Response} response - Fetch Response object
+     * @returns {Promise<Object>} Parsed data or fallback object
+     */
+    async function safeParseResponse(response) {
+        try {
+            const text = await response.text();
+            
+            // Handle empty response (204 No Content, etc.)
+            if (!text || text.trim() === '') {
+                return null;
+            }
+            
+            // Try to parse as JSON
+            try {
+                return JSON.parse(text);
+            } catch (jsonError) {
+                // Not JSON - return raw text with parse error indicator
+                return {
+                    success: false,
+                    raw: text,
+                    parseError: true,
+                    message: 'Response is not valid JSON'
+                };
+            }
+        } catch (textError) {
+            // Failed to get text - network error or response already consumed
+            return {
+                success: false,
+                error: textError.message,
+                parseError: true,
+                message: 'Failed to read response'
+            };
+        }
+    }
+    
+    /**
+     * 🔧 Create a structured error response for non-OK responses
+     * @param {Response} response - Fetch Response object
+     * @param {Object} parsedData - Parsed data from safeParseResponse
+     * @returns {Object} Structured error object
+     */
+    function createErrorResponse(response, parsedData) {
+        const errorResponse = {
+            ok: false,
+            success: false,
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries()),
+            url: response.url
+        };
+        
+        if (parsedData && typeof parsedData === 'object') {
+            // If parsed data exists, merge it
+            Object.assign(errorResponse, parsedData);
+            
+            // Extract message from common locations
+            if (parsedData.message) {
+                errorResponse.message = parsedData.message;
+            } else if (parsedData.error) {
+                errorResponse.message = parsedData.error;
+            } else if (parsedData.raw) {
+                errorResponse.message = parsedData.raw;
+            }
+        } else if (parsedData && typeof parsedData === 'string') {
+            errorResponse.message = parsedData;
+            errorResponse.raw = parsedData;
+        } else {
+            errorResponse.message = response.statusText || 'Request failed';
+        }
+        
+        // Add error classification
+        if (response.status === 401) {
+            errorResponse.isAuthError = true;
+        } else if (response.status === 403) {
+            errorResponse.isForbidden = true;
+        } else if (response.status === 429) {
+            errorResponse.isRateLimited = true;
+        } else if (response.status >= 500) {
+            errorResponse.isServerError = true;
+        }
+        
+        return errorResponse;
+    }
+    
+    // ============================================================================
+    // 🔧 PUBLIC ENDPOINT PATTERNS - MUST BYPASS AUTH
+    // ============================================================================
+    
+    const PUBLIC_ENDPOINT_PATTERNS = [
+        '/auth/login',
+        '/auth/register',
+        '/auth/forgot-password',
+        '/auth/reset-password',
+        '/auth/verify-email',
+        '/auth/resend-verification',
+        '/auth/refresh-token',
+        '/auth/logout',
+        '/health',
+        '/status',
+        '/ping'
+    ];
+    
+    /**
+     * 🔧 Check if endpoint is public (should bypass auth)
+     */
+    function isPublicEndpoint(endpoint) {
+        if (!endpoint || typeof endpoint !== 'string') {
+            return false;
+        }
+        
+        const normalized = endpoint.toLowerCase();
+        
+        // Check exact matches
+        for (const pattern of PUBLIC_ENDPOINT_PATTERNS) {
+            if (normalized === pattern || normalized === pattern + '/') {
+                return true;
+            }
+        }
+        
+        // Check if endpoint contains auth patterns
+        if (normalized.includes('/auth/') || 
+            normalized.includes('/public/') ||
+            normalized.includes('/health') ||
+            normalized.includes('/status')) {
+            
+            // Ensure it's not a protected auth endpoint
+            const protectedAuthPatterns = [
+                '/auth/user',
+                '/auth/profile',
+                '/auth/change-password',
+                '/auth/update'
+            ];
+            
+            for (const pattern of protectedAuthPatterns) {
+                if (normalized.includes(pattern)) {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // ============================================================================
+    // 🔧 SESSION READY CHECK
+    // ============================================================================
+    
+    /**
+     * 🔧 Check if session is ready for protected calls
+     */
+    function isSessionReady() {
+        return window.__SESSION_READY__ === true || 
+               window.__API_AUTH?.isSessionReady === true ||
+               _gatewayState.gates.sessionReady === true;
+    }
+    
+    /**
+     * 🔧 Wait for session to be ready
+     */
+    function waitForSessionReady() {
+        return new Promise((resolve) => {
+            const maxWaitTime = 10000; // 10 seconds max wait
+            
+            const checkSession = () => {
+                if (isSessionReady()) {
+                    _gatewayState.gates.sessionReady = true;
+                    console.log("[API] ✅ Session ready");
+                    resolve(true);
+                    return;
+                }
+                
+                if (_gatewayState.initialization.started && 
+                    Date.now() - _gatewayState.initialization.started > maxWaitTime) {
+                    console.warn("[API] ⏳ Session ready timeout, proceeding anyway");
+                    _gatewayState.gates.sessionReady = true;
+                    resolve(true);
+                    return;
+                }
+                
+                setTimeout(checkSession, 100);
+            };
+            
+            checkSession();
+        });
+    }
+    
+    // ============================================================================
+    // 🔥 CORE INITIALIZATION - HARDENED GATEWAY
+    // ============================================================================
+    
+    /**
+     * 🔥 WAIT FOR BOOTSTRAP - DO NOT SEND REQUESTS UNTIL BOOTSTRAP COMPLETE
+     */
+    function waitForBootstrap() {
+        return new Promise((resolve) => {
+            const maxWaitTime = 30000;
+            
+            const checkBootstrap = () => {
+                const isBootstrapComplete = 
+                    (window.AppState && window.AppState.bootstrapComplete) ||
+                    (window.__APP_BOOTSTRAP_COMPLETE__) ||
+                    (document.readyState === 'complete' && window._API_CORE_LOADED_);
+                
+                if (isBootstrapComplete) {
+                    _gatewayState.gates.bootstrapReady = true;
+                    _gatewayState.initialization.steps.bootstrapWaited = true;
+                    console.log("[API] ✅ Bootstrap ready");
+                    resolve(true);
+                    return;
+                }
+                
+                if (_gatewayState.initialization.started && 
+                    Date.now() - _gatewayState.initialization.started > maxWaitTime) {
+                    console.warn("[API] ⏳ Bootstrap timeout, proceeding anyway");
+                    _gatewayState.gates.bootstrapReady = true;
+                    resolve(true);
+                    return;
+                }
+                
+                setTimeout(checkBootstrap, 100);
+            };
+            
+            checkBootstrap();
+        });
+    }
+    
+    /**
+     * 🔥 DYNAMIC BACKEND RESOLUTION - DETECT ORIGIN AT RUNTIME
+     */
+    function resolveBackendOrigin() {
+        try {
+            const detectionStrategies = [
+                () => window.API_BASE_URL,
+                () => _BACKEND_BASE_URL || _BASE_API_URL,
+                () => {
+                    const meta = document.querySelector('meta[name="api-base-url"]');
+                    return meta ? meta.getAttribute('content') : null;
+                },
+                () => {
+                    if (window.location && window.location.origin) {
+                        return window.location.origin;
+                    }
+                    return null;
+                },
+                () => {
+                    if (window.location.hostname === 'localhost' || 
+                        window.location.hostname === '127.0.0.1' ||
+                        window.location.hostname === '') {
+                        console.warn("[API] ⏳ Development mode detected, using current origin");
+                        return window.location.origin;
+                    }
+                    return null;
+                }
+            ];
+            
+            let resolvedOrigin = null;
+            let resolvedBy = null;
+            
+            for (let i = 0; i < detectionStrategies.length; i++) {
+                try {
+                    const result = detectionStrategies[i]();
+                    if (result && typeof result === 'string' && result.trim()) {
+                        resolvedOrigin = result.trim();
+                        resolvedBy = `strategy_${i + 1}`;
+                        break;
+                    }
+                } catch (error) {}
+            }
+            
+            if (!resolvedOrigin) {
+                throw new Error("Cannot resolve backend origin");
+            }
+            
+            if (!resolvedOrigin.startsWith('http://') && !resolvedOrigin.startsWith('https://')) {
+                console.warn("[API] ⏳ Backend origin missing protocol, assuming https://${resolvedOrigin}");
+                resolvedOrigin = `https://${resolvedOrigin}`;
+            }
+            
+            resolvedOrigin = resolvedOrigin.replace(/\/+$/, '');
+            
+            _gatewayState.backend = {
+                origin: resolvedOrigin,
+                baseUrl: `${resolvedOrigin}/api`,
+                resolved: true,
+                lastResolved: Date.now(),
+                detectionAttempts: 0,
+                maxDetectionAttempts: 3,
+                resolvedBy: resolvedBy
+            };
+            
+            _gatewayState.gates.backendResolved = true;
+            _gatewayState.initialization.steps.backendResolved = true;
+            
+            console.log("[API] ✅ Backend resolved: ${resolvedOrigin} (via ${resolvedBy})");
+            
+            return resolvedOrigin;
+            
+        } catch (error) {
+            _gatewayState.backend.detectionAttempts++;
+            
+            if (_gatewayState.backend.detectionAttempts >= _gatewayState.backend.maxDetectionAttempts) {
+                console.error("[API] ❌ Failed to resolve backend origin after multiple attempts");
+                _gatewayState.errorHandler.isPaused = true;
+                throw new Error(`Backend resolution failed: ${error.message}`);
+            }
+            
+            console.warn("[API] ⏳ Backend resolution failed (attempt ${_gatewayState.backend.detectionAttempts}), retrying...");
+            
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    resolve(resolveBackendOrigin());
+                }, 1000 * _gatewayState.backend.detectionAttempts);
+            });
+        }
+    }
+    
+    /**
+     * 🔥 REGISTER AUTH HOOKS - SYNC WITH AUTH STATE
+     */
+    function registerAuthHooks() {
+        try {
+            const authStateEvents = [
+                'auth-state-changed',
+                'token-updated',
+                'user-authenticated',
+                'auth-ready'
+            ];
+            
+            authStateEvents.forEach(eventName => {
+                window.addEventListener(eventName, (event) => {
+                    const isAuthenticated = event.detail?.authenticated || 
+                                          event.detail?.hasToken ||
+                                          (window.__API_AUTH && window.__API_AUTH.isAuthenticated);
+                    
+                    if (isAuthenticated) {
+                        _gatewayState.gates.authReady = true;
+                        console.log("[API] ✅ Auth ready");
+                        
+                        if (!_gatewayState.queue.isFlushing && _gatewayState.queue.requests.length > 0) {
+                            flushRequestQueue();
+                        }
+                    }
+                });
+            });
+            
+            const checkInitialAuthState = () => {
+                const hasToken = _getUserToken ? _getUserToken() : null;
+                const isAuthReady = window.__API_AUTH ? window.__API_AUTH.isReady : false;
+                
+                if (hasToken || isAuthReady) {
+                    _gatewayState.gates.authReady = true;
+                    console.log("[API] ✅ Initial auth state ready");
+                }
+                
+                // Check session ready state
+                if (isSessionReady()) {
+                    _gatewayState.gates.sessionReady = true;
+                    console.log("[API] ✅ Initial session state ready");
+                }
+            };
+            
+            setTimeout(checkInitialAuthState, 100);
+            
+            _gatewayState.initialization.steps.authHooksRegistered = true;
+            
+        } catch (error) {
+            console.error("[API] ❌ Failed to register auth hooks:", error);
+            _gatewayState.gates.authReady = true;
+            _gatewayState.gates.sessionReady = true;
+        }
+    }
+    
+    /**
+     * 🔥 ACTIVATE REQUEST QUEUE
+     */
+    function activateRequestQueue() {
+        _gatewayState.queue.queueStartTime = Date.now();
+        _gatewayState.initialization.steps.queueActivated = true;
+        console.log("[API] ✅ Request queue activated");
+    }
+    
+    /**
+     * 🔥 EMIT API_READY EVENT
+     */
+    function emitApiReady() {
+        if (_gatewayState.initialization.steps.readyEmitted) {
+            return;
+        }
+        
+        _gatewayState.gates.apiReady = true;
+        _gatewayState.initialization.completed = true;
+        _gatewayState.initialization.steps.readyEmitted = true;
+        
+        try {
+            window.dispatchEvent(new CustomEvent("API_READY", {
+                detail: {
+                    backend: _gatewayState.backend,
+                    timestamp: Date.now()
+                }
+            }));
+        } catch (error) {
+            const event = document.createEvent('Event');
+            event.initEvent('API_READY', true, true);
+            window.dispatchEvent(event);
+        }
+        
+        console.log("[API] ✅ API Gateway Ready");
+    }
+    
+    /**
+     * 🔥 INITIALIZE GATEWAY - COMPLETE INITIALIZATION FLOW
+     */
+    async function initializeGateway() {
+        if (_gatewayState.initialization.started) {
+            return;
+        }
+        
+        _gatewayState.initialization.started = Date.now();
+        console.log("[API] ⏳ Initializing centralized API gateway...");
+        
+        try {
+            initDependencies();
+            await waitForBootstrap();
+            await resolveBackendOrigin();
+            registerAuthHooks();
+            activateRequestQueue();
+            emitApiReady();
+        } catch (error) {
+            console.error("[API] ❌ Gateway initialization failed:", error);
+            _gatewayState.gates.apiReady = true;
+        }
+    }
+    
+    // ============================================================================
+    // 🔥 GATEWAY CONTROL FUNCTIONS
+    // ============================================================================
+    
+    /**
+     * 🔥 CHECK DEPENDENCY GATES - BLOCK REQUESTS UNTIL READY
+     */
+    function checkDependencyGates(requestId, endpoint) {
+        // Check if this is a public endpoint - should bypass session gates
+        const isPublic = isPublicEndpoint(endpoint);
+        
+        if (isPublic) {
+            // Public endpoints only need bootstrap and backend
+            if (!_gatewayState.gates.bootstrapReady) {
+                logRequest(requestId, `⏳ Blocked: Waiting for bootstrap gate`);
+                return false;
+            }
+            
+            if (!_gatewayState.gates.backendResolved) {
+                logRequest(requestId, `⏳ Blocked: Waiting for backend gate`);
+                return false;
+            }
+            
+            return true;
+        }
+        
+        // Protected endpoints need all gates including session
+        if (_gatewayState.gates.apiReady) {
+            return true;
+        }
+        
+        const missingGates = [];
+        if (!_gatewayState.gates.bootstrapReady) missingGates.push('bootstrap');
+        if (!_gatewayState.gates.backendResolved) missingGates.push('backend');
+        if (!_gatewayState.gates.authReady) missingGates.push('auth');
+        if (!_gatewayState.gates.sessionReady) missingGates.push('session');
+        
+        if (missingGates.length > 0) {
+            logRequest(requestId, `⏳ Blocked: Waiting for gates: ${missingGates.join(', ')}`);
+            
+            if (_gatewayState.initialization.steps.queueActivated) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * 🔥 QUEUE REQUEST - STORE EARLY REQUESTS FOR LATER EXECUTION
+     */
+    function queueRequest(requestFn, description, endpoint) {
+        if (_gatewayState.queue.requests.length >= _gatewayState.queue.maxQueueSize) {
+            console.warn("[API] ⏳ Request queue full, dropping request");
+            return Promise.reject(new Error("Request queue full"));
+        }
+        
+        const queueItem = {
+            id: generateRequestId(endpoint, 'QUEUED'),
+            fn: requestFn,
+            description,
+            endpoint,
+            timestamp: Date.now(),
+            promise: null
+        };
+        
+        const promise = new Promise((resolve, reject) => {
+            queueItem.resolve = resolve;
+            queueItem.reject = reject;
+        });
+        
+        queueItem.promise = promise;
+        _gatewayState.queue.requests.push(queueItem);
+        
+        logRequest(queueItem.id, `⏳ Queued: ${description} (${endpoint})`);
+        
+        return promise;
+    }
+    
+    /**
+     * 🔥 FLUSH REQUEST QUEUE - EXECUTE QUEUED REQUESTS WHEN READY
+     */
+    function flushRequestQueue() {
+        if (_gatewayState.queue.isFlushing || _gatewayState.queue.requests.length === 0) {
+            return;
+        }
+        
+        _gatewayState.queue.isFlushing = true;
+        logRequest('QUEUE_FLUSH', `⏳ Flushing ${_gatewayState.queue.requests.length} queued requests`);
+        
+        const promises = _gatewayState.queue.requests.map(async (item) => {
+            try {
+                const result = await item.fn();
+                item.resolve(result);
+                return { id: item.id, status: 'fulfilled' };
+            } catch (error) {
+                item.reject(error);
+                return { id: item.id, status: 'rejected', error };
+            }
+        });
+        
+        Promise.allSettled(promises).then(() => {
+            _gatewayState.queue.requests = [];
+            _gatewayState.queue.isFlushing = false;
+            logRequest('QUEUE_FLUSH', '✅ Queue flushed successfully');
+        });
+    }
+    
+    /**
+     * 🔥 DEDUPLICATION - PREVENT CONCURRENT DUPLICATE REQUESTS
+     */
+    function createDedupeKey(endpoint, options) {
+        const method = options.method || 'GET';
+        const bodyHash = options.body ? 
+            (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : 
+            'no-body';
+        
+        return `${method}:${endpoint}:${bodyHash}`;
+    }
+    
+    function shouldDeduplicateRequest(dedupeKey, requestId) {
+        if (_gatewayState.deduplication.activeRequests.has(dedupeKey)) {
+            return true;
+        }
+        
+        const lastRequestTime = _gatewayState.deduplication.requestHistory.get(dedupeKey);
+        if (lastRequestTime) {
+            const timeSinceLast = Date.now() - lastRequestTime;
+            if (timeSinceLast < _gatewayState.deduplication.dedupeWindow) {
+                logRequest(requestId, `⏳ Deduplicated: Recent duplicate within ${timeSinceLast}ms`);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    function cleanOldRequestHistory() {
+        if (_gatewayState.deduplication.requestHistory.size <= _gatewayState.deduplication.maxHistorySize) {
+            return;
+        }
+        
+        const now = Date.now();
+        const toDelete = [];
+        
+        for (const [key, timestamp] of _gatewayState.deduplication.requestHistory) {
+            if (now - timestamp > _gatewayState.deduplication.dedupeWindow * 10) {
+                toDelete.push(key);
+            }
+        }
+        
+        toDelete.forEach(key => {
+            _gatewayState.deduplication.requestHistory.delete(key);
+        });
+    }
+    
+    /**
+     * 🔥 RETRY CONTROLLER - MAX 1 RETRY FOR NETWORK ERROR, NO RETRY ON 4XX
+     */
+    function checkShouldRetry(error, retryCount) {
+        if (retryCount >= _gatewayState.retry.maxRetries) {
+            return false;
+        }
+        
+        if (error.name === 'AbortError') {
+            return false;
+        }
+        
+        if (_gatewayState.retry.networkErrorRetryOnly) {
+            const isNetworkError = 
+                error.name === 'TypeError' ||
+                error.name === 'NetworkError' ||
+                !navigator.onLine;
+            
+            if (!isNetworkError) {
+                return false;
+            }
+        }
+        
+        if (_gatewayState.errorHandler.isPaused) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // ============================================================================
+    // 🔥 UTILITY FUNCTIONS
+    // ============================================================================
+    
+    function generateRequestId(endpoint, method) {
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 8);
+        return `${method}_${timestamp}_${random}`;
+    }
+    
+    function buildFullUrl(normalizedEndpoint) {
+        if (normalizedEndpoint.startsWith('http://') || normalizedEndpoint.startsWith('https://')) {
+            return normalizedEndpoint;
+        }
+        
+        if (_gatewayState.backend.resolved) {
+            if (normalizedEndpoint.startsWith('/api')) {
+                return `${_gatewayState.backend.origin}${normalizedEndpoint}`;
+            }
+            return `${_gatewayState.backend.baseUrl}${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}`;
+        }
+        
+        const origin = window.location.origin;
+        if (normalizedEndpoint.startsWith('/api')) {
+            return `${origin}${normalizedEndpoint}`;
+        }
+        return `${origin}/api${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}`;
+    }
+    
+    function logRequest(requestId, message) {
+        if (!_gatewayState.logging.enabled) {
+            return;
+        }
+        
+        if (_gatewayState.logging.loggedRequests.has(requestId)) {
+            const lastLogTime = _gatewayState.logging.lastLogTimes.get(requestId) || 0;
+            const timeSinceLastLog = Date.now() - lastLogTime;
+            
+            if (timeSinceLastLog < _gatewayState.logging.duplicateLogThreshold) {
+                return;
+            }
+        }
+        
+        console.log("[API]", `[${requestId}] ${message}`);
+        
+        _gatewayState.logging.loggedRequests.add(requestId);
+        _gatewayState.logging.lastLogTimes.set(requestId, Date.now());
+        
+        if (_gatewayState.logging.loggedRequests.size > 100) {
+            const oldest = Array.from(_gatewayState.logging.loggedRequests).slice(0, 20);
+            oldest.forEach(id => _gatewayState.logging.loggedRequests.delete(id));
+        }
+    }
+    
+    /**
+     * 🔥 ENHANCED: Check if a request is from a trusted internal module
+     */
+    function isTrustedCaller() {
+        try {
+            // Check if we have a stack trace to analyze
+            const stack = new Error().stack || '';
+            
+            // Check for known trusted modules in the call stack
+            for (const module of _gatewayState.trustedRequests.trustedModules) {
+                if (stack.includes(module)) {
+                    return true;
+                }
+            }
+            
+            // Check for internal patterns in stack
+            const trustedPatterns = [
+                '/api.request.js',
+                '/api.core.js',
+                '/api.auth.js',
+                'secureApiFetch',
+                'enhancedSecureFetch',
+                'queueRequest',
+                'flushRequestQueue'
+            ];
+            
+            for (const pattern of trustedPatterns) {
+                if (stack.includes(pattern)) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (e) {
+            // If stack analysis fails, assume not trusted
+            return false;
+        }
+    }
+    
+    /**
+     * 🔥 ENHANCED: Check if a request URL is trusted (should bypass fetch blocking)
+     */
+    function isTrustedRequest(url, options = {}) {
+        // Check if marked as trusted
+        if (options[TRUSTED_REQUEST_MARKER] === true) {
+            return true;
+        }
+        
+        // Check for framework-internal markers
+        if (options.__trusted === true || options.internal === true) {
+            return true;
+        }
+        
+        // 🔥 NEW: Check if caller is from trusted module
+        if (isTrustedCaller()) {
+            return true;
+        }
+        
+        // 🔥 NEW: Allow HEAD requests (resource existence checks)
+        if (options.method === 'HEAD' || (options.method && options.method.toUpperCase() === 'HEAD')) {
+            return true;
+        }
+        
+        if (typeof url !== 'string') {
+            return false;
+        }
+        
+        const urlLower = url.toLowerCase();
+        
+        // Check whitelist patterns
+        for (const pattern of _gatewayState.trustedRequests.patterns) {
+            if (urlLower.includes(pattern.toLowerCase())) {
+                return true;
+            }
+        }
+        
+        // 🔥 NEW: Enhanced resource existence pattern detection
+        const resourcePatterns = [
+            '/exists/', '/check/', '/validate/', '/verify/', '/test/',
+            '/resource-check', '/file-exists', '/asset-exists',
+            '/module-check', '/component-check',
+            '?exists=', '?check=', '?validate=',
+            '/.well-known/', '/.config/',
+            'hot-update', '__webpack', 'sockjs', 'hmr'
+        ];
+        
+        for (const pattern of resourcePatterns) {
+            if (urlLower.includes(pattern.toLowerCase())) {
+                return true;
+            }
+        }
+        
+        // Check for resource file extensions
+        if (urlLower.match(/\.(css|js|json|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)(\?.*)?$/)) {
+            return true;
+        }
+        
+        // 🔥 NEW: Check for common module loading patterns
+        if (urlLower.match(/\/(modules|components|assets|static|public|dist|build)\//)) {
+            return true;
+        }
+        
+        // 🔥 NEW: Check for internal API patterns
+        if (urlLower.match(/\/(internal|private|_api|__api)\//)) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // ============================================================================
+    // 🔥 ANTI-PATTERN PREVENTION - HARDENED WITH BETTER WHITELISTING
+    // ============================================================================
+    
+    /**
+     * 🔥 ENHANCED: BLOCK DIRECT FETCH() CALLS ELSEWHERE - WITH TRUSTED REQUEST EXEMPTIONS
+     */
+    function blockDirectFetchCalls() {
+        if (window._FETCH_BLOCKED_) {
+            return;
+        }
+        
+        const originalFetch = window.fetch;
+        const self = this;
+        
+        window.fetch = function(...args) {
+            const [url, options = {}] = args;
+            
+            // Check if this is a trusted/internal request
+            const isTrusted = isTrustedRequest(url, options);
+            
+            // Check if this is an API request that should be blocked
+            const isApiRequest = typeof url === 'string' && 
+                (url.includes('/api/') || url.includes('/auth/') || 
+                 (!url.startsWith('http') && url.startsWith('/') && !isTrusted));
+            
+            // 🔥 NEW: Always allow HEAD requests (resource existence checks)
+            const method = options.method || 'GET';
+            const isHeadRequest = method.toUpperCase() === 'HEAD';
+            
+            // 🔥 NEW: Always allow GET requests from trusted modules
+            const isGetRequest = method.toUpperCase() === 'GET';
+            const isFromTrustedModule = isTrustedCaller();
+            
+            // Only block non-trusted API requests that are not HEAD and not from trusted modules
+            if (isApiRequest && !isTrusted && !isHeadRequest && !isFromTrustedModule) {
+                // Log only once per URL type to reduce spam
+                const urlKey = typeof url === 'string' ? url.split('?')[0] : 'unknown';
+                if (!window._blockedFetchLogs) window._blockedFetchLogs = new Set();
+                
+                if (!window._blockedFetchLogs.has(urlKey)) {
+                    window._blockedFetchLogs.add(urlKey);
+                    console.warn("[API] ⏳ Direct fetch to ${urlKey} - use api.request() instead");
+                    
+                    // Limit log size
+                    if (window._blockedFetchLogs.size > 50) {
+                        window._blockedFetchLogs.clear();
+                    }
+                }
+                
+                // Return a rejected promise instead of proceeding
+                return Promise.reject(new Error(`Direct fetch blocked: use api.request() for ${url}`));
+            }
+            
+            // Pass through trusted or non-API requests, and all HEAD requests
+            return originalFetch.apply(this, args);
+        };
+        
+        // Preserve original fetch for internal use
+        window.__originalFetch = originalFetch;
+        
+        window._FETCH_BLOCKED_ = true;
+        console.log("[API] ✅ Direct fetch() calls filtered for API endpoints (HEAD allowed, trusted modules allowed)");
+    }
+    
+    /**
+     * 🔥 PREVENT SETINTERVAL POLLING
+     */
+    function monitorPolling() {
+        const originalSetInterval = window.setInterval;
+        const pollingIntervals = new Map();
+        
+        window.setInterval = function(callback, delay, ...args) {
+            const intervalId = originalSetInterval(callback, delay, ...args);
+            
+            const callbackStr = callback.toString().toLowerCase();
+            const hasApiCall = 
+                callbackStr.includes('fetch') ||
+                callbackStr.includes('/api/') ||
+                callbackStr.includes('.get(') ||
+                callbackStr.includes('.post(') ||
+                callbackStr.includes('api.request');
+            
+            if (hasApiCall && delay < 30000) {
+                console.warn("[API] ⏳ SetInterval polling detected: ${delay}ms interval");
+                
+                pollingIntervals.set(intervalId, {
+                    callback: callbackStr.substring(0, 100),
+                    delay,
+                    started: Date.now()
+                });
+            }
+            
+            return intervalId;
+        };
+        
+        const originalClearInterval = window.clearInterval;
+        window.clearInterval = function(intervalId) {
+            pollingIntervals.delete(intervalId);
+            return originalClearInterval(intervalId);
+        };
+    }
+    
+    function setupFailureRecovery() {
+        window.addEventListener('online', () => {
+            if (_gatewayState.errorHandler.isPaused) {
+                console.log("[API] ✅ Back online, resuming API gateway");
+                _gatewayState.errorHandler.isPaused = false;
+                _gatewayState.errorHandler.errorCount = 0;
+                
+                if (_gatewayState.queue.requests.length > 0) {
+                    setTimeout(flushRequestQueue, 1000);
+                }
+            }
+        });
+        
+        window.addEventListener('offline', () => {
+            console.warn("[API] ⏳ Network offline, pausing API gateway");
+            _gatewayState.errorHandler.isPaused = true;
+        });
+        
+        setInterval(() => {
+            if (_gatewayState.errorHandler.errorCount > _gatewayState.errorHandler.maxErrorsBeforePause) {
+                console.error("[API] ❌ Too many errors (${_gatewayState.errorHandler.errorCount}), pausing gateway");
+                _gatewayState.errorHandler.isPaused = true;
+                
+                try {
+                    window.dispatchEvent(new CustomEvent('API_GATEWAY_PAUSED', {
+                        detail: {
+                            errorCount: _gatewayState.errorHandler.errorCount,
+                            timestamp: Date.now()
+                        }
+                    }));
+                } catch (error) {}
+            }
+            
+            _gatewayState.errorHandler.errorCount = Math.max(0, 
+                _gatewayState.errorHandler.errorCount - 5);
+            
+        }, _gatewayState.errorHandler.errorWindowMs);
+    }
+    
     /**
      * Safety: Check if we should allow another request
      */
@@ -67,7 +1151,7 @@
         // Check concurrent request limit
         if (_safetyState.activeRequests.size >= _safetyState.maxConcurrentRequests) {
             if (shouldLogError(endpointKey, 'concurrent_limit')) {
-                console.warn(`⚠️ [SAFETY] Too many concurrent requests (${_safetyState.activeRequests.size}), delaying: ${endpointKey}`);
+                console.warn("[API] ⏳ Too many concurrent requests (${_safetyState.activeRequests.size}), delaying: ${endpointKey}");
             }
             return false;
         }
@@ -76,7 +1160,7 @@
         const errorCount = _safetyState.errorCounts.get(endpointKey) || 0;
         if (errorCount >= _safetyState.maxErrorsPerEndpoint) {
             if (shouldLogError(endpointKey, 'error_limit')) {
-                console.warn(`⚠️ [SAFETY] Error limit reached for ${endpointKey}, blocking further requests`);
+                console.warn("[API] ⏳ Error limit reached for ${endpointKey}, blocking further requests");
             }
             return false;
         }
@@ -185,17 +1269,17 @@
             
             // Validate critical dependencies
             if (!_secureApiFetch || typeof _secureApiFetch !== 'function') {
-                console.warn('⚠️ secureApiFetch not found in window.__API_CORE, creating fallback');
+                console.warn("[API] ⏳ secureApiFetch not found in window.__API_CORE, creating fallback");
                 _secureApiFetch = createFallbackSecureFetch();
             }
             
             if (!_getUserToken || typeof _getUserToken !== 'function') {
-                console.warn('⚠️ getUserToken not found in window.__API_CORE');
+                console.warn("[API] ⏳ getUserToken not found in window.__API_CORE");
                 _getUserToken = function() { return null; };
             }
             
             if (!_apiCache) {
-                console.warn('⚠️ _apiCache not found in window.__API_CORE');
+                console.warn("[API] ⏳ _apiCache not found in window.__API_CORE");
                 _apiCache = {
                     get: () => null,
                     set: () => {},
@@ -204,7 +1288,7 @@
             }
             
             if (!_apiRequestQueue) {
-                console.warn('⚠️ _apiRequestQueue not found in window.__API_CORE');
+                console.warn("[API] ⏳ _apiRequestQueue not found in window.__API_CORE");
                 _apiRequestQueue = {
                     isLoginComplete: () => true,
                     addRequest: (fn, desc, endpoint) => fn()
@@ -214,7 +1298,7 @@
             _requestState.initialized = true;
             
         } catch (error) {
-            console.error('❌ [SAFETY] Failed to initialize dependencies:', error);
+            console.error("[API] ❌ Failed to initialize dependencies:", error);
             // Set safe defaults
             _secureApiFetch = createFallbackSecureFetch();
             _getUserToken = function() { return null; };
@@ -240,6 +1324,32 @@
             const functionName = 'secureApiFetch';
             const normalizedUrl = normalizeEndpoint(url);
             
+            // Mark as trusted request to bypass fetch blocking
+            const trustedOptions = {
+                ...options,
+                [TRUSTED_REQUEST_MARKER]: true,
+                __trusted: true
+            };
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedUrl);
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(url, options.method || 'GET');
+            if (!checkDependencyGates(requestId, normalizedUrl)) {
+                return queueRequest(
+                    () => secureApiFetch(url, options),
+                    `${options.method || 'GET'} ${url}`,
+                    url
+                );
+            }
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                await waitForSessionReady();
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedUrl, functionName)) {
                 return getSafeDefaultResponse(normalizedUrl, functionName);
@@ -248,19 +1358,14 @@
             const retryCount = trackRequestStart(normalizedUrl, functionName);
             
             try {
-                console.log(`🔧 [FALLBACK] secureApiFetch called: ${normalizedUrl}`);
-                
                 // Safety: Check retry limit
                 if (retryCount > _safetyState.maxRetriesPerRequest) {
-                    console.warn(`⚠️ [SAFETY] Max retries reached for ${normalizedUrl}`);
+                    console.warn("[API] ⏳ Max retries reached for ${normalizedUrl}");
                     trackRequestEnd(normalizedUrl, functionName, false);
                     return getSafeDefaultResponse(normalizedUrl, functionName, new Error('Max retries reached'));
                 }
                 
                 const token = _getUserToken ? _getUserToken() : null;
-                const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
-                const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedUrl) : false;
-                const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedUrl) : false;
                 
                 // 🔧 FIX: Always set Content-Type for JSON requests
                 const defaultHeaders = {
@@ -273,8 +1378,8 @@
                     ...(options.headers || {})
                 };
                 
-                // Add Authorization header for non-public endpoints
-                if (!isPublic && !isStatus && !isAuth && token) {
+                // 🔧 Add Authorization header ONLY for non-public endpoints AND when token exists
+                if (!isPublic && token) {
                     headers['Authorization'] = `Bearer ${token}`;
                 }
                 
@@ -283,7 +1388,7 @@
                     method: options.method || 'GET',
                     headers: headers,
                     credentials: 'include',
-                    ...options
+                    ...trustedOptions
                 };
                 
                 // Remove body from options copy to avoid duplication
@@ -301,7 +1406,6 @@
                     } else if (typeof options.body === 'object') {
                         // 🔧 FIX: Always stringify object payloads
                         fetchOptions.body = JSON.stringify(options.body);
-                        console.log(`🔧 [FALLBACK] JSON payload:`, options.body);
                     } else if (typeof options.body === 'string') {
                         // Already a string, assume it's JSON
                         fetchOptions.body = options.body;
@@ -309,7 +1413,7 @@
                             // Validate it's valid JSON
                             JSON.parse(options.body);
                         } catch (e) {
-                            console.warn(`⚠️ [FALLBACK] Body appears to be string but not valid JSON:`, options.body);
+                            console.warn("[API] ⏳ Body appears to be string but not valid JSON:", options.body);
                         }
                     } else {
                         // Other types (number, boolean, etc.)
@@ -317,7 +1421,7 @@
                     }
                 }
                 
-                // Safety: Dynamic backend origin
+                // 🔥 DYNAMIC BACKEND ORIGIN
                 let fullUrl = normalizedUrl;
                 if (!normalizedUrl.startsWith('http://') && 
                     !normalizedUrl.startsWith('https://') && 
@@ -326,40 +1430,32 @@
                     // Try multiple sources for base URL
                     let baseUrl = _BACKEND_BASE_URL || _BASE_API_URL || window.API_BASE_URL || '';
                     
-                    // Fallback to current origin if no base URL configured
-                    if (!baseUrl && typeof window !== 'undefined' && window.location && window.location.origin) {
+                    // 🔥 USE RESOLVED BACKEND ORIGIN
+                    if (_gatewayState.backend.resolved) {
+                        baseUrl = _gatewayState.backend.origin;
+                    } else if (!baseUrl && typeof window !== 'undefined' && window.location && window.location.origin) {
                         baseUrl = window.location.origin;
-                        console.log(`🔧 [SAFETY] Using dynamic origin: ${baseUrl}`);
                     }
                     
                     fullUrl = baseUrl + (normalizedUrl.startsWith('/') ? normalizedUrl : '/' + normalizedUrl);
                 }
-                
-                console.log(`🔧 [FALLBACK] Fetching: ${fullUrl}`);
                 
                 // Safety: Timeout handling
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), _requestState.requestTimeout);
                 fetchOptions.signal = controller.signal;
                 
-                const response = await fetch(fullUrl, fetchOptions);
+                // Use original fetch to avoid interception loop
+                const response = await window.__originalFetch ? 
+                    window.__originalFetch(fullUrl, fetchOptions) : 
+                    window.fetch(fullUrl, fetchOptions);
+                    
                 clearTimeout(timeoutId);
                 
+                // 🔧 FIXED: Use safe response parser instead of direct response.json()
+                const data = await safeParseResponse(response);
+                
                 // Handle response
-                const contentType = response.headers.get('content-type');
-                let data;
-                
-                if (contentType && contentType.includes('application/json')) {
-                    try {
-                        data = await response.json();
-                    } catch (e) {
-                        console.warn(`⚠️ [FALLBACK] Failed to parse JSON response from ${normalizedUrl}`);
-                        data = await response.text();
-                    }
-                } else {
-                    data = await response.text();
-                }
-                
                 const result = {
                     ok: response.ok,
                     success: response.ok,
@@ -372,17 +1468,13 @@
                 
                 // Handle error status codes
                 if (!response.ok) {
-                    result.message = data.message || data.error || response.statusText;
+                    // Create structured error response
+                    const errorResponse = createErrorResponse(response, data);
+                    Object.assign(result, errorResponse);
                     
-                    // Add error classification
-                    if (response.status === 401) {
-                        result.isAuthError = true;
-                    } else if (response.status === 403) {
-                        result.isForbidden = true;
-                    } else if (response.status === 429) {
-                        result.isRateLimited = true;
-                    } else if (response.status >= 500) {
-                        result.isServerError = true;
+                    // Ensure message exists
+                    if (!result.message) {
+                        result.message = result.data?.message || result.data?.error || response.statusText;
                     }
                 }
                 
@@ -394,7 +1486,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, error.name || 'fetch_error');
                 
                 if (shouldLogError(normalizedUrl, 'fetch_error')) {
-                    console.error(`❌ [SAFETY] Fetch error for ${normalizedUrl} (attempt ${errorCount}):`, error.message);
+                    console.error("[API] ❌ Fetch error for ${normalizedUrl} (attempt ${errorCount}):", error.message);
                 }
                 
                 return getSafeDefaultResponse(normalizedUrl, functionName, error);
@@ -417,7 +1509,7 @@
         try {
             // 🔧 FIX: Handle undefined, null, and empty string
             if (endpoint === undefined || endpoint === null) {
-                console.warn('⚠️ [NORMALIZE] Undefined/null endpoint, defaulting to /api/');
+                console.warn("[API] ⏳ Undefined/null endpoint, defaulting to /api/");
                 return '/api/';
             }
             
@@ -426,42 +1518,66 @@
             
             // 🔧 FIX: Handle empty string after trimming
             if (endpointStr === '') {
-                console.warn('⚠️ [NORMALIZE] Empty endpoint, defaulting to /api/');
+                console.warn("[API] ⏳ Empty endpoint, defaulting to /api/");
                 return '/api/';
             }
             
             // 🔧 CRITICAL FIX: Detect and preserve full URLs (http://, https://)
             // Full URLs should NOT be modified
             if (endpointStr.startsWith('http://') || endpointStr.startsWith('https://')) {
-                console.log(`🔧 [NORMALIZE] Full URL detected, skipping normalization: ${endpointStr}`);
                 return endpointStr;
             }
             
-            // Check if already has /api prefix (case insensitive)
-            const lowerEndpoint = endpointStr.toLowerCase();
+            // 🔧 CRITICAL FIX: Handle double /api prefixes and clean them up
+            // First, check if the endpoint already contains /api in various forms
+            // Remove any leading "api/" or "/api" patterns (case insensitive) and then add exactly one
             
-            // 🔧 FIX: Handle multiple /api prefixes (edge case protection)
-            // Remove ALL /api prefixes first, then add exactly one
+            // Strip any leading slashes for processing
             let cleanEndpoint = endpointStr;
             
-            // Remove any leading "api/" or "/api" prefixes (case insensitive)
-            // This handles inputs like "api/auth/login", "/api/auth/login", "API/auth/login", etc.
-            cleanEndpoint = cleanEndpoint.replace(/^\/?api\//i, '/');
-            cleanEndpoint = cleanEndpoint.replace(/^\/?api$/i, '/');
+            // Case 1: Handle patterns like "/api/api/something" -> remove duplicate
+            if (cleanEndpoint.match(/^\/?api\/api\//i)) {
+                cleanEndpoint = cleanEndpoint.replace(/^\/?api\/api\//i, '/');
+            }
+            
+            // Case 2: Handle patterns like "api/api/something" -> remove duplicate
+            if (cleanEndpoint.match(/^api\/api\//i)) {
+                cleanEndpoint = cleanEndpoint.replace(/^api\/api\//i, '');
+            }
+            
+            // Case 3: Handle patterns like "/api/something" -> remove leading /api for clean rebuild
+            if (cleanEndpoint.match(/^\/?api\//i)) {
+                cleanEndpoint = cleanEndpoint.replace(/^\/?api\//i, '');
+            }
+            
+            // Case 4: Handle patterns like "api/something" -> remove leading api/
+            if (cleanEndpoint.match(/^api\//i)) {
+                cleanEndpoint = cleanEndpoint.replace(/^api\//i, '');
+            }
+            
+            // Case 5: Handle patterns like "/api" (exact) -> remove
+            if (cleanEndpoint.match(/^\/?api$/i)) {
+                cleanEndpoint = '';
+            }
             
             // Ensure the clean endpoint starts with a slash
-            if (!cleanEndpoint.startsWith('/')) {
+            if (cleanEndpoint && !cleanEndpoint.startsWith('/')) {
                 cleanEndpoint = '/' + cleanEndpoint;
             }
             
             // Now add exactly one /api prefix
+            // Special case: if after cleaning we have empty string, just return '/api'
+            if (!cleanEndpoint || cleanEndpoint === '/') {
+                return '/api';
+            }
+            
+            // Special case for auth endpoints that should remain as /api/auth/...
             const normalized = '/api' + cleanEndpoint;
             
-            console.log(`🔧 [NORMALIZE] "${endpoint}" → "${normalized}"`);
             return normalized;
             
         } catch (error) {
-            console.error('❌ [SAFETY] normalizeEndpoint failed:', error);
+            console.error("[API] ❌ normalizeEndpoint failed:", error);
             return '/api/';
         }
     }
@@ -489,26 +1605,22 @@
             if (normalized.username && !normalized.email) {
                 if (normalized.username.includes('@') && normalized.username.includes('.')) {
                     normalized.email = normalized.username;
-                    console.log('🔧 [AUTH] Copied username to email field (username appears to be email)');
                 }
             }
             
             // Case 2: If email provided but no username, use email as username
             if (normalized.email && !normalized.username) {
                 normalized.username = normalized.email;
-                console.log('🔧 [AUTH] Using email as username');
             }
             
             // Case 3: For registration, ensure confirmPassword matches password
             if (normalized.password && !normalized.confirmPassword) {
                 normalized.confirmPassword = normalized.password;
-                console.log('🔧 [AUTH] Copied password to confirmPassword field');
             }
             
             // Case 4: Ensure name field is present for registration if not provided
             if (!normalized.name && normalized.username) {
                 normalized.name = normalized.username.split('@')[0]; // Use part before @ for email
-                console.log('🔧 [AUTH] Generated name from username');
             }
             
             // 🔧 FIX: Remove any null/undefined/empty string values
@@ -518,7 +1630,6 @@
                     normalized[key] === undefined || 
                     normalized[key] === '') {
                     delete normalized[key];
-                    console.log(`🔧 [AUTH] Removed empty field: ${key}`);
                 }
             });
             
@@ -526,12 +1637,11 @@
             const safeLogPayload = { ...normalized };
             if (safeLogPayload.password) safeLogPayload.password = '[REDACTED]';
             if (safeLogPayload.confirmPassword) safeLogPayload.confirmPassword = '[REDACTED]';
-            console.log('🔧 [AUTH] Normalized payload:', safeLogPayload);
             
             return normalized;
             
         } catch (error) {
-            console.error('❌ [SAFETY] normalizeAuthPayload failed:', error);
+            console.error("[API] ❌ normalizeAuthPayload failed:", error);
             return payload || {};
         }
     }
@@ -573,7 +1683,7 @@
             return JSON.stringify(payload);
             
         } catch (error) {
-            console.error('❌ [SAFETY] Failed to serialize payload:', error, payload);
+            console.error("[API] ❌ Failed to serialize payload:", error, payload);
             throw new Error(`Failed to serialize payload to JSON: ${error.message}`);
         }
     }
@@ -596,6 +1706,16 @@
             // 🔧 FIX: Normalize endpoint with /api prefix
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, options.method || 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -606,7 +1726,14 @@
             // Generate request ID for tracking
             const requestId = `${options.method || 'GET'}_${normalizedEndpoint}_${Date.now()}`;
             
-            console.log(`🔧 [ENHANCED] Request ${requestId}: ${endpoint} → ${normalizedEndpoint}`);
+            // 🔥 CHECK GATEWAY GATES
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => enhancedSecureFetch(endpoint, options),
+                    `${options.method || 'GET'} ${endpoint}`,
+                    endpoint
+                );
+            }
             
             // Check if we should retry on failure
             const shouldRetry = options.retry !== false;
@@ -619,23 +1746,29 @@
                 try {
                     // Safety: Check retry limit
                     if (retryCount > _safetyState.maxRetriesPerRequest) {
-                        console.warn(`⚠️ [SAFETY] Max retries reached for ${normalizedEndpoint}`);
+                        console.warn("[API] ⏳ Max retries reached for ${normalizedEndpoint}");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return getSafeDefaultResponse(normalizedEndpoint, functionName, new Error('Max retries reached'));
                     }
                     
                     // Log attempt
                     if (attempt > 1) {
-                        console.log(`🔧 [ENHANCED] Retry attempt ${attempt}/${maxRetries} for ${normalizedEndpoint}`);
+                        console.log("[API] ⏳ Retry attempt ${attempt}/${maxRetries} for ${normalizedEndpoint}");
                     }
                     
-                    // Use the original secureApiFetch with normalized endpoint
-                    const result = await _secureApiFetch(normalizedEndpoint, options);
+                    // Use the original secureApiFetch with normalized endpoint and trusted marker
+                    const trustedOptions = {
+                        ...options,
+                        [TRUSTED_REQUEST_MARKER]: true,
+                        __trusted: true
+                    };
+                    
+                    const result = await _secureApiFetch(normalizedEndpoint, trustedOptions);
                     
                     // If successful, return result
                     if (result.success) {
                         if (attempt > 1) {
-                            console.log(`✅ [ENHANCED] Request succeeded on attempt ${attempt}: ${normalizedEndpoint}`);
+                            console.log("[API] ✅ Request succeeded on attempt ${attempt}: ${normalizedEndpoint}");
                         }
                         trackRequestEnd(normalizedEndpoint, functionName, true);
                         return result;
@@ -644,7 +1777,7 @@
                     // Handle specific error cases
                     if (result.status === 401) {
                         // Auth error - don't retry
-                        console.warn(`🔐 [ENHANCED] Auth error (401) for ${normalizedEndpoint}, not retrying`);
+                        console.warn("[API] ⏳ Auth error (401) for ${normalizedEndpoint}, not retrying");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         trackError(normalizedEndpoint, functionName, 'auth_error');
                         return result;
@@ -655,7 +1788,7 @@
                         const retryAfter = result.headers?.['retry-after'] || result.headers?.['Retry-After'];
                         if (retryAfter && attempt < maxRetries) {
                             const delay = parseInt(retryAfter) * 1000 || retryDelay;
-                            console.log(`⏳ [ENHANCED] Rate limited, waiting ${delay}ms before retry`);
+                            console.log("[API] ⏳ Rate limited, waiting ${delay}ms before retry");
                             await new Promise(resolve => setTimeout(resolve, delay));
                             continue;
                         }
@@ -664,7 +1797,7 @@
                     // For server errors, retry with exponential backoff
                     if (result.status >= 500 && shouldRetry && attempt < maxRetries) {
                         const delay = retryDelay * Math.pow(2, attempt - 1);
-                        console.log(`⏳ [ENHANCED] Server error ${result.status}, retrying in ${delay}ms`);
+                        console.log("[API] ⏳ Server error ${result.status}, retrying in ${delay}ms");
                         await new Promise(resolve => setTimeout(resolve, delay));
                         lastError = result;
                         continue;
@@ -677,14 +1810,14 @@
                     
                 } catch (error) {
                     if (shouldLogError(normalizedEndpoint, 'attempt_failed')) {
-                        console.error(`❌ [ENHANCED] Attempt ${attempt} failed for ${normalizedEndpoint}:`, error.message);
+                        console.error("[API] ❌ Attempt ${attempt} failed for ${normalizedEndpoint}:", error.message);
                     }
                     lastError = error;
                     
                     // Network errors - retry with exponential backoff
                     if (shouldRetry && attempt < maxRetries) {
                         const delay = retryDelay * Math.pow(2, attempt - 1);
-                        console.log(`⏳ [ENHANCED] Network error, retrying in ${delay}ms`);
+                        console.log("[API] ⏳ Network error, retrying in ${delay}ms");
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
@@ -699,7 +1832,7 @@
             const errorCount = trackError(normalizedEndpoint, functionName, 'all_retries_failed');
             
             if (shouldLogError(normalizedEndpoint, 'all_retries_failed')) {
-                console.error(`❌ [ENHANCED] All ${maxRetries} attempts failed for ${normalizedEndpoint} (total errors: ${errorCount})`);
+                console.error("[API] ❌ All ${maxRetries} attempts failed for ${normalizedEndpoint} (total errors: ${errorCount})");
             }
             
             // Return a consistent error object
@@ -720,7 +1853,7 @@
             };
             
         } catch (error) {
-            console.error('❌ [SAFETY] enhancedSecureFetch critical error:', error);
+            console.error("[API] ❌ enhancedSecureFetch critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -743,28 +1876,40 @@
         try {
             // Safety: Validate URL
             if (!url || typeof url !== 'string') {
-                console.error('❌ [SAFETY] api.get() called with invalid URL:', url);
+                console.error("[API] ❌ api.get() called with invalid URL:", url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
-            console.log(`🔧 [API] api.get() called for: ${url}`);
-            
             // 🔧 FIX: Normalize URL with /api prefix
             const normalizedUrl = normalizeEndpoint(url);
-            console.log(`🔧 [API] Normalized to: ${normalizedUrl}`);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedUrl);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(url, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(url, 'GET');
+            if (!checkDependencyGates(requestId, normalizedUrl)) {
+                return queueRequest(
+                    () => apiGet(url, options),
+                    `GET ${url}`,
+                    url
+                );
+            }
             
             // Check if this is a public endpoint (using normalized URL)
-            const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
+            const isPublicEndpointFlag = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
             const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedUrl) : false;
             const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedUrl) : false;
             
             // Use centralized token system
             const token = _getUserToken ? _getUserToken() : null;
-            
-            console.log(`🔧 [API] Token from centralized system: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-            console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
-            console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
-            console.log(`🔧 [API] Is auth endpoint: ${isAuth}`);
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedUrl, functionName)) {
@@ -779,7 +1924,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached data for: ${normalizedUrl}`);
+                    console.log("[API] ✅ Returning cached data for: ${normalizedUrl}");
                     trackRequestEnd(normalizedUrl, functionName, true);
                     return {
                         ok: true,
@@ -802,7 +1947,7 @@
                 // 🔧 FIX: Safe error handling - only throw when appropriate
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'get_failed')) {
-                        console.error(`❌ [API] GET request failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ GET request failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -812,7 +1957,7 @@
                     
                     // Return cached data if available and request failed
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] Request failed, returning cached data for: ${normalizedUrl}`);
+                        console.log("[API] ✅ Request failed, returning cached data for: ${normalizedUrl}");
                         trackRequestEnd(normalizedUrl, functionName, false);
                         return {
                             ok: true,
@@ -827,7 +1972,7 @@
                     }
                     
                     // Only throw for auth errors without token
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -856,7 +2001,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'get_error');
                 
                 if (shouldLogError(normalizedUrl, 'get_error')) {
-                    console.error(`❌ [SAFETY] api.get() error for ${normalizedUrl}:`, error.message);
+                    console.error("[API] ❌ api.get() error for ${normalizedUrl}:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -864,7 +2009,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] Error occurred, returning cached data for: ${normalizeEndpoint(url)}`);
+                    console.log("[API] ✅ Error occurred, returning cached data for: ${normalizeEndpoint(url)}");
                     return {
                         ok: true,
                         success: true,
@@ -895,7 +2040,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] api.get() critical error:', error);
+            console.error("[API] ❌ api.get() critical error:", error);
             return getSafeDefaultResponse(url || 'unknown', functionName, error);
         }
     }
@@ -915,15 +2060,32 @@
         try {
             // Safety: Validate URL
             if (!url || typeof url !== 'string') {
-                console.error('❌ [SAFETY] api.post() called with invalid URL:', url);
+                console.error("[API] ❌ api.post() called with invalid URL:", url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
-            console.log(`🔧 [API] api.post() called for: ${url}`);
-            
             // 🔧 FIX: Normalize URL with /api prefix
             const normalizedUrl = normalizeEndpoint(url);
-            console.log(`🔧 [API] Normalized to: ${normalizedUrl}`);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedUrl);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(url, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(url, 'POST');
+            if (!checkDependencyGates(requestId, normalizedUrl)) {
+                return queueRequest(
+                    () => apiPost(url, data, options),
+                    `POST ${url}`,
+                    url
+                );
+            }
             
             // Check if this is an auth endpoint for special payload handling
             const isAuthEndpoint = normalizedUrl.includes('/auth/');
@@ -931,14 +2093,12 @@
             // 🔧 FIX: Normalize auth payloads for backward compatibility
             let payload = data;
             if (isAuthEndpoint && payload && typeof payload === 'object') {
-                console.log('🔧 [API] Normalizing auth payload for login/register');
                 payload = normalizeAuthPayload(payload);
                 
                 // 🔒 SECURITY: Never log passwords
                 const safeLogPayload = { ...payload };
                 if (safeLogPayload.password) safeLogPayload.password = '[REDACTED]';
                 if (safeLogPayload.confirmPassword) safeLogPayload.confirmPassword = '[REDACTED]';
-                console.log('🔧 [API] Normalized payload:', safeLogPayload);
             }
             
             // 🔧 CRITICAL FIX: Ensure Content-Type is set for JSON payloads
@@ -954,17 +2114,12 @@
             }
             
             // Check if this is a public endpoint (using normalized URL)
-            const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
+            const isPublicEndpointFlag = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
             const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedUrl) : false;
             const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedUrl) : false;
             
             // Use centralized token system
             const token = _getUserToken ? _getUserToken() : null;
-            
-            console.log(`🔧 [API] Token from centralized system: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-            console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
-            console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
-            console.log(`🔧 [API] Is auth endpoint: ${isAuth}`);
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedUrl, functionName)) {
@@ -992,7 +2147,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'post_failed')) {
-                        console.error(`❌ [API] POST request failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ POST request failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1001,7 +2156,7 @@
                     }
                     
                     // Only throw for auth errors without token
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -1025,7 +2180,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'post_error');
                 
                 if (shouldLogError(normalizedUrl, 'post_error')) {
-                    console.error(`❌ [SAFETY] api.post() error for ${normalizedUrl}:`, error.message);
+                    console.error("[API] ❌ api.post() error for ${normalizedUrl}:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -1045,7 +2200,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] api.post() critical error:', error);
+            console.error("[API] ❌ api.post() critical error:", error);
             return getSafeDefaultResponse(url || 'unknown', functionName, error);
         }
     }
@@ -1065,15 +2220,32 @@
         try {
             // Safety: Validate URL
             if (!url || typeof url !== 'string') {
-                console.error('❌ [SAFETY] api.put() called with invalid URL:', url);
+                console.error("[API] ❌ api.put() called with invalid URL:", url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
-            console.log(`🔧 [API] api.put() called for: ${url}`);
-            
             // 🔧 FIX: Normalize URL with /api prefix
             const normalizedUrl = normalizeEndpoint(url);
-            console.log(`🔧 [API] Normalized to: ${normalizedUrl}`);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedUrl);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(url, 'PUT');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(url, 'PUT');
+            if (!checkDependencyGates(requestId, normalizedUrl)) {
+                return queueRequest(
+                    () => apiPut(url, data, options),
+                    `PUT ${url}`,
+                    url
+                );
+            }
             
             // 🔧 CRITICAL FIX: Ensure Content-Type is set for JSON payloads
             // Merge headers, ensuring Content-Type is always application/json for non-FormData
@@ -1088,17 +2260,12 @@
             }
             
             // Check if this is a public endpoint (using normalized URL)
-            const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
+            const isPublicEndpointFlag = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
             const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedUrl) : false;
             const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedUrl) : false;
             
             // Use centralized token system
             const token = _getUserToken ? _getUserToken() : null;
-            
-            console.log(`🔧 [API] Token from centralized system: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-            console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
-            console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
-            console.log(`🔧 [API] Is auth endpoint: ${isAuth}`);
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedUrl, functionName)) {
@@ -1126,7 +2293,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'put_failed')) {
-                        console.error(`❌ [API] PUT request failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ PUT request failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1135,7 +2302,7 @@
                     }
                     
                     // Only throw for auth errors without token
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -1159,7 +2326,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'put_error');
                 
                 if (shouldLogError(normalizedUrl, 'put_error')) {
-                    console.error(`❌ [SAFETY] api.put() error for ${normalizedUrl}:`, error.message);
+                    console.error("[API] ❌ api.put() error for ${normalizedUrl}:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -1179,7 +2346,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] api.put() critical error:', error);
+            console.error("[API] ❌ api.put() critical error:", error);
             return getSafeDefaultResponse(url || 'unknown', functionName, error);
         }
     }
@@ -1198,28 +2365,40 @@
         try {
             // Safety: Validate URL
             if (!url || typeof url !== 'string') {
-                console.error('❌ [SAFETY] api.delete() called with invalid URL:', url);
+                console.error("[API] ❌ api.delete() called with invalid URL:", url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
-            console.log(`🔧 [API] api.delete() called for: ${url}`);
-            
             // 🔧 FIX: Normalize URL with /api prefix
             const normalizedUrl = normalizeEndpoint(url);
-            console.log(`🔧 [API] Normalized to: ${normalizedUrl}`);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedUrl);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(url, 'DELETE');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(url, 'DELETE');
+            if (!checkDependencyGates(requestId, normalizedUrl)) {
+                return queueRequest(
+                    () => apiDelete(url, options),
+                    `DELETE ${url}`,
+                    url
+                );
+            }
             
             // Check if this is a public endpoint (using normalized URL)
-            const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
+            const isPublicEndpointFlag = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
             const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedUrl) : false;
             const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedUrl) : false;
             
             // Use centralized token system
             const token = _getUserToken ? _getUserToken() : null;
-            
-            console.log(`🔧 [API] Token from centralized system: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-            console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
-            console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
-            console.log(`🔧 [API] Is auth endpoint: ${isAuth}`);
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedUrl, functionName)) {
@@ -1238,7 +2417,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'delete_failed')) {
-                        console.error(`❌ [API] DELETE request failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ DELETE request failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1247,7 +2426,7 @@
                     }
                     
                     // Only throw for auth errors without token
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -1271,7 +2450,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'delete_error');
                 
                 if (shouldLogError(normalizedUrl, 'delete_error')) {
-                    console.error(`❌ [SAFETY] api.delete() error for ${normalizedUrl}:`, error.message);
+                    console.error("[API] ❌ api.delete() error for ${normalizedUrl}:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -1291,7 +2470,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] api.delete() critical error:', error);
+            console.error("[API] ❌ api.delete() critical error:", error);
             return getSafeDefaultResponse(url || 'unknown', functionName, error);
         }
     }
@@ -1311,28 +2490,40 @@
         try {
             // Safety: Validate URL
             if (!url || typeof url !== 'string') {
-                console.error('❌ [SAFETY] api.upload() called with invalid URL:', url);
+                console.error("[API] ❌ api.upload() called with invalid URL:", url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
-            console.log(`🔧 [API] api.upload() called for: ${url}`);
-            
             // 🔧 FIX: Normalize URL with /api prefix
             const normalizedUrl = normalizeEndpoint(url);
-            console.log(`🔧 [API] Normalized to: ${normalizedUrl}`);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedUrl);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(url, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(url, 'POST');
+            if (!checkDependencyGates(requestId, normalizedUrl)) {
+                return queueRequest(
+                    () => apiUpload(url, data, options),
+                    `UPLOAD ${url}`,
+                    url
+                );
+            }
             
             // Check if this is a public endpoint (using normalized URL)
-            const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
+            const isPublicEndpointFlag = _isPublicEndpoint ? _isPublicEndpoint(normalizedUrl) : false;
             const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedUrl) : false;
             const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedUrl) : false;
             
             // Use centralized token system
             const token = _getUserToken ? _getUserToken() : null;
-            
-            console.log(`🔧 [API] Token from centralized system: ${token ? `Present (${token.substring(0, 20)}...)` : 'Not found'}`);
-            console.log(`🔧 [API] Is public endpoint: ${isPublic}`);
-            console.log(`🔧 [API] Is status endpoint: ${isStatus}`);
-            console.log(`🔧 [API] Is auth endpoint: ${isAuth}`);
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedUrl, functionName)) {
@@ -1392,7 +2583,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'upload_failed')) {
-                        console.error(`❌ [API] Upload request failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ Upload request failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1401,7 +2592,7 @@
                     }
                     
                     // Only throw for auth errors without token
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -1425,7 +2616,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'upload_error');
                 
                 if (shouldLogError(normalizedUrl, 'upload_error')) {
-                    console.error(`❌ [SAFETY] api.upload() error for ${normalizedUrl}:`, error.message);
+                    console.error("[API] ❌ api.upload() error for ${normalizedUrl}:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -1445,7 +2636,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] api.upload() critical error:', error);
+            console.error("[API] ❌ api.upload() critical error:", error);
             return getSafeDefaultResponse(url || 'unknown', functionName, error);
         }
     }
@@ -1485,8 +2676,9 @@
                 
                 xhr.open('POST', fullUrl, true);
                 
-                // Add authorization header if token exists
-                if (token) {
+                // Add authorization header if token exists AND endpoint is not public
+                const isPublic = isPublicEndpoint(normalizedUrl);
+                if (token && !isPublic) {
                     xhr.setRequestHeader('Authorization', `Bearer ${token}`);
                 }
                 
@@ -1549,7 +2741,7 @@
                 xhr.send(formData);
                 
             } catch (error) {
-                console.error('❌ [SAFETY] xhrUpload error:', error);
+                console.error("[API] ❌ xhrUpload error:", error);
                 resolve(getSafeDefaultResponse(url || 'unknown', 'xhrUpload', error));
             }
         });
@@ -1564,7 +2756,19 @@
         const functionName = 'apiHealthCheck';
         
         try {
-            console.log(`🔧 [API] api.healthCheck() called`);
+            // Health check is public - bypass session gates
+            const endpoint = '/health';
+            const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId('/health', 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => apiHealthCheck(),
+                    `HEALTHCHECK`,
+                    '/health'
+                );
+            }
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest('/health', functionName)) {
@@ -1582,10 +2786,10 @@
                     '/api/status'
                 ];
                 
-                for (const endpoint of endpoints) {
+                for (const ep of endpoints) {
                     try {
                         // 🔧 UPDATED: Use enhanced secure fetch
-                        const result = await enhancedSecureFetch(endpoint, { 
+                        const result = await enhancedSecureFetch(ep, { 
                             method: 'GET',
                             auth: false 
                         });
@@ -1598,7 +2802,7 @@
                                 status: 200,
                                 statusText: 'Healthy',
                                 data: result.data,
-                                endpoint: endpoint,
+                                endpoint: ep,
                                 healthy: true,
                                 timestamp: new Date().toISOString()
                             };
@@ -1627,7 +2831,7 @@
                 const errorCount = trackError('/health', functionName, 'health_check_error');
                 
                 if (shouldLogError('/health', 'health_check_error')) {
-                    console.error(`❌ [SAFETY] api.healthCheck() error:`, error.message);
+                    console.error("[API] ❌ api.healthCheck() error:", error.message);
                 }
                 
                 return {
@@ -1643,7 +2847,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] api.healthCheck() critical error:', error);
+            console.error("[API] ❌ api.healthCheck() critical error:", error);
             return getSafeDefaultResponse('/health', functionName, error);
         }
     }
@@ -1666,6 +2870,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getMessages(),
+                    `GET messages`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -1679,7 +2903,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached messages`);
+                    console.log("[API] ✅ Returning cached messages");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -1699,7 +2923,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_messages_failed')) {
-                        console.error(`❌ [API] getMessages failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getMessages failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1709,7 +2933,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getMessages failed, returning cached data`);
+                        console.log("[API] ✅ getMessages failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -1725,7 +2949,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -1754,7 +2978,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_messages_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_messages_error')) {
-                    console.error(`❌ [SAFETY] getMessages error:`, error.message);
+                    console.error("[API] ❌ getMessages error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -1762,7 +2986,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getMessages error, returning cached data`);
+                    console.log("[API] ✅ getMessages error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -1790,7 +3014,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getMessages critical error:', error);
+            console.error("[API] ❌ getMessages critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -1808,7 +3032,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!messageId) {
-                console.error('❌ [SAFETY] getMessageById called without messageId');
+                console.error("[API] ❌ getMessageById called without messageId");
                 return {
                     ok: false,
                     success: false,
@@ -1824,6 +3048,26 @@
             const endpoint = `/messages/${encodeURIComponent(messageId)}`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getMessageById(messageId),
+                    `GET message ${messageId}`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -1837,7 +3081,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached message ${messageId}`);
+                    console.log("[API] ✅ Returning cached message ${messageId}");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -1857,7 +3101,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_message_by_id_failed')) {
-                        console.error(`❌ [API] getMessageById failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getMessageById failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1867,7 +3111,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -1896,7 +3140,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_message_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_message_by_id_error')) {
-                    console.error(`❌ [SAFETY] getMessageById error:`, error.message);
+                    console.error("[API] ❌ getMessageById error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -1904,7 +3148,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getMessageById error, returning cached data`);
+                    console.log("[API] ✅ getMessageById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -1935,7 +3179,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getMessageById critical error:', error);
+            console.error("[API] ❌ getMessageById critical error:", error);
             return getSafeDefaultResponse('/messages/:id', functionName, error);
         }
     }
@@ -1954,7 +3198,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!messageData) {
-                console.error('❌ [SAFETY] sendMessage called without messageData');
+                console.error("[API] ❌ sendMessage called without messageData");
                 return {
                     ok: false,
                     success: false,
@@ -1968,6 +3212,26 @@
             
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => sendMessage(messageData),
+                    `POST message`,
+                    endpoint
+                );
+            }
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
@@ -1986,7 +3250,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'send_message_failed')) {
-                        console.error(`❌ [API] sendMessage failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ sendMessage failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -1996,7 +3260,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2025,7 +3289,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'send_message_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'send_message_error')) {
-                    console.error(`❌ [SAFETY] sendMessage error:`, error.message);
+                    console.error("[API] ❌ sendMessage error:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -2045,7 +3309,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] sendMessage critical error:', error);
+            console.error("[API] ❌ sendMessage critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2064,6 +3328,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getFriends(),
+                    `GET friends`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -2076,7 +3360,7 @@
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log(`🔧 [CACHE] Returning cached friends`);
+                console.log("[API] ✅ Returning cached friends");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -2097,7 +3381,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_friends_failed')) {
-                        console.error(`❌ [API] getFriends failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getFriends failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2107,7 +3391,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getFriends failed, returning cached data`);
+                        console.log("[API] ✅ getFriends failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -2123,7 +3407,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2152,12 +3436,12 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_friends_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_friends_error')) {
-                    console.error(`❌ [SAFETY] getFriends error:`, error.message);
+                    console.error("[API] ❌ getFriends error:", error.message);
                 }
                 
                 // Return cached data if available
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getFriends error, returning cached data`);
+                    console.log("[API] ✅ getFriends error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2185,7 +3469,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getFriends critical error:', error);
+            console.error("[API] ❌ getFriends critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2204,7 +3488,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!userId) {
-                console.error('❌ [SAFETY] addFriend called without userId');
+                console.error("[API] ❌ addFriend called without userId");
                 return {
                     ok: false,
                     success: false,
@@ -2218,6 +3502,27 @@
             
             // Safety: Check if request should proceed
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => addFriend(userId),
+                    `POST add friend ${userId}`,
+                    endpoint
+                );
+            }
+            
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
             }
@@ -2234,7 +3539,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'add_friend_failed')) {
-                        console.error(`❌ [API] addFriend failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ addFriend failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2244,7 +3549,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2273,7 +3578,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'add_friend_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'add_friend_error')) {
-                    console.error(`❌ [SAFETY] addFriend error:`, error.message);
+                    console.error("[API] ❌ addFriend error:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -2293,7 +3598,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] addFriend critical error:', error);
+            console.error("[API] ❌ addFriend critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2312,6 +3617,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getGroups(),
+                    `GET groups`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -2325,7 +3650,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached groups`);
+                    console.log("[API] ✅ Returning cached groups");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -2345,7 +3670,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_groups_failed')) {
-                        console.error(`❌ [API] getGroups failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getGroups failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2355,7 +3680,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getGroups failed, returning cached data`);
+                        console.log("[API] ✅ getGroups failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -2371,7 +3696,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2400,7 +3725,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_groups_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_groups_error')) {
-                    console.error(`❌ [SAFETY] getGroups error:`, error.message);
+                    console.error("[API] ❌ getGroups error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -2408,7 +3733,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getGroups error, returning cached data`);
+                    console.log("[API] ✅ getGroups error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2439,7 +3764,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getGroups critical error:', error);
+            console.error("[API] ❌ getGroups critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2457,7 +3782,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!groupId) {
-                console.error('❌ [SAFETY] getGroupById called without groupId');
+                console.error("[API] ❌ getGroupById called without groupId");
                 return {
                     ok: false,
                     success: false,
@@ -2473,6 +3798,26 @@
             const endpoint = `/groups/${encodeURIComponent(groupId)}`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getGroupById(groupId),
+                    `GET group ${groupId}`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -2486,7 +3831,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached group ${groupId}`);
+                    console.log("[API] ✅ Returning cached group ${groupId}");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -2506,7 +3851,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_group_by_id_failed')) {
-                        console.error(`❌ [API] getGroupById failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getGroupById failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2516,7 +3861,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2545,7 +3890,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_group_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_group_by_id_error')) {
-                    console.error(`❌ [SAFETY] getGroupById error:`, error.message);
+                    console.error("[API] ❌ getGroupById error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -2553,7 +3898,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getGroupById error, returning cached data`);
+                    console.log("[API] ✅ getGroupById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2584,7 +3929,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getGroupById critical error:', error);
+            console.error("[API] ❌ getGroupById critical error:", error);
             return getSafeDefaultResponse('/groups/:id', functionName, error);
         }
     }
@@ -2603,7 +3948,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!groupData) {
-                console.error('❌ [SAFETY] createGroup called without groupData');
+                console.error("[API] ❌ createGroup called without groupData");
                 return {
                     ok: false,
                     success: false,
@@ -2617,6 +3962,27 @@
             
             // Safety: Check if request should proceed
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => createGroup(groupData),
+                    `POST create group`,
+                    endpoint
+                );
+            }
+            
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
             }
@@ -2633,7 +3999,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'create_group_failed')) {
-                        console.error(`❌ [API] createGroup failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ createGroup failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2643,7 +4009,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2672,7 +4038,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'create_group_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'create_group_error')) {
-                    console.error(`❌ [SAFETY] createGroup error:`, error.message);
+                    console.error("[API] ❌ createGroup error:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -2692,7 +4058,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] createGroup critical error:', error);
+            console.error("[API] ❌ createGroup critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2711,6 +4077,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getStatuses(),
+                    `GET statuses`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -2723,7 +4109,7 @@
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log(`🔧 [CACHE] Returning cached statuses`);
+                console.log("[API] ✅ Returning cached statuses");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -2745,7 +4131,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_statuses_failed')) {
-                        console.error(`❌ [API] getStatuses failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getStatuses failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2755,7 +4141,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getStatuses failed, returning cached data`);
+                        console.log("[API] ✅ getStatuses failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -2771,7 +4157,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2800,12 +4186,12 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_statuses_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_statuses_error')) {
-                    console.error(`❌ [SAFETY] getStatuses error:`, error.message);
+                    console.error("[API] ❌ getStatuses error:", error.message);
                 }
                 
                 // Return cached data if available
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getStatuses error, returning cached data`);
+                    console.log("[API] ✅ getStatuses error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2833,7 +4219,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getStatuses critical error:', error);
+            console.error("[API] ❌ getStatuses critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2851,7 +4237,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!statusId) {
-                console.error('❌ [SAFETY] getStatus called without statusId');
+                console.error("[API] ❌ getStatus called without statusId");
                 return {
                     ok: false,
                     success: false,
@@ -2867,6 +4253,26 @@
             const endpoint = `/status/${encodeURIComponent(statusId)}`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getStatus(statusId),
+                    `GET status ${statusId}`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -2880,7 +4286,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached status ${statusId}`);
+                    console.log("[API] ✅ Returning cached status ${statusId}");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -2900,7 +4306,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_status_failed')) {
-                        console.error(`❌ [API] getStatus failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getStatus failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -2910,7 +4316,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -2939,7 +4345,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_status_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_status_error')) {
-                    console.error(`❌ [SAFETY] getStatus error:`, error.message);
+                    console.error("[API] ❌ getStatus error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -2947,7 +4353,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getStatus error, returning cached data`);
+                    console.log("[API] ✅ getStatus error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2978,7 +4384,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getStatus critical error:', error);
+            console.error("[API] ❌ getStatus critical error:", error);
             return getSafeDefaultResponse('/status/:id', functionName, error);
         }
     }
@@ -2997,7 +4403,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!statusData) {
-                console.error('❌ [SAFETY] createStatus called without statusData');
+                console.error("[API] ❌ createStatus called without statusData");
                 return {
                     ok: false,
                     success: false,
@@ -3011,6 +4417,27 @@
             
             // Safety: Check if request should proceed
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => createStatus(statusData),
+                    `POST create status`,
+                    endpoint
+                );
+            }
+            
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
             }
@@ -3027,7 +4454,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'create_status_failed')) {
-                        console.error(`❌ [API] createStatus failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ createStatus failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3037,7 +4464,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -3066,7 +4493,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'create_status_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'create_status_error')) {
-                    console.error(`❌ [SAFETY] createStatus error:`, error.message);
+                    console.error("[API] ❌ createStatus error:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -3086,7 +4513,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] createStatus critical error:', error);
+            console.error("[API] ❌ createStatus critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3105,6 +4532,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getCalls(),
+                    `GET calls`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -3118,7 +4565,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached calls`);
+                    console.log("[API] ✅ Returning cached calls");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -3138,7 +4585,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_calls_failed')) {
-                        console.error(`❌ [API] getCalls failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getCalls failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3148,7 +4595,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getCalls failed, returning cached data`);
+                        console.log("[API] ✅ getCalls failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3164,7 +4611,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -3193,7 +4640,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_calls_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_calls_error')) {
-                    console.error(`❌ [SAFETY] getCalls error:`, error.message);
+                    console.error("[API] ❌ getCalls error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -3201,7 +4648,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getCalls error, returning cached data`);
+                    console.log("[API] ✅ getCalls error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -3232,7 +4679,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getCalls critical error:', error);
+            console.error("[API] ❌ getCalls critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3251,7 +4698,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!callData) {
-                console.error('❌ [SAFETY] startCall called without callData');
+                console.error("[API] ❌ startCall called without callData");
                 return {
                     ok: false,
                     success: false,
@@ -3265,6 +4712,27 @@
             
             // Safety: Check if request should proceed
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'POST');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'POST');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => startCall(callData),
+                    `POST start call`,
+                    endpoint
+                );
+            }
+            
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
             }
@@ -3281,7 +4749,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'start_call_failed')) {
-                        console.error(`❌ [API] startCall failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ startCall failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3291,7 +4759,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -3320,7 +4788,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'start_call_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'start_call_error')) {
-                    console.error(`❌ [SAFETY] startCall error:`, error.message);
+                    console.error("[API] ❌ startCall error:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -3340,7 +4808,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] startCall critical error:', error);
+            console.error("[API] ❌ startCall critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3364,6 +4832,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getSettings(),
+                    `GET settings`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -3376,7 +4864,7 @@
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log(`🔧 [CACHE] Returning cached settings`);
+                console.log("[API] ✅ Returning cached settings");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -3397,7 +4885,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_settings_failed')) {
-                        console.error(`❌ [API] getSettings failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getSettings failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3407,7 +4895,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getSettings failed, returning cached data`);
+                        console.log("[API] ✅ getSettings failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3423,7 +4911,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -3455,9 +4943,9 @@
                             // Background update for user preferences
                             await getUserPreferences();
                             
-                            console.log('🔧 [API] Background settings update completed');
+                            console.log("[API] ✅ Background settings update completed");
                         } catch (bgError) {
-                            console.log('🔧 [API] Background settings update failed:', bgError.message);
+                            console.log("[API] ⏳ Background settings update failed:", bgError.message);
                         }
                     }, 2000); // Wait 2 seconds before background updates
                 }
@@ -3470,12 +4958,12 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_settings_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_settings_error')) {
-                    console.error(`❌ [SAFETY] getSettings error:`, error.message);
+                    console.error("[API] ❌ getSettings error:", error.message);
                 }
                 
                 // Return cached data as fallback
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getSettings error, returning cached data`);
+                    console.log("[API] ✅ getSettings error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -3503,7 +4991,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getSettings critical error:', error);
+            console.error("[API] ❌ getSettings critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3535,6 +5023,51 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getFeatures(),
+                    `GET features`,
+                    endpoint
+                ).then(result => {
+                    if (result && result.ok === false && result.safetyBlocked) {
+                        return {
+                            ok: true,
+                            success: true,
+                            status: 200,
+                            statusText: 'OK (safety blocked)',
+                            data: defaultFeatures,
+                            headers: {},
+                            default: true,
+                            message: 'Using default features (safety blocked)'
+                        };
+                    }
+                    return result;
+                }).catch(() => {
+                    return {
+                        ok: true,
+                        success: true,
+                        status: 200,
+                        statusText: 'OK (queue error)',
+                        data: defaultFeatures,
+                        headers: {},
+                        default: true,
+                        message: 'Using default features (queue error)'
+                    };
+                });
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return {
@@ -3556,7 +5089,7 @@
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log(`🔧 [CACHE] Returning cached features`);
+                console.log("[API] ✅ Returning cached features");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -3577,7 +5110,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_features_failed')) {
-                        console.warn(`⚠️ [API] getFeatures failed: ${result.status} - ${result.message}, using cached or default`);
+                        console.warn("[API] ⏳ getFeatures failed: ${result.status} - ${result.message}, using cached or default");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3587,7 +5120,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getFeatures failed, returning cached data`);
+                        console.log("[API] ✅ getFeatures failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3629,12 +5162,12 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_features_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_features_error')) {
-                    console.error(`❌ [SAFETY] getFeatures error:`, error.message);
+                    console.error("[API] ❌ getFeatures error:", error.message);
                 }
                 
                 // Return cached data if available
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getFeatures error, returning cached data`);
+                    console.log("[API] ✅ getFeatures error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -3663,7 +5196,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getFeatures critical error:', error);
+            console.error("[API] ❌ getFeatures critical error:", error);
             // Always return defaults for critical errors
             return {
                 ok: true,
@@ -3702,7 +5235,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!settingsData) {
-                console.error('❌ [SAFETY] updateSettings called without settingsData');
+                console.error("[API] ❌ updateSettings called without settingsData");
                 return {
                     ok: false,
                     success: false,
@@ -3716,6 +5249,27 @@
             
             // Safety: Check if request should proceed
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'PUT');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'PUT');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => updateSettings(settingsData),
+                    `PUT update settings`,
+                    endpoint
+                );
+            }
+            
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
             }
@@ -3732,7 +5286,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'update_settings_failed')) {
-                        console.error(`❌ [API] updateSettings failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ updateSettings failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3742,7 +5296,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -3771,7 +5325,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'update_settings_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'update_settings_error')) {
-                    console.error(`❌ [SAFETY] updateSettings error:`, error.message);
+                    console.error("[API] ❌ updateSettings error:", error.message);
                 }
                 
                 // 🔧 FIX: Safe error handling with defensive checks
@@ -3791,7 +5345,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] updateSettings critical error:', error);
+            console.error("[API] ❌ updateSettings critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3810,6 +5364,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getTools(),
+                    `GET tools`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -3823,7 +5397,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached tools`);
+                    console.log("[API] ✅ Returning cached tools");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -3843,7 +5417,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_tools_failed')) {
-                        console.error(`❌ [API] getTools failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getTools failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3853,7 +5427,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getTools failed, returning cached data`);
+                        console.log("[API] ✅ getTools failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3869,7 +5443,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -3898,7 +5472,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_tools_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_tools_error')) {
-                    console.error(`❌ [SAFETY] getTools error:`, error.message);
+                    console.error("[API] ❌ getTools error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -3906,7 +5480,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getTools error, returning cached data`);
+                    console.log("[API] ✅ getTools error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -3937,7 +5511,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getTools critical error:', error);
+            console.error("[API] ❌ getTools critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3954,6 +5528,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getUsers(),
+                    `GET users`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -3967,7 +5561,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached users`);
+                    console.log("[API] ✅ Returning cached users");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -3987,7 +5581,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_users_failed')) {
-                        console.error(`❌ [API] getUsers failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getUsers failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -3997,7 +5591,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getUsers failed, returning cached data`);
+                        console.log("[API] ✅ getUsers failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4013,7 +5607,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4042,7 +5636,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_users_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_users_error')) {
-                    console.error(`❌ [SAFETY] getUsers error:`, error.message);
+                    console.error("[API] ❌ getUsers error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4050,7 +5644,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getUsers error, returning cached data`);
+                    console.log("[API] ✅ getUsers error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4081,7 +5675,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getUsers critical error:', error);
+            console.error("[API] ❌ getUsers critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4092,7 +5686,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!userId) {
-                console.error('❌ [SAFETY] getUserById called without userId');
+                console.error("[API] ❌ getUserById called without userId");
                 return {
                     ok: false,
                     success: false,
@@ -4108,6 +5702,26 @@
             const endpoint = `/users/${encodeURIComponent(userId)}`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getUserById(userId),
+                    `GET user ${userId}`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -4121,7 +5735,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached user ${userId}`);
+                    console.log("[API] ✅ Returning cached user ${userId}");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -4141,7 +5755,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_user_by_id_failed')) {
-                        console.error(`❌ [API] getUserById failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getUserById failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -4151,7 +5765,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4180,7 +5794,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_user_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_user_by_id_error')) {
-                    console.error(`❌ [SAFETY] getUserById error:`, error.message);
+                    console.error("[API] ❌ getUserById error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4188,7 +5802,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getUserById error, returning cached data`);
+                    console.log("[API] ✅ getUserById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4219,7 +5833,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getUserById critical error:', error);
+            console.error("[API] ❌ getUserById critical error:", error);
             return getSafeDefaultResponse('/users/:id', functionName, error);
         }
     }
@@ -4231,6 +5845,26 @@
         try {
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getChats(),
+                    `GET chats`,
+                    endpoint
+                );
+            }
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
@@ -4245,7 +5879,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached chats`);
+                    console.log("[API] ✅ Returning cached chats");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -4265,7 +5899,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_chats_failed')) {
-                        console.error(`❌ [API] getChats failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getChats failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -4275,7 +5909,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getChats failed, returning cached data`);
+                        console.log("[API] ✅ getChats failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4291,7 +5925,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4320,7 +5954,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_chats_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_chats_error')) {
-                    console.error(`❌ [SAFETY] getChats error:`, error.message);
+                    console.error("[API] ❌ getChats error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4328,7 +5962,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getChats error, returning cached data`);
+                    console.log("[API] ✅ getChats error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4359,7 +5993,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getChats critical error:', error);
+            console.error("[API] ❌ getChats critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4370,7 +6004,7 @@
         try {
             // 🔧 FIX: Defensive null check
             if (!chatId) {
-                console.error('❌ [SAFETY] getChatById called without chatId');
+                console.error("[API] ❌ getChatById called without chatId");
                 return {
                     ok: false,
                     success: false,
@@ -4386,6 +6020,26 @@
             const endpoint = `/chats/${encodeURIComponent(chatId)}`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getChatById(chatId),
+                    `GET chat ${chatId}`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -4399,7 +6053,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached chat ${chatId}`);
+                    console.log("[API] ✅ Returning cached chat ${chatId}");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -4419,7 +6073,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_chat_by_id_failed')) {
-                        console.error(`❌ [API] getChatById failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getChatById failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -4429,7 +6083,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4458,7 +6112,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_chat_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_chat_by_id_error')) {
-                    console.error(`❌ [SAFETY] getChatById error:`, error.message);
+                    console.error("[API] ❌ getChatById error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4466,7 +6120,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getChatById error, returning cached data`);
+                    console.log("[API] ✅ getChatById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4497,7 +6151,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getChatById critical error:', error);
+            console.error("[API] ❌ getChatById critical error:", error);
             return getSafeDefaultResponse('/chats/:id', functionName, error);
         }
     }
@@ -4509,6 +6163,26 @@
         try {
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getContacts(),
+                    `GET contacts`,
+                    endpoint
+                );
+            }
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
@@ -4523,7 +6197,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached contacts`);
+                    console.log("[API] ✅ Returning cached contacts");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -4543,7 +6217,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_contacts_failed')) {
-                        console.error(`❌ [API] getContacts failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getContacts failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -4553,7 +6227,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getContacts failed, returning cached data`);
+                        console.log("[API] ✅ getContacts failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4569,7 +6243,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4598,7 +6272,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_contacts_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_contacts_error')) {
-                    console.error(`❌ [SAFETY] getContacts error:`, error.message);
+                    console.error("[API] ❌ getContacts error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4606,7 +6280,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getContacts error, returning cached data`);
+                    console.log("[API] ✅ getContacts error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4637,7 +6311,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getContacts critical error:', error);
+            console.error("[API] ❌ getContacts critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4654,6 +6328,26 @@
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getNotifications(),
+                    `GET notifications`,
+                    endpoint
+                );
+            }
+            
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
                 return getSafeDefaultResponse(normalizedEndpoint, functionName);
@@ -4667,7 +6361,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached notifications`);
+                    console.log("[API] ✅ Returning cached notifications");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -4687,7 +6381,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_notifications_failed')) {
-                        console.error(`❌ [API] getNotifications failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getNotifications failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -4697,7 +6391,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getNotifications failed, returning cached data`);
+                        console.log("[API] ✅ getNotifications failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4713,7 +6407,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4742,7 +6436,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_notifications_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_notifications_error')) {
-                    console.error(`❌ [SAFETY] getNotifications error:`, error.message);
+                    console.error("[API] ❌ getNotifications error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4750,7 +6444,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getNotifications error, returning cached data`);
+                    console.log("[API] ✅ getNotifications error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4781,7 +6475,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getNotifications critical error:', error);
+            console.error("[API] ❌ getNotifications critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4793,6 +6487,26 @@
         try {
             // 🔧 FIX: Normalize endpoint
             const normalizedEndpoint = normalizeEndpoint(endpoint);
+            
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                const requestId = generateRequestId(endpoint, 'GET');
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => getUserPreferences(),
+                    `GET user preferences`,
+                    endpoint
+                );
+            }
             
             // Safety: Check if request should proceed
             if (!shouldAllowRequest(normalizedEndpoint, functionName)) {
@@ -4807,7 +6521,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log(`🔧 [CACHE] Returning cached user preferences`);
+                    console.log("[API] ✅ Returning cached user preferences");
                     trackRequestEnd(normalizedEndpoint, functionName, true);
                     return {
                         ok: true,
@@ -4827,7 +6541,7 @@
                 // 🔧 FIX: Safe error handling
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_user_preferences_failed')) {
-                        console.error(`❌ [API] getUserPreferences failed: ${result.status} - ${result.message}`);
+                        console.error("[API] ❌ getUserPreferences failed: ${result.status} - ${result.message}");
                     }
                     
                     // 🔧 FIX: Defensive null checks
@@ -4837,7 +6551,7 @@
                     
                     // Return cached data if available
                     if (cachedData) {
-                        console.log(`🔧 [CACHE] getUserPreferences failed, returning cached data`);
+                        console.log("[API] ✅ getUserPreferences failed, returning cached data");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4853,7 +6567,7 @@
                     
                     // Only throw for auth errors without token
                     const token = _getUserToken ? _getUserToken() : null;
-                    if (result.status === 401 && !token) {
+                    if (result.status === 401 && !token && !isPublic) {
                         throw {
                             message: result.message,
                             status: result.status,
@@ -4882,7 +6596,7 @@
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_user_preferences_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_user_preferences_error')) {
-                    console.error(`❌ [SAFETY] getUserPreferences error:`, error.message);
+                    console.error("[API] ❌ getUserPreferences error:", error.message);
                 }
                 
                 // Check cache as fallback
@@ -4890,7 +6604,7 @@
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log(`🔧 [CACHE] getUserPreferences error, returning cached data`);
+                    console.log("[API] ✅ getUserPreferences error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4921,7 +6635,7 @@
             }
             
         } catch (error) {
-            console.error('❌ [SAFETY] getUserPreferences critical error:', error);
+            console.error("[API] ❌ getUserPreferences critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4937,8 +6651,27 @@
             // 🔧 FIX: Normalize endpoint with /api prefix
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             
+            // Check if this is a public endpoint
+            const isPublic = isPublicEndpoint(normalizedEndpoint);
+            
             if (shouldLogError(normalizedEndpoint, 'request_call')) {
-                console.log(`🔧 [REQUEST] Normalized: ${endpoint} → ${normalizedEndpoint}`);
+                console.log("[API] ⏳ Request normalized: ${endpoint} → ${normalizedEndpoint}");
+            }
+            
+            // 🔥 CHECK GATEWAY GATES
+            const requestId = generateRequestId(endpoint, options.method || 'GET');
+            if (!checkDependencyGates(requestId, normalizedEndpoint)) {
+                return queueRequest(
+                    () => request(endpoint, options),
+                    `${options.method || 'GET'} ${endpoint}`,
+                    endpoint
+                );
+            }
+            
+            // 🔧 Wait for session if this is a protected call
+            if (!isPublic && !isSessionReady()) {
+                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                await waitForSessionReady();
             }
             
             // Safety: Check if request should proceed
@@ -4952,14 +6685,14 @@
             // 🔧 CRITICAL: Public endpoints bypass all token checks
             
             // Check if this is a public endpoint (using normalized endpoint)
-            const isPublic = _isPublicEndpoint ? _isPublicEndpoint(normalizedEndpoint) : false;
+            const isPublicEndpointFlag = _isPublicEndpoint ? _isPublicEndpoint(normalizedEndpoint) : false;
             const isStatus = _isStatusEndpoint ? _isStatusEndpoint(normalizedEndpoint) : false;
             const isAuth = _isAuthEndpoint ? _isAuthEndpoint(normalizedEndpoint) : false;
             
             // If this is a public endpoint, execute immediately without queue
-            if (isPublic || isStatus || isAuth) {
+            if (isPublic || isPublicEndpointFlag || isStatus || isAuth) {
                 if (shouldLogError(normalizedEndpoint, 'public_endpoint')) {
-                    console.log(`🔧 [REQUEST] PUBLIC/AUTH/STATUS endpoint - executing immediately: ${normalizedEndpoint}`);
+                    console.log("[API] ⏳ PUBLIC/AUTH/STATUS endpoint - executing immediately: ${normalizedEndpoint}");
                 }
                 const result = await enhancedSecureFetch(endpoint, options);
                 trackRequestEnd(normalizedEndpoint, functionName, result.success);
@@ -4973,7 +6706,7 @@
             // If this is a protected endpoint and we don't have a token, 
             // and login is not complete, queue the request
             if (requiresAuth && !token && _apiRequestQueue && !_apiRequestQueue.isLoginComplete()) {
-                console.log(`🔐 [QUEUE] Delaying protected endpoint until login complete: ${normalizedEndpoint}`);
+                console.log("[API] ⏳ Delaying protected endpoint until login complete: ${normalizedEndpoint}");
                 
                 const result = await _apiRequestQueue.addRequest(
                     () => enhancedSecureFetch(endpoint, options),
@@ -4995,7 +6728,7 @@
             const errorCount = trackError(normalizeEndpoint(endpoint || 'unknown'), functionName, 'request_error');
             
             if (shouldLogError(normalizeEndpoint(endpoint || 'unknown'), 'request_error')) {
-                console.error(`❌ [SAFETY] request function error for ${endpoint}:`, error.message);
+                console.error("[API] ❌ request function error for ${endpoint}:", error.message);
             }
             
             return getSafeDefaultResponse(endpoint || 'unknown', functionName, error);
@@ -5039,14 +6772,14 @@
                 ['/api/auth/', '/api/auth/'],
             ];
             
-            console.log('🧪 Testing endpoint normalization:');
+            console.log('[API] 🧪 Testing endpoint normalization:');
             testCases.forEach(([input, expected]) => {
                 const result = normalizeEndpoint(input);
                 const pass = result === expected;
                 console.log(`  ${pass ? '✅' : '❌'} "${input}" → "${result}" ${pass ? '' : `(expected: "${expected}")`}`);
             });
         } catch (error) {
-            console.error('❌ [SAFETY] testNormalization failed:', error);
+            console.error("[API] ❌ testNormalization failed:", error);
         }
     }
     
@@ -5061,6 +6794,14 @@
         try {
             // Initialize dependencies first
             initDependencies();
+            
+            // 🔥 INITIALIZE GATEWAY
+            initializeGateway();
+            
+            // 🔥 SETUP ANTI-PATTERN PREVENTION
+            blockDirectFetchCalls();
+            monitorPolling();
+            setupFailureRecovery();
             
             // Create the public API object
             const publicApi = {
@@ -5079,10 +6820,15 @@
                 _normalizeAuthPayload: normalizeAuthPayload,
                 _testNormalization: testNormalization,
                 _safeJsonSerialize: safeJsonSerialize,
+                _safeParseResponse: safeParseResponse,
+                _createErrorResponse: createErrorResponse,
                 
                 // Safety methods (for debugging)
                 _safetyState: _safetyState,
                 _getSafeDefaultResponse: getSafeDefaultResponse,
+                
+                // Gateway state (for debugging)
+                _gatewayState: _gatewayState,
                 
                 // Iframe methods
                 getMessages,
@@ -5112,7 +6858,10 @@
                 getChatById,
                 getContacts,
                 getNotifications,
-                getUserPreferences
+                getUserPreferences,
+                
+                // Constants
+                TRUSTED_REQUEST_MARKER
             };
             
             // Expose to window.api.request without overriding existing window.api
@@ -5136,7 +6885,12 @@
             // Also expose to __API_REQUESTS for compatibility
             window.__API_REQUESTS = publicApi;
             
-            console.log("✅ api.request.js initialized with fixed /api prefix normalization and safety guards");
+            // Expose original fetch for internal use
+            if (!window.__originalFetch && window.fetch) {
+                window.__originalFetch = window.fetch;
+            }
+            
+            console.log("[API] ✅ api.request.js initialized with hardened centralized gateway (HEAD allowed, trusted modules allowed)");
             
             // Test normalization in development
             if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
@@ -5150,12 +6904,12 @@
                 try {
                     window.dispatchEvent(new Event("api-request-ready"));
                 } catch (e) {
-                    console.log('🔧 [API] api-request-ready event dispatched');
+                    console.log('[API] ⏳ api-request-ready event dispatched');
                 }
             }, 100);
             
         } catch (error) {
-            console.error('❌ [SAFETY] Failed to initialize public interface:', error);
+            console.error("[API] ❌ Failed to initialize public interface:", error);
             // Still try to expose minimal API
             if (!window.api) window.api = {};
             if (!window.api.request) window.api.request = {
@@ -5167,6 +6921,10 @@
     }
     
     // Initialize the module
-    initPublicInterface();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPublicInterface);
+    } else {
+        initPublicInterface();
+    }
     
 })();

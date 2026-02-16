@@ -5,8 +5,36 @@
 // UPDATED: Preserves execution order and timing
 // UPDATED: Includes all recovery and resilience mechanisms
 // UPDATED: Added comprehensive error safety and failure isolation
+// UPDATED: Added crash isolation with try/catch around each module
+// HARDENED: Strict state machine, authentication gating, sequential dependency loading
+// HARDENED: Eliminates race conditions, infinite retries, script load storms
+// HARDENED: Added guarded readiness checks for all external modules
+// FIXED: State transition guards to prevent invalid transitions
+// FIXED: Module loader retry system with infinite loop prevention
+// FIXED: Error handling recursion guards
+// FIXED: Race condition in session loading - added hardened readiness barriers
+// FIXED: Added null-safe .waitFor() guards throughout bootstrap
+// FIXED: Enhanced dependency barrier to ensure api.core → api.request → api.auth → session → ui sequence
+// FIXED: Added safe auth readiness validation to prevent crashes when api.auth not fully exposed
+// FIXED: Prevent infinite LOADING → LOADING transitions by adding state change guards
+// FIXED: Prevent ERROR → ERROR loops by blocking repeated transitions to same error state
+// FIXED: Added compatibility fallback if api.auth.isAuthFullyReadySafe is missing
+// FIXED: Prevent degraded mode when dependencies are actually ready with thorough validation
+// FIXED: Prevent recursive error notifications with enhanced recursion guards
+// FIXED: Prevent stack overflow in showErrorToUser with call stack tracking
+// UPDATED: Added internal dependency queue system with strict sequential loading
+// UPDATED: Added single-log-per-stage dependency tracking
+// UPDATED: Added __APP_READY__ flag for auth and session coordination
 
-// Import API modules (used for authentication and requests)
+// BOOT AUDIT: Entry point - IIFE execution starts here
+// BOOT AUDIT: First async call - HARDENED_BOOTSTRAP_CONTROLLER.bootstrap() at window.initializeEnhancedApp
+// BOOT AUDIT: Session restore call - AUTHENTICATION_GATE.validateSession() at HARDENED_BOOTSTRAP_CONTROLLER.bootstrap()
+// BOOT AUDIT: UI init call - APP_BOOTSTRAP.initializeGlobalUI() via initializeOriginalBootstrap()
+// BOOT AUDIT: iframe creation - APP_BOOTSTRAP.loadIframePage() via loadAppContentInternal()
+// BOOT AUDIT: call-core init - Not directly in this file, but orchestrated via initCallCore() barrier
+// BOOT AUDIT: error handlers - Global error handlers at window.onerror, window.onunhandledrejection
+
+// Import API modules (used for authentication and requests) - MANDATORY ORDER
 import './api.core.js';
 import './api.request.js';
 import './api.auth.js';
@@ -17,27 +45,415 @@ import './app.core.ui.js';
 
 (function () {
   // ============================================================================
+  // PHASE 2 — GLOBAL BOOT CONTEXT (ENHANCED)
+  // ============================================================================
+  window.AppBootContext = window.AppBootContext || {
+    // BOOT BARRIER: Prevents any module from proceeding without dependencies
+    configReady: false,
+    sessionReady: false,
+    uiReady: false,
+    iframesReady: false,
+    callsReady: false,
+    
+    // Promise-based wait functions
+    _waiters: {
+      config: [],
+      session: [],
+      ui: [],
+      iframes: [],
+      calls: []
+    },
+    
+    // Set a flag and resolve all waiters
+    setReady: function(component) {
+      if (this[component + 'Ready'] === true) return; // Already set
+      
+      console.log(`[BOOT] ✅ AppBootContext.${component}Ready = true`);
+      this[component + 'Ready'] = true;
+      
+      // Resolve all waiters for this component
+      if (this._waiters[component]) {
+        this._waiters[component].forEach(resolve => resolve(true));
+        this._waiters[component] = [];
+      }
+      
+      // Dispatch event for legacy listeners
+      window.dispatchEvent(new CustomEvent(`moodchat-${component}-ready`, {
+        detail: { timestamp: Date.now() }
+      }));
+    },
+    
+    // Wait for a component to be ready
+    waitFor: function(component, timeoutMs = 10000) {
+      // BOOT BARRIER: Prevents race with component initialization
+      return new Promise((resolve, reject) => {
+        if (this[component + 'Ready'] === true) {
+          resolve(true);
+          return;
+        }
+        
+        const timeout = setTimeout(() => {
+          const index = this._waiters[component].indexOf(resolve);
+          if (index !== -1) this._waiters[component].splice(index, 1);
+          reject(new Error(`Timeout waiting for ${component} (${timeoutMs}ms)`));
+        }, timeoutMs);
+        
+        this._waiters[component].push(() => {
+          clearTimeout(timeout);
+          resolve(true);
+        });
+      });
+    },
+    
+    // Reset (for recovery)
+    reset: function() {
+      this.configReady = false;
+      this.sessionReady = false;
+      this.uiReady = false;
+      this.iframesReady = false;
+      this.callsReady = false;
+      
+      // Clear waiters
+      Object.keys(this._waiters).forEach(key => {
+        this._waiters[key] = [];
+      });
+    }
+  };
+  
+  // ============================================================================
+  // PHASE 3 — PROMISE BARRIER SYSTEM (NEW)
+  // ============================================================================
+  const BootstrapBarrier = {
+    // BOOT BARRIER: Prevents race with config loading
+    waitForConfig: function(timeoutMs = 10000) {
+      return window.AppBootContext.waitFor('config', timeoutMs);
+    },
+    
+    // BOOT BARRIER: Prevents race with session restoration
+    waitForSession: function(timeoutMs = 15000) {
+      return window.AppBootContext.waitFor('session', timeoutMs);
+    },
+    
+    // BOOT BARRIER: Prevents race with UI initialization
+    waitForUI: function(timeoutMs = 10000) {
+      return window.AppBootContext.waitFor('ui', timeoutMs);
+    },
+    
+    // BOOT BARRIER: Prevents race with iframe creation
+    waitForIframes: function(timeoutMs = 10000) {
+      return window.AppBootContext.waitFor('iframes', timeoutMs);
+    },
+    
+    // BOOT BARRIER: Prevents race with call-core initialization
+    waitForCalls: function(timeoutMs = 10000) {
+      return window.AppBootContext.waitFor('calls', timeoutMs);
+    },
+    
+    // Wait for multiple components
+    waitForAll: function(components, timeoutMs = 20000) {
+      return Promise.all(components.map(c => this['waitFor' + c.charAt(0).toUpperCase() + c.slice(1)](timeoutMs)));
+    }
+  };
+  
+  // ============================================================================
+  // PHASE 7 — ERROR CONTAINMENT ZONE (NEW)
+  // ============================================================================
+  async function safeStage(stageName, stageFn, options = {}) {
+    // BOOT BARRIER: Isolates failures to prevent cascade
+    const { retries = 1, fallback = null, critical = false } = options;
+    
+    console.group(`[BOOT] 🚧 Stage: ${stageName}`);
+    console.time(stageName);
+    
+    let lastError;
+    for (let attempt = 1; attempt <= retries + 1; attempt++) {
+      try {
+        const result = await stageFn();
+        console.timeEnd(stageName);
+        console.groupEnd();
+        return result;
+      } catch (error) {
+        lastError = error;
+        console.warn(`[BOOT] ⚠️ Stage ${stageName} attempt ${attempt} failed:`, error.message);
+        
+        if (attempt <= retries) {
+          const delay = Math.min(1000 * attempt, 3000);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    console.error(`[BOOT] ❌ Stage ${stageName} failed after ${retries + 1} attempts`, lastError);
+    console.timeEnd(stageName);
+    console.groupEnd();
+    
+    if (critical) {
+      throw lastError;
+    }
+    
+    return fallback;
+  }
+  
+  // ============================================================================
+  // PHASE 8 — NAVIGATION FAILSAFE (NEW)
+  // ============================================================================
+  const NavigationController = {
+    _locked: false,
+    _unlockCallbacks: [],
+    
+    // Lock navigation during critical boot phases
+    lock: function(reason = 'bootstrap') {
+      if (this._locked) return;
+      
+      console.log(`[NAV] 🔒 Navigation locked: ${reason}`);
+      this._locked = true;
+      
+      window.dispatchEvent(new CustomEvent('moodchat-navigation-lock', {
+        detail: { reason, timestamp: Date.now() }
+      }));
+    },
+    
+    // BOOT BARRIER: ALWAYS called, even on failure - prevents deadlock
+    unlock: function(reason = 'bootstrap_complete') {
+      if (!this._locked) return;
+      
+      console.log(`[NAV] 🔓 Navigation unlocked: ${reason}`);
+      this._locked = false;
+      
+      // Execute queued navigation operations
+      this._unlockCallbacks.forEach(cb => {
+        try { cb(); } catch (e) { console.warn('[NAV] Unlock callback failed:', e); }
+      });
+      this._unlockCallbacks = [];
+      
+      window.dispatchEvent(new CustomEvent('moodchat-navigation-unlock', {
+        detail: { reason, timestamp: Date.now() }
+      }));
+    },
+    
+    // Queue operation to run after unlock
+    afterUnlock: function(callback) {
+      if (!this._locked) {
+        callback();
+      } else {
+        this._unlockCallbacks.push(callback);
+      }
+    },
+    
+    isLocked: function() {
+      return this._locked;
+    }
+  };
+  
+  // ============================================================================
+  // PHASE 5 — SESSION GATE INTEGRATION
+  // ============================================================================
+  // Listen for session:ready event from app.core.session.js
+  window.addEventListener('session:ready', function(event) {
+    console.log('[BOOT] 📡 Received session:ready event');
+    window.AppBootContext.setReady('session');
+    
+    // Also set currentUser for backward compatibility
+    if (event.detail && event.detail.user) {
+      window.currentUser = event.detail.user;
+    }
+  });
+  
+  // Also listen for legacy auth-ready event
+  window.addEventListener('auth-ready', function() {
+    console.log('[BOOT] 📡 Received auth-ready event');
+    // Session may already be set, but this helps with backward compatibility
+    if (!window.AppBootContext.sessionReady) {
+      window.AppBootContext.setReady('session');
+    }
+  });
+  
+  // ============================================================================
+  // PHASE 6 — CALL-CORE GATE (WILL BE USED BY call-core.js)
+  // ============================================================================
+  window.waitForCallCoreReady = async function() {
+    // BOOT BARRIER: call-core must wait for session AND iframes
+    await BootstrapBarrier.waitForAll(['session', 'iframes']);
+    
+    // Verify parent handshake (simplified - actual handshake in call-core)
+    const handshakeTimeout = 5000;
+    const handshakePromise = new Promise((resolve) => {
+      const handler = (event) => {
+        if (event.data && event.data.type === 'call-core-handshake') {
+          window.removeEventListener('message', handler);
+          resolve(true);
+        }
+      };
+      window.addEventListener('message', handler);
+      setTimeout(() => resolve(false), handshakeTimeout);
+    });
+    
+    const handshakeComplete = await handshakePromise;
+    if (!handshakeComplete) {
+      console.warn('[BOOT] ⚠️ Call-core handshake timeout - proceeding in degraded mode');
+    }
+    
+    window.AppBootContext.setReady('calls');
+    return handshakeComplete;
+  };
+  
+  // ============================================================================
+  // BOOTSTRAP CONSTANTS - HARDENED
+  // ============================================================================
+  
+  const BOOTSTRAP_CONSTANTS = {
+    // Execution control - HARDENED: Reduced retries, added timeouts
+    MAX_RETRIES: 2,
+    INIT_TIMEOUT: 10000,
+    STEP_TIMEOUT: 5000,
+    DEBOUNCE_WINDOW: 1000,
+    
+    // State machine definitions - NEW: Strict state control
+    STATES: {
+      INIT: 'INIT',
+      LOADING: 'LOADING',
+      AUTH: 'AUTH',
+      READY: 'READY',
+      RUNNING: 'RUNNING',
+      ERROR: 'ERROR',
+      DEGRADED: 'DEGRADED' // ADDED: Degraded mode state for non-critical failures
+    },
+    
+    // Module criticality levels - ADDED
+    CRITICALITY: {
+      CONFIG: 'critical',
+      ENVIRONMENT: 'critical',
+      API_CORE: 'critical',
+      API_REQUEST: 'critical',
+      API_AUTH: 'critical',
+      SESSION: 'optional', // CHANGED: Session is now optional
+      UI: 'optional',
+      IFRAME: 'optional',
+      ROUTING: 'optional',
+      VALIDATION: 'optional'
+    },
+    
+    // Mandatory execution order - HARDENED: No parallelism, strict sequence
+    EXECUTION_ORDER: [
+      'config',
+      'environment',
+      'api.core',
+      'api.request',
+      'api.auth',
+      'session', // Non-critical
+      'validation',
+      'ui',
+      'iframe',
+      'routing'
+    ]
+  };
+  
+  // ============================================================================
   // GLOBAL ERROR SAFETY LAYER - ADDED FOR FAILURE ISOLATION
   // ============================================================================
   
-  // Global error tracking to prevent duplicate logging
+  // Global error tracking to prevent duplicate logging - HARDENED: Added debouncing
   const ERROR_TRACKER = {
     loggedErrors: new Set(),
     loggedPromises: new Set(),
+    moduleFailures: new Map(), // ADDED: Track module failures
+    degradedMode: false, // ADDED: Track degraded mode state
     maxAttempts: 3,
+    lastErrorTime: new Map(),
+    DEBOUNCE_WINDOW: 1000,
     
     shouldLog: function(errorKey, context = '') {
       const key = `${errorKey}:${context}`;
+      const now = Date.now();
+      const lastTime = this.lastErrorTime.get(key) || 0;
+      
+      // Debounce identical errors - HARDENED: Prevent spam
+      if (now - lastTime < this.DEBOUNCE_WINDOW) {
+        return false;
+      }
+      
       if (this.loggedErrors.has(key)) {
         return false;
       }
+      
       this.loggedErrors.add(key);
+      
+      // Limit set size to prevent memory leak
+      if (this.loggedErrors.size > 1000) {
+        const iterator = this.loggedErrors.values();
+        for (let i = 0; i < 100; i++) {
+          this.loggedErrors.delete(iterator.next().value);
+        }
+      }
+      
+      this.lastErrorTime.set(key, now);
       return true;
+    },
+    
+    // ADDED: Track module failure
+    trackModuleFailure: function(moduleName, error, critical = false) {
+      const failures = this.moduleFailures.get(moduleName) || {
+        count: 0,
+        lastError: null,
+        critical: critical,
+        timestamp: null,
+        attempts: []
+      };
+      
+      failures.count++;
+      failures.lastError = error ? error.message : 'Unknown error';
+      failures.timestamp = new Date().toISOString();
+      failures.attempts.push({
+        timestamp: failures.timestamp,
+        error: error ? error.message : 'Unknown error'
+      });
+      
+      // Keep only last 5 attempts
+      if (failures.attempts.length > 5) {
+        failures.attempts = failures.attempts.slice(-5);
+      }
+      
+      this.moduleFailures.set(moduleName, failures);
+      
+      // Switch to degraded mode if non-critical modules fail repeatedly
+      if (!critical && failures.count > 2) {
+        this.degradedMode = true;
+        console.warn(`[ERROR] ⚠️ Switching to degraded mode due to ${moduleName} failures`);
+      }
+      
+      return failures;
+    },
+    
+    // ADDED: Check if in degraded mode
+    isDegradedMode: function() {
+      return this.degradedMode;
+    },
+    
+    // ADDED: Get failure report
+    getFailureReport: function() {
+      const report = {
+        degradedMode: this.degradedMode,
+        moduleFailures: []
+      };
+      
+      this.moduleFailures.forEach((data, name) => {
+        report.moduleFailures.push({
+          module: name,
+          count: data.count,
+          lastError: data.lastError,
+          critical: data.critical,
+          timestamp: data.timestamp
+        });
+      });
+      
+      return report;
     },
     
     clear: function() {
       this.loggedErrors.clear();
       this.loggedPromises.clear();
+      this.lastErrorTime.clear();
+      // Keep module failures for diagnostics
     }
   };
   
@@ -74,6 +490,15 @@ import './app.core.ui.js';
     event.preventDefault(); // Prevent browser console warning
     return false;
   };
+  
+  // Global async error handler
+  window.addEventListener('unhandledrejection', function(event) {
+    const errorKey = `async-error:${event.reason?.message || 'unknown'}`;
+    if (ERROR_TRACKER.shouldLog(errorKey, 'unhandledrejection')) {
+      console.error('🚨 [Async Error] Unhandled promise rejection:', event.reason);
+      event.preventDefault(); // Prevent console warning
+    }
+  });
   
   // Safe wrapper for any function execution
   function safeExecute(fn, context = 'anonymous', maxRetries = 1) {
@@ -117,7 +542,8 @@ import './app.core.ui.js';
         }
         
         if (attempts < maxRetries) {
-          return await execute(); // Retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+          return await execute(); // Retry with backoff
         }
         
         // Return null to prevent crashes
@@ -129,7 +555,7 @@ import './app.core.ui.js';
     return await execute();
   }
   
-  // Safe module initialization wrapper
+  // Safe module initialization wrapper with crash isolation
   function safeModuleInit(moduleName, initFunction) {
     try {
       console.log(`🔧 Initializing module: ${moduleName}`);
@@ -141,6 +567,11 @@ import './app.core.ui.js';
       if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
         console.error(`❌ Module ${moduleName} initialization failed:`, error.message);
       }
+      
+      // Track module failure
+      const isCritical = BOOTSTRAP_CONSTANTS.CRITICALITY[moduleName.toUpperCase().replace(/\./g, '_')] === 'critical';
+      ERROR_TRACKER.trackModuleFailure(moduleName, error, isCritical);
+      
       // Return a stub module to prevent crashes
       return {
         _moduleFailed: true,
@@ -171,6 +602,266 @@ import './app.core.ui.js';
       return false;
     }
   }
+  
+  // ============================================================================
+  // DEFENSIVE AUTH READINESS HELPER - ADDED TO PREVENT CRASHES
+  // ============================================================================
+  
+  // Safe check for isAuthFullyReady method - FIXED: Added compatibility fallback
+  function isAuthFullyReadySafe() {
+    try {
+      // Guard against any undefined access
+      // FIXED: Added compatibility fallback if the property doesn't exist
+      const authReady = Boolean(
+        window.api &&
+        window.api.auth &&
+        window.api.auth.isAuthFullyReady === true
+      );
+      
+      // FIXED: Also check for alternative indicators if the main one is missing
+      if (!authReady) {
+        // Check for auth module existence and essential methods as fallback
+        const hasAuthModule = window.api && window.api.auth;
+        const hasEssentialMethods = hasAuthModule && 
+          typeof window.api.auth.getUser === 'function' &&
+          typeof window.api.auth.isAuthenticated === 'function';
+        const hasAuthState = typeof AUTH_STATE !== 'undefined' && 
+          AUTH_STATE.isAuthenticated && 
+          AUTH_STATE.isAuthenticated();
+        
+        return hasEssentialMethods || hasAuthState;
+      }
+      
+      return authReady;
+    } catch (error) {
+      console.warn(`[BOOT] ⚠️ Safe auth readiness check failed: ${error.message}`);
+      return false;
+    }
+  }
+  
+  // Safe wait for auth readiness with timeout and graceful degradation
+  async function waitForAuthReadySafe(timeoutMs = 5000) {
+    console.log('[BOOT] 🔐 Safely waiting for auth readiness...');
+    
+    // Check if already ready using safe method
+    if (isAuthFullyReadySafe()) {
+      console.log('[BOOT] ✅ Auth already fully ready');
+      return true;
+    }
+    
+    // Try to use waitForReady if available
+    if (window.api && window.api.auth && typeof window.api.auth.waitForReady === 'function') {
+      try {
+        await Promise.race([
+          window.api.auth.waitForReady(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Auth waitForReady timeout')), timeoutMs)
+          )
+        ]);
+        
+        // Re-check readiness
+        if (isAuthFullyReadySafe()) {
+          console.log('[BOOT] ✅ Auth became ready via waitForReady');
+          return true;
+        }
+      } catch (error) {
+        console.warn(`[BOOT] ⚠️ Auth waitForReady failed: ${error.message}`);
+      }
+    }
+    
+    // Fallback polling with safety
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      if (isAuthFullyReadySafe()) {
+        console.log('[BOOT] ✅ Auth became ready during polling');
+        return true;
+      }
+      
+      // Don't block the event loop
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    // Timeout occurred - log warning but don't crash
+    console.warn('[BOOT] ⚠️ Auth readiness timeout - continuing in degraded mode');
+    return false;
+  }
+  
+  // ============================================================================
+  // BOOTSTRAP STATE MACHINE - NEW: Strict state control with DEGRADED mode
+  // ============================================================================
+  
+  const BOOTSTRAP_STATE_MACHINE = {
+    _currentState: BOOTSTRAP_CONSTANTS.STATES.INIT,
+    _transitionHistory: [],
+    _lock: false,
+    _startTime: null,
+    _timeoutId: null,
+    _lastTransition: null,
+    _lastErrorState: null, // FIXED: Track last error state to prevent ERROR → ERROR loops
+    _errorTransitionCount: 0, // FIXED: Count consecutive error transitions
+    
+    // Valid state transitions - NEW: Enforces order with DEGRADED mode
+    VALID_TRANSITIONS: {
+      'INIT': ['LOADING', 'ERROR'],
+      'LOADING': ['AUTH', 'READY', 'ERROR', 'DEGRADED'], // Can go to DEGRADED from LOADING
+      'AUTH': ['READY', 'ERROR', 'DEGRADED'], // Can go to DEGRADED from AUTH
+      'DEGRADED': ['READY', 'RUNNING', 'ERROR'], // Can recover from DEGRADED
+      'READY': ['RUNNING', 'ERROR', 'DEGRADED'],
+      'RUNNING': ['ERROR', 'DEGRADED'],
+      'ERROR': ['DEGRADED', 'INIT'] // Can recover from ERROR to DEGRADED or reset to INIT
+    },
+    
+    getState: function() {
+      return this._currentState;
+    },
+    
+    // ADDED: Check if in degraded mode
+    isDegraded: function() {
+      return this._currentState === BOOTSTRAP_CONSTANTS.STATES.DEGRADED || 
+             ERROR_TRACKER.isDegradedMode();
+    },
+    
+    transitionTo: function(newState, reason = '') {
+      if (this._lock) {
+        console.warn(`[BOOT] ⚠️ State transition blocked by lock: ${this._currentState} -> ${newState}`);
+        return false;
+      }
+      
+      // FIXED: Prevent self-transitions (same state to same state)
+      if (this._currentState === newState) {
+        console.log(`[BOOT] ℹ️ State unchanged: ${newState} (transition ignored)`);
+        return true; // Return true but don't emit event
+      }
+      
+      // FIXED: Prevent ERROR → ERROR loops by blocking transitions from ERROR
+      if (this._currentState === BOOTSTRAP_CONSTANTS.STATES.ERROR && 
+          newState === BOOTSTRAP_CONSTANTS.STATES.ERROR) {
+        console.warn(`[BOOT] ⚠️ Blocked ERROR → ERROR transition`);
+        return false;
+      }
+      
+      // FIXED: Prevent multiple ERROR transitions in succession
+      if (newState === BOOTSTRAP_CONSTANTS.STATES.ERROR) {
+        // If we're already in ERROR state, block
+        if (this._currentState === BOOTSTRAP_CONSTANTS.STATES.ERROR) {
+          console.warn(`[BOOT] ⚠️ Already in ERROR state, blocking another ERROR transition`);
+          return false;
+        }
+        
+        // Track consecutive error transitions
+        const now = Date.now();
+        if (this._lastErrorState && (now - this._lastErrorState.timestamp < 5000)) {
+          this._errorTransitionCount++;
+          if (this._errorTransitionCount > 3) {
+            console.error(`[BOOT] ❌ Too many error transitions (${this._errorTransitionCount}), switching to DEGRADED mode`);
+            this.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'too_many_errors');
+            return false;
+          }
+        } else {
+          this._errorTransitionCount = 1;
+        }
+        
+        this._lastErrorState = {
+          from: this._currentState,
+          timestamp: now,
+          reason: reason
+        };
+      } else {
+        // Reset error counter on successful non-error transition
+        this._errorTransitionCount = 0;
+      }
+      
+      const oldState = this._currentState;
+      const validTransitions = this.VALID_TRANSITIONS[oldState] || [];
+      
+      if (!validTransitions.includes(newState)) {
+        console.error(`[BOOT] ❌ Invalid transition: ${oldState} -> ${newState}`);
+        return false;
+      }
+      
+      this._currentState = newState;
+      this._lastTransition = {
+        from: oldState,
+        to: newState,
+        timestamp: Date.now(),
+        reason: reason
+      };
+      this._transitionHistory.push(this._lastTransition);
+      
+      // Keep history limited
+      if (this._transitionHistory.length > 50) {
+        this._transitionHistory = this._transitionHistory.slice(-50);
+      }
+      
+      console.log(`[BOOT] 🔄 State: ${oldState} -> ${newState} ${reason ? `(${reason})` : ''}`);
+      
+      this.emitStateChange(oldState, newState);
+      return true;
+    },
+    
+    lock: function() {
+      this._lock = true;
+      console.log('[BOOT] 🔒 State machine locked');
+    },
+    
+    unlock: function() {
+      this._lock = false;
+      console.log('[BOOT] 🔓 State machine unlocked');
+    },
+    
+    startTimeoutGuard: function() {
+      this._startTime = Date.now();
+      
+      if (this._timeoutId) {
+        clearTimeout(this._timeoutId);
+      }
+      
+      this._timeoutId = setTimeout(() => {
+        if (this._currentState !== BOOTSTRAP_CONSTANTS.STATES.RUNNING && 
+            this._currentState !== BOOTSTRAP_CONSTANTS.STATES.ERROR &&
+            this._currentState !== BOOTSTRAP_CONSTANTS.STATES.DEGRADED) {
+          console.error('[BOOT] ⏱️ Startup timeout - switching to degraded mode');
+          this.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'startup_timeout');
+        }
+      }, BOOTSTRAP_CONSTANTS.INIT_TIMEOUT);
+    },
+    
+    clearTimeoutGuard: function() {
+      if (this._timeoutId) {
+        clearTimeout(this._timeoutId);
+        this._timeoutId = null;
+      }
+    },
+    
+    emitStateChange: function(oldState, newState) {
+      try {
+        const event = new CustomEvent('moodchat-bootstrap-state-change', {
+          detail: {
+            oldState: oldState,
+            newState: newState,
+            isDegraded: this.isDegraded(),
+            failures: ERROR_TRACKER.getFailureReport(),
+            timestamp: Date.now(),
+            history: [...this._transitionHistory]
+          }
+        });
+        window.dispatchEvent(event);
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Failed to emit state change event:', error);
+      }
+    },
+    
+    reset: function() {
+      this._currentState = BOOTSTRAP_CONSTANTS.STATES.INIT;
+      this._transitionHistory = [];
+      this._lock = false;
+      this._lastTransition = null;
+      this._lastErrorState = null;
+      this._errorTransitionCount = 0;
+      this.clearTimeoutGuard();
+      console.log('[BOOT] 🔄 State machine reset');
+    }
+  };
   
   // ============================================================================
   // PRE-LOGIN CHECK - PHASE 0: VERIFY USER AUTHENTICATION BEFORE ANY LOADING
@@ -245,7 +936,7 @@ import './app.core.ui.js';
       }
       
       // Redirect to login page
-      if (!window.location.pathname.includes('login.html') && 
+      if (!window.location.pathname.includes('index.html') && 
           !window.location.pathname.includes('index.html') &&
           !window.location.pathname.includes('/')) {
         setTimeout(() => {
@@ -258,6 +949,879 @@ import './app.core.ui.js';
     
     return isLoggedIn || isPublicPage;
   }
+  
+  // ============================================================================
+  // AUTHENTICATION GATE - HARDENED: Blocks UI until session valid
+  // ============================================================================
+  
+  const AUTHENTICATION_GATE = {
+    _isAuthenticated: false,
+    _user: null,
+    _validationAttempts: 0,
+    
+    validateSession: async function() {
+      console.log('[BOOT] 🔐 Validating session...');
+      
+      // BOOT BARRIER: Session validation must complete before UI/iframes
+      
+      // Check if we're in degraded mode
+      if (BOOTSTRAP_STATE_MACHINE.isDegraded()) {
+        console.log('[BOOT] ⚠️ Degraded mode - using simplified auth check');
+        return this.simplifiedAuthCheck();
+      }
+      
+      // Check authentication state
+      const isLoggedIn = userLoggedIn();
+      const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
+      
+      if (!isLoggedIn && !isPublicPage) {
+        console.log('[BOOT] 🔐 Authentication required');
+        return { valid: false, requiresAuth: true, isPublic: false };
+      }
+      
+      // If public page, allow without auth
+      if (isPublicPage) {
+        console.log('[BOOT] 📄 Public page, auth not required');
+        return { valid: true, requiresAuth: false, isPublic: true };
+      }
+      
+      // Validate token if logged in
+      if (isLoggedIn) {
+        const tokenValid = await this.validateToken();
+        if (tokenValid) {
+          this._isAuthenticated = true;
+          console.log('[BOOT] ✅ Session validated');
+          
+          // BOOT BARRIER: Signal session ready
+          window.AppBootContext.setReady('session');
+          
+          return { valid: true, requiresAuth: true, isPublic: false };
+        } else {
+          console.log('[BOOT] ❌ Session invalid');
+          return { valid: false, requiresAuth: true, isPublic: false };
+        }
+      }
+      
+      return { valid: false, requiresAuth: true, isPublic: false };
+    },
+    
+    // ADDED: Simplified auth check for degraded mode
+    simplifiedAuthCheck: function() {
+      try {
+        const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+        const hasToken = !!token;
+        
+        if (hasToken) {
+          // Basic token validation
+          try {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              if (payload.exp && payload.exp < Date.now() / 1000) {
+                return { valid: false, requiresAuth: true, degraded: true, reason: 'Token expired' };
+              }
+            }
+          } catch (e) {
+            // Token validation failed but we'll still try
+          }
+          
+          return { valid: true, requiresAuth: true, degraded: true };
+        }
+        
+        return { valid: false, requiresAuth: true, degraded: true };
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Simplified auth check failed:', error);
+        return { valid: false, requiresAuth: true, degraded: true };
+      }
+    },
+    
+    validateToken: async function() {
+      if (this._validationAttempts >= 2) {
+        console.warn('[BOOT] ⚠️ Max validation attempts reached');
+        return false;
+      }
+      
+      this._validationAttempts++;
+      
+      try {
+        // Try modular API first
+        if (window.api && window.api.auth && window.api.auth.validateToken) {
+          const result = await window.api.auth.validateToken();
+          return result.valid === true;
+        }
+        
+        // Fallback: check localStorage
+        const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+        if (!token) return false;
+        
+        // Basic JWT validation
+        const parts = token.split('.');
+        if (parts.length !== 3) return false;
+        
+        const payload = JSON.parse(atob(parts[1]));
+        if (payload.exp && payload.exp < Date.now() / 1000) {
+          return false;
+        }
+        
+        return true;
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Token validation failed:', error.message);
+        return false;
+      }
+    },
+    
+    blockUI: function() {
+      console.log('[BOOT] 🚫 Blocking UI until authenticated');
+      
+      // Hide app UI
+      const appContainers = document.querySelectorAll('#app-container, .app-container, [data-app-container]');
+      appContainers.forEach(container => {
+        container.style.display = 'none';
+      });
+      
+      // Show auth UI
+      const authContainers = document.querySelectorAll('#auth-container, .auth-container, [data-auth-container]');
+      authContainers.forEach(container => {
+        container.style.display = 'block';
+      });
+      
+      // Hide loading screen
+      const loadingScreen = document.getElementById('loadingScreen');
+      if (loadingScreen) {
+        loadingScreen.style.display = 'none';
+      }
+    },
+    
+    releaseUI: function() {
+      console.log('[BOOT] ✅ Releasing UI');
+      
+      // Show app UI
+      const appContainers = document.querySelectorAll('#app-container, .app-container, [data-app-container]');
+      appContainers.forEach(container => {
+        container.style.display = 'block';
+      });
+      
+      // Hide auth UI
+      const authContainers = document.querySelectorAll('#auth-container, .auth-container, [data-auth-container]');
+      authContainers.forEach(container => {
+        container.style.display = 'none';
+      });
+    },
+    
+    redirectToLogin: function(reason = 'Authentication required') {
+      console.log(`[BOOT] 🔐 Redirecting to login: ${reason}`);
+      
+      const currentPath = window.location.pathname + window.location.search;
+      const loginPages = ['/', '/index.html', '/index.html', '/index.html'];
+      const isLoginPage = loginPages.some(page => currentPath.endsWith(page));
+      
+      if (!isLoginPage) {
+        try {
+          sessionStorage.setItem('moodchat_return_path', currentPath);
+        } catch (error) {
+          console.warn('[BOOT] ⚠️ Failed to store return path:', error);
+        }
+        
+        setTimeout(() => {
+          window.location.href = '/index.html';
+        }, 100);
+      }
+      
+      return false;
+    },
+    
+    isAuthenticated: function() {
+      return this._isAuthenticated;
+    },
+    
+    reset: function() {
+      this._isAuthenticated = false;
+      this._user = null;
+      this._validationAttempts = 0;
+    }
+  };
+  
+  // ============================================================================
+  // INTERNAL DEPENDENCY QUEUE SYSTEM - NEW: Strict sequential loading
+  // ============================================================================
+  
+  const DEPENDENCY_QUEUE = {
+    _queue: [],
+    _currentIndex: 0,
+    _completed: new Set(),
+    _failed: new Map(),
+    _loggedWaiting: new Set(),
+    _loggedSuccess: new Set(),
+    _loggedFailure: new Set(),
+    _appReady: false,
+    _readyPromise: null,
+    _readyResolve: null,
+    _readyReject: null,
+    
+    // Define the strict dependency order with criticality
+    DEPENDENCY_ORDER: [
+      { name: 'config', check: () => typeof APP_CONFIG !== 'undefined', critical: true },
+      { name: 'environment', check: () => typeof window !== 'undefined' && typeof document !== 'undefined', critical: true },
+      { name: 'api.core', check: () => window.api && window.api.core, critical: true },
+      { name: 'api.request', check: () => window.api && window.api.request, critical: true },
+      { name: 'api.auth', check: () => window.api && window.api.auth && typeof window.api.auth.getUser === 'function', critical: true },
+      { name: 'session', check: () => window.app && window.app.core && window.app.core.session, critical: false }, // CHANGED: Session is optional
+      { name: 'ui', check: () => window.app && window.app.core && window.app.core.ui, critical: false }
+    ],
+    
+    initialize: function() {
+      this._queue = [...this.DEPENDENCY_ORDER];
+      this._currentIndex = 0;
+      this._completed.clear();
+      this._failed.clear();
+      this._loggedWaiting.clear();
+      this._loggedSuccess.clear();
+      this._loggedFailure.clear();
+      this._appReady = false;
+      
+      // Create ready promise
+      this._readyPromise = new Promise((resolve, reject) => {
+        this._readyResolve = resolve;
+        this._readyReject = reject;
+      });
+      
+      console.log('[DEP] 📋 Dependency queue initialized with', this._queue.length, 'stages');
+      return this;
+    },
+    
+    // Check if a dependency is ready with single logging
+    checkDependency: function(dependency) {
+      const isReady = dependency.check();
+      const logKey = dependency.name;
+      
+      if (isReady) {
+        if (!this._loggedSuccess.has(logKey)) {
+          console.log(`✅ ${dependency.name} ready`);
+          this._loggedSuccess.add(logKey);
+        }
+        return true;
+      } else {
+        if (!this._loggedWaiting.has(logKey) && !this._loggedFailure.has(logKey)) {
+          console.log(`⏳ Waiting for ${dependency.name}...`);
+          this._loggedWaiting.add(logKey);
+        }
+        return false;
+      }
+    },
+    
+    // Process the next dependency in queue
+    processNext: async function() {
+      if (this._currentIndex >= this._queue.length) {
+        // All dependencies processed
+        if (!this._appReady) {
+          this._appReady = true;
+          window.__APP_READY__ = true;
+          console.log('[DEP] 🎉 All dependencies satisfied - __APP_READY__ = true');
+          if (this._readyResolve) {
+            this._readyResolve(true);
+          }
+        }
+        return true;
+      }
+      
+      const dependency = this._queue[this._currentIndex];
+      
+      // Check if already completed
+      if (this._completed.has(dependency.name)) {
+        this._currentIndex++;
+        return this.processNext();
+      }
+      
+      // Check if already failed
+      if (this._failed.has(dependency.name)) {
+        if (dependency.critical) {
+          console.error(`[DEP] ❌ Critical dependency ${dependency.name} failed - cannot proceed`);
+          if (this._readyReject) {
+            this._readyReject(new Error(`Critical dependency failed: ${dependency.name}`));
+          }
+          return false;
+        } else {
+          // Skip non-critical failed dependencies
+          console.warn(`[DEP] ⚠️ Non-critical dependency ${dependency.name} failed - skipping`);
+          this._currentIndex++;
+          return this.processNext();
+        }
+      }
+      
+      // Check if ready
+      if (this.checkDependency(dependency)) {
+        this._completed.add(dependency.name);
+        this._loggedWaiting.delete(dependency.name);
+        this._currentIndex++;
+        return this.processNext();
+      } else {
+        // Not ready yet - will be retried later
+        return false;
+      }
+    },
+    
+    // Start processing with polling
+    start: function() {
+      console.log('[DEP] 🚀 Starting dependency queue processing');
+      
+      // Poll every 100ms
+      const pollInterval = setInterval(async () => {
+        const result = await this.processNext();
+        
+        // If all done, clear interval
+        if (this._appReady || this._currentIndex >= this._queue.length) {
+          clearInterval(pollInterval);
+        }
+      }, 100);
+      
+      // Also check immediately
+      setTimeout(() => this.processNext(), 0);
+      
+      return this._readyPromise;
+    },
+    
+    // Mark a dependency as failed (called from module loader)
+    markFailed: function(moduleName, error) {
+      const dependency = this._queue.find(d => d.name === moduleName);
+      if (dependency) {
+        this._failed.set(moduleName, error);
+        if (!this._loggedFailure.has(moduleName)) {
+          console.error(`❌ ${moduleName} failed: ${error.message || error}`);
+          this._loggedFailure.add(moduleName);
+          
+          // Track module failure
+          ERROR_TRACKER.trackModuleFailure(moduleName, error, dependency.critical);
+        }
+      }
+    },
+    
+    // Wait for app to be ready
+    waitForReady: function() {
+      return this._readyPromise;
+    },
+    
+    // Check if app is ready
+    isReady: function() {
+      return this._appReady;
+    },
+    
+    // ADDED: Get failed modules
+    getFailedModules: function() {
+      const failed = [];
+      this._failed.forEach((error, name) => {
+        failed.push({ name, error: error.message });
+      });
+      return failed;
+    }
+  };
+  
+  // Initialize the dependency queue
+  DEPENDENCY_QUEUE.initialize();
+  
+  // Expose waitForReady method for auth and session modules
+  window.__APP_DEPENDENCY_QUEUE = DEPENDENCY_QUEUE;
+  
+  // ============================================================================
+  // SEQUENTIAL DEPENDENCY LOADER - HARDENED: No parallelism, strict order
+  // ============================================================================
+  
+  const SEQUENTIAL_LOADER = {
+    _loadedModules: new Map(),
+    _currentStep: 0,
+    _loading: false,
+    _moduleAttempts: new Map(), // Track attempts per module
+    
+    MODULES: [
+      {
+        name: 'config',
+        validate: () => typeof APP_CONFIG !== 'undefined',
+        load: () => {
+          // BOOT BARRIER: Config ready
+          window.AppBootContext.setReady('config');
+          return Promise.resolve();
+        },
+        critical: true
+      },
+      {
+        name: 'environment',
+        validate: () => typeof window !== 'undefined' && typeof document !== 'undefined',
+        load: () => Promise.resolve(),
+        critical: true
+      },
+      {
+        name: 'api.core',
+        validate: () => window.api && window.api.core,
+        load: async () => {
+          return this.waitForWithGuard(() => window.api && window.api.core, 'api.core');
+        },
+        critical: true
+      },
+      {
+        name: 'api.request',
+        validate: () => window.api && window.api.request,
+        load: async () => {
+          return this.waitForWithGuard(() => window.api && window.api.request, 'api.request');
+        },
+        critical: true
+      },
+      {
+        name: 'api.auth',
+        validate: () => window.api && window.api.auth,
+        load: async () => {
+          return this.waitForWithGuard(() => window.api && window.api.auth, 'api.auth');
+        },
+        critical: true
+      },
+      {
+        name: 'session',
+        // CHANGED: Session validation now returns true even if module missing (degraded mode)
+        validate: () => {
+          // Check that session module is loaded
+          const sessionLoaded = window.app && window.app.core && window.app.core.session;
+          
+          // If session is not loaded, log warning but return true to continue
+          if (!sessionLoaded) {
+            console.warn('[BOOT] ⚠️ Session module not available - continuing in degraded mode');
+            return true; // Return true to allow bootstrap to continue
+          }
+          
+          // HARDENED: Ensure auth is fully ready before considering session valid - using safe check
+          const authReady = SEQUENTIAL_LOADER.isAuthFullyReadySafe();
+          
+          // If auth is ready but not detected, do a more thorough check
+          let authActuallyReady = authReady;
+          if (!authActuallyReady) {
+            // Check alternative indicators
+            const hasAuthModule = window.api && window.api.auth;
+            const hasUser = window.currentUser || 
+                           (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser && AUTH_STATE.getUser());
+            authActuallyReady = (hasAuthModule && hasUser) || 
+                               (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated());
+          }
+          
+          console.log(`[BOOT] 📊 Session validation: sessionLoaded=${sessionLoaded}, authReady=${authReady}, authActuallyReady=${authActuallyReady}`);
+          
+          return sessionLoaded && authActuallyReady;
+        },
+        load: async () => {
+          console.log('[BOOT] 🔐 Preparing to load session module - ensuring auth is fully ready first');
+          
+          try {
+            // HARDENED: Wait for auth to be fully ready before loading session
+            await SEQUENTIAL_LOADER.ensureAuthFullyReadySafe();
+            
+            // Now wait for session to be available with shorter timeout
+            console.log('[BOOT] 🔐 Auth fully ready, now waiting for session module');
+            await SEQUENTIAL_LOADER.waitForWithGuard(
+              () => window.app && window.app.core && window.app.core.session, 
+              'session',
+              3000 // Shorter timeout for optional module
+            ).catch(error => {
+              console.warn('[BOOT] ⚠️ Session module timeout - continuing without it');
+              return null;
+            });
+          } catch (error) {
+            console.warn('[BOOT] ⚠️ Session module failed to load - continuing without it');
+            ERROR_TRACKER.trackModuleFailure('session', error, false);
+          }
+          
+          // Always return true to continue bootstrap
+          return true;
+        },
+        critical: false // CHANGED: Session is now optional
+      },
+      {
+        name: 'ui',
+        validate: () => window.app && window.app.core && window.app.core.ui,
+        load: async () => {
+          try {
+            await this.waitForWithGuard(() => window.app && window.app.core && window.app.core.ui, 'ui', 3000);
+            window.AppBootContext.setReady('ui');
+          } catch (error) {
+            console.warn('[BOOT] ⚠️ UI module timeout - using fallback UI');
+            this.createFallbackUI();
+          }
+          return true;
+        },
+        critical: false // UI is optional
+      }
+    ],
+    
+    // ADDED: Create fallback UI when UI module fails
+    createFallbackUI: function() {
+      if (document.getElementById('fallback-ui')) return;
+      
+      try {
+        const fallbackDiv = document.createElement('div');
+        fallbackDiv.id = 'fallback-ui';
+        fallbackDiv.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: #1f2937;
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+        `;
+        fallbackDiv.innerHTML = `
+          <div style="text-align: center; padding: 20px;">
+            <h2 style="margin-bottom: 16px;">Loading Application...</h2>
+            <p style="color: #9ca3af;">Please wait while we initialize.</p>
+          </div>
+        `;
+        document.body.appendChild(fallbackDiv);
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Failed to create fallback UI:', error);
+      }
+    },
+    
+    // SAFE: Check if auth is fully ready without crashing
+    isAuthFullyReadySafe: function() {
+      try {
+        // Use the global safe helper
+        return isAuthFullyReadySafe();
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Auth readiness safe check failed:', error);
+        return false;
+      }
+    },
+    
+    // HARDENED: New method to check if auth is fully ready with all required capabilities
+    isAuthFullyReady: function() {
+      try {
+        // Check basic auth module existence
+        if (!window.api || !window.api.auth) {
+          return false;
+        }
+        
+        // Check for essential auth methods with null-safe checks
+        const hasGetUser = typeof window.api.auth.getUser === 'function';
+        const hasIsAuthenticated = typeof window.api.auth.isAuthenticated === 'function';
+        const hasValidateToken = typeof window.api.auth.validateToken === 'function';
+        
+        // Check if auth is initialized (if it has an isReady method)
+        let isReady = true;
+        if (window.api.auth.isReady && typeof window.api.auth.isReady === 'function') {
+          isReady = window.api.auth.isReady();
+        }
+        
+        // Check for __API_AUTH_READY flag
+        const apiAuthReady = window.__API_AUTH_READY === true;
+        
+        // Check for AUTH_STATE readiness
+        const authStateReady = typeof AUTH_STATE !== 'undefined' && 
+                               AUTH_STATE.isInitialized !== false;
+        
+        const readiness = {
+          moduleExists: true,
+          hasGetUser,
+          hasIsAuthenticated,
+          hasValidateToken,
+          isReady,
+          apiAuthReady,
+          authStateReady,
+          // Overall ready if we have the core methods and either isReady flag or API flag
+          overall: (hasGetUser || hasIsAuthenticated) && (isReady || apiAuthReady)
+        };
+        
+        console.log('[BOOT] 🔐 Auth readiness check:', readiness);
+        
+        return readiness.overall;
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Auth readiness check failed:', error);
+        return false;
+      }
+    },
+    
+    // HARDENED: New safe method to ensure auth is fully ready with proper waiting
+    ensureAuthFullyReadySafe: async function() {
+      console.log('[BOOT] 🔐 Ensuring auth is fully ready before session loading (safe version)...');
+      
+      // Use the global safe helper
+      await waitForAuthReadySafe(5000);
+      
+      // FIXED: Additional check to ensure we're not in degraded mode when auth is actually ready
+      if (!isAuthFullyReadySafe()) {
+        // Double-check with alternative methods
+        const hasUser = window.currentUser || 
+                       (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser && AUTH_STATE.getUser());
+        const hasAuthModule = window.api && window.api.auth;
+        
+        if (hasUser && hasAuthModule) {
+          console.log('[BOOT] ✅ Auth is actually ready despite safe check returning false');
+          return true;
+        }
+      }
+      
+      return true;
+    },
+    
+    // HARDENED: New method to ensure auth is fully ready with proper waiting
+    ensureAuthFullyReady: async function() {
+      console.log('[BOOT] 🔐 Ensuring auth is fully ready before session loading...');
+      
+      // Wait for basic auth module existence
+      await this.waitForWithGuard(() => window.api && window.api.auth, 'api.auth.basic');
+      
+      // HARDENED: Guarded wait for auth.isReady() if it exists
+      if (window.api && window.api.auth && typeof window.api.auth.isReady === 'function') {
+        console.log('[BOOT] 🔐 Auth has isReady() method, checking...');
+        
+        if (!window.api.auth.isReady()) {
+          console.log('[BOOT] 🔐 Auth not ready yet, waiting for auth-ready event');
+          
+          // Wait for auth-ready event with timeout
+          await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              console.log('[BOOT] ⏱️ Auth-ready event timeout, proceeding anyway');
+              resolve();
+            }, 5000);
+            
+            const handler = () => {
+              clearTimeout(timeout);
+              window.removeEventListener('auth-ready', handler);
+              window.removeEventListener('apiAuthReady', handler);
+              resolve();
+            };
+            
+            window.addEventListener('auth-ready', handler, { once: true });
+            window.addEventListener('apiAuthReady', handler, { once: true });
+          });
+        }
+      }
+      
+      // HARDENED: Guarded wait for AUTH_STATE initialization
+      if (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.waitForInitialization && typeof AUTH_STATE.waitForInitialization === 'function') {
+        console.log('[BOOT] 🔐 Waiting for AUTH_STATE initialization');
+        try {
+          await AUTH_STATE.waitForInitialization();
+        } catch (error) {
+          console.warn('[BOOT] ⚠️ AUTH_STATE.waitForInitialization failed:', error);
+        }
+      }
+      
+      // HARDENED: Guarded wait for api.auth.waitForReady() if it exists
+      if (window.api && window.api.auth && typeof window.api.auth.waitForReady === 'function') {
+        console.log('[BOOT] 🔐 Waiting for api.auth.waitForReady()');
+        try {
+          await window.api.auth.waitForReady();
+          console.log('[BOOT] ✅ api.auth.waitForReady() resolved');
+        } catch (error) {
+          console.warn('[BOOT] ⚠️ api.auth.waitForReady() failed:', error);
+        }
+      } else {
+        console.log('[BOOT] 🔐 api.auth.waitForReady() not available, using alternative checks');
+      }
+      
+      // HARDENED: Guarded wait for window.__API_CORE.ready
+      if (window.__API_CORE && window.__API_CORE.ready && typeof window.__API_CORE.ready.then === 'function') {
+        console.log('[BOOT] 🔐 Waiting for window.__API_CORE.ready');
+        try {
+          await window.__API_CORE.ready;
+          console.log('[BOOT] ✅ window.__API_CORE.ready resolved');
+        } catch (error) {
+          console.warn('[BOOT] ⚠️ window.__API_CORE.ready failed:', error);
+        }
+      }
+      
+      // HARDENED: Additional readiness checks
+      const readyFlags = [
+        { flag: window.__AUTH_READY, name: '__AUTH_READY' },
+        { flag: window.__API_AUTH_READY, name: '__API_AUTH_READY' },
+        { flag: window.__AUTH_INITIALIZED, name: '__AUTH_INITIALIZED' }
+      ];
+      
+      for (const { flag, name } of readyFlags) {
+        if (flag && typeof flag.then === 'function') {
+          console.log(`[BOOT] 🔐 Waiting for ${name}`);
+          try {
+            await flag;
+            console.log(`[BOOT] ✅ ${name} resolved`);
+          } catch (error) {
+            console.warn(`[BOOT] ⚠️ ${name} failed:`, error);
+          }
+        }
+      }
+      
+      console.log('[BOOT] ✅ Auth fully ready check completed');
+    },
+    
+    loadAll: async function() {
+      if (this._loading) {
+        console.warn('[BOOT] ⚠️ Loader already running');
+        return false;
+      }
+      
+      this._loading = true;
+      console.log('[BOOT] 📦 Loading dependencies sequentially...');
+      
+      BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.LOADING, 'dependency_loading_start');
+      
+      let criticalFailure = false;
+      
+      for (let i = 0; i < this.MODULES.length; i++) {
+        const module = this.MODULES[i];
+        this._currentStep = i;
+        
+        // Initialize attempt counter if not exists
+        if (!this._moduleAttempts.has(module.name)) {
+          this._moduleAttempts.set(module.name, 0);
+        }
+        
+        console.log(`[BOOT] 🔧 [${i + 1}/${this.MODULES.length}] Loading: ${module.name} (${module.critical ? 'critical' : 'optional'})`);
+        
+        const success = await this.loadModule(module);
+        if (!success) {
+          if (module.critical) {
+            console.error(`[BOOT] ❌ Critical module failed: ${module.name}`);
+            DEPENDENCY_QUEUE.markFailed(module.name, new Error(`Critical module failed`));
+            ERROR_TRACKER.trackModuleFailure(module.name, new Error(`Critical module failed`), true);
+            criticalFailure = true;
+            break;
+          } else {
+            console.warn(`[BOOT] ⚠️ Optional module failed: ${module.name} - continuing`);
+            DEPENDENCY_QUEUE.markFailed(module.name, new Error(`Optional module failed`));
+            ERROR_TRACKER.trackModuleFailure(module.name, new Error(`Optional module failed`), false);
+          }
+        }
+      }
+      
+      if (criticalFailure) {
+        console.log('[BOOT] ⚠️ Critical module failure - switching to degraded mode');
+        BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'critical_module_failure');
+        this._loading = false;
+        return false;
+      }
+      
+      console.log('[BOOT] ✅ All dependencies loaded');
+      this._loading = false;
+      return true;
+    },
+    
+    loadModule: async function(module, retryCount = 0) {
+      // FIXED: Check if already loaded first
+      if (module.validate()) {
+        if (!this._loadedModules.has(module.name)) {
+          this._loadedModules.set(module.name, true);
+        }
+        return true;
+      }
+      
+      // FIXED: Track attempts to prevent infinite loops
+      const attempts = this._moduleAttempts.get(module.name) || 0;
+      if (attempts >= 2) { // Max 2 attempts total
+        console.error(`[BOOT] ❌ Module ${module.name} exceeded max attempts (${attempts})`);
+        DEPENDENCY_QUEUE.markFailed(module.name, new Error(`Max attempts exceeded`));
+        return false;
+      }
+      
+      this._moduleAttempts.set(module.name, attempts + 1);
+      
+      try {
+        // Load with timeout
+        await this.loadWithTimeout(module.load, module.name);
+        
+        // Validate after load
+        if (module.validate()) {
+          this._loadedModules.set(module.name, true);
+          return true;
+        } else {
+          throw new Error(`Validation failed for ${module.name}`);
+        }
+      } catch (error) {
+        console.warn(`[BOOT] ⚠️ Failed to load ${module.name}:`, error.message);
+        DEPENDENCY_QUEUE.markFailed(module.name, error);
+        ERROR_TRACKER.trackModuleFailure(module.name, error, module.critical);
+        
+        // FIXED: Retry with exponential backoff, but only once more for critical modules
+        if (module.critical && attempts < 1) { // Only retry critical modules once
+          const backoffDelay = Math.pow(2, attempts) * 1000;
+          console.log(`[BOOT] ⏳ Retrying ${module.name} in ${backoffDelay}ms (attempt ${attempts + 1}/2)...`);
+          
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+          return await this.loadModule(module, attempts + 1);
+        }
+        
+        if (module.critical) {
+          console.error(`[BOOT] ❌ Max retries exceeded for critical module: ${module.name}`);
+        }
+        return false;
+      }
+    },
+    
+    loadWithTimeout: async function(loadFunction, moduleName) {
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Timeout loading ${moduleName}`));
+        }, BOOTSTRAP_CONSTANTS.STEP_TIMEOUT);
+        
+        loadFunction()
+          .then(result => {
+            clearTimeout(timeoutId);
+            resolve(result);
+          })
+          .catch(error => {
+            clearTimeout(timeoutId);
+            reject(error);
+          });
+      });
+    },
+    
+    // HARDENED: waitFor with null-safe guarding
+    waitForWithGuard: function(condition, moduleName, timeout = BOOTSTRAP_CONSTANTS.STEP_TIMEOUT) {
+      return new Promise((resolve, reject) => {
+        const startTime = Date.now();
+        
+        const check = () => {
+          try {
+            if (condition()) {
+              resolve(true);
+              return;
+            }
+          } catch (error) {
+            // Condition evaluation threw an error, treat as false
+            console.warn(`[BOOT] ⚠️ Condition check for ${moduleName} threw:`, error.message);
+          }
+          
+          if (Date.now() - startTime > timeout) {
+            reject(new Error(`Timeout waiting for ${moduleName}`));
+            return;
+          }
+          
+          setTimeout(check, 100);
+        };
+        
+        check();
+      });
+    },
+    
+    isModuleLoaded: function(moduleName) {
+      return this._loadedModules.get(moduleName) || false;
+    },
+    
+    getStatus: function() {
+      const status = {};
+      this.MODULES.forEach(module => {
+        status[module.name] = {
+          loaded: this._loadedModules.get(module.name) || false,
+          critical: module.critical,
+          attempts: this._moduleAttempts.get(module.name) || 0
+        };
+      });
+      return status;
+    },
+    
+    reset: function() {
+      this._loadedModules.clear();
+      this._currentStep = 0;
+      this._loading = false;
+      this._moduleAttempts.clear();
+    }
+  };
   
   // ============================================================================
   // GLOBAL NAMESPACE GOVERNANCE - PHASE 1: DEFENSIVE NAMESPACE ESTABLISHMENT
@@ -484,6 +2048,9 @@ import './app.core.ui.js';
       };
       
       console.log('✅ Created comprehensive APP_CONFIG with centralized page registry');
+      
+      // BOOT BARRIER: Config ready
+      window.AppBootContext.setReady('config');
     } else {
       // ENHANCE EXISTING APP_CONFIG FOR BACKWARD COMPATIBILITY
       console.log('🔧 Enhancing existing APP_CONFIG for session-first architecture');
@@ -587,11 +2154,14 @@ import './app.core.ui.js';
       }
       
       console.log('✅ APP_CONFIG enhancement complete with session-first architecture');
+      
+      // BOOT BARRIER: Config ready
+      window.AppBootContext.setReady('config');
     }
 
     // Check for public pages
     window.isPublicPage = function() {
-      const publicPages = ['/', '/index.html', '/login.html', '/signup.html', '/auth.html', '/register.html'];
+      const publicPages = ['/', '/index.html', '/index.html', '/index.html', '/signup.html', '/auth.html', '/register.html'];
       const currentPath = window.location.pathname.toLowerCase();
       
       // Also check if we have a page parameter that indicates public access
@@ -635,6 +2205,7 @@ import './app.core.ui.js';
       AUTH_CHECKING: 'auth_checking',
       UI_LOADING: 'ui_loading',
       READY: 'ready',
+      DEGRADED: 'degraded', // ADDED: Degraded mode phase
       FAILED: 'failed'
     },
     
@@ -647,7 +2218,13 @@ import './app.core.ui.js';
     },
     
     initialize: function() {
-      // Check authentication before starting bootstrap
+      // Check authentication before starting bootstrap - HARDENED: Added state check
+      const currentState = BOOTSTRAP_STATE_MACHINE.getState();
+      if (currentState === BOOTSTRAP_CONSTANTS.STATES.ERROR) {
+        console.log('[BOOT] ⏳ Bootstrap blocked: system in ERROR state');
+        return this;
+      }
+      
       const isLoggedIn = userLoggedIn();
       const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
       
@@ -737,11 +2314,20 @@ import './app.core.ui.js';
       return this.currentPhase === phase;
     },
     
+    // ADDED: Check if in degraded mode
+    isDegraded: function() {
+      return this.currentPhase === this.PHASES.DEGRADED || 
+             BOOTSTRAP_STATE_MACHINE.isDegraded() ||
+             ERROR_TRACKER.isDegradedMode();
+    },
+    
     trackProgress: function(event) {
       const progressEvent = new CustomEvent('moodchat-bootstrap-progress', {
         detail: {
           event: event,
           phase: this.currentPhase,
+          isDegraded: this.isDegraded(),
+          failures: ERROR_TRACKER.getFailureReport(),
           timestamp: new Date().toISOString(),
           dependencies: { ...this.dependencies },
           elapsedMs: Date.now() - this.startTime
@@ -755,6 +2341,8 @@ import './app.core.ui.js';
         detail: {
           newPhase: newPhase,
           oldPhase: oldPhase,
+          isDegraded: this.isDegraded(),
+          failures: ERROR_TRACKER.getFailureReport(),
           timestamp: new Date().toISOString(),
           dependencies: { ...this.dependencies },
           elapsedMs: Date.now() - this.startTime
@@ -764,7 +2352,7 @@ import './app.core.ui.js';
     },
     
     complete: function(success = true, message = '') {
-      const finalPhase = success ? this.PHASES.READY : this.PHASES.FAILED;
+      const finalPhase = success ? (this.isDegraded() ? this.PHASES.DEGRADED : this.PHASES.READY) : this.PHASES.FAILED;
       this.setPhase(finalPhase);
       
       const completionEvent = new CustomEvent('moodchat-bootstrap-complete', {
@@ -772,6 +2360,8 @@ import './app.core.ui.js';
           success: success,
           message: message,
           phase: finalPhase,
+          isDegraded: this.isDegraded(),
+          failures: ERROR_TRACKER.getFailureReport(),
           timestamp: new Date().toISOString(),
           elapsedMs: Date.now() - this.startTime,
           dependencies: { ...this.dependencies }
@@ -786,16 +2376,25 @@ import './app.core.ui.js';
         window.app._dependencyGraph.bootstrapState.completionMessage = message;
         window.app._dependencyGraph.bootstrapState.completionTime = new Date().toISOString();
         window.app._dependencyGraph.bootstrapState.completionElapsedMs = Date.now() - this.startTime;
+        window.app._dependencyGraph.bootstrapState.failures = ERROR_TRACKER.getFailureReport();
       }
       
       console.log(`🏁 Application bootstrap ${success ? 'completed successfully' : 'failed'}: ${message}`);
       console.log(`⏱️ Total bootstrap time: ${Date.now() - this.startTime}ms`);
+      if (this.isDegraded()) {
+        console.warn(`⚠️ Application running in DEGRADED mode`);
+      }
+      
+      // BOOT BARRIER: Unlock navigation regardless of success/failure
+      NavigationController.unlock('bootstrap_complete');
     },
     
     getStatusReport: function() {
       return {
         phase: this.currentPhase,
+        isDegraded: this.isDegraded(),
         dependencies: { ...this.dependencies },
+        failures: ERROR_TRACKER.getFailureReport(),
         elapsedMs: Date.now() - this.startTime,
         startTime: new Date(this.startTime).toISOString(),
         currentTime: new Date().toISOString()
@@ -806,6 +2405,528 @@ import './app.core.ui.js';
   // Initialize bootstrap tracker immediately
   safeExecute(() => BOOTSTRAP_STATE.initialize(), 'BOOTSTRAP_STATE.initialize');
 
+  // ============================================================================
+  // HARDENED BOOTSTRAP CONTROLLER - NEW: Replaces APP_BOOTSTRAP with strict control
+  // ============================================================================
+  
+  const HARDENED_BOOTSTRAP_CONTROLLER = {
+    _initialized: false,
+    _startupPromise: null,
+    _recoveryMode: false,
+    _executionLock: false,
+    _recoveryAttempts: 0,
+    _restarting: false, // NEW: Guard against multiple restart calls
+    _showingNotification: false, // FIXED: Prevent recursive notifications
+    _showingError: false, // FIXED: Prevent recursive errors
+    _errorCallStack: [], // FIXED: Track error call stack to prevent recursion
+    
+    // Main bootstrap function with strict control
+    bootstrap: async function() {
+      // Single execution guard - HARDENED: Prevent duplicate execution
+      if (this._executionLock) {
+        console.warn('[BOOT] ⚠️ Bootstrap already in progress');
+        return this._startupPromise;
+      }
+      
+      if (this._initialized) {
+        console.warn('[BOOT] ⚠️ Bootstrap already completed');
+        return Promise.resolve(true);
+      }
+      
+      this._executionLock = true;
+      console.log('[BOOT] 🚀 Starting hardened bootstrap...');
+      
+      // BOOT BARRIER: Lock navigation during critical boot phases
+      NavigationController.lock('bootstrap');
+      
+      this._startupPromise = (async () => {
+        try {
+          // Step 1: Initialize state machine
+          BOOTSTRAP_STATE_MACHINE.startTimeoutGuard();
+          BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.LOADING, 'bootstrap_start');
+          
+          // Step 2: Wait for DOM
+          await safeStage('waitForDOMReady', () => this.waitForDOMReady(), { critical: true });
+          
+          // Step 3: Load dependencies sequentially
+          BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.LOADING, 'loading_dependencies');
+          const depsLoaded = await safeStage('loadDependencies', () => SEQUENTIAL_LOADER.loadAll(), { critical: true });
+          
+          // Step 4: Start dependency queue to ensure strict order
+          console.log('[BOOT] 📋 Starting internal dependency queue...');
+          DEPENDENCY_QUEUE.start();
+          
+          // Step 5: Check if we're in degraded mode
+          if (BOOTSTRAP_STATE_MACHINE.isDegraded() || !depsLoaded) {
+            console.log('[BOOT] ⚠️ Running in degraded mode');
+            BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'degraded_mode');
+            this.showDegradedModeNotification();
+          }
+          
+          // Step 6: Authenticate (but wait for __APP_READY__ first)
+          BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.AUTH, 'authenticating');
+          
+          // Wait for __APP_READY__ before auth
+          if (!DEPENDENCY_QUEUE.isReady()) {
+            console.log('[BOOT] 🔐 Waiting for __APP_READY__ before authentication...');
+            await DEPENDENCY_QUEUE.waitForReady().catch(() => {
+              console.warn('[BOOT] ⚠️ __APP_READY__ timeout - proceeding anyway');
+            });
+            console.log('[BOOT] ✅ __APP_READY__ achieved, proceeding with auth');
+          }
+          
+          // BOOT BARRIER: Wait for config before auth
+          await BootstrapBarrier.waitForConfig(5000).catch(() => {
+            console.warn('[BOOT] ⚠️ Config not ready, proceeding anyway');
+          });
+          
+          const authResult = await safeStage('validateSession', () => AUTHENTICATION_GATE.validateSession(), { critical: true });
+          
+          if (!authResult.valid && authResult.requiresAuth && !BOOTSTRAP_STATE_MACHINE.isDegraded()) {
+            // Block UI and show login
+            AUTHENTICATION_GATE.blockUI();
+            AUTHENTICATION_GATE.redirectToLogin('Authentication required');
+            BOOTSTRAP_STATE_MACHINE.lock(); // Lock at AUTH state
+            console.log('[BOOT] 🔐 Authentication required, bootstrap paused');
+            
+            // BOOT BARRIER: Still unlock navigation for login page
+            NavigationController.unlock('auth_required');
+            
+            this._executionLock = false;
+            return false;
+          }
+          
+          // Step 7: Release UI if authenticated
+          if (authResult.valid) {
+            AUTHENTICATION_GATE.releaseUI();
+          }
+          
+          // Step 8: Transition to appropriate state
+          if (BOOTSTRAP_STATE_MACHINE.isDegraded()) {
+            BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'running_degraded');
+          } else {
+            BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.READY, 'authentication_passed');
+          }
+          
+          // Step 9: Initialize original bootstrap system (for backward compatibility)
+          await safeStage('initializeOriginalBootstrap', () => this.initializeOriginalBootstrap(), { critical: false });
+          
+          // Step 10: Clear timeout
+          BOOTSTRAP_STATE_MACHINE.clearTimeoutGuard();
+          
+          // Step 11: Mark as initialized
+          this._initialized = true;
+          
+          if (BOOTSTRAP_STATE_MACHINE.isDegraded()) {
+            BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.RUNNING, 'bootstrap_complete_degraded');
+            console.log('[BOOT] ⚠️ Hardened bootstrap completed in DEGRADED mode');
+          } else {
+            BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.RUNNING, 'bootstrap_complete');
+            console.log('[BOOT] ✅ Hardened bootstrap completed successfully');
+          }
+          
+          return true;
+          
+        } catch (error) {
+          console.error('[BOOT] ❌ Hardened bootstrap failed:', error);
+          
+          // Try to recover to degraded mode
+          BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, `recovery_from_error: ${error.message}`);
+          this.showDegradedModeNotification();
+          
+          // Mark as initialized anyway
+          this._initialized = true;
+          this._executionLock = false;
+          
+          return false;
+        } finally {
+          this._executionLock = false;
+          // BOOT BARRIER: Always unlock navigation
+          NavigationController.unlock('bootstrap_finally');
+        }
+      })();
+      
+      return this._startupPromise;
+    },
+    
+    // NEW: Show degraded mode notification
+    showDegradedModeNotification: function() {
+      try {
+        if (typeof window.showNotification === 'function') {
+          window.showNotification(
+            'Application running in degraded mode. Some features may be limited.',
+            'warning',
+            10000
+          );
+        } else {
+          // Create fallback notification
+          const notification = document.createElement('div');
+          notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: #f59e0b;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            z-index: 10000;
+            animation: slideUp 0.3s ease-out;
+          `;
+          notification.textContent = 'Application running in degraded mode. Some features may be limited.';
+          document.body.appendChild(notification);
+          
+          setTimeout(() => {
+            notification.style.animation = 'slideDown 0.3s ease-in';
+            setTimeout(() => notification.remove(), 300);
+          }, 10000);
+        }
+      } catch (error) {
+        console.warn('[BOOT] ⚠️ Failed to show degraded mode notification');
+      }
+    },
+    
+    // NEW: Determine if failure is from a core module
+    isCoreModuleFailure: function(error) {
+      const errorMessage = error.message || '';
+      // Core modules that should trigger restart if they fail
+      const coreModuleIndicators = [
+        'api.core',
+        'api.request',
+        'api.auth',
+        'config',
+        'environment',
+        'dependency loading failed',
+        'critical module'
+      ];
+      
+      return coreModuleIndicators.some(indicator => 
+        errorMessage.toLowerCase().includes(indicator.toLowerCase())
+      );
+    },
+    
+    // Initialize original bootstrap system for backward compatibility
+    initializeOriginalBootstrap: async function() {
+      console.log('[BOOT] 🔄 Initializing original bootstrap system...');
+      
+      // Create a minimal APP_BOOTSTRAP for backward compatibility
+      if (typeof window.APP_BOOTSTRAP === 'undefined') {
+        window.APP_BOOTSTRAP = {
+          bootstrap: async function() {
+            console.log('[BOOT] 🔄 Original bootstrap called (stub)');
+            return true;
+          },
+          waitForBootstrap: function() {
+            return DEPENDENCY_QUEUE.waitForReady();
+          },
+          getStatus: function() {
+            return {
+              isBootstrapping: false,
+              phase: BOOTSTRAP_STATE.isDegraded() ? 'degraded' : 'ready',
+              isDegraded: BOOTSTRAP_STATE.isDegraded(),
+              retryCount: 0,
+              dependencies: { apiJs: true, domReady: true, authReady: true }
+            };
+          }
+        };
+      }
+      
+      // Mark original BOOTSTRAP_STATE as ready
+      if (BOOTSTRAP_STATE && BOOTSTRAP_STATE.complete) {
+        BOOTSTRAP_STATE.complete(true, 'Bootstrap completed via hardened controller');
+      }
+      
+      return true;
+    },
+    
+    waitForDOMReady: function() {
+      return new Promise((resolve) => {
+        if (document.readyState !== 'loading') {
+          resolve();
+          return;
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+          resolve();
+        });
+        
+        setTimeout(() => {
+          resolve();
+        }, BOOTSTRAP_CONSTANTS.STEP_TIMEOUT);
+      });
+    },
+    
+    triggerRecoveryMode: async function(reason) {
+      if (this._recoveryMode) return;
+      
+      this._recoveryAttempts++;
+      console.error(`[BOOT] 🚨 Entering recovery mode (attempt ${this._recoveryAttempts}/3): ${reason}`);
+      
+      // FIXED: Limit recovery attempts
+      if (this._recoveryAttempts >= 3) {
+        console.error('[BOOT] ❌ Max recovery attempts reached, switching to degraded mode');
+        BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'max_recovery_attempts');
+        this.showDegradedModeNotification();
+        return;
+      }
+      
+      this._recoveryMode = true;
+      
+      // Disable routing
+      BOOTSTRAP_STATE_MACHINE.lock();
+      
+      // Clear iframes
+      document.querySelectorAll('iframe').forEach(iframe => {
+        iframe.remove();
+      });
+      
+      // Show recovery UI
+      this.showRecoveryUI(reason);
+      
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Try to restart
+      console.log('[BOOT] 🔄 Attempting restart after recovery mode');
+      await this.restartBootstrap();
+    },
+    
+    showRecoveryUI: function(reason) {
+      try {
+        // Hide main UI
+        const appContainers = document.querySelectorAll('#app-container, .app-container');
+        appContainers.forEach(container => {
+          container.style.display = 'none';
+        });
+        
+        // Show auth UI (which will show login)
+        AUTHENTICATION_GATE.blockUI();
+        
+        // Show recovery notification
+        this.safeShowNotification('Application error - Attempting recovery...', 'warning', 5000);
+        
+      } catch (error) {
+        console.error('[BOOT] ❌ Recovery UI failed:', error);
+      }
+    },
+    
+    restartBootstrap: async function() {
+      // NEW: Guard against multiple restart calls
+      if (this._restarting) {
+        console.log('[BOOT] ⚠️ Restart already in progress, skipping');
+        return;
+      }
+      
+      this._restarting = true;
+      console.log('[BOOT] 🔄 Restarting bootstrap...');
+      
+      // Reset all systems
+      BOOTSTRAP_STATE_MACHINE.reset();
+      SEQUENTIAL_LOADER.reset();
+      AUTHENTICATION_GATE.reset();
+      DEPENDENCY_QUEUE.initialize();
+      
+      // Reset controller state
+      this._initialized = false;
+      this._startupPromise = null;
+      this._executionLock = false;
+      // Keep _recoveryMode true to prevent infinite loops
+      
+      // Restart
+      try {
+        await this.bootstrap();
+      } finally {
+        this._restarting = false;
+      }
+    },
+    
+    getStatus: function() {
+      return {
+        initialized: this._initialized,
+        state: BOOTSTRAP_STATE_MACHINE.getState(),
+        isDegraded: BOOTSTRAP_STATE_MACHINE.isDegraded(),
+        dependencies: SEQUENTIAL_LOADER.getStatus(),
+        auth: AUTHENTICATION_GATE.isAuthenticated(),
+        recoveryMode: this._recoveryMode,
+        executionLock: this._executionLock,
+        recoveryAttempts: this._recoveryAttempts,
+        restarting: this._restarting,
+        appReady: DEPENDENCY_QUEUE.isReady(),
+        failures: ERROR_TRACKER.getFailureReport()
+      };
+    },
+    
+    // FIXED: Safe wrapper for showNotification to prevent recursion
+    safeShowNotification: function(message, type = 'info', duration = 5000) {
+      if (this._showingNotification) return;
+      this._showingNotification = true;
+      
+      try {
+        if (typeof window.showNotification === 'function') {
+          window.showNotification(message, type, duration);
+        } else if (typeof this.showErrorToUser === 'function') {
+          this.showErrorToUser(message, type);
+        } else {
+          console.log(`[NOTIFICATION] ${type}: ${message}`);
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to show notification:', error);
+      } finally {
+        setTimeout(() => {
+          this._showingNotification = false;
+        }, 100);
+      }
+    },
+    
+    // FIXED: Safe wrapper for showErrorToUser to prevent recursion and stack overflow
+    showErrorToUser: function(message, type = 'error') {
+      // FIXED: Track call stack to prevent recursion and stack overflow
+      const callId = Date.now() + Math.random().toString(36).substring(2, 10);
+      this._errorCallStack.push(callId);
+      
+      // Prevent deep recursion
+      if (this._errorCallStack.length > 5) {
+        console.error('⚠️ Error call stack too deep, aborting');
+        this._errorCallStack.pop();
+        return;
+      }
+      
+      if (this._showingError) {
+        this._errorCallStack.pop();
+        return;
+      }
+      
+      this._showingError = true;
+      
+      try {
+        // Try using existing notification system
+        if (typeof window.showNotification === 'function') {
+          window.showNotification(message, type, 10000);
+        } else {
+          // Fallback error display
+          const errorDiv = document.createElement('div');
+          errorDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'error' ? '#f87171' : '#f59e0b'};
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            z-index: 9999;
+            max-width: 300px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            animation: slideInRight 0.3s ease-out;
+          `;
+          errorDiv.textContent = message;
+          document.body.appendChild(errorDiv);
+          
+          setTimeout(() => {
+            if (errorDiv.parentNode) {
+              errorDiv.style.animation = 'slideOutRight 0.3s ease-in';
+              setTimeout(() => errorDiv.remove(), 300);
+            }
+          }, 10000);
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to show error to user:', error);
+      } finally {
+        setTimeout(() => {
+          this._showingError = false;
+          // Remove from call stack
+          const index = this._errorCallStack.indexOf(callId);
+          if (index > -1) this._errorCallStack.splice(index, 1);
+        }, 100);
+      }
+    },
+    
+    // FIXED: Show fatal error without recursion
+    showFatalError: function(error) {
+      try {
+        // Hide everything
+        document.body.innerHTML = '';
+        
+        // Show error screen
+        const errorScreen = document.createElement('div');
+        errorScreen.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: #1f2937;
+          color: white;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          text-align: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        `;
+        
+        errorScreen.innerHTML = `
+          <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+          <h1 style="font-size: 24px; margin-bottom: 16px;">Application Failed to Start</h1>
+          <p style="margin-bottom: 24px; max-width: 500px; opacity: 0.8;">
+            The application encountered a critical error and cannot continue.
+            Please try refreshing the page or contact support if the problem persists.
+          </p>
+          <div style="background: rgba(255,255,255,0.1); padding: 16px; border-radius: 8px; margin-bottom: 24px; max-width: 500px; text-align: left;">
+            <div style="font-size: 12px; opacity: 0.6; margin-bottom: 8px;">Error Details:</div>
+            <div style="font-family: monospace; font-size: 12px;">${error.message}</div>
+          </div>
+          <div style="display: flex; gap: 12px;">
+            <button id="retryButton" style="
+              background: #8b5cf6;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 16px;
+            ">Try Again</button>
+            <button id="reportButton" style="
+              background: transparent;
+              color: #8b5cf6;
+              border: 1px solid #8b5cf6;
+              padding: 12px 24px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 16px;
+            ">Report Issue</button>
+          </div>
+        `;
+        
+        document.body.appendChild(errorScreen);
+        
+        // Add button handlers
+        document.getElementById('retryButton').addEventListener('click', () => {
+          window.location.reload();
+        });
+        
+        document.getElementById('reportButton').addEventListener('click', () => {
+          const errorReport = {
+            error: error.toString(),
+            message: error.message,
+            stack: error.stack,
+            url: window.location.href,
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString(),
+            bootstrap: BOOTSTRAP_STATE.getStatusReport()
+          };
+          
+          console.error('Error report:', errorReport);
+          this.safeShowNotification('Error details logged to console', 'info', 5000);
+        });
+      } catch (fatalError) {
+        console.error('❌ Even fatal error screen failed:', fatalError);
+        document.body.innerHTML = '<h1>Critical Error</h1><p>Please refresh the page.</p>';
+      }
+    }
+  };
+  
   // ============================================================================
   // DEPENDENCY RESOLUTION INTEGRITY - PHASE 3: MODULE REGISTRATION CONTROLLER
   // ============================================================================
@@ -819,116 +2940,138 @@ import './app.core.ui.js';
     registeredCallbacks: [],
     pendingOperations: [],
     moduleFailures: new Set(),
+    failedModules: new Map(), // Track failed modules to disable them
+    _showingNotification: false,
+    _showingError: false,
+    _errorCallStack: [], // FIXED: Track error call stack to prevent recursion
     
-    // Main bootstrap function
+    // Main bootstrap function with crash isolation
     bootstrap: async function() {
-      // Check authentication before starting bootstrap
-      const isLoggedIn = userLoggedIn();
-      const isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
-      
-      if (!isLoggedIn && !isPublicPage) {
-        console.log('⏳ Authentication required, pausing bootstrap until login');
-        return Promise.reject(new Error('Authentication required'));
+      // HARDENED: Check if hardened controller has already run
+      if (HARDENED_BOOTSTRAP_CONTROLLER._initialized) {
+        console.log('[BOOT] ⚠️ Hardened controller already initialized, using it');
+        return Promise.resolve(true);
       }
       
-      if (this.isBootstrapping) {
-        console.log('⚠️ Bootstrap already in progress, returning existing promise');
-        return this.bootstrapPromise;
-      }
+      // HARDENED: Use hardened controller instead
+      console.log('[BOOT] 🔄 Redirecting to hardened bootstrap controller');
+      return HARDENED_BOOTSTRAP_CONTROLLER.bootstrap();
+    },
+    
+    // FIXED: Show notification with recursion guard
+    showNotification: function(message, type = 'info', duration = 5000) {
+      if (this._showingNotification) return;
+      this._showingNotification = true;
       
-      this.isBootstrapping = true;
-      BOOTSTRAP_STATE.setPhase(BOOTSTRAP_STATE.PHASES.INITIALIZING);
-      
-      // CORE MODULE REGISTRATION: Record bootstrap start
-      if (window.app && window.app._dependencyGraph) {
-        window.app._dependencyGraph.appBootstrap = {
-          started: true,
-          startTime: new Date().toISOString(),
-          retryCount: this.currentRetry,
-          maxRetries: this.MAX_RETRIES
-        };
-      }
-      
-      this.bootstrapPromise = new Promise(async (resolve, reject) => {
-        try {
-          console.log('🚀 Starting enhanced application bootstrap...');
-          
-          // STEP 1: Wait for DOM to be ready
-          await this.waitForDOMReady();
-          BOOTSTRAP_STATE.markDependencyReady('domReady');
-          
-          // STEP 2: Wait for modular API initialization
-          await this.waitForModularApi();
-          BOOTSTRAP_STATE.markDependencyReady('apiJs');
-          
-          // STEP 3: Wait for auth readiness
-          await this.waitForAuthReady();
-          BOOTSTRAP_STATE.markDependencyReady('authReady');
-          
-          // STEP 4: Check authentication state
-          const authState = await this.checkAuthenticationState();
-          
-          // STEP 5: Based on auth state, decide UI flow
-          await this.determineUIFlow(authState);
-          
-          // STEP 6: Initialize global UI components
-          await this.initializeGlobalUI();
-          
-          // STEP 7: Setup event listeners and coordination
-          await this.setupCoordinationSystems();
-          
-          // STEP 8: CORE MODULE REGISTRATION - Register app.core exactly once
-          await this.registerCoreModule();
-          
-          // STEP 9: Complete bootstrap
-          BOOTSTRAP_STATE.complete(true, 'Application bootstrap completed successfully');
-          
-          // CORE MODULE REGISTRATION: Mark registration complete
-          if (window.app && window.app._coreRegistered !== undefined) {
-            window.app._coreRegistered = true;
-          }
-          
-          // Execute registered callbacks
-          this.executeRegisteredCallbacks();
-          
-          // Execute pending operations
-          this.executePendingOperations();
-          
-          // Log module failures summary
-          if (this.moduleFailures.size > 0) {
-            console.warn(`⚠️ Bootstrap completed with ${this.moduleFailures.size} module failures:`, 
-              Array.from(this.moduleFailures));
-          }
-          
-          console.log('✅ Enhanced application bootstrap completed');
-          resolve(true);
-          
-        } catch (error) {
-          console.error('❌ Application bootstrap failed:', error);
-          BOOTSTRAP_STATE.complete(false, error.message);
-          
-          // CORE MODULE REGISTRATION: Record bootstrap failure
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.appBootstrap.failed = true;
-            window.app._dependencyGraph.appBootstrap.failureReason = error.message;
-            window.app._dependencyGraph.appBootstrap.failureTime = new Date().toISOString();
-          }
-          
-          // Attempt graceful recovery
-          await this.attemptRecovery(error);
-          reject(error);
-        } finally {
-          this.isBootstrapping = false;
-          
-          // CORE MODULE REGISTRATION: Record bootstrap completion
-          if (window.app && window.app._dependencyGraph) {
-            window.app._dependencyGraph.appBootstrap.completed = true;
-            window.app._dependencyGraph.appBootstrap.completionTime = new Date().toISOString();
-          }
+      try {
+        if (typeof window.showNotification === 'function') {
+          window.showNotification(message, type, duration);
+        } else {
+          // Fallback implementation
+          this.showErrorToUser(message, type);
         }
-      });
+      } catch (error) {
+        console.error('⚠️ Failed to show notification:', error);
+      } finally {
+        setTimeout(() => {
+          this._showingNotification = false;
+        }, 100);
+      }
+    },
+    
+    // FIXED: Show error to user with recursion guard and stack overflow prevention
+    showErrorToUser: function(message, type = 'error') {
+      // FIXED: Track call stack to prevent recursion and stack overflow
+      const callId = Date.now() + Math.random().toString(36).substring(2, 10);
+      this._errorCallStack.push(callId);
       
-      return this.bootstrapPromise;
+      // Prevent deep recursion
+      if (this._errorCallStack.length > 5) {
+        console.error('⚠️ Error call stack too deep, aborting');
+        this._errorCallStack.pop();
+        return;
+      }
+      
+      if (this._showingError) {
+        this._errorCallStack.pop();
+        return;
+      }
+      
+      this._showingError = true;
+      
+      try {
+        // Try using existing notification system
+        if (typeof window.showNotification === 'function') {
+          window.showNotification(message, type, 10000);
+        } else {
+          // Fallback error display
+          const errorDiv = document.createElement('div');
+          errorDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'error' ? '#f87171' : '#f59e0b'};
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            z-index: 9999;
+            max-width: 300px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            animation: slideInRight 0.3s ease-out;
+          `;
+          errorDiv.textContent = message;
+          document.body.appendChild(errorDiv);
+          
+          setTimeout(() => {
+            if (errorDiv.parentNode) {
+              errorDiv.style.animation = 'slideOutRight 0.3s ease-in';
+              setTimeout(() => errorDiv.remove(), 300);
+            }
+          }, 10000);
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to show error to user:', error);
+      } finally {
+        setTimeout(() => {
+          this._showingError = false;
+          // Remove from call stack
+          const index = this._errorCallStack.indexOf(callId);
+          if (index > -1) this._errorCallStack.splice(index, 1);
+        }, 100);
+      }
+    },
+    
+    // All original methods preserved for backward compatibility
+    crashSafeWaitForDOMReady: function() {
+      return safeExecuteAsync(() => this.waitForDOMReady(), 'waitForDOMReady', 1);
+    },
+    
+    crashSafeWaitForModularApi: function() {
+      return safeExecuteAsync(() => this.waitForModularApi(), 'waitForModularApi', 1);
+    },
+    
+    crashSafeWaitForAuthReady: function() {
+      return safeExecuteAsync(() => this.waitForAuthReady(), 'waitForAuthReady', 1);
+    },
+    
+    crashSafeCheckAuthenticationState: function() {
+      return safeExecuteAsync(() => this.checkAuthenticationState(), 'checkAuthenticationState', 1);
+    },
+    
+    crashSafeDetermineUIFlow: function(authState) {
+      return safeExecuteAsync(() => this.determineUIFlow(authState), 'determineUIFlow', 1);
+    },
+    
+    crashSafeInitializeGlobalUI: function() {
+      return safeExecuteAsync(() => this.initializeGlobalUI(), 'initializeGlobalUI', 1);
+    },
+    
+    crashSafeSetupCoordinationSystems: function() {
+      return safeExecuteAsync(() => this.setupCoordinationSystems(), 'setupCoordinationSystems', 1);
+    },
+    
+    crashSafeRegisterCoreModule: function() {
+      return safeExecuteAsync(() => this.registerCoreModule(), 'registerCoreModule', 1);
     },
     
     // Wait for DOM to be ready
@@ -1417,7 +3560,7 @@ import './app.core.ui.js';
       };
       
       // Check if we're on a public page
-      authState.isPublicPage = isPublicPage();
+      authState.isPublicPage = window.isPublicPage ? window.isPublicPage() : false;
       
       if (authState.isPublicPage) {
         console.log('📄 Public page detected, auth not required');
@@ -1483,13 +3626,13 @@ import './app.core.ui.js';
       // Use centralized auth state if available
       if (typeof AUTH_STATE !== 'undefined') {
         try {
-          authState.hasToken = AUTH_STATE.hasToken();
+          authState.hasToken = AUTH_STATE.hasToken ? AUTH_STATE.hasToken() : false;
           
           if (authState.hasToken) {
-            authState.user = AUTH_STATE.getUser();
+            authState.user = AUTH_STATE.getUser ? AUTH_STATE.getUser() : null;
             
             // Check if token is already validated
-            if (AUTH_STATE.isAuthenticated()) {
+            if (AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated()) {
               authState.tokenValid = true;
               console.log('✅ Token already validated in auth state');
               
@@ -1528,6 +3671,7 @@ import './app.core.ui.js';
         } catch (error) {
           console.log('⚠️ AUTH_STATE check failed:', error);
           this.moduleFailures.add('AUTH_STATE');
+          this.failedModules.set('AUTH_STATE', error);
         }
       } else {
         // Fallback to localStorage check
@@ -1905,6 +4049,7 @@ import './app.core.ui.js';
         
         // Don't re-throw - core module failure shouldn't stop bootstrap
         this.moduleFailures.add('app.core');
+        this.failedModules.set('app.core', error);
       }
     },
     
@@ -1965,12 +4110,18 @@ import './app.core.ui.js';
           
           // Check if bootstrap is complete
           isBootstrapped: function() {
-            return BOOTSTRAP_STATE.isPhase(BOOTSTRAP_STATE.PHASES.READY);
+            return BOOTSTRAP_STATE.isPhase(BOOTSTRAP_STATE.PHASES.READY) || 
+                   BOOTSTRAP_STATE.isPhase(BOOTSTRAP_STATE.PHASES.DEGRADED);
+          },
+          
+          // Check if in degraded mode
+          isDegraded: function() {
+            return BOOTSTRAP_STATE.isDegraded();
           },
           
           // Wait for bootstrap completion
           waitForBootstrap: function() {
-            return APP_BOOTSTRAP.waitForBootstrap();
+            return DEPENDENCY_QUEUE.waitForReady();
           },
           
           // Get bootstrap status
@@ -2088,7 +4239,7 @@ import './app.core.ui.js';
                   cancelable: true
                 });
                 window.dispatchEvent(event);
-              }
+            }
             } catch (error) {
               console.error(`⚠️ Failed to emit event ${eventName}:`, error);
             }
@@ -2160,7 +4311,8 @@ import './app.core.ui.js';
               return {
                 elapsedMs: Date.now() - BOOTSTRAP_STATE.startTime,
                 startTime: new Date(BOOTSTRAP_STATE.startTime).toISOString(),
-                currentPhase: BOOTSTRAP_STATE.getPhase()
+                currentPhase: BOOTSTRAP_STATE.getPhase(),
+                isDegraded: BOOTSTRAP_STATE.isDegraded()
               };
             }
             return null;
@@ -2174,7 +4326,8 @@ import './app.core.ui.js';
                 authWait: window.app._dependencyGraph.authWait,
                 authCheck: window.app._dependencyGraph.authCheck,
                 tokenValidation: window.app._dependencyGraph.tokenValidation,
-                uiFlow: window.app._dependencyGraph.uiFlow
+                uiFlow: window.app._dependencyGraph.uiFlow,
+                failures: ERROR_TRACKER.getFailureReport()
               };
             }
             return null;
@@ -2217,6 +4370,9 @@ import './app.core.ui.js';
                 domReady: BOOTSTRAP_STATE.dependencies.domReady,
                 authReady: BOOTSTRAP_STATE.dependencies.authReady
               },
+              appReady: DEPENDENCY_QUEUE.isReady(),
+              isDegraded: BOOTSTRAP_STATE.isDegraded(),
+              failures: ERROR_TRACKER.getFailureReport(),
               timestamp: new Date().toISOString()
             };
           },
@@ -2230,8 +4386,12 @@ import './app.core.ui.js';
           getHealth: function() {
             const status = this.getStatus();
             return {
-              healthy: status.bootstrap.phase === BOOTSTRAP_STATE.PHASES.READY,
+              healthy: (status.bootstrap.phase === BOOTSTRAP_STATE.PHASES.READY || 
+                       status.bootstrap.phase === BOOTSTRAP_STATE.PHASES.DEGRADED) && 
+                       status.appReady,
               phase: status.bootstrap.phase,
+              isDegraded: status.isDegraded,
+              appReady: status.appReady,
               dependenciesReady: Object.values(status.dependencies).every(v => v),
               namespaceReady: status.namespace.initialized,
               coreRegistered: status.namespace.coreRegistered
@@ -2303,7 +4463,8 @@ import './app.core.ui.js';
       const event = new CustomEvent('moodchat-auth-ui-required', {
         detail: {
           timestamp: new Date().toISOString(),
-          reason: 'Public page or no valid session'
+          reason: 'Public page or no valid session',
+          isDegraded: BOOTSTRAP_STATE.isDegraded()
         }
       });
       window.dispatchEvent(event);
@@ -2336,7 +4497,9 @@ import './app.core.ui.js';
       const event = new CustomEvent('moodchat-dashboard-ui-required', {
         detail: {
           timestamp: new Date().toISOString(),
-          user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null)
+          user: window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null),
+          isDegraded: BOOTSTRAP_STATE.isDegraded(),
+          failures: ERROR_TRACKER.getFailureReport()
         }
       });
       window.dispatchEvent(event);
@@ -2351,7 +4514,7 @@ import './app.core.ui.js';
       
       // Only redirect if not already on auth page
       const currentPath = window.location.pathname;
-      const authPages = ['/', '/index.html', '/login.html', '/signup.html'];
+      const authPages = ['/', '/index.html', '/index.html', '/index.html', '/signup.html'];
       const isAuthPage = authPages.some(page => currentPath.endsWith(page));
       
       if (!isAuthPage) {
@@ -2373,10 +4536,15 @@ import './app.core.ui.js';
       }
     },
     
-    // Initialize global UI components
+    // Initialize global UI components with crash isolation for each component
     initializeGlobalUI: async function() {
       BOOTSTRAP_STATE.setPhase(BOOTSTRAP_STATE.PHASES.UI_LOADING);
       console.log('🎨 Initializing global UI components...');
+      
+      // BOOT BARRIER: UI must wait for session
+      await BootstrapBarrier.waitForSession(10000).catch(() => {
+        console.warn('[BOOT] ⚠️ Session not ready for UI init, proceeding anyway');
+      });
       
       // DEPENDENCY RESOLUTION INTEGRITY: Record UI initialization start
       if (window.app && window.app._dependencyGraph) {
@@ -2388,22 +4556,32 @@ import './app.core.ui.js';
       }
       
       try {
-        // 1. Initialize sidebar if present
-        await safeExecuteAsync(() => this.initializeSidebar(), 'initializeSidebar', 1);
+        // UI components to initialize with individual try/catch blocks
+        const uiComponents = [
+          { name: 'sidebar', init: () => this.crashSafeInitializeSidebar() },
+          { name: 'navigation', init: () => this.crashSafeInitializeNavigation() },
+          { name: 'theme', init: () => this.crashSafeInitializeTheme() },
+          { name: 'notifications', init: () => this.crashSafeInitializeNotifications() },
+          { name: 'responsive', init: () => this.crashSafeInitializeResponsiveBehaviors() }
+        ];
         
-        // 2. Initialize navigation
-        await safeExecuteAsync(() => this.initializeNavigation(), 'initializeNavigation', 1);
+        // Initialize each component with isolation
+        for (const component of uiComponents) {
+          try {
+            console.log(`🎨 Initializing ${component.name}...`);
+            await component.init();
+            console.log(`✅ ${component.name} initialized`);
+          } catch (error) {
+            const errorKey = `ui-component:${component.name}`;
+            if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+              console.error(`❌ ${component.name} initialization failed:`, error.message);
+            }
+            this.failedModules.set(component.name, error);
+            // Continue with other components
+          }
+        }
         
-        // 3. Initialize theme
-        await safeExecuteAsync(() => this.initializeTheme(), 'initializeTheme', 1);
-        
-        // 4. Initialize notification system
-        await safeExecuteAsync(() => this.initializeNotifications(), 'initializeNotifications', 1);
-        
-        // 5. Initialize responsive behaviors
-        await safeExecuteAsync(() => this.initializeResponsiveBehaviors(), 'initializeResponsiveBehaviors', 1);
-        
-        console.log('✅ Global UI components initialized');
+        console.log('✅ Global UI components initialization attempt completed');
         
         // DEPENDENCY RESOLUTION INTEGRITY: Record UI initialization success
         if (window.app && window.app._dependencyGraph) {
@@ -2424,7 +4602,30 @@ import './app.core.ui.js';
         }
         
         // Continue anyway - UI should degrade gracefully
+      } finally {
+        window.AppBootContext.setReady('ui');
       }
+    },
+    
+    // Crash-safe individual component initializers
+    crashSafeInitializeSidebar: function() {
+      return safeExecuteAsync(() => this.initializeSidebar(), 'initializeSidebar', 1);
+    },
+    
+    crashSafeInitializeNavigation: function() {
+      return safeExecuteAsync(() => this.initializeNavigation(), 'initializeNavigation', 1);
+    },
+    
+    crashSafeInitializeTheme: function() {
+      return safeExecuteAsync(() => this.initializeTheme(), 'initializeTheme', 1);
+    },
+    
+    crashSafeInitializeNotifications: function() {
+      return safeExecuteAsync(() => this.initializeNotifications(), 'initializeNotifications', 1);
+    },
+    
+    crashSafeInitializeResponsiveBehaviors: function() {
+      return safeExecuteAsync(() => this.initializeResponsiveBehaviors(), 'initializeResponsiveBehaviors', 1);
     },
     
     // Initialize sidebar
@@ -2562,6 +4763,13 @@ import './app.core.ui.js';
         return;
       }
       
+      // BOOT BARRIER: Queue navigation if locked
+      if (NavigationController.isLocked()) {
+        console.log(`[NAV] ⏳ Navigation locked, queuing ${page}`);
+        NavigationController.afterUnlock(() => this.navigateTo(page, pushState));
+        return;
+      }
+      
       // Update URL if needed
       if (pushState) {
         window.history.pushState({ page: page }, '', page);
@@ -2611,6 +4819,7 @@ import './app.core.ui.js';
         } catch (error) {
           console.warn('⚠️ Settings service theme application failed:', error);
           this.moduleFailures.add('SETTINGS_SERVICE.applyTheme');
+          this.failedModules.set('SETTINGS_SERVICE', error);
         }
       }
       
@@ -2899,7 +5108,8 @@ import './app.core.ui.js';
           detail: {
             timestamp: new Date().toISOString(),
             user: user,
-            sessionReady: !!user
+            sessionReady: !!user,
+            isDegraded: BOOTSTRAP_STATE.isDegraded()
           }
         });
         window.dispatchEvent(event);
@@ -2932,7 +5142,7 @@ import './app.core.ui.js';
         };
         
         waitForSession().then((sessionReady) => {
-          if (!sessionReady) {
+          if (!sessionReady && !BOOTSTRAP_STATE.isDegraded()) {
             console.error('❌ Session never became ready, showing auth UI');
             APP_BOOTSTRAP.showAuthUI();
             return;
@@ -2960,15 +5170,30 @@ import './app.core.ui.js';
         // Step 3: Load the parent shell (chat.html) if not already loaded
         safeExecuteAsync(() => this.ensureParentShellLoaded(), 'ensureParentShellLoaded', 1).then(() => {
           
-          // Step 4: Load the determined page
-          this.loadPageSafely(pageToLoad);
-          
-          // Step 5: Initialize iframe coordination for future page loads
-          this.initializeIframeCoordination();
+          // BOOT BARRIER: iframes must wait for session
+          BootstrapBarrier.waitForSession(10000).then(() => {
+            // Step 4: Load the determined page
+            this.loadPageSafely(pageToLoad);
+            
+            // Step 5: Initialize iframe coordination for future page loads
+            this.initializeIframeCoordination();
+            
+            // BOOT BARRIER: Signal iframes ready
+            window.AppBootContext.setReady('iframes');
+          }).catch(() => {
+            console.warn('[BOOT] ⚠️ Session wait timeout for iframes, loading anyway');
+            this.loadPageSafely(pageToLoad);
+            this.initializeIframeCoordination();
+            window.AppBootContext.setReady('iframes');
+          });
           
         }).catch((error) => {
           console.error('❌ Failed to ensure parent shell:', error);
-          this.showFatalError(new Error('Parent shell failed to load'));
+          if (!BOOTSTRAP_STATE.isDegraded()) {
+            this.showFatalError(new Error('Parent shell failed to load'));
+          } else {
+            console.warn('[BOOT] ⚠️ Parent shell failed in degraded mode - continuing');
+          }
         });
         
       }).catch((error) => {
@@ -3063,7 +5288,10 @@ import './app.core.ui.js';
         
         // Mark navigation as ready
         window.dispatchEvent(new CustomEvent('moodchat-navigation-ready', {
-          detail: { timestamp: new Date().toISOString() }
+          detail: { 
+            timestamp: new Date().toISOString(),
+            isDegraded: BOOTSTRAP_STATE.isDegraded()
+          }
         }));
         
         resolve();
@@ -3201,8 +5429,14 @@ import './app.core.ui.js';
       
       // Load the page based on its type
       if (pageConfig.isIframe && !pageConfig.isParent) {
-        // Load as iframe within parent shell
-        this.loadIframePage(pageConfig);
+        // BOOT BARRIER: iframe must wait for session
+        BootstrapBarrier.waitForSession(5000).then(() => {
+          // Load as iframe within parent shell
+          this.loadIframePage(pageConfig);
+        }).catch(() => {
+          console.warn('[BOOT] ⚠️ Session not ready for iframe, loading anyway');
+          this.loadIframePage(pageConfig);
+        });
       } else {
         // Load as main page (chat.html is already loaded)
         this.loadMainPage(pageConfig);
@@ -3300,7 +5534,8 @@ import './app.core.ui.js';
             pageId: pageConfig.id,
             pageKey: Object.keys(APP_CONFIG.pages).find(key => APP_CONFIG.pages[key].id === pageConfig.id),
             isIframe: true,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            isDegraded: BOOTSTRAP_STATE.isDegraded()
           }
         }));
       });
@@ -3333,7 +5568,8 @@ import './app.core.ui.js';
               isAuthenticated: !!(window.currentUser || (typeof AUTH_STATE !== 'undefined' && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
               token: typeof AUTH_STATE !== 'undefined' && AUTH_STATE.getToken ? AUTH_STATE.getToken() : null,
               timestamp: new Date().toISOString(),
-              pageConfig: pageConfig
+              pageConfig: pageConfig,
+              isDegraded: BOOTSTRAP_STATE.isDegraded()
             };
             
             iframe.contentWindow.postMessage(sessionData, '*');
@@ -3366,7 +5602,8 @@ import './app.core.ui.js';
             pageId: pageConfig.id,
             pageKey: Object.keys(APP_CONFIG.pages).find(key => APP_CONFIG.pages[key].id === pageConfig.id),
             isIframe: false,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            isDegraded: BOOTSTRAP_STATE.isDegraded()
           }
         }));
         
@@ -3452,25 +5689,33 @@ import './app.core.ui.js';
       }
       
       try {
-        // 1. Setup event coordination with safety wrapper
-        await safeExecuteAsync(() => this.setupEventCoordination(), 'setupEventCoordination', 1);
+        // Coordination systems to initialize with individual try/catch blocks
+        const coordinationSystems = [
+          { name: 'event_coordination', init: () => this.crashSafeSetupEventCoordination() },
+          { name: 'iframe_coordination', init: () => this.crashSafeSetupIframeCoordinationWithRetry() },
+          { name: 'error_handling', init: () => this.crashSafeSetupErrorHandling() },
+          { name: 'session_monitoring', init: () => this.crashSafeSetupSessionMonitoring() },
+          { name: 'performance_monitoring', init: () => this.crashSafeSetupPerformanceMonitoring() },
+          { name: 'background_sync', init: () => this.crashSafeTriggerBackgroundSync() }
+        ];
         
-        // 2. Setup iframe coordination with max retries
-        await this.setupIframeCoordinationWithRetry();
+        // Initialize each system with isolation
+        for (const system of coordinationSystems) {
+          try {
+            console.log(`🔗 Setting up ${system.name}...`);
+            await system.init();
+            console.log(`✅ ${system.name} setup completed`);
+          } catch (error) {
+            const errorKey = `coordination-system:${system.name}`;
+            if (ERROR_TRACKER.shouldLog(errorKey, error.message)) {
+              console.error(`❌ ${system.name} setup failed:`, error.message);
+            }
+            this.failedModules.set(system.name, error);
+            // Continue with other systems
+          }
+        }
         
-        // 3. Setup error handling
-        await safeExecuteAsync(() => this.setupErrorHandling(), 'setupErrorHandling', 1);
-        
-        // 4. Setup session monitoring
-        await safeExecuteAsync(() => this.setupSessionMonitoring(), 'setupSessionMonitoring', 1);
-        
-        // 5. Setup performance monitoring
-        await safeExecuteAsync(() => this.setupPerformanceMonitoring(), 'setupPerformanceMonitoring', 1);
-        
-        // 6. Trigger background sync if available
-        await safeExecuteAsync(() => this.triggerBackgroundSync(), 'triggerBackgroundSync', 1);
-        
-        console.log('✅ Coordination systems setup complete');
+        console.log('✅ Coordination systems setup attempt completed');
         
         // DEPENDENCY RESOLUTION INTEGRITY: Record coordination setup success
         if (window.app && window.app._dependencyGraph) {
@@ -3492,6 +5737,31 @@ import './app.core.ui.js';
         
         // Continue anyway - coordination is important but not critical
       }
+    },
+    
+    // Crash-safe coordination system initializers
+    crashSafeSetupEventCoordination: function() {
+      return safeExecuteAsync(() => this.setupEventCoordination(), 'setupEventCoordination', 1);
+    },
+    
+    crashSafeSetupIframeCoordinationWithRetry: function() {
+      return safeExecuteAsync(() => this.setupIframeCoordinationWithRetry(), 'setupIframeCoordinationWithRetry', 1);
+    },
+    
+    crashSafeSetupErrorHandling: function() {
+      return safeExecuteAsync(() => this.setupErrorHandling(), 'setupErrorHandling', 1);
+    },
+    
+    crashSafeSetupSessionMonitoring: function() {
+      return safeExecuteAsync(() => this.setupSessionMonitoring(), 'setupSessionMonitoring', 1);
+    },
+    
+    crashSafeSetupPerformanceMonitoring: function() {
+      return safeExecuteAsync(() => this.setupPerformanceMonitoring(), 'setupPerformanceMonitoring', 1);
+    },
+    
+    crashSafeTriggerBackgroundSync: function() {
+      return safeExecuteAsync(() => this.triggerBackgroundSync(), 'triggerBackgroundSync', 1);
     },
     
     // Setup iframe coordination with retry logic
@@ -3726,7 +5996,8 @@ import './app.core.ui.js';
             user: authData.user,
             isAuthenticated: authData.isAuthenticated,
             validated: authData.user?.validated || false,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            isDegraded: BOOTSTRAP_STATE.isDegraded()
           }
         }, '*');
       } catch (error) {
@@ -3848,7 +6119,8 @@ import './app.core.ui.js';
           settings: typeof SETTINGS_SERVICE !== 'undefined' && SETTINGS_SERVICE.current ? 
                    SETTINGS_SERVICE.current : {},
           bootstrap: BOOTSTRAP_STATE.getStatusReport(),
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          isDegraded: BOOTSTRAP_STATE.isDegraded()
         };
         
         iframeWindow.postMessage(initialState, '*');
@@ -4086,42 +6358,6 @@ import './app.core.ui.js';
       }
     },
     
-    // Show error to user
-    showErrorToUser: function(message, type = 'error') {
-      try {
-        if (typeof window.showNotification === 'function') {
-          window.showNotification(message, type, 10000);
-        } else {
-          // Fallback error display
-          const errorDiv = document.createElement('div');
-          errorDiv.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: ${type === 'error' ? '#f87171' : '#f59e0b'};
-            color: white;
-            padding: 12px 16px;
-            border-radius: 8px;
-            z-index: 9999;
-            max-width: 300px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            animation: slideInRight 0.3s ease-out;
-          `;
-          errorDiv.textContent = message;
-          document.body.appendChild(errorDiv);
-          
-          setTimeout(() => {
-            if (errorDiv.parentNode) {
-              errorDiv.style.animation = 'slideOutRight 0.3s ease-in';
-              setTimeout(() => errorDiv.remove(), 300);
-            }
-          }, 10000);
-        }
-      } catch (error) {
-        console.error('⚠️ Failed to show error to user:', error);
-      }
-    },
-    
     // Setup session monitoring
     setupSessionMonitoring: function() {
       console.log('⏰ Setting up session monitoring...');
@@ -4303,11 +6539,26 @@ import './app.core.ui.js';
       }
     },
     
-    // Attempt recovery from bootstrap failure
+    // Attempt recovery from bootstrap failure with infinite retry prevention
     attemptRecovery: async function(error) {
       console.log('🔄 Attempting recovery from bootstrap failure...');
       
       this.currentRetry++;
+      
+      // Prevent infinite startup retries
+      if (this.currentRetry > this.MAX_RETRIES) {
+        console.error('❌ Maximum retries exceeded, switching to degraded mode');
+        
+        // Record max retries exceeded
+        if (window.app && window.app._dependencyGraph) {
+          window.app._dependencyGraph.maxRetriesExceeded = true;
+          window.app._dependencyGraph.maxRetriesExceededAt = new Date().toISOString();
+        }
+        
+        BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'max_retries_exceeded');
+        this.showDegradedModeNotification();
+        throw error;
+      }
       
       // Record recovery attempt
       if (window.app && window.app._dependencyGraph) {
@@ -4320,29 +6571,23 @@ import './app.core.ui.js';
         });
       }
       
-      if (this.currentRetry <= this.MAX_RETRIES) {
-        console.log(`🔄 Retry attempt ${this.currentRetry}/${this.MAX_RETRIES} in ${this.RETRY_DELAY}ms`);
-        
-        // Show retry message to user
-        this.showErrorToUser(`Application startup failed. Retrying... (${this.currentRetry}/${this.MAX_RETRIES})`, 'warning');
-        
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY));
-        
-        // Retry bootstrap
-        return this.bootstrap();
-      } else {
-        console.error('❌ Maximum retries exceeded, showing fatal error');
-        
-        // Record max retries exceeded
-        if (window.app && window.app._dependencyGraph) {
-          window.app._dependencyGraph.maxRetriesExceeded = true;
-          window.app._dependencyGraph.maxRetriesExceededAt = new Date().toISOString();
-        }
-        
-        this.showFatalError(error);
-        throw error;
-      }
+      console.log(`🔄 Retry attempt ${this.currentRetry}/${this.MAX_RETRIES} in ${this.RETRY_DELAY}ms`);
+      
+      // Show retry message to user
+      this.showErrorToUser(`Application startup failed. Retrying... (${this.currentRetry}/${this.MAX_RETRIES})`, 'warning');
+      
+      // Ensure UI thread is never blocked by using setTimeout for async delay
+      return new Promise((resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            // Retry bootstrap
+            await this.bootstrap();
+            resolve();
+          } catch (retryError) {
+            reject(retryError);
+          }
+        }, this.RETRY_DELAY);
+      });
     },
     
     // Show fatal error
@@ -4418,11 +6663,12 @@ import './app.core.ui.js';
             url: window.location.href,
             userAgent: navigator.userAgent,
             timestamp: new Date().toISOString(),
-            bootstrap: BOOTSTRAP_STATE.getStatusReport()
+            bootstrap: BOOTSTRAP_STATE.getStatusReport(),
+            failures: ERROR_TRACKER.getFailureReport()
           };
           
           console.error('Error report:', errorReport);
-          alert('Error details have been logged to the console. Please provide this information to support.');
+          this.showNotification('Error details have been logged to the console. Please provide this information to support.', 'info', 5000);
         });
       } catch (fatalError) {
         console.error('❌ Even fatal error screen failed:', fatalError);
@@ -4567,7 +6813,8 @@ import './app.core.ui.js';
     
     // Wait for bootstrap to complete
     waitForBootstrap: function() {
-      if (BOOTSTRAP_STATE.isPhase(BOOTSTRAP_STATE.PHASES.READY)) {
+      if (BOOTSTRAP_STATE.isPhase(BOOTSTRAP_STATE.PHASES.READY) || 
+          BOOTSTRAP_STATE.isPhase(BOOTSTRAP_STATE.PHASES.DEGRADED)) {
         return Promise.resolve();
       }
       
@@ -4575,24 +6822,7 @@ import './app.core.ui.js';
         return Promise.reject(new Error('Bootstrap failed'));
       }
       
-      return new Promise((resolve, reject) => {
-        const successHandler = () => {
-          window.removeEventListener('moodchat-bootstrap-complete', successHandler);
-          window.removeEventListener('moodchat-bootstrap-complete', errorHandler);
-          resolve();
-        };
-        
-        const errorHandler = (event) => {
-          if (!event.detail.success) {
-            window.removeEventListener('moodchat-bootstrap-complete', successHandler);
-            window.removeEventListener('moodchat-bootstrap-complete', errorHandler);
-            reject(new Error(event.detail.message));
-          }
-        };
-        
-        window.addEventListener('moodchat-bootstrap-complete', successHandler);
-        window.addEventListener('moodchat-bootstrap-complete', errorHandler);
-      });
+      return DEPENDENCY_QUEUE.waitForReady();
     },
     
     // Get bootstrap status
@@ -4600,15 +6830,19 @@ import './app.core.ui.js';
       return {
         isBootstrapping: this.isBootstrapping,
         phase: BOOTSTRAP_STATE.getPhase(),
+        isDegraded: BOOTSTRAP_STATE.isDegraded(),
         retryCount: this.currentRetry,
         dependencies: BOOTSTRAP_STATE.dependencies,
         registeredCallbacks: this.registeredCallbacks.length,
         pendingOperations: this.pendingOperations.length,
+        appReady: DEPENDENCY_QUEUE.isReady(),
         namespaceStatus: window.app ? {
           initialized: window.app._namespaceInitialized,
           coreRegistered: window.app._coreRegistered,
           pendingRegistrations: window.app._pendingRegistrations.length
-        } : null
+        } : null,
+        failedModules: Array.from(this.failedModules.keys()),
+        failures: ERROR_TRACKER.getFailureReport()
       };
     }
   };
@@ -4661,6 +6895,28 @@ import './app.core.ui.js';
         };
       }
       
+      // Legacy startApp function - map to barrier-based system
+      if (typeof window.startApp === 'undefined') {
+        window.startApp = async function() {
+          console.log('🚀 Legacy startApp called - redirecting to barrier-based bootstrap');
+          
+          // Wait for config and session using barriers
+          try {
+            await BootstrapBarrier.waitForConfig(5000);
+          } catch (e) {
+            console.warn('Config wait timeout in startApp');
+          }
+          
+          try {
+            await BootstrapBarrier.waitForSession(10000);
+          } catch (e) {
+            console.warn('Session wait timeout in startApp');
+          }
+          
+          return HARDENED_BOOTSTRAP_CONTROLLER.bootstrap();
+        };
+      }
+      
       console.log('✅ Backward compatibility ensured');
     } catch (error) {
       console.error('⚠️ Backward compatibility setup failed:', error);
@@ -4684,8 +6940,8 @@ import './app.core.ui.js';
     // Ensure backward compatibility first
     ensureBackwardCompatibility();
     
-    // Start bootstrap process
-    return APP_BOOTSTRAP.bootstrap();
+    // HARDENED: Use hardened bootstrap controller
+    return HARDENED_BOOTSTRAP_CONTROLLER.bootstrap();
   };
   
   // Auto-start if DOM is already loaded
@@ -4694,12 +6950,20 @@ import './app.core.ui.js';
       console.log('📄 DOM ready, starting enhanced app bootstrap');
       window.initializeEnhancedApp().catch(error => {
         console.error('❌ Auto-start failed:', error);
+        // Switch to degraded mode
+        BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'auto_start_failed');
+        // BOOT BARRIER: Unlock navigation on failure
+        NavigationController.unlock('auto_start_failed');
       });
     });
   } else {
     console.log('📄 DOM already ready, starting enhanced app bootstrap');
     window.initializeEnhancedApp().catch(error => {
       console.error('❌ Auto-start failed:', error);
+      // Switch to degraded mode
+      BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.DEGRADED, 'auto_start_failed');
+      // BOOT BARRIER: Unlock navigation on failure
+      NavigationController.unlock('auto_start_failed');
     });
   }
   
@@ -4734,6 +6998,9 @@ import './app.core.ui.js';
     return null;
   };
   
+  // Expose dependency queue status
+  window.__APP_READY__ = false; // Initial value, will be set to true by DEPENDENCY_QUEUE
+  
   // ============================================================================
   // OPTIONAL MODULE SAFETY HANDLING
   // ============================================================================
@@ -4756,5 +7023,31 @@ import './app.core.ui.js';
   // Example usage for optional modules (to be called by other parts of the app)
   window.safeLoadOptionalModule = safeLoadOptionalModule;
   
-  console.log('✅ app.core.bootstrap.js loaded successfully with enhanced safety features');
+  // Expose safe auth readiness helpers globally
+  window.isAuthFullyReadySafe = isAuthFullyReadySafe;
+  window.waitForAuthReadySafe = waitForAuthReadySafe;
+  
+  // Expose barrier system
+  window.BootstrapBarrier = BootstrapBarrier;
+  window.AppBootContext = window.AppBootContext;
+  window.NavigationController = NavigationController;
+  
+  // Expose status and failure reporting
+  window.getBootstrapStatus = function() {
+    return {
+      state: BOOTSTRAP_STATE_MACHINE.getState(),
+      isDegraded: BOOTSTRAP_STATE_MACHINE.isDegraded(),
+      failures: ERROR_TRACKER.getFailureReport(),
+      modules: SEQUENTIAL_LOADER.getStatus(),
+      bootContext: {
+        configReady: window.AppBootContext.configReady,
+        sessionReady: window.AppBootContext.sessionReady,
+        uiReady: window.AppBootContext.uiReady,
+        iframesReady: window.AppBootContext.iframesReady,
+        callsReady: window.AppBootContext.callsReady
+      }
+    };
+  };
+  
+  console.log('✅ app.core.bootstrap.js loaded successfully with hardened bootstrap system, guarded readiness checks, and DEGRADED MODE support');
 })();

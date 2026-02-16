@@ -12,13 +12,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MoodChat - Global Chat Platform</title>
     
+    <!-- Font Awesome 6 CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
     <!-- CSS Frameworks and Styles -->
     <style>
         /* ============================================= */
         /* ROOT VARIABLES & THEME SYSTEM */
         /* ============================================= */
         :root {
-            /* Calm Theme Colors */
+            /* Calm Theme Colors - LIGHT MODE (DEFAULT) */
             --primary-color: #667eea;
             --primary-dark: #764ba2;
             --secondary-color: #8e44ad;
@@ -34,7 +37,7 @@
             --gradient-success: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
             --gradient-warning: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
             
-            /* UI Colors */
+            /* UI Colors - LIGHT MODE */
             --bg-color: #ffffff;
             --sidebar-bg: #f8f9fa;
             --panel-bg: #ffffff;
@@ -63,9 +66,15 @@
             --session-expired-color: #e67e22;
             --session-valid-color: #2ecc71;
             --session-invalid-color: #e74c3c;
+
+            /* ===== ADDED: Color palette for theme picker ===== */
+            --theme-primary: #667eea;
+            --theme-primary-dark: #764ba2;
+            --theme-accent: #3498db;
+            --theme-success: #2ecc71;
         }
         
-        /* Dark Theme */
+        /* DARK THEME */
         .theme-dark {
             --bg-color: #1a1a2e;
             --sidebar-bg: #16213e;
@@ -76,6 +85,194 @@
             --text-light: #8a8d91;
             --border-color: #2d3748;
             --shadow-color: rgba(0, 0, 0, 0.3);
+            --primary-color: #818cf8;
+            --primary-dark: #a78bfa;
+            --accent-color: #60a5fa;
+            --success-color: #34d399;
+            --warning-color: #fbbf24;
+            --danger-color: #f87171;
+        }
+        
+        /* ===== ADDED: Color themes for dashboard personalization ===== */
+        body[data-theme-color="ocean"] {
+            --theme-primary: #0066cc;
+            --theme-primary-dark: #004c99;
+            --theme-accent: #00aaff;
+            --theme-success: #00cc88;
+        }
+        body[data-theme-color="sunset"] {
+            --theme-primary: #ff6b6b;
+            --theme-primary-dark: #ee5253;
+            --theme-accent: #ff9f43;
+            --theme-success: #10ac84;
+        }
+        body[data-theme-color="forest"] {
+            --theme-primary: #27ae60;
+            --theme-primary-dark: #219150;
+            --theme-accent: #f39c12;
+            --theme-success: #2ecc71;
+        }
+        body[data-theme-color="lavender"] {
+            --theme-primary: #9b59b6;
+            --theme-primary-dark: #8e44ad;
+            --theme-accent: #f1c40f;
+            --theme-success: #1abc9c;
+        }
+
+        /* ===== ADDED: Structural containers (hidden but present) ===== */
+        #app-container, #iframe-container, #bottom-nav {
+            display: none;
+        }
+        footer {
+            display: none; /* hidden by default, can be used by JS */
+        }
+
+        /* THEME TOGGLE BUTTON */
+        .theme-toggle-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 30px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+            font-weight: 600;
+            transition: all var(--transition-fast);
+            backdrop-filter: blur(10px);
+            width: 100%;
+        }
+        
+        .theme-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+        }
+        
+        .theme-dark .theme-toggle-btn i {
+            transform: rotate(180deg);
+        }
+
+        /* ===== ADDED: Dashboard color picker (professional) ===== */
+        .theme-picker {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .theme-option {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: transform 0.2s, border-color 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .theme-option:hover {
+            transform: scale(1.15);
+        }
+        .theme-option.active {
+            border-color: white;
+            box-shadow: 0 0 0 2px var(--primary-color);
+        }
+        .theme-option[data-color="default"] { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .theme-option[data-color="ocean"] { background: linear-gradient(135deg, #0066cc, #00aaff); }
+        .theme-option[data-color="sunset"] { background: linear-gradient(135deg, #ff6b6b, #ff9f43); }
+        .theme-option[data-color="forest"] { background: linear-gradient(135deg, #27ae60, #f39c12); }
+        .theme-option[data-color="lavender"] { background: linear-gradient(135deg, #9b59b6, #f1c40f); }
+
+        /* ===== ADDED: Invite back animation for dashboard ===== */
+        @keyframes invitePulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.02); opacity: 1; box-shadow: 0 0 20px var(--primary-color); }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+        .invite-message {
+            background: var(--gradient-primary);
+            color: white;
+            padding: 18px;
+            border-radius: var(--card-radius);
+            text-align: center;
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin: 20px 0;
+            animation: invitePulse 2s infinite ease-in-out;
+            box-shadow: 0 8px 20px rgba(102,126,234,0.3);
+            border: 2px solid rgba(255,255,255,0.3);
+            backdrop-filter: blur(5px);
+        }
+        .invite-message i {
+            margin-right: 10px;
+            font-size: 1.4rem;
+            vertical-align: middle;
+        }
+
+        /* ===== ADDED: Improved bottom nav toggle (three dashes) ===== */
+        .bottom-nav-toggle {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 2000;
+            background: var(--primary-color);
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: transform 0.2s, background 0.2s;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        .bottom-nav-toggle:hover {
+            transform: scale(1.1);
+            background: var(--primary-dark);
+        }
+        #bottom-nav {
+            position: fixed;
+            bottom: 80px;
+            left: 20px;
+            background: var(--panel-bg);
+            border-radius: 20px;
+            padding: 15px;
+            box-shadow: 0 10px 30px var(--shadow-color);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 200px;
+            z-index: 1999;
+            border: 1px solid var(--border-color);
+            transform: translateX(-120%);
+            transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        }
+        #bottom-nav.visible {
+            transform: translateX(0);
+        }
+        #bottom-nav a {
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 12px 15px;
+            border-radius: 12px;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 500;
+        }
+        #bottom-nav a:hover {
+            background: var(--border-color);
+            color: var(--primary-color);
+        }
+        #bottom-nav a i {
+            width: 20px;
+            color: var(--primary-color);
         }
         
         /* ============================================= */
@@ -93,7 +290,7 @@
             color: var(--text-primary);
             min-height: 100vh;
             overflow-x: hidden;
-            transition: background-color var(--transition-medium);
+            transition: background-color var(--transition-medium), color var(--transition-medium);
         }
         
         /* ============================================= */
@@ -143,7 +340,6 @@
         /* ============================================= */
         /* MOBILE RESPONSIVE DESIGN */
         /* ============================================= */
-        /* Mobile Header - Always Visible on Mobile */
         .mobile-header {
             display: none;
             height: var(--header-height);
@@ -193,7 +389,6 @@
             font-size: 18px;
         }
         
-        /* Mobile Sidebar Overlay */
         .mobile-sidebar-overlay {
             display: none;
             position: fixed;
@@ -211,7 +406,6 @@
             opacity: 1;
         }
         
-        /* Mobile Sidebar */
         .sidebar.mobile {
             position: fixed;
             top: 0;
@@ -228,7 +422,6 @@
             left: 0;
         }
         
-        /* Mobile Content Adjustments */
         .auth-panel.mobile-active {
             margin-left: 0;
         }
@@ -357,7 +550,6 @@
             margin-bottom: 20px;
         }
         
-        /* Stats Grid - Mobile Optimized */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -388,7 +580,6 @@
             letter-spacing: 0.5px;
         }
         
-        /* Feature Showcase - Mobile Optimized */
         .feature-showcase {
             margin-bottom: 30px;
         }
@@ -448,7 +639,6 @@
             line-height: 1.4;
         }
         
-        /* Social Proof - Mobile Optimized */
         .social-proof {
             margin-bottom: 30px;
         }
@@ -508,7 +698,6 @@
             color: rgba(255, 255, 255, 0.7);
         }
         
-        /* Download Section - Mobile Optimized */
         .download-section {
             margin-top: auto;
         }
@@ -577,7 +766,7 @@
         }
         
         /* ============================================= */
-        /* FORM CONTAINER STRUCTURES - UPDATED FOR JS COMPATIBILITY */
+        /* FORM CONTAINER STRUCTURES */
         /* ============================================= */
         .login-container,
         .register-container,
@@ -638,7 +827,6 @@
             animation: clockPulse 2s ease-in-out infinite;
         }
         
-        /* Auth Tabs - Mobile Optimized */
         .auth-tabs {
             display: flex;
             background: rgba(255, 255, 255, 0.1);
@@ -679,7 +867,6 @@
             background: white;
         }
         
-        /* Auth Body - Mobile Optimized */
         .auth-body {
             padding: 25px;
         }
@@ -718,7 +905,7 @@
         }
         
         /* ============================================= */
-        /* FORM STYLES - MOBILE OPTIMIZED */
+        /* FORM STYLES */
         /* ============================================= */
         .form-group {
             margin-bottom: 20px;
@@ -772,19 +959,19 @@
             border: none;
             color: var(--text-light);
             cursor: pointer;
-            width: 24px;
-            height: 24px;
+            width: 30px;
+            height: 30px;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: color var(--transition-fast);
+            z-index: 5;
         }
         
         .password-toggle:hover {
             color: var(--primary-color);
         }
         
-        /* Password guidance text */
         .password-guidance {
             font-size: 12px;
             color: var(--text-light);
@@ -797,10 +984,6 @@
             margin-top: 5px;
         }
         
-        .password-guidance li {
-            margin-bottom: 3px;
-        }
-        
         .guidance-note {
             font-style: italic;
             font-size: 11px;
@@ -808,7 +991,6 @@
             margin-top: 8px;
         }
         
-        /* Warning Container */
         .password-warning {
             font-size: 12px;
             color: var(--warning-color);
@@ -828,7 +1010,6 @@
             flex-shrink: 0;
         }
         
-        /* ERROR MESSAGE STYLES - UPDATED FOR JS COMPATIBILITY */
         .error-message {
             color: var(--danger-color);
             font-size: 13px;
@@ -852,10 +1033,9 @@
         }
         
         .success-message.visible {
-            display: flex;
+            display: block;
         }
         
-        /* Login attempt countdown */
         .login-attempt-countdown {
             background: var(--warning-color);
             color: white;
@@ -883,7 +1063,6 @@
             100% { opacity: 1; }
         }
         
-        /* Checkbox Group */
         .checkbox-group {
             display: flex;
             align-items: flex-start;
@@ -906,7 +1085,6 @@
             cursor: pointer;
         }
         
-        /* Feature Tags - Mobile Optimized */
         .feature-tags {
             display: flex;
             flex-wrap: wrap;
@@ -940,7 +1118,6 @@
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
         
-        /* Language Tags */
         .language-tags {
             display: flex;
             flex-wrap: wrap;
@@ -958,7 +1135,6 @@
             border: 1px solid rgba(52, 152, 219, 0.3);
         }
         
-        /* Buttons - Mobile Optimized */
         .btn {
             display: inline-flex;
             align-items: center;
@@ -1044,7 +1220,6 @@
             box-shadow: none !important;
         }
         
-        /* Button with session state */
         .btn-with-state {
             position: relative;
         }
@@ -1076,7 +1251,6 @@
             background: var(--session-invalid-color);
         }
         
-        /* Loading Spinner */
         .spinner {
             width: 20px;
             height: 20px;
@@ -1091,16 +1265,10 @@
             display: block;
         }
         
-        /* ============================================= */
-        /* AUTH FORM STYLES */
-        /* ============================================= */
         .auth-form {
             animation: fadeIn 0.3s ease;
         }
         
-        /* ============================================= */
-        /* PANEL SYSTEM */
-        /* ============================================= */
         .panel {
             display: none;
             animation: fadeIn 0.3s ease;
@@ -1110,7 +1278,6 @@
             display: block;
         }
         
-        /* Quick Login Card - Mobile Optimized */
         .quick-login-card {
             background: var(--card-bg);
             border-radius: var(--card-radius);
@@ -1122,6 +1289,8 @@
             position: relative;
             animation: slideInRight 0.3s ease-out;
             display: none;
+            width: 100%;
+            max-width: 500px;
         }
         
         .quick-login-card.visible {
@@ -1133,6 +1302,7 @@
             align-items: center;
             gap: 15px;
             margin-bottom: 15px;
+            flex-wrap: wrap;
         }
         
         .quick-login-avatar {
@@ -1152,22 +1322,33 @@
         .quick-login-info {
             display: flex;
             flex-direction: column;
+            flex: 1;
+            min-width: 0;
         }
         
         .quick-login-info h3 {
             font-size: 18px;
             margin-bottom: 4px;
             color: var(--text-primary);
+            word-break: break-word;
         }
         
         .quick-login-info p {
             font-size: 14px;
             color: var(--text-secondary);
+            word-break: break-word;
         }
         
         .quick-login-actions {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .quick-login-actions .btn {
+            flex: 1 1 auto;
+            width: auto;
+            min-width: 120px;
         }
         
         .remove-quick-login {
@@ -1192,7 +1373,6 @@
             color: var(--danger-color);
         }
         
-        /* Premium Promotion - Mobile Optimized */
         .premium-promotion {
             background: var(--gradient-primary);
             border-radius: var(--card-radius);
@@ -1257,7 +1437,6 @@
             color: #ffd700;
         }
         
-        /* Dashboard - Mobile Optimized */
         .dashboard-content {
             width: 100%;
             max-width: 500px;
@@ -1335,9 +1514,6 @@
             margin-top: 25px;
         }
         
-        /* ============================================= */
-        /* NOTIFICATION SYSTEM */
-        /* ============================================= */
         .notification-container {
             position: fixed;
             bottom: 20px;
@@ -1432,7 +1608,6 @@
         /* ============================================= */
         /* RESPONSIVE BREAKPOINTS */
         /* ============================================= */
-        /* Tablet (768px and below) */
         @media (max-width: 768px) {
             :root {
                 --sidebar-width: 0;
@@ -1489,12 +1664,15 @@
                 flex-direction: column;
             }
             
+            .quick-login-actions .btn {
+                width: 100%;
+            }
+            
             .feature-tags {
                 justify-content: center;
             }
         }
         
-        /* Mobile (480px and below) */
         @media (max-width: 480px) {
             .auth-header {
                 padding: 20px 15px;
@@ -1556,9 +1734,17 @@
                 font-size: 11px;
                 padding: 6px 8px;
             }
+            
+            .quick-login-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .quick-login-info {
+                align-items: center;
+            }
         }
         
-        /* Small Mobile (360px and below) */
         @media (max-width: 360px) {
             .auth-header h2 {
                 font-size: 20px;
@@ -1601,7 +1787,6 @@
             }
         }
         
-        /* Desktop (769px and above) */
         @media (min-width: 769px) {
             .mobile-header {
                 display: none;
@@ -1686,7 +1871,6 @@
             100% { opacity: 0.6; }
         }
         
-        /* Floating Animation for Stats */
         .stat-card:nth-child(1) { animation: float 3s ease-in-out infinite; }
         .stat-card:nth-child(2) { animation: float 3.5s ease-in-out infinite 0.5s; }
         .stat-card:nth-child(3) { animation: float 4s ease-in-out infinite 1s; }
@@ -1736,7 +1920,24 @@
     </style>
 </head>
 <body>
-    <!-- 1. LOADING OVERLAY (CRITICAL - FIRST ELEMENT) -->
+    <!-- ===== ADDED: Required structural containers (hidden but present) ===== -->
+    <div id="app-container"></div>
+    <div id="iframe-container"></div>
+    <!-- Bottom nav toggle (three dashes) – improved show/hide -->
+    <div class="bottom-nav-toggle" id="bottomNavToggle">
+        <i class="fas fa-bars"></i>
+    </div>
+    <div id="bottom-nav">
+        <a href="#"><i class="fas fa-home"></i> Home</a>
+        <a href="#"><i class="fas fa-compass"></i> Explore</a>
+        <a href="#"><i class="fas fa-bell"></i> Notifications</a>
+        <a href="#"><i class="fas fa-user"></i> Profile</a>
+        <a href="#"><i class="fas fa-cog"></i> Settings</a>
+        <a href="#" id="bottomNavClose"><i class="fas fa-times"></i> Close</a>
+    </div>
+    <footer></footer>
+
+    <!-- 1. LOADING OVERLAY -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-content">
             <div class="loading-spinner"></div>
@@ -1744,7 +1945,7 @@
         </div>
     </div>
     
-    <!-- 2. NOTIFICATION CONTAINER (REQUIRED) -->
+    <!-- 2. NOTIFICATION CONTAINER -->
     <div class="notification-container" id="notificationContainer"></div>
     
     <!-- Session Status Indicator -->
@@ -1767,10 +1968,9 @@
     <!-- Mobile Sidebar Overlay -->
     <div class="mobile-sidebar-overlay" id="mobileSidebarOverlay"></div>
     
-    <!-- Mobile Sidebar (Hidden on Desktop) -->
+    <!-- Mobile Sidebar -->
     <aside class="sidebar mobile" id="mobileSidebar">
         <div class="sidebar-content">
-            <!-- Branding -->
             <div class="branding">
                 <div class="logo-large">
                     <i class="fas fa-comments"></i>
@@ -1779,7 +1979,6 @@
                 <p class="tagline">Connect with the world</p>
             </div>
             
-            <!-- Stats -->
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-number">2M+</div>
@@ -1799,7 +1998,6 @@
                 </div>
             </div>
             
-            <!-- Features -->
             <div class="feature-showcase">
                 <h2>✨ Features</h2>
                 <div class="feature-grid">
@@ -1833,7 +2031,6 @@
                 </div>
             </div>
             
-            <!-- Testimonials -->
             <div class="social-proof">
                 <h2>🌟 Testimonials</h2>
                 <div class="testimonial">
@@ -1850,7 +2047,6 @@
                 </div>
             </div>
             
-            <!-- Download -->
             <div class="download-section">
                 <h2>📱 Get The App</h2>
                 <div class="badge-grid">
@@ -1870,6 +2066,9 @@
                         <div class="coming-soon">Soon</div>
                     </a>
                 </div>
+                <button class="theme-toggle-btn" id="mobileThemeToggle">
+                    <i class="fas fa-moon"></i> Dark Mode
+                </button>
             </div>
         </div>
     </aside>
@@ -1877,7 +2076,6 @@
     <!-- Desktop Sidebar -->
     <aside class="sidebar" id="desktopSidebar">
         <div class="sidebar-content">
-            <!-- Same content as mobile sidebar -->
             <div class="branding">
                 <div class="logo-large">
                     <i class="fas fa-comments"></i>
@@ -1973,6 +2171,9 @@
                         <div class="coming-soon">Soon</div>
                     </a>
                 </div>
+                <button class="theme-toggle-btn" id="desktopThemeToggle">
+                    <i class="fas fa-moon"></i> Dark Mode
+                </button>
             </div>
         </div>
     </aside>
@@ -1980,7 +2181,7 @@
     <!-- Main Content -->
     <main class="auth-panel" id="authPanel">
         <div class="auth-content">
-            <!-- 4. QUICK LOGIN CARD -->
+            <!-- Quick Login Card -->
             <div class="quick-login-card" id="quickLoginCard">
                 <button class="remove-quick-login" id="removeQuickLogin">
                     <i class="fas fa-times"></i>
@@ -2004,7 +2205,6 @@
             
             <!-- Auth Container -->
             <div class="auth-container" id="auth-container">
-                <!-- 5. PANEL TITLES -->
                 <div class="auth-header">
                     <div class="double-clock">
                         <i class="fas fa-clock"></i>
@@ -2013,7 +2213,6 @@
                     <p id="panelSubtitle">Login to continue</p>
                 </div>
                 
-                <!-- Auth Tabs -->
                 <div class="auth-tabs" id="authTabs">
                     <button class="auth-tab active" data-method="email">
                         <i class="fas fa-envelope"></i> Email
@@ -2027,10 +2226,9 @@
                 </div>
                 
                 <div class="auth-body">
-                    <!-- 3a. LOGIN FORM CONTAINER -->
+                    <!-- LOGIN FORM -->
                     <div class="login-container active" id="login-container">
                         <form class="auth-form" id="login-form" novalidate>
-                            <!-- Login attempt countdown -->
                             <div class="login-attempt-countdown" id="loginAttemptCountdown">
                                 <i class="fas fa-clock"></i>
                                 <span id="countdownMessage">Too many login attempts. Please wait:</span>
@@ -2129,7 +2327,7 @@
                         </form>
                     </div>
                     
-                    <!-- 3b. REGISTER FORM CONTAINER -->
+                    <!-- REGISTER FORM -->
                     <div class="register-container" id="register-container">
                         <form class="auth-form" id="register-form" novalidate>
                             <div class="premium-promotion">
@@ -2326,7 +2524,7 @@
                         </form>
                     </div>
                     
-                    <!-- 3c. FORGOT PASSWORD FORM CONTAINER -->
+                    <!-- FORGOT PASSWORD FORM -->
                     <div class="forgot-container" id="forgot-container">
                         <form class="auth-form" id="forgot-form" novalidate>
                             <div class="form-group">
@@ -2374,9 +2572,24 @@
                         </form>
                     </div>
                     
-                    <!-- Dashboard Panel -->
+                    <!-- DASHBOARD PANEL (Enhanced with theme picker & invite message) -->
                     <div class="panel" id="dashboardPanel">
                         <div class="dashboard-content">
+                            <!-- ===== ADDED: Invite back message with animation ===== -->
+                            <div class="invite-message">
+                                <i class="fas fa-hand-peace"></i> 
+                                We've missed you! Ready to continue the conversation?
+                            </div>
+
+                            <!-- ===== ADDED: Theme color picker for dashboard personalization ===== -->
+                            <div class="theme-picker">
+                                <div class="theme-option active" data-color="default" title="Default"></div>
+                                <div class="theme-option" data-color="ocean" title="Ocean"></div>
+                                <div class="theme-option" data-color="sunset" title="Sunset"></div>
+                                <div class="theme-option" data-color="forest" title="Forest"></div>
+                                <div class="theme-option" data-color="lavender" title="Lavender"></div>
+                            </div>
+
                             <div class="dashboard-header">
                                 <div class="dashboard-avatar" id="dashboardAvatar">U</div>
                                 <h1 id="dashboardGreeting">Welcome!</h1>
@@ -2433,25 +2646,21 @@
         </div>
     </main>
     
-    <!-- ============================================= -->
-    <!-- JAVASCRIPT LOADING - UPDATED FOR MODULAR API -->
-    <!-- ============================================= -->
-   <!-- API Layer -->
-<script type="module" src="/js/api.core.js"></script>
-<script type="module" src="/js/api.request.js"></script>
-<script type="module" src="/js/api.auth.js"></script>
-<script type="module" src="/js/api.messages.js"></script>  <!-- only if missing -->
+    <!-- API Layer -->
+    <script type="module" src="/js/api.core.js"></script>
+    <script type="module" src="/js/api.request.js"></script>
+    <script type="module" src="/js/api.auth.js"></script>
+    <script type="module" src="/js/api.messages.js"></script>
 
-<!-- App Core -->
-<script type="module" src="/js/app.core.bootstrap.js"></script>
-<script type="module" src="/js/app.core.session.js"></script>
-<script type="module" src="/js/app.core.ui.js"></script>
+    <!-- App Core -->
+    <script type="module" src="/js/app.core.bootstrap.js"></script>
+    <script type="module" src="/js/app.core.session.js"></script>
+    <script type="module" src="/js/app.core.ui.js"></script>
 
-<!-- Optional UI -->
-<script type="module" src="/js/app.ui.auth.js"></script>
+    <!-- Optional UI -->
+    <script type="module" src="/js/app.ui.auth.js"></script>
 
-
-    <!-- Core utilities and session management - UPDATED FOR MODULAR API -->
+    <!-- Core utilities and session management -->
     <script>
         // Initialize global objects that auth scripts expect
         window.CoreUtils = window.CoreUtils || {
@@ -2501,31 +2710,26 @@
             }
         };
         
-        // CHANGED: SessionState now uses api.auth for user management
         window.SessionState = window.SessionState || {
             getToken: function() {
-                // CHANGED: Use api.auth if available, otherwise localStorage
                 if (window.api && window.api.auth && window.api.auth.getToken) {
                     return window.api.auth.getToken();
                 }
                 return localStorage.getItem('moodchat_token');
             },
             setToken: function(token) {
-                // CHANGED: Use api.auth if available, otherwise localStorage
                 if (window.api && window.api.auth && window.api.auth.setToken) {
                     window.api.auth.setToken(token);
                 }
                 localStorage.setItem('moodchat_token', token);
             },
             clearToken: function() {
-                // CHANGED: Use api.auth if available, otherwise localStorage
                 if (window.api && window.api.auth && window.api.auth.clearToken) {
                     window.api.auth.clearToken();
                 }
                 localStorage.removeItem('moodchat_token');
             },
             getUser: function() {
-                // CHANGED: Use window.currentUser from api.auth if available
                 if (window.currentUser) {
                     return window.currentUser;
                 }
@@ -2533,17 +2737,14 @@
                 return userStr ? JSON.parse(userStr) : null;
             },
             setUser: function(user) {
-                // CHANGED: Set window.currentUser for api.auth compatibility
                 window.currentUser = user;
                 localStorage.setItem('moodchat_user', JSON.stringify(user));
             },
             clearUser: function() {
-                // CHANGED: Clear window.currentUser for api.auth compatibility
                 window.currentUser = null;
                 localStorage.removeItem('moodchat_user');
             },
             isLoggedIn: function() {
-                // CHANGED: Check with api.auth if available
                 if (window.api && window.api.auth && window.api.auth.isAuthenticated) {
                     return window.api.auth.isAuthenticated();
                 }
@@ -2551,10 +2752,8 @@
             }
         };
         
-        // CHANGED: AuthGateway wrapper for modular API compatibility
         window.AuthGateway = window.AuthGateway || {
             login: async function(credentials) {
-                // CHANGED: Call api.auth.login() instead of api.login()
                 if (window.api && window.api.auth && window.api.auth.login) {
                     try {
                         const response = await window.api.auth.login(credentials);
@@ -2577,7 +2776,6 @@
             },
             
             register: async function(userData) {
-                // CHANGED: Call api.auth.register() instead of api.register()
                 if (window.api && window.api.auth && window.api.auth.register) {
                     try {
                         const response = await window.api.auth.register(userData);
@@ -2600,7 +2798,6 @@
             },
             
             forgotPassword: async function(emailData) {
-                // CHANGED: Call api.auth.forgotPassword() instead of api.forgotPassword()
                 if (window.api && window.api.auth && window.api.auth.forgotPassword) {
                     try {
                         const response = await window.api.auth.forgotPassword(emailData);
@@ -2623,44 +2820,152 @@
         };
     </script>
     
-    <!-- Main authentication handler - UPDATED FOR MODULAR API -->
+    <!-- Main authentication handler + new features (theme picker, bottom nav) -->
     <script>
-        // Authentication system state
-        let authSystemReady = false;
-        let authInitialized = false;
-        let apiCoreReady = false;
-        let apiAuthReady = false;
-        
-        // AuthGateway contract enforcement
-        const AuthGatewayContracts = {
-            login: {
-                expectedParams: ['email', 'mobile', 'username', 'password', 'remember'],
-                methodMap: {
-                    email: 'email',
-                    mobile: 'mobile', 
-                    username: 'username'
+        // =============================================
+        // THEME TOGGLE (Dark/Light)
+        // =============================================
+        function initThemeToggle() {
+            const themeToggleButtons = [
+                document.getElementById('mobileThemeToggle'),
+                document.getElementById('desktopThemeToggle')
+            ].filter(Boolean);
+            
+            const savedTheme = localStorage.getItem('moodchat_theme');
+            if (savedTheme === 'dark') {
+                document.body.classList.add('theme-dark');
+                themeToggleButtons.forEach(btn => {
+                    if (btn) btn.innerHTML = '<i class="fas fa-sun"></i> Light Mode';
+                });
+            }
+            
+            themeToggleButtons.forEach(btn => {
+                if (btn) {
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        document.body.classList.toggle('theme-dark');
+                        const isDark = document.body.classList.contains('theme-dark');
+                        localStorage.setItem('moodchat_theme', isDark ? 'dark' : 'light');
+                        
+                        themeToggleButtons.forEach(b => {
+                            if (b) {
+                                b.innerHTML = isDark ? 
+                                    '<i class="fas fa-sun"></i> Light Mode' : 
+                                    '<i class="fas fa-moon"></i> Dark Mode';
+                            }
+                        });
+                    });
                 }
-            },
-            register: {
-                expectedParams: ['displayName', 'username', 'email', 'password', 'confirmPassword', 'interests'],
-                required: ['displayName', 'username', 'email', 'password', 'confirmPassword']
-            },
-            forgotPassword: {
-                expectedParams: ['email'],
-                required: ['email']
-            }
-        };
+            });
+        }
         
-        // CHANGED: Enhanced initialization that waits for modular API
-        function initializeAuthenticationSystem() {
-            if (authInitialized) {
-                console.log('[AUTH] Authentication system already initialized');
-                return;
+        // =============================================
+        // DASHBOARD COLOR PICKER (Theme personalization)
+        // =============================================
+        function initDashboardThemePicker() {
+            const options = document.querySelectorAll('.theme-option');
+            const savedColor = localStorage.getItem('moodchat_dashboard_color') || 'default';
+            
+            // Apply saved color
+            document.body.setAttribute('data-theme-color', savedColor);
+            options.forEach(opt => {
+                if (opt.dataset.color === savedColor) {
+                    opt.classList.add('active');
+                } else {
+                    opt.classList.remove('active');
+                }
+            });
+
+            options.forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const color = opt.dataset.color;
+                    document.body.setAttribute('data-theme-color', color);
+                    localStorage.setItem('moodchat_dashboard_color', color);
+                    options.forEach(o => o.classList.remove('active'));
+                    opt.classList.add('active');
+                    
+                    // Show feedback
+                    window.CoreUtils.showNotification('Theme Updated', `Dashboard color changed to ${color}`, 'success');
+                });
+            });
+        }
+
+        // =============================================
+        // BOTTOM NAV TOGGLE (three dashes) – improved show/hide
+        // =============================================
+        function initBottomNav() {
+            const toggle = document.getElementById('bottomNavToggle');
+            const bottomNav = document.getElementById('bottom-nav');
+            const closeBtn = document.getElementById('bottomNavClose');
+            
+            if (toggle && bottomNav) {
+                toggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    bottomNav.classList.toggle('visible');
+                });
+                
+                // Close when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!bottomNav.contains(e.target) && !toggle.contains(e.target)) {
+                        bottomNav.classList.remove('visible');
+                    }
+                });
+                
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        bottomNav.classList.remove('visible');
+                    });
+                }
             }
+        }
+
+        // =============================================
+        // PASSWORD TOGGLE
+        // =============================================
+        function initPasswordToggles() {
+            const toggles = document.querySelectorAll('[data-toggle-password]');
+            toggles.forEach(toggle => {
+                const newToggle = toggle.cloneNode(true);
+                toggle.parentNode.replaceChild(newToggle, toggle);
+                
+                newToggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const targetId = this.getAttribute('data-target');
+                    const passwordInput = document.getElementById(targetId);
+                    const icon = this.querySelector('i');
+                    
+                    if (passwordInput) {
+                        if (passwordInput.type === 'password') {
+                            passwordInput.type = 'text';
+                            if (icon) {
+                                icon.classList.remove('fa-eye');
+                                icon.classList.add('fa-eye-slash');
+                            }
+                            this.setAttribute('aria-label', 'Hide password');
+                        } else {
+                            passwordInput.type = 'password';
+                            if (icon) {
+                                icon.classList.remove('fa-eye-slash');
+                                icon.classList.add('fa-eye');
+                            }
+                            this.setAttribute('aria-label', 'Show password');
+                        }
+                    }
+                });
+            });
+        }
+        
+        // =============================================
+        // AUTH SYSTEM INIT (same as original, but we add new inits)
+        // =============================================
+        let authInitialized = false;
+        
+        function initializeAuthenticationSystem() {
+            if (authInitialized) return;
             
             console.log('[AUTH] Starting authentication system initialization...');
             
-            // Wait for API core and auth modules to be ready
             waitForAPIReady()
                 .then(() => {
                     console.log('[AUTH] API modules ready, initializing UI...');
@@ -2670,14 +2975,12 @@
                 })
                 .catch(error => {
                     console.warn('[AUTH] API timeout or error, proceeding with fallback:', error);
-                    // Initialize with fallback if API doesn't load
                     initializeBasicUIComponents();
                     checkExistingSession();
                     authInitialized = true;
                 });
         }
         
-        // CHANGED: Wait for both api.core and api.auth to be ready
         function waitForAPIReady() {
             return new Promise((resolve, reject) => {
                 console.log('[AUTH] Waiting for API modules...');
@@ -2691,14 +2994,13 @@
                         clearTimeout(timeout);
                         console.log('[AUTH] API modules ready!');
                         
-                        // CHANGED: Initialize api.core
                         if (window.api.core.initialize) {
                             window.api.core.initialize().then(() => {
                                 console.log('[AUTH] API core initialized');
                                 resolve();
                             }).catch(error => {
                                 console.warn('[AUTH] API core init error:', error);
-                                resolve(); // Resolve anyway to continue
+                                resolve();
                             });
                         } else {
                             resolve();
@@ -2709,7 +3011,7 @@
                 const timeout = setTimeout(() => {
                     clearInterval(checkInterval);
                     console.warn('[AUTH] API wait timeout - proceeding anyway');
-                    resolve(); // Resolve anyway to prevent blocking
+                    resolve();
                 }, 5000);
             });
         }
@@ -2717,7 +3019,11 @@
         function initializeBasicUIComponents() {
             console.log('[AUTH] Initializing basic UI components...');
             
-            // Initialize form toggles
+            initPasswordToggles();
+            initThemeToggle();
+            initBottomNav();          // <-- new
+            initDashboardThemePicker(); // <-- new
+            
             document.querySelectorAll('[data-form-toggle]').forEach(toggle => {
                 toggle.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -2727,29 +3033,6 @@
                 });
             });
             
-            // Initialize password toggles
-            document.querySelectorAll('[data-toggle-password]').forEach(toggle => {
-                toggle.addEventListener('click', function() {
-                    console.log('[AUTH] Password toggle clicked');
-                    const targetId = this.getAttribute('data-target');
-                    const passwordInput = document.getElementById(targetId);
-                    const icon = this.querySelector('i');
-                    
-                    if (passwordInput.type === 'password') {
-                        passwordInput.type = 'text';
-                        icon.classList.remove('fa-eye');
-                        icon.classList.add('fa-eye-slash');
-                        this.setAttribute('aria-label', 'Hide password');
-                    } else {
-                        passwordInput.type = 'password';
-                        icon.classList.remove('fa-eye-slash');
-                        icon.classList.add('fa-eye');
-                        this.setAttribute('aria-label', 'Show password');
-                    }
-                });
-            });
-            
-            // Initialize auth tabs
             const authTabs = document.querySelectorAll('.auth-tab');
             const loginIdentifier = document.getElementById('loginIdentifier');
             const loginMethodIcon = document.getElementById('loginMethodIcon');
@@ -2784,7 +3067,6 @@
                 });
             });
             
-            // Initialize interest tags
             document.querySelectorAll('.feature-tag').forEach(tag => {
                 tag.addEventListener('click', function() {
                     console.log('[AUTH] Interest tag clicked:', this.getAttribute('data-interest'));
@@ -2792,7 +3074,6 @@
                 });
             });
             
-            // Initialize mobile sidebar
             const mobileMenuToggle = document.getElementById('mobileMenuToggle');
             const mobileSidebar = document.getElementById('mobileSidebar');
             const mobileSidebarOverlay = document.getElementById('mobileSidebarOverlay');
@@ -2813,12 +3094,10 @@
                 });
             }
             
-            // Initialize other UI components
             initializeQuickLogin();
             initializeLogout();
             initializeEnterChat();
             
-            // Bind auth buttons
             bindAuthButtonsUnconditionally();
             
             console.log('[AUTH] Basic UI components initialized');
@@ -2827,7 +3106,6 @@
         function bindAuthButtonsUnconditionally() {
             console.log('[AUTH] Unconditionally binding authentication buttons...');
             
-            // Login button
             const loginButton = document.getElementById('login-button');
             if (loginButton) {
                 loginButton.addEventListener('click', async function(e) {
@@ -2843,7 +3121,7 @@
                         const activeTab = document.querySelector('.auth-tab.active');
                         const method = activeTab ? activeTab.getAttribute('data-method') : 'email';
                         
-                        console.log('[AUTH] Login attempt with method:', method, 'identifier:', identifier ? 'provided' : 'missing');
+                        console.log('[AUTH] Login attempt with method:', method, identifier ? 'provided' : 'missing');
                         
                         clearErrorMessages();
                         
@@ -2852,7 +3130,6 @@
                             return;
                         }
                         
-                        // Check AuthGateway readiness
                         if (!window.AuthGateway || typeof window.AuthGateway.login !== 'function') {
                             console.error('[AUTH] AuthGateway not ready for login');
                             window.CoreUtils.showNotification('Error', 'Authentication service is loading. Please try again in a moment.', 'error');
@@ -2868,7 +3145,7 @@
                                 password: password
                             };
                             
-                            const methodParam = AuthGatewayContracts.login.methodMap[method];
+                            const methodParam = { email: 'email', mobile: 'mobile', username: 'username' }[method];
                             if (methodParam) {
                                 loginData[methodParam] = identifier;
                             }
@@ -2883,7 +3160,6 @@
                                 processedResponse.message || '');
                             
                             if (processedResponse.success) {
-                                // Store session data
                                 if (processedResponse.data && processedResponse.data.token) {
                                     window.SessionState.setToken(processedResponse.data.token);
                                     console.log('[AUTH] Token stored');
@@ -2891,14 +3167,11 @@
                                 if (processedResponse.data && processedResponse.data.user) {
                                     window.SessionState.setUser(processedResponse.data.user);
                                     console.log('[AUTH] User data stored');
-                                    
-                                    // CHANGED: Set window.currentUser for compatibility
                                     window.currentUser = processedResponse.data.user;
                                 }
                                 
                                 window.CoreUtils.showNotification('Success', 'Login successful! Redirecting to chat...', 'success');
                                 
-                                // Redirect to chat.html after short delay
                                 setTimeout(() => {
                                     window.location.href = 'chat.html';
                                 }, 1500);
@@ -2927,7 +3200,6 @@
                 });
             }
             
-            // Register button
             const registerButton = document.getElementById('register-button');
             if (registerButton) {
                 registerButton.addEventListener('click', async function(e) {
@@ -2994,8 +3266,6 @@
                                 if (processedResponse.data && processedResponse.data.user) {
                                     window.SessionState.setUser(processedResponse.data.user);
                                     console.log('[AUTH] Registration user data stored');
-                                    
-                                    // CHANGED: Set window.currentUser for compatibility
                                     window.currentUser = processedResponse.data.user;
                                 }
                                 
@@ -3029,7 +3299,6 @@
                 });
             }
             
-            // Forgot password button
             const forgotButton = document.getElementById('forgot-button');
             if (forgotButton) {
                 forgotButton.addEventListener('click', async function(e) {
@@ -3112,23 +3381,18 @@
             console.log('[AUTH] Authentication buttons bound unconditionally');
         }
         
-        // SAFE RESPONSE PROCESSING: Never assume JSON, handle all response types defensively
         function safelyProcessAuthResponse(response) {
-            // If response is already processed (object with success property)
             if (response && typeof response === 'object' && 'success' in response) {
                 return response;
             }
             
-            // If response is a string that might be JSON
             if (typeof response === 'string') {
                 try {
-                    // Try to parse as JSON
                     const parsed = JSON.parse(response);
                     if (parsed && typeof parsed === 'object') {
                         return parsed;
                     }
                 } catch (e) {
-                    // Not valid JSON, treat as error message
                     console.warn('[AUTH] Response is not valid JSON:', response.substring(0, 100));
                     return {
                         success: false,
@@ -3137,7 +3401,6 @@
                 }
             }
             
-            // If response is null/undefined or other type
             console.warn('[AUTH] Unexpected response type:', typeof response);
             return {
                 success: false,
@@ -3145,20 +3408,16 @@
             };
         }
         
-        // SAFE ERROR EXTRACTION: Convert all errors to controlled messages
         function safelyExtractErrorMessage(error) {
             if (!error) return 'An unknown error occurred';
             
-            // Handle string errors
             if (typeof error === 'string') {
                 return getFriendlyErrorMessage(error);
             }
             
-            // Handle Error objects
             if (error instanceof Error) {
                 const message = error.message || error.toString();
                 
-                // Check for common error patterns
                 if (message.includes('JSON') || message.includes('parse')) {
                     return 'Server returned an invalid response. Please try again.';
                 }
@@ -3175,7 +3434,6 @@
                 return getFriendlyErrorMessage(message);
             }
             
-            // Handle object errors
             if (typeof error === 'object') {
                 if (error.message) {
                     return getFriendlyErrorMessage(error.message);
@@ -3188,11 +3446,9 @@
                 }
             }
             
-            // Fallback
             return 'An error occurred. Please try again.';
         }
         
-        // Map backend field names to DOM element IDs
         function mapErrorFieldToDOM(backendField) {
             if (!backendField) return 'registerEmail';
             
@@ -3207,13 +3463,11 @@
             return fieldMap[backendField] || 'registerEmail';
         }
         
-        // FIXED: Helper function to get user-friendly error messages
         function getFriendlyErrorMessage(backendMessage) {
             if (!backendMessage) return 'An error occurred. Please try again.';
             
-            const lowerMsg = backendMessage.toLowerCase();
+            const lowerMsg = String(backendMessage).toLowerCase();
             
-            // Map common backend errors to user-friendly messages
             if (lowerMsg.includes('invalid credentials') || lowerMsg.includes('wrong password')) {
                 return 'Incorrect email or password. Please try again.';
             }
@@ -3239,14 +3493,12 @@
                 return 'Server returned an invalid response. Please try again.';
             }
             
-            // Default: return original message but sanitized
             return backendMessage.length > 100 ? 
                 'An error occurred. Please try again.' : 
                 backendMessage;
         }
         
         function bindFormSubmissions() {
-            // Bind form submissions as fallback
             const loginForm = document.getElementById('login-form');
             const registerForm = document.getElementById('register-form');
             const forgotForm = document.getElementById('forgot-form');
@@ -3255,7 +3507,6 @@
                 loginForm.addEventListener('submit', function(e) {
                     e.preventDefault();
                     console.log('[AUTH] Login form submitted via form event');
-                    // Trigger button click to use our unconditional handler
                     const loginButton = document.getElementById('login-button');
                     if (loginButton) {
                         loginButton.click();
@@ -3267,7 +3518,6 @@
                 registerForm.addEventListener('submit', function(e) {
                     e.preventDefault();
                     console.log('[AUTH] Register form submitted via form event');
-                    // Trigger button click to use our unconditional handler
                     const registerButton = document.getElementById('register-button');
                     if (registerButton) {
                         registerButton.click();
@@ -3279,7 +3529,6 @@
                 forgotForm.addEventListener('submit', function(e) {
                     e.preventDefault();
                     console.log('[AUTH] Forgot password form submitted via form event');
-                    // Trigger button click to use our unconditional handler
                     const forgotButton = document.getElementById('forgot-button');
                     if (forgotButton) {
                         forgotButton.click();
@@ -3288,7 +3537,6 @@
             }
         }
         
-        // Validation functions
         function validateLoginInputs(identifier, password, method) {
             let isValid = true;
             
@@ -3382,15 +3630,12 @@
             return isValid;
         }
         
-        // UI helper functions
         function switchForm(formName) {
-            // Hide all forms
             document.getElementById('login-container').classList.remove('active');
             document.getElementById('register-container').classList.remove('active');
             document.getElementById('forgot-container').classList.remove('active');
             document.getElementById('dashboardPanel').classList.remove('active');
             
-            // Show selected form
             if (formName === 'login') {
                 document.getElementById('login-container').classList.add('active');
                 document.getElementById('panelTitle').textContent = 'Welcome to MoodChat';
@@ -3452,14 +3697,12 @@
             }
         }
         
-        // Other initialization functions
         function initializeQuickLogin() {
             const quickLoginBtn = document.getElementById('quickLoginBtn');
             const removeQuickLogin = document.getElementById('removeQuickLogin');
             const useDifferentAccountBtn = document.getElementById('useDifferentAccountBtn');
             const quickLoginCard = document.getElementById('quickLoginCard');
             
-            // Check if there's a saved user for quick login
             const savedUser = window.SessionState.getUser();
             if (savedUser && quickLoginCard) {
                 document.getElementById('quickLoginName').textContent = `Welcome back, ${savedUser.displayName || savedUser.username || 'User'}!`;
@@ -3473,11 +3716,9 @@
                     console.log('[AUTH] Quick login button clicked');
                     const savedUser = window.SessionState.getUser();
                     if (savedUser) {
-                        // Auto-login with saved token
                         if (window.SessionState.getToken()) {
                             window.CoreUtils.showNotification('Success', 'Quick login successful! Redirecting to chat...', 'success');
                             
-                            // Redirect to chat.html after short delay
                             setTimeout(() => {
                                 window.location.href = 'chat.html';
                             }, 1500);
@@ -3528,7 +3769,6 @@
                     console.log('[AUTH] Enter chat button clicked - redirecting to chat.html');
                     window.CoreUtils.showNotification('Info', 'Redirecting to chat...', 'info');
                     
-                    // Redirect to chat.html
                     setTimeout(() => {
                         window.location.href = 'chat.html';
                     }, 1000);
@@ -3536,9 +3776,7 @@
             }
         }
         
-        // CHANGED: Enhanced checkExistingSession to use api.auth if available
         function checkExistingSession() {
-            // First check with SessionState
             if (window.SessionState.isLoggedIn()) {
                 const user = window.SessionState.getUser();
                 if (user) {
@@ -3546,12 +3784,17 @@
                     document.getElementById('dashboardGreeting').textContent = `Welcome, ${user.displayName || user.username || 'User'}!`;
                     document.getElementById('dashboardEmail').textContent = user.email || '';
                     document.getElementById('dashboardAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
+                    
+                    const quickLoginCard = document.getElementById('quickLoginCard');
+                    if (quickLoginCard) {
+                        document.getElementById('quickLoginName').textContent = `Welcome back, ${user.displayName || user.username || 'User'}!`;
+                        document.getElementById('quickLoginEmail').textContent = user.email || '';
+                        document.getElementById('quickLoginAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
+                        quickLoginCard.classList.add('visible');
+                    }
                 }
             } else {
-                // If SessionState doesn't have a session but api.auth might
-                // This handles the case where api.auth was initialized elsewhere
                 if (window.api && window.api.auth && window.api.auth.isAuthenticated && window.api.auth.isAuthenticated()) {
-                    // Try to get user from api.auth
                     if (window.api.auth.getCurrentUser) {
                         const user = window.api.auth.getCurrentUser();
                         if (user) {
@@ -3567,17 +3810,13 @@
             }
         }
         
-        // CHANGED: Start initialization with proper API readiness check
         document.addEventListener('DOMContentLoaded', function() {
             console.log('[AUTH] DOM loaded, starting authentication system');
             
-            // Show loading state while waiting for API
             window.CoreUtils.showLoading('Initializing application...');
             
-            // Initialize auth system
             initializeAuthenticationSystem();
             
-            // Hide loading after a timeout or when auth is initialized
             const loadingCheck = setInterval(() => {
                 if (authInitialized) {
                     clearInterval(loadingCheck);
@@ -3586,14 +3825,12 @@
                 }
             }, 100);
             
-            // Safety timeout
             setTimeout(() => {
                 clearInterval(loadingCheck);
                 window.CoreUtils.hideLoading();
             }, 3000);
         });
         
-        // CHANGED: Listen for auth state changes from api.auth
         if (typeof document.addEventListener === 'function') {
             document.addEventListener('authStateChange', function(event) {
                 console.log('[AUTH] Auth state change event received:', event.detail);
@@ -3602,7 +3839,6 @@
             
             document.addEventListener('authReady', function(event) {
                 console.log('[AUTH] Auth ready event received');
-                // Update UI if needed when auth becomes ready
                 checkExistingSession();
             });
         }

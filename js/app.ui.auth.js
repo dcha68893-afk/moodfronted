@@ -1,10 +1,11 @@
 // app.ui.auth.js - Authentication Gateway Module
-// VERSION: 4.0.4 - MODULAR CORE INTEGRATION
+// VERSION: 4.1.0 - WAIT FOR API.AUTH.JS READINESS
 // RESPONSIBILITIES: Authentication state management and API gateway
 // INTEGRATION: Exclusively uses api.auth.js for all authentication operations
 // ISOLATION: No DOM dependencies, no UI logic, no automatic initialization
 // UI ORCHESTRATION: Preserves all UI flows, event bindings, and visual feedback patterns
 // SAFETY: Added safety guards to prevent crashes in chat.html and iframes
+// FIX: UI initialization now waits for window.api.auth.waitForReady() or polls with timeout
 
 // ============================================================================
 // MODULAR CORE IMPORTS
@@ -44,10 +45,10 @@ const AUTH_GATEWAY_CONFIG = {
     UI_READY_CHECK_INTERVAL: 100,
     UI_READY_MAX_WAIT: 5000,
     
-    // API Initialization - INCREASED for reliability
-    API_AUTH_INIT_MAX_WAIT: 15000, // Increased from 10000
-    API_AUTH_INIT_RETRY_INTERVAL: 500,
-    API_AUTH_INIT_MAX_RETRIES: 30, // Increased from 20
+    // API Initialization - REDUCED: now uses waitForReady()
+    API_AUTH_INIT_MAX_WAIT: 3000, // Reduced from 15000 - waitForReady handles real wait
+    API_AUTH_INIT_RETRY_INTERVAL: 100,
+    API_AUTH_INIT_MAX_RETRIES: 30,
     
     // No more endpoint definitions - all handled by api.auth.js
 };
@@ -344,12 +345,12 @@ const SafetyGuards = {
 window.__authSafetyGuards = SafetyGuards;
 
 // ============================================================================
-// API.AUTH.JS READINESS MANAGER - ENHANCED WITH BETTER DETECTION
+// API.AUTH.JS READINESS MANAGER - UPDATED TO USE waitForReady()
 // ============================================================================
 class ApiAuthReadinessManager {
     constructor() {
         this._isReady = false;
-        this._isFullyInitialized = false; // NEW: Tracks if api.auth.js is fully initialized
+        this._isFullyInitialized = false;
         this._readyCallbacks = [];
         this._errorCallbacks = [];
         this._detectionInProgress = false;
@@ -357,7 +358,7 @@ class ApiAuthReadinessManager {
         this._detectionStartTime = null;
         this._readyEventName = 'apiAuthReady';
         this._errorEventName = 'apiAuthError';
-        this._fullyReadyEventName = 'api:auth:initialized'; // NEW: Event from api.auth.js
+        this._fullyReadyEventName = 'api:auth:initialized';
         
         // Start detection immediately
         this._initialize();
@@ -388,7 +389,7 @@ class ApiAuthReadinessManager {
                 this._markAsFailed(event.detail);
             });
             
-            // NEW: Listen for api.auth.js FULL initialization event
+            // Listen for api.auth.js FULL initialization event
             window.addEventListener(this._fullyReadyEventName, (event) => {
                 console.log('✅ api.auth.js FULLY INITIALIZED event received:', event.detail);
                 this._markAsFullyInitialized(event.detail);
@@ -475,7 +476,8 @@ class ApiAuthReadinessManager {
                     lifecycleState: apiAuth._lifecycleState,
                     registrationComplete: apiAuth._registrationComplete,
                     _initialized: apiAuth._initialized,
-                    ready: apiAuth.ready
+                    ready: apiAuth.ready,
+                    hasWaitForReady: typeof apiAuth.waitForReady === 'function'
                 });
                 
                 // Check for essential methods
@@ -615,7 +617,8 @@ class ApiAuthReadinessManager {
                 moduleType: typeof module,
                 hasLogin: typeof module.login,
                 hasLogout: typeof module.logout,
-                hasGetUser: typeof module.getUser
+                hasGetUser: typeof module.getUser,
+                hasWaitForReady: typeof module.waitForReady === 'function'
             });
             
             // Check for essential methods - THIS IS THE MOST IMPORTANT CHECK
@@ -745,7 +748,7 @@ class ApiAuthReadinessManager {
                 'authModuleReady',
                 'apiInitialized',
                 'modulesLoaded',
-                'api:auth:initialized' // Specific event from api.auth.js
+                'api:auth:initialized'
             ];
             
             events.forEach(eventName => {
@@ -990,7 +993,7 @@ class ApiAuthReadinessManager {
                         fullyInitialized: false,
                         timeout: true 
                     });
-                }, 10000); // 10 second timeout for full initialization
+                }, 3000); // 3 second timeout for full initialization
             } catch (error) {
                 window.__authSafetyGuards._logOnce(`waitForFullInitialization failed: ${error.message}`, 'FULL_INIT_WAIT');
                 resolve({ 
@@ -1193,7 +1196,7 @@ try {
 })();
 
 // ============================================================================
-// API.AUTH PROXY WITH ENHANCED INITIALIZATION WAITING
+// API.AUTH PROXY WITH ENHANCED waitForReady() INTEGRATION
 // ============================================================================
 class ApiAuthProxy {
     constructor() {
@@ -1212,8 +1215,22 @@ class ApiAuthProxy {
         try {
             console.log('🔧 Initializing ApiAuthProxy...');
             
-            // Wait for api.auth to be ready (detected)
-            const readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+            // Wait for api.auth to be ready - USE waitForReady() if available
+            let readinessResult;
+            
+            if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
+                console.log('✅ Using window.api.auth.waitForReady() for initialization');
+                try {
+                    await window.api.auth.waitForReady();
+                    readinessResult = { ready: true, fullyInitialized: true, source: 'waitForReady' };
+                } catch (error) {
+                    console.warn('⚠️ waitForReady() failed, falling back to polling', error);
+                    readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+                }
+            } else {
+                console.log('⏳ waitForReady() not available, using polling');
+                readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+            }
             
             if (readinessResult.fallbackMode) {
                 console.warn('⚠️ No real api.auth found, using fallback mode');
@@ -1224,15 +1241,13 @@ class ApiAuthProxy {
             }
             
             // Get the real api.auth module
-            // FORCE DIRECT CONNECTION TO api.auth.js
-            // Check multiple locations for the real module
             const possibleAuthModules = [
                 window.api?.auth,
                 window.MoodChatAuth,
                 window.auth,
                 window.app?.api?.auth,
                 window.__authModule
-            ].filter(Boolean); // Remove null/undefined
+            ].filter(Boolean);
             
             console.log('🔍 Looking for real api.auth module in:', possibleAuthModules.map(m => m.constructor.name));
             
@@ -1258,6 +1273,7 @@ class ApiAuthProxy {
                     hasLogin: typeof this._realApiAuth.login,
                     hasLogout: typeof this._realApiAuth.logout,
                     hasGetUser: typeof this._realApiAuth.getUser,
+                    hasWaitForReady: typeof this._realApiAuth.waitForReady === 'function',
                     version: this._realApiAuth._version,
                     lifecycleState: this._realApiAuth._lifecycleState
                 });
@@ -1321,7 +1337,16 @@ class ApiAuthProxy {
         
         this._fullInitPromise = (async () => {
             try {
-                // Wait for the readiness manager to signal full initialization
+                // USE waitForReady() if available
+                if (this._realApiAuth && typeof this._realApiAuth.waitForReady === 'function') {
+                    console.log('✅ Using waitForReady() for full initialization');
+                    await this._realApiAuth.waitForReady();
+                    console.log('✅ api.auth.js fully initialized via waitForReady()');
+                    this._isFallbackMode = false;
+                    return true;
+                }
+                
+                // Fall back to readiness manager
                 const result = await window.__apiAuthReadinessManager.waitForFullInitialization();
                 
                 if (result.fullyInitialized) {
@@ -1331,7 +1356,6 @@ class ApiAuthProxy {
                     return true;
                 } else {
                     console.warn('⚠️ api.auth.js full initialization timeout, checking current state');
-                    // Check current state
                     if (this._isApiAuthFullyInitialized(this._realApiAuth)) {
                         console.log('✅ api.auth.js is now fully initialized');
                         this._isFallbackMode = false;
@@ -1364,10 +1388,11 @@ class ApiAuthProxy {
             
             console.log('🔍 _isApiAuthFullyInitialized checking:', {
                 moduleType: typeof module,
-                keys: Object.keys(module).slice(0, 10), // First 10 keys
+                keys: Object.keys(module).slice(0, 10),
                 hasLogin: typeof module.login,
                 hasLogout: typeof module.logout,
-                hasGetUser: typeof module.getUser
+                hasGetUser: typeof module.getUser,
+                hasWaitForReady: typeof module.waitForReady === 'function'
             });
             
             // CRITICAL CHECK: Must have essential methods
@@ -1381,10 +1406,7 @@ class ApiAuthProxy {
                 return false;
             }
             
-            // For v2.1.1+, we consider it fully initialized if it has essential methods
-            // The module handles its own internal initialization state
             console.log('✅ Module has all essential methods, considering fully initialized');
-            
             return true;
         } catch (error) {
             window.__authSafetyGuards._logOnce(`API Auth full initialization check failed: ${error.message}`, 'API_FULL_INIT_CHECK');
@@ -1414,14 +1436,24 @@ class ApiAuthProxy {
                             return this._handleFallbackCall(method, args);
                         }
                         
-                        // Wait for full initialization if needed
+                        // Wait for full initialization if needed - USE waitForReady() if available
                         if (!this._isApiAuthFullyInitialized(this._realApiAuth)) {
                             console.log(`⏳ api.auth.js not fully initialized for ${method}, waiting...`);
-                            const fullyReady = await this._waitForFullInitialization();
                             
-                            if (!fullyReady) {
-                                console.warn(`⚠️ api.auth.js still not ready for ${method}, using fallback`);
-                                return this._handleFallbackCall(method, args, { error: 'Authentication module not ready' });
+                            if (this._realApiAuth && typeof this._realApiAuth.waitForReady === 'function') {
+                                try {
+                                    await this._realApiAuth.waitForReady();
+                                    console.log(`✅ waitForReady() complete for ${method}`);
+                                } catch (error) {
+                                    console.warn(`⚠️ waitForReady() failed for ${method}, using fallback`, error);
+                                    return this._handleFallbackCall(method, args, { error: 'Authentication module not ready' });
+                                }
+                            } else {
+                                const fullyReady = await this._waitForFullInitialization();
+                                if (!fullyReady) {
+                                    console.warn(`⚠️ api.auth.js still not ready for ${method}, using fallback`);
+                                    return this._handleFallbackCall(method, args, { error: 'Authentication module not ready' });
+                                }
                             }
                         }
                         
@@ -1615,13 +1647,13 @@ class ApiAuthProxy {
 }
 
 // ============================================================================
-// AUTH GATEWAY - CORE MODULE WITH ENHANCED API.AUTH INTEGRATION
+// AUTH GATEWAY - CORE MODULE WITH waitForReady() INTEGRATION
 // ============================================================================
 class AuthGateway {
     constructor() {
         try {
             this._state = {
-                status: 'unknown', // 'unknown', 'authenticated', 'unauthenticated', 'error'
+                status: 'unknown',
                 user: null,
                 token: null,
                 lastUpdated: null
@@ -1643,7 +1675,7 @@ class AuthGateway {
             this._eventBusSubscriptions = new Map();
             this._apiAuthProxy = null;
             this._apiAuthReady = false;
-            this._apiAuthFullyInitialized = false; // NEW: Track full initialization
+            this._apiAuthFullyInitialized = false;
             
             // Initialize API readiness manager
             if (!window.__apiAuthReadinessManager) {
@@ -1680,9 +1712,9 @@ class AuthGateway {
     
     async _init() {
         try {
-            console.log('🚀 Auth Gateway initializing with enhanced API auth integration...');
+            console.log('🚀 Auth Gateway initializing with waitForReady() integration...');
             
-            // Step 1: Wait for API Auth to be ready
+            // Step 1: Wait for API Auth to be ready - USE waitForReady() if available
             await this._waitForApiAuth();
             
             // Step 2: Initialize API Auth Proxy
@@ -1703,7 +1735,7 @@ class AuthGateway {
             // Step 7: Register with global UI namespace
             this._registerWithUINamespace();
             
-            console.log('✅ Auth Gateway initialized with robust API auth integration');
+            console.log('✅ Auth Gateway initialized with waitForReady() integration');
         } catch (error) {
             window.__authSafetyGuards._logOnce(`AuthGateway initialization failed: ${error.message}`, 'AUTH_GATEWAY_INIT');
             // Still try to set up basic functionality
@@ -1713,14 +1745,29 @@ class AuthGateway {
     }
     
     /**
-     * Wait for API Auth to be fully ready
+     * Wait for API Auth to be fully ready - UPDATED TO USE waitForReady()
      */
     async _waitForApiAuth() {
         try {
             console.log('⏳ Waiting for api.auth.js to be ready...');
             
-            // Use the readiness manager
-            const readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+            let readinessResult;
+            
+            // USE waitForReady() if available
+            if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
+                console.log('✅ Using window.api.auth.waitForReady()');
+                try {
+                    await window.api.auth.waitForReady();
+                    readinessResult = { ready: true, fullyInitialized: true, source: 'waitForReady' };
+                    console.log('✅ waitForReady() completed successfully');
+                } catch (error) {
+                    console.warn('⚠️ waitForReady() failed, falling back to polling', error);
+                    readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+                }
+            } else {
+                console.log('⏳ waitForReady() not available, using polling');
+                readinessResult = await window.__apiAuthReadinessManager.waitForReady();
+            }
             
             if (readinessResult.fallbackMode) {
                 console.warn('⚠️ API Auth not fully available, using fallback mode');
@@ -1729,9 +1776,24 @@ class AuthGateway {
                 return;
             }
             
-            // Wait for FULL initialization (not just detection)
+            // Wait for FULL initialization
             console.log('⏳ Waiting for api.auth.js FULL initialization...');
-            const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+            
+            let fullInitResult;
+            
+            // USE waitForReady() again for full initialization
+            if (window.api?.auth && typeof window.api.auth.waitForReady === 'function' && !readinessResult.fullyInitialized) {
+                console.log('✅ Using waitForReady() for full initialization');
+                try {
+                    await window.api.auth.waitForReady();
+                    fullInitResult = { fullyInitialized: true, source: 'waitForReady-full' };
+                } catch (error) {
+                    console.warn('⚠️ waitForReady() failed for full initialization', error);
+                    fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                }
+            } else {
+                fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+            }
             
             if (fullInitResult.fullyInitialized) {
                 console.log('✅ api.auth.js is FULLY INITIALIZED and ready');
@@ -1763,7 +1825,18 @@ class AuthGateway {
         try {
             console.log('🔍 Verifying api.auth.js initialization...');
             
-            // Check multiple times with increasing delays
+            // Check if waitForReady is available
+            if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
+                try {
+                    await window.api.auth.waitForReady();
+                    console.log('✅ api.auth.js verified via waitForReady()');
+                    return true;
+                } catch (error) {
+                    console.warn('⚠️ waitForReady() verification failed', error);
+                }
+            }
+            
+            // Fallback checks
             const checks = [
                 { delay: 0, description: 'Immediate check' },
                 { delay: 100, description: 'Short delay check' },
@@ -1876,7 +1949,7 @@ class AuthGateway {
     }
     
     /**
-     * Ensure API is ready before proceeding
+     * Ensure API is ready before proceeding - UPDATED TO USE waitForReady()
      */
     async _ensureAPIReady() {
         if (this._apiReady && this._apiAuthReady && this._apiAuthFullyInitialized) {
@@ -1894,7 +1967,7 @@ class AuthGateway {
                         this._apiReadyCallbacks.splice(index, 1);
                         resolve();
                     }
-                }, 5000);
+                }, 3000); // Reduced from 5000
                 
                 // Start waiting if not already
                 if (!this._waitingForAPI) {
@@ -1984,11 +2057,11 @@ class AuthGateway {
     }
     
     // ============================================================================
-    // PUBLIC API METHODS - UPDATED TO USE API AUTH PROXY
+    // PUBLIC API METHODS - UPDATED TO USE API AUTH PROXY WITH waitForReady()
     // ============================================================================
     
     /**
-     * Login with credentials - Uses apiAuthProxy.login()
+     * Login with credentials - Uses apiAuthProxy.login() with waitForReady()
      */
     async login(credentials) {
         try {
@@ -1999,10 +2072,20 @@ class AuthGateway {
             const email = credentials.email.trim();
             const password = credentials.password;
             
-            // Ensure API Auth is ready AND fully initialized
+            // Ensure API Auth is ready AND fully initialized - USE waitForReady()
             await this._ensureAPIReady();
             
-            // Additional wait for full initialization
+            // Additional wait for full initialization - USE waitForReady() if available
+            if (window.api?.auth && typeof window.api.auth.waitForReady === 'function' && !this._apiAuthFullyInitialized) {
+                console.log('⏳ Calling waitForReady() before login...');
+                try {
+                    await window.api.auth.waitForReady();
+                    this._apiAuthFullyInitialized = true;
+                    console.log('✅ waitForReady() complete for login');
+                } catch (error) {
+                    console.warn('⚠️ waitForReady() failed before login', error);
+                }
+            }
             
             // Check if api.auth.js is available directly
             if (window.api?.auth && typeof window.api.auth.login === 'function') {
@@ -2061,7 +2144,7 @@ class AuthGateway {
             try {
                 console.log('Attempting login with identifier:', email.substring(0, 3) + '...');
                 
-                // ✅ UPDATED: Use apiAuthProxy.login() instead of direct API call
+                // Use apiAuthProxy.login()
                 const response = await this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
                 
                 console.log('Login API call completed, processing response...');
@@ -2234,13 +2317,24 @@ class AuthGateway {
                 throw new Error('Missing required registration data');
             }
             
-            // Ensure API Auth is ready AND fully initialized
+            // Ensure API Auth is ready AND fully initialized - USE waitForReady()
             await this._ensureAPIReady();
             
-            // Wait for full initialization if needed
+            // Wait for full initialization if needed - USE waitForReady()
             if (!this._apiAuthFullyInitialized) {
-                const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
+                    try {
+                        await window.api.auth.waitForReady();
+                        this._apiAuthFullyInitialized = true;
+                    } catch (error) {
+                        console.warn('⚠️ waitForReady() failed before register', error);
+                        const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                        this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                    }
+                } else {
+                    const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                    this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                }
             }
             
             // Ensure UI orchestration is ready
@@ -2265,7 +2359,7 @@ class AuthGateway {
                 
                 console.log('Attempting registration for:', data.email);
                 
-                // ✅ UPDATED: Use apiAuthProxy.register()
+                // Use apiAuthProxy.register()
                 const response = await this._apiAuthProxy.register({
                     email: data.email.trim().toLowerCase(),
                     username: data.username.trim(),
@@ -2281,7 +2375,7 @@ class AuthGateway {
                     return response;
                 }
                 
-                // Check success - rest of method remains the same as original
+                // Check success
                 const isSuccessful = response.success === true || response.ok === true;
                 
                 if (isSuccessful) {
@@ -2370,19 +2464,30 @@ class AuthGateway {
     }
     
     /**
-     * Auto-login from stored token - Uses apiAuthProxy.validateAuth() or getUser()
+     * Auto-login from stored token - Uses apiAuthProxy.validateAuth() or getUser() with waitForReady()
      */
     async autoLogin() {
         try {
             console.log('Attempting auto-login from stored token...');
             
-            // Ensure API Auth is ready AND fully initialized
+            // Ensure API Auth is ready AND fully initialized - USE waitForReady()
             await this._ensureAPIReady();
             
-            // Wait for full initialization if needed
+            // Wait for full initialization if needed - USE waitForReady()
             if (!this._apiAuthFullyInitialized) {
-                const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
-                this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                if (window.api?.auth && typeof window.api.auth.waitForReady === 'function') {
+                    try {
+                        await window.api.auth.waitForReady();
+                        this._apiAuthFullyInitialized = true;
+                    } catch (error) {
+                        console.warn('⚠️ waitForReady() failed before autoLogin', error);
+                        const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                        this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                    }
+                } else {
+                    const fullInitResult = await window.__apiAuthReadinessManager.waitForFullInitialization();
+                    this._apiAuthFullyInitialized = fullInitResult.fullyInitialized;
+                }
             }
             
             // Ensure UI orchestration is ready
@@ -2414,7 +2519,7 @@ class AuthGateway {
             this._validationInProgress = true;
             
             try {
-                // ✅ UPDATED: Use apiAuthProxy.validateAuth() or getUser() for token validation
+                // Use apiAuthProxy.validateAuth() or getUser() for token validation
                 let response;
                 
                 if (typeof this._apiAuthProxy.validateAuth === 'function') {
@@ -2553,7 +2658,7 @@ class AuthGateway {
             await this._ensureUIOrchestrationReady();
             
             try {
-                // ✅ UPDATED: Use apiAuthProxy.logout()
+                // Use apiAuthProxy.logout()
                 if (typeof this._apiAuthProxy.logout === 'function') {
                     try {
                         await this._apiAuthProxy.logout();
@@ -2700,7 +2805,7 @@ class AuthGateway {
     }
     
     /**
-     * Validate current token - Uses apiAuthProxy.validateAuth()
+     * Validate current token - Uses apiAuthProxy.validateAuth() with waitForReady()
      */
     async validateToken() {
         try {
@@ -2729,10 +2834,10 @@ class AuthGateway {
             this._validationInProgress = true;
             
             try {
-                // Ensure API Auth is ready
+                // Ensure API Auth is ready - USE waitForReady()
                 await this._ensureAPIReady();
                 
-                // ✅ UPDATED: Use apiAuthProxy.validateAuth() for server validation
+                // Use apiAuthProxy.validateAuth() for server validation
                 let response;
                 if (typeof this._apiAuthProxy.validateAuth === 'function') {
                     response = await this._apiAuthProxy.validateAuth();
@@ -2840,7 +2945,7 @@ class AuthGateway {
                 try {
                     console.log('Attempting token refresh...');
                     
-                    // ✅ UPDATED: Use apiAuthProxy.refreshToken()
+                    // Use apiAuthProxy.refreshToken()
                     let response;
                     if (typeof this._apiAuthProxy.refreshToken === 'function') {
                         response = await this._apiAuthProxy.refreshToken();
@@ -3161,12 +3266,14 @@ class AuthGateway {
                 apiAuthProxy: {
                     initialized: this._apiAuthProxy ? true : false,
                     fallbackMode: this._apiAuthProxy?.isFallbackMode() || false,
-                    hasRealApiAuth: !!this._apiAuthProxy?.getRealApiAuth()
+                    hasRealApiAuth: !!this._apiAuthProxy?.getRealApiAuth(),
+                    hasWaitForReady: !!(window.api?.auth && typeof window.api.auth.waitForReady === 'function')
                 },
                 apiModules: {
                     core: !!window.api?.core,
                     auth: !!window.api?.auth,
-                    request: !!window.api?.request
+                    request: !!window.api?.request,
+                    waitForReady: !!(window.api?.auth && typeof window.api.auth.waitForReady === 'function')
                 },
                 uiNamespace: {
                     app: !!window.app,
@@ -3282,7 +3389,7 @@ class AuthGateway {
                 user: this._state.user,
                 token: this._state.token,
                 timestamp: Date.now(),
-                version: '4.0.4'
+                version: '4.1.0'
             };
             
             localStorage.setItem(AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY, JSON.stringify(authState));
@@ -3460,7 +3567,7 @@ class AuthGateway {
                 user: this._state.user,
                 token: this._state.token,
                 timestamp: Date.now(),
-                version: '4.0.4'
+                version: '4.1.0'
             };
             
             localStorage.setItem(AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY, JSON.stringify(authState));
@@ -3528,7 +3635,7 @@ class AuthGateway {
             window.addEventListener('apiAuthManagerReady', this._handleApiAuthReady.bind(this));
             window.addEventListener('apiAuthManagerError', this._handleApiAuthError.bind(this));
             window.addEventListener('apiAuthProxyReady', this._handleApiAuthProxyReady.bind(this));
-            window.addEventListener('apiAuthManagerFullyInitialized', this._handleApiAuthFullyInitialized.bind(this)); // NEW
+            window.addEventListener('apiAuthManagerFullyInitialized', this._handleApiAuthFullyInitialized.bind(this));
         } catch (error) {
             window.__authSafetyGuards._logOnce(`_setupSynchronization failed: ${error.message}`, 'SETUP_SYNCHRONIZATION');
         }
@@ -4138,24 +4245,24 @@ try {
     };
 }
 
-console.log('✅ app.ui.auth.js - AUTHENTICATION GATEWAY MODULE LOADED (v4.0.4)');
-console.log('🚀 ENHANCED API.AUTH.JS INTEGRATION WITH MODULAR CORE:');
+console.log('✅ app.ui.auth.js - AUTHENTICATION GATEWAY MODULE LOADED (v4.1.0)');
+console.log('🚀 ENHANCED API.AUTH.JS INTEGRATION WITH waitForReady():');
 console.log('  • ✅ MODULAR: Imported app.core.session.js and app.core.ui.js');
 console.log('  • ✅ COMPATIBLE: All auth forms, validation, and UI interactions preserved');
 console.log('  • ✅ EVENT-SAFE: All existing event listeners and DOM handling preserved');
 console.log('  • ✅ FEATURE-COMPLETE: Login, logout, modal popups all functional');
-console.log('  • ✅ NEW: Distinguishes between detected vs fully initialized');
-console.log('  • ✅ NEW: Waits for api.auth.js FULL initialization event');
-console.log('  • ✅ NEW: Prevents "module not ready" errors');
-console.log('  • ✅ NEW: Better fallback messages with retry hints');
-console.log('  • ✅ FIXED: Race condition between detection and initialization');
-console.log('  • ✅ SAFETY: Added safety guards to prevent crashes in chat.html and iframes');
+console.log('  • ✅ NEW: Uses window.api.auth.waitForReady() for auth readiness');
+console.log('  • ✅ NEW: Falls back to polling only if waitForReady() unavailable');
+console.log('  • ✅ NEW: Reduced hardcoded timeouts from 15s to 3s');
+console.log('  • ✅ FIXED: Race condition between UI initialization and auth readiness');
+console.log('  • ✅ FIXED: "Authentication module not ready" errors prevented');
+console.log('  • ✅ SAFETY: Added defensive checks for missing api.auth.js');
 console.log('  • ✅ SAFETY: Form initialization isolated with try/catch');
 console.log('  • ✅ SAFETY: DOM element access protected');
 console.log('  • ✅ SAFETY: Event handlers wrapped in safe execution');
 console.log('  • ✅ SAFETY: Session checks with graceful degradation');
 console.log('🔗 GLOBAL OBJECTS: AuthGateway, __apiAuthReadinessManager, __uiOrchestrationRegistry, __authSafetyGuards');
-console.log('⚡ READY STATE: Waits for api.auth.js FULL initialization before auth operations');
+console.log('⚡ READY STATE: UI now waits for api.auth.js FULL initialization before executing auth operations');
 console.log('🛡️ FALLBACK SAFE: User-friendly messages when service is initializing');
-console.log('⚠️ CRITICAL FIX: No more "Authentication module not ready" console errors');
+console.log('⚠️ CRITICAL FIX: No more race conditions between auth detection and UI initialization');
 console.log('🛡️ CRASH PROTECTION: Auth UI failures will not crash chat.html or iframes');

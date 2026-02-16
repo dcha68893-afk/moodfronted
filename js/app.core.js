@@ -752,7 +752,7 @@ if (typeof APP_CONFIG === 'undefined') {
 
 // Check for public pages
 window.isPublicPage = function() {
-  const publicPages = ['/', '/index.html', '/login.html', '/signup.html', '/auth.html', '/register.html'];
+  const publicPages = ['/', '/index.html', '/index.html', '/signup.html', '/auth.html', '/register.html'];
   const currentPath = window.location.pathname.toLowerCase();
   
   // Also check if we have a page parameter that indicates public access
@@ -2419,7 +2419,7 @@ window.isPublicPage = function() {
       
       // Only redirect if not already on auth page
       const currentPath = window.location.pathname;
-      const authPages = ['/', '/index.html', '/login.html', '/signup.html'];
+      const authPages = ['/', '/index.html', '/index.html', '/signup.html'];
       const isAuthPage = authPages.some(page => currentPath.endsWith(page));
       
       if (!isAuthPage) {
