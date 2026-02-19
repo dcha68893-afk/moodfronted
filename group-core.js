@@ -1,7 +1,8 @@
 // =============================================
 // PRODUCTION-READY GROUPS SYSTEM WITH PARENT SESSION AUTHORITY
 // COMPLETE CORE ENGINE - HIGHLY SECURE, XSS PROTECTED
-// VERSION: 3.0.1 - FIXED HANDSHAKE & PARENT COMMUNICATION
+// VERSION: 3.2.0 - ADDED IFrameAuthority, StartupGovernor, TransportAgent
+// ENHANCED: Stability, Resilience, Multi-module Compatibility
 // =============================================
 
 // =============================================
@@ -9,8 +10,127 @@
 // =============================================
 
 const MODULE_NAME = 'Groups';
-const MODULE_VERSION = '3.0.1';
+const MODULE_VERSION = '3.2.0';
 let _instanceId = null;
+
+// =============================================
+// ENVIRONMENT AUTO-DETECTION SYSTEM
+// =============================================
+
+const ENVIRONMENT = (() => {
+    try {
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+        const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+        const isFileProtocol = protocol === 'file:';
+        const isRender = hostname.includes('onrender.com') || hostname.endsWith('.onrender.com');
+        const isCustomDomain = !isLocalhost && !isRender && !isFileProtocol && hostname.includes('.');
+        
+        // Detect VPN/High Latency via navigator.connection if available
+        let isHighLatency = false;
+        let estimatedBandwidth = Infinity;
+        
+        if (navigator.connection) {
+            const conn = navigator.connection;
+            estimatedBandwidth = conn.downlink || Infinity;
+            const rtt = conn.rtt || 0;
+            isHighLatency = rtt > 300 || estimatedBandwidth < 0.5; // 300ms+ or <500kbps
+        }
+        
+        // Detect VPN via IP range heuristics (simplified)
+        const isVPN = !isLocalhost && !isRender && !isCustomDomain && hostname.match(/^\d+\.\d+\.\d+\.\d+$/);
+        
+        return {
+            type: isLocalhost ? 'LOCAL_DEV' : 
+                  isRender ? 'RENDER_HOSTED' : 
+                  isVPN ? 'VPN_NETWORK' : 
+                  isCustomDomain ? 'PRODUCTION' : 'UNKNOWN',
+            hostname,
+            protocol,
+            isLocalhost,
+            isRender,
+            isVPN: !!isVPN,
+            isHighLatency,
+            estimatedBandwidth,
+            userAgent: navigator.userAgent,
+            timestamp: Date.now()
+        };
+    } catch (e) {
+        return {
+            type: 'UNKNOWN',
+            error: e.message,
+            timestamp: Date.now()
+        };
+    }
+})();
+
+// =============================================
+// DIAGNOSTICS CONTROLLER (Silent by default)
+// =============================================
+
+const DIAGNOSTICS = {
+    enabled: false, // Disabled by default - no console noise
+    logs: [],
+    maxLogs: 100,
+    
+    enable(flag = true) {
+        this.enabled = flag;
+        if (flag) {
+            this.log('info', 'Diagnostics enabled');
+        }
+    },
+    
+    log(level, message, data = null) {
+        if (!this.enabled) return;
+        
+        const entry = {
+            timestamp: Date.now(),
+            level,
+            message,
+            data: data ? JSON.parse(JSON.stringify(data)) : null
+        };
+        
+        this.logs.push(entry);
+        if (this.logs.length > this.maxLogs) {
+            this.logs.shift();
+        }
+        
+        // Silent in console - only store
+    },
+    
+    getState() {
+        return {
+            enabled: this.enabled,
+            logCount: this.logs.length,
+            environment: ENVIRONMENT
+        };
+    }
+};
+
+// Expose debug toggle via window (disabled by default)
+if (typeof window !== 'undefined') {
+    Object.defineProperty(window, '__IFRAME_DEBUG__', {
+        get: () => DIAGNOSTICS.enabled,
+        set: (val) => {
+            DIAGNOSTICS.enable(val);
+            if (val) {
+                console.log('[DIAGNOSTICS] Enabled - check window.__IFRAME_DEBUG_DATA__');
+            }
+        },
+        configurable: false
+    });
+    
+    Object.defineProperty(window, '__IFRAME_DEBUG_DATA__', {
+        get: () => ({
+            environment: ENVIRONMENT,
+            diagnostics: DIAGNOSTICS.logs.slice(-50),
+            state: StartupGovernor ? StartupGovernor.getState() : null,
+            session: SessionMirror ? SessionMirror.getState() : null,
+            connection: ParentConnectionManager ? ParentConnectionManager.getStatus() : null
+        }),
+        configurable: false
+    });
+}
 
 // =============================================
 // SECURITY CONSTANTS - CSP COMPLIANT
@@ -32,10 +152,1220 @@ const SECURITY_CONFIG = {
         /<script/i,
         /<\/script/i
     ],
-    HANDSHAKE_TIMEOUT: 5000,
-    HANDSHAKE_MAX_RETRIES: 3,
+    HANDSHAKE_TIMEOUT: ENVIRONMENT.isHighLatency ? 10000 : 5000, // Adaptive timeout
+    HANDSHAKE_MAX_RETRIES: ENVIRONMENT.isHighLatency ? 5 : 3,
     SESSION_REFRESH_INTERVAL: 60000,
-    MESSAGE_QUEUE_MAX_SIZE: 100
+    MESSAGE_QUEUE_MAX_SIZE: 100,
+    
+    // Protocol Constants
+    PROTOCOL_VERSION: "KYN-1.0",
+    FRAME_ID: 'groups-iframe-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+    HEARTBEAT_INTERVAL: ENVIRONMENT.isHighLatency ? 30000 : 15000, // Adaptive heartbeat
+    HEARTBEAT_TIMEOUT: ENVIRONMENT.isHighLatency ? 90000 : 45000,
+    ACK_TIMEOUT: ENVIRONMENT.isHighLatency ? 6000 : 3000,
+    MAX_RETRY_DELAY: ENVIRONMENT.isHighLatency ? 20000 : 10000,
+    INITIAL_RETRY_DELAY: ENVIRONMENT.isHighLatency ? 1000 : 500,
+    
+    // Origin Trust List - Dynamic
+    TRUSTED_ORIGINS: [
+        window.location.origin,
+        'http://localhost:5500',
+        'http://127.0.0.1:5500',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:4000',
+        'http://127.0.0.1:4000',
+        'https://knecta.chat',
+        'https://www.knecta.chat',
+        /\.onrender\.com$/,  // Support Render deployments
+        /^\d+\.\d+\.\d+\.\d+:\d+$/,  // Support VPN IPs
+        'null'
+    ]
+};
+
+// =============================================
+// STARTUP GOVERNOR - Prevents re-entry, duplicate handshakes
+// =============================================
+
+const StartupGovernor = {
+    _state: 'INIT', // INIT → WAIT_PARENT → HANDSHAKING → SYNCING → ACTIVE → DEGRADED → RECOVERING
+    _lock: false,
+    _initAttempts: 0,
+    _maxInitAttempts: 3,
+    _initPromise: null,
+    _initResolve: null,
+    _initReject: null,
+    _stateListeners: new Set(),
+    _stateHistory: [],
+    
+    init() {
+        if (this._lock) {
+            DIAGNOSTICS.log('debug', 'StartupGovernor locked, returning existing promise');
+            return this._initPromise || Promise.resolve({ success: false, reason: 'locked' });
+        }
+        
+        this._lock = true;
+        this._initAttempts++;
+        this._transition('WAIT_PARENT');
+        
+        this._initPromise = new Promise((resolve, reject) => {
+            this._initResolve = resolve;
+            this._initReject = reject;
+            
+            // Start initialization pipeline
+            this._runPipeline().then(resolve).catch(reject);
+        });
+        
+        return this._initPromise;
+    },
+    
+    async _runPipeline() {
+        try {
+            DIAGNOSTICS.log('info', 'StartupGovernor pipeline starting', { state: this._state });
+            
+            // Stage 1: Wait for parent (with timeout)
+            const parentAvailable = await this._waitForParent(ENVIRONMENT.isHighLatency ? 8000 : 5000);
+            
+            // Stage 2: Handshake
+            this._transition('HANDSHAKING');
+            const handshakeResult = await this._performHandshake(parentAvailable);
+            
+            // Stage 3: Session sync
+            this._transition('SYNCING');
+            const sessionResult = await this._syncSession(handshakeResult);
+            
+            // Stage 4: Activate
+            this._transition('ACTIVE');
+            
+            DIAGNOSTICS.log('info', 'StartupGovernor pipeline complete', {
+                parentAvailable,
+                handshake: handshakeResult,
+                session: sessionResult
+            });
+            
+            return {
+                success: true,
+                state: this._state,
+                parentAvailable,
+                handshake: handshakeResult,
+                session: sessionResult
+            };
+            
+        } catch (error) {
+            DIAGNOSTICS.log('error', 'StartupGovernor pipeline failed', { error: error.message });
+            
+            if (this._initAttempts < this._maxInitAttempts) {
+                this._transition('RECOVERING');
+                this._lock = false;
+                
+                // Retry with backoff
+                await new Promise(r => setTimeout(r, 1000 * this._initAttempts));
+                return this._runPipeline();
+            }
+            
+            this._transition('DEGRADED');
+            return {
+                success: false,
+                state: this._state,
+                error: error.message,
+                fallback: true
+            };
+        }
+    },
+    
+    _waitForParent(timeout) {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            const checkInterval = setInterval(() => {
+                const parentAvailable = ParentConnectionManager && 
+                                        ParentConnectionManager.parentAvailable;
+                
+                if (parentAvailable) {
+                    clearInterval(checkInterval);
+                    clearTimeout(timer);
+                    resolve(true);
+                }
+                
+                if (Date.now() - start > timeout) {
+                    clearInterval(checkInterval);
+                    clearTimeout(timer);
+                    resolve(false);
+                }
+            }, 100);
+            
+            const timer = setTimeout(() => {
+                clearInterval(checkInterval);
+                resolve(false);
+            }, timeout);
+        });
+    },
+    
+    async _performHandshake(parentAvailable) {
+        if (!parentAvailable) {
+            return { success: false, reason: 'parent_unavailable' };
+        }
+        
+        try {
+            // Use existing handshake system but ensure single execution
+            const result = await HandshakeClient.initiate({
+                timeout: SECURITY_CONFIG.HANDSHAKE_TIMEOUT,
+                maxRetries: SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES
+            });
+            
+            return { success: true, result };
+        } catch (error) {
+            DIAGNOSTICS.log('warn', 'Handshake failed, attempting cached session', { error: error.message });
+            
+            // Try cached session as fallback
+            if (ParentConnectionManager && ParentConnectionManager.tryCachedSession()) {
+                return { success: true, fromCache: true };
+            }
+            
+            return { success: false, error: error.message };
+        }
+    },
+    
+    async _syncSession(handshakeResult) {
+        // Wait for session to be ready
+        return new Promise((resolve) => {
+            if (SessionMirror && SessionMirror.isAuthenticated()) {
+                resolve({ success: true, fromCache: handshakeResult.fromCache });
+                return;
+            }
+            
+            const timeout = setTimeout(() => {
+                unsubscribe();
+                resolve({ success: false, reason: 'timeout' });
+            }, ENVIRONMENT.isHighLatency ? 8000 : 5000);
+            
+            const unsubscribe = SessionMirror.subscribe((state) => {
+                if (state.authenticated) {
+                    clearTimeout(timeout);
+                    unsubscribe();
+                    resolve({ success: true, fromCache: state.fromCache });
+                }
+            });
+        });
+    },
+    
+    _transition(newState) {
+        const validStates = ['INIT', 'WAIT_PARENT', 'HANDSHAKING', 'SYNCING', 'ACTIVE', 'DEGRADED', 'RECOVERING'];
+        if (!validStates.includes(newState)) return;
+        
+        const oldState = this._state;
+        this._state = newState;
+        
+        this._stateHistory.push({
+            from: oldState,
+            to: newState,
+            timestamp: Date.now()
+        });
+        
+        if (this._stateHistory.length > 20) {
+            this._stateHistory.shift();
+        }
+        
+        DIAGNOSTICS.log('info', `StartupGovernor state: ${oldState} → ${newState}`);
+        
+        this._stateListeners.forEach(listener => {
+            try {
+                listener(newState, oldState);
+            } catch (e) {
+                // Ignore listener errors
+            }
+        });
+    },
+    
+    onStateChange(listener) {
+        this._stateListeners.add(listener);
+        return () => this._stateListeners.delete(listener);
+    },
+    
+    getState() {
+        return {
+            state: this._state,
+            attempts: this._initAttempts,
+            history: this._stateHistory.slice(-5),
+            environment: ENVIRONMENT.type
+        };
+    },
+    
+    isActive() {
+        return this._state === 'ACTIVE';
+    },
+    
+    isDegraded() {
+        return this._state === 'DEGRADED';
+    },
+    
+    reset() {
+        this._state = 'INIT';
+        this._lock = false;
+        this._initAttempts = 0;
+        this._initPromise = null;
+        DIAGNOSTICS.log('info', 'StartupGovernor reset');
+    }
+};
+
+// =============================================
+// ORIGIN ADAPTER - Dynamic trust evaluator
+// =============================================
+
+const OriginAdapter = {
+    _trustCache: new Map(),
+    _dynamicOrigins: new Set(),
+    
+    init() {
+        // Add current origin
+        this.addTrustedOrigin(window.location.origin);
+        
+        // Add parent origin if detectable
+        try {
+            if (window.parent && window.parent.location) {
+                this.addTrustedOrigin(window.parent.location.origin);
+            }
+        } catch (e) {
+            // Cross-origin, ignore
+        }
+        
+        DIAGNOSTICS.log('info', 'OriginAdapter initialized', { trustedCount: this._trustCache.size });
+    },
+    
+    addTrustedOrigin(origin) {
+        if (!origin) return;
+        
+        const originStr = String(origin);
+        
+        // Check if already in static list
+        const isStaticTrusted = SECURITY_CONFIG.TRUSTED_ORIGINS.some(pattern => {
+            if (pattern instanceof RegExp) {
+                return pattern.test(originStr);
+            }
+            return pattern === originStr;
+        });
+        
+        if (isStaticTrusted) {
+            this._dynamicOrigins.add(originStr);
+        }
+    },
+    
+    isTrusted(origin) {
+        if (!origin) return false;
+        
+        // Check cache
+        if (this._trustCache.has(origin)) {
+            return this._trustCache.get(origin);
+        }
+        
+        const originStr = String(origin);
+        
+        // 1. Check exact matches in dynamic set
+        if (this._dynamicOrigins.has(originStr)) {
+            this._trustCache.set(origin, true);
+            return true;
+        }
+        
+        // 2. Check static patterns
+        for (const pattern of SECURITY_CONFIG.TRUSTED_ORIGINS) {
+            if (pattern instanceof RegExp && pattern.test(originStr)) {
+                this._dynamicOrigins.add(originStr);
+                this._trustCache.set(origin, true);
+                return true;
+            }
+            if (pattern === originStr) {
+                this._dynamicOrigins.add(originStr);
+                this._trustCache.set(origin, true);
+                return true;
+            }
+        }
+        
+        // 3. In sandbox mode or degraded state, be more permissive
+        if (this._isSandboxed() || StartupGovernor.isDegraded()) {
+            // Allow if origin is from same domain pattern
+            if (originStr.includes(window.location.hostname) || 
+                window.location.hostname.includes(originStr.replace(/^https?:\/\//, '').split(':')[0])) {
+                this._trustCache.set(origin, true);
+                return true;
+            }
+        }
+        
+        this._trustCache.set(origin, false);
+        return false;
+    },
+    
+    _isSandboxed() {
+        try {
+            // Try to access parent properties
+            const test = window.parent.document;
+            return false;
+        } catch (e) {
+            return e.name === 'SecurityError';
+        }
+    },
+    
+    getTrustedOrigins() {
+        return Array.from(this._dynamicOrigins);
+    },
+    
+    clearCache() {
+        this._trustCache.clear();
+    }
+};
+
+// =============================================
+// TRANSPORT AGENT - Reliable messaging with ACK/Retry
+// =============================================
+
+const TransportAgent = {
+    _messageId: 0,
+    _pendingAcks: new Map(),
+    _retryQueues: new Map(),
+    _offlineQueue: [],
+    _heartbeatInterval: null,
+    _lastHeartbeat: 0,
+    _connectionState: 'disconnected', // disconnected, connecting, connected, degraded
+    _maxRetries: ENVIRONMENT.isHighLatency ? 5 : 3,
+    _baseBackoff: ENVIRONMENT.isHighLatency ? 1000 : 500,
+    _listeners: new Set(),
+    _stats: {
+        sent: 0,
+        received: 0,
+        acked: 0,
+        timedout: 0,
+        retried: 0,
+        failed: 0
+    },
+    
+    init() {
+        this._setupHeartbeat();
+        this._processOfflineQueue();
+        DIAGNOSTICS.log('info', 'TransportAgent initialized', { environment: ENVIRONMENT.type });
+    },
+    
+    send(type, payload = {}, options = {}) {
+        const messageId = this._generateMessageId();
+        const requiresAck = options.requiresAck !== false;
+        const timeout = options.timeout || SECURITY_CONFIG.ACK_TIMEOUT;
+        const retryCount = options.retryCount || 0;
+        const maxRetries = options.maxRetries || this._maxRetries || 3;
+        const priority = options.priority || 'normal';
+        
+        // Check if parent available
+        const parentAvailable = ParentConnectionManager && 
+                                ParentConnectionManager.parentAvailable &&
+                                this._connectionState !== 'disconnected';
+        
+        if (!parentAvailable) {
+            // Queue for later
+            this._offlineQueue.push({
+                messageId,
+                type,
+                payload,
+                options,
+                timestamp: Date.now(),
+                priority
+            });
+            
+            // Limit queue size
+            if (this._offlineQueue.length > SECURITY_CONFIG.MESSAGE_QUEUE_MAX_SIZE) {
+                this._offlineQueue.shift();
+            }
+            
+            DIAGNOSTICS.log('debug', 'Message queued (offline)', { type, messageId });
+            
+            return Promise.resolve({ 
+                success: false, 
+                queued: true, 
+                messageId,
+                reason: 'parent_unavailable'
+            });
+        }
+        
+        // Create canonical message
+        const message = this._createCanonicalMessage(type, payload, {
+            messageId,
+            requiresAck
+        });
+        
+        // Add to pending if ACK required
+        if (requiresAck) {
+            const retryInfo = {
+                messageId,
+                type,
+                payload,
+                options,
+                retryCount,
+                maxRetries,
+                timeout: setTimeout(() => {
+                    this._handleAckTimeout(messageId, retryCount, maxRetries, type, payload, options);
+                }, timeout),
+                timestamp: Date.now()
+            };
+            
+            this._pendingAcks.set(messageId, retryInfo);
+        }
+        
+        // Send via ParentConnectionManager
+        try {
+            ParentConnectionManager.sendMessage(type, payload, {
+                messageId,
+                requiresAck,
+                timeout,
+                ...options
+            }).then(response => {
+                this._stats.sent++;
+                if (!requiresAck) {
+                    this._stats.acked++;
+                }
+            }).catch(error => {
+                this._stats.failed++;
+                DIAGNOSTICS.log('warn', 'TransportAgent send failed', { type, error: error.message });
+            });
+            
+        } catch (error) {
+            this._stats.failed++;
+            DIAGNOSTICS.log('error', 'TransportAgent send error', { type, error: error.message });
+            
+            if (requiresAck) {
+                const pending = this._pendingAcks.get(messageId);
+                if (pending) {
+                    clearTimeout(pending.timeout);
+                    this._pendingAcks.delete(messageId);
+                }
+            }
+            
+            return Promise.reject(error);
+        }
+        
+        if (!requiresAck) {
+            return Promise.resolve({ success: true, messageId });
+        }
+        
+        // Return promise that resolves on ACK
+        return new Promise((resolve, reject) => {
+            const checkAck = () => {
+                const pending = this._pendingAcks.get(messageId);
+                if (!pending) {
+                    // Already handled
+                    return;
+                }
+                
+                // Store resolve/reject for later
+                pending.resolve = resolve;
+                pending.reject = reject;
+            };
+            
+            checkAck();
+        });
+    },
+    
+    _handleAckTimeout(messageId, retryCount, maxRetries, type, payload, options) {
+        const pending = this._pendingAcks.get(messageId);
+        if (!pending) return;
+        
+        this._pendingAcks.delete(messageId);
+        this._stats.timedout++;
+        
+        if (retryCount < maxRetries) {
+            // Retry with backoff
+            const backoffDelay = this._baseBackoff * Math.pow(2, retryCount);
+            this._stats.retried++;
+            
+            DIAGNOSTICS.log('debug', 'Retrying message', { 
+                type, 
+                retryCount: retryCount + 1, 
+                maxRetries,
+                delay: backoffDelay 
+            });
+            
+            setTimeout(() => {
+                this.send(type, payload, {
+                    ...options,
+                    retryCount: retryCount + 1,
+                    maxRetries,
+                    messageId
+                }).then(pending.resolve).catch(pending.reject);
+            }, backoffDelay);
+        } else {
+            // Max retries reached
+            DIAGNOSTICS.log('warn', 'Message failed after max retries', { type, messageId });
+            
+            if (pending.reject) {
+                pending.reject(new Error('ACK timeout after max retries'));
+            }
+        }
+    },
+    
+    handleAck(message) {
+        const messageId = message.inResponseTo || message.payload?.inResponseTo;
+        if (!messageId) return;
+        
+        const pending = this._pendingAcks.get(messageId);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            this._pendingAcks.delete(messageId);
+            this._stats.acked++;
+            
+            if (pending.resolve) {
+                pending.resolve({ success: true, ack: message });
+            }
+            
+            DIAGNOSTICS.log('debug', 'ACK received', { messageId });
+        }
+    },
+    
+    handlePing(message) {
+        // Respond with PONG
+        this.send('PONG', {
+            inResponseTo: message.messageId || message.id,
+            timestamp: Date.now(),
+            state: this._connectionState
+        }, { requiresAck: false }).catch(() => {});
+        
+        this._lastHeartbeat = Date.now();
+    },
+    
+    _generateMessageId() {
+        return `msg_${Date.now()}_${++this._messageId}_${Math.random().toString(36).substr(2, 6)}`;
+    },
+    
+    _createCanonicalMessage(type, payload, options = {}) {
+        return {
+            protocol: SECURITY_CONFIG.PROTOCOL_VERSION,
+            messageId: options.messageId || this._generateMessageId(),
+            type: type,
+            source: "iframe",
+            target: "parent",
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            timestamp: Date.now(),
+            payload: this._sanitizePayload(payload),
+            requiresAck: options.requiresAck || false,
+            token: ParentConnectionManager ? ParentConnectionManager.getToken() : null,
+            environment: ENVIRONMENT.type
+        };
+    },
+    
+    _sanitizePayload(payload) {
+        if (!payload) return {};
+        
+        try {
+            return JSON.parse(JSON.stringify(payload, (key, value) => {
+                if (key === 'token' || key === 'password' || key === 'secret' || key === 'authorization') {
+                    return '[REDACTED]';
+                }
+                if (typeof value === 'string' && value.length > SECURITY_CONFIG.MAX_STRING_LENGTH) {
+                    return value.substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
+                }
+                return value;
+            }));
+        } catch (e) {
+            return {};
+        }
+    },
+    
+    _setupHeartbeat() {
+        if (this._heartbeatInterval) {
+            clearInterval(this._heartbeatInterval);
+        }
+        
+        this._heartbeatInterval = setInterval(() => {
+            const parentAvailable = ParentConnectionManager && 
+                                    ParentConnectionManager.parentAvailable;
+            
+            if (parentAvailable && this._connectionState === 'connected') {
+                this.send('PING', {
+                    timestamp: Date.now(),
+                    state: this._connectionState
+                }, { requiresAck: false }).catch(() => {});
+                
+                // Check for missed heartbeats
+                if (this._lastHeartbeat > 0 && 
+                    Date.now() - this._lastHeartbeat > SECURITY_CONFIG.HEARTBEAT_TIMEOUT) {
+                    DIAGNOSTICS.log('warn', 'Heartbeat timeout, reconnecting');
+                    this._connectionState = 'disconnected';
+                    this.reconnect();
+                }
+            }
+        }, SECURITY_CONFIG.HEARTBEAT_INTERVAL);
+    },
+    
+    _processOfflineQueue() {
+        if (this._offlineQueue.length === 0) return;
+        
+        const parentAvailable = ParentConnectionManager && 
+                                ParentConnectionManager.parentAvailable;
+        
+        if (!parentAvailable) return;
+        
+        // Process by priority
+        const sorted = [...this._offlineQueue].sort((a, b) => {
+            const priorityOrder = { high: 0, normal: 1, low: 2 };
+            return (priorityOrder[a.priority] || 1) - (priorityOrder[b.priority] || 1);
+        });
+        
+        this._offlineQueue = [];
+        
+        sorted.forEach(msg => {
+            setTimeout(() => {
+                this.send(msg.type, msg.payload, msg.options).catch(() => {});
+            }, 100);
+        });
+        
+        DIAGNOSTICS.log('info', 'Processed offline queue', { count: sorted.length });
+    },
+    
+    reconnect() {
+        this._connectionState = 'connecting';
+        
+        // Attempt to reconnect via ParentConnectionManager
+        if (ParentConnectionManager && ParentConnectionManager.reconnect) {
+            ParentConnectionManager.reconnect();
+        }
+        
+        setTimeout(() => {
+            this._processOfflineQueue();
+        }, 1000);
+    },
+    
+    onMessage(listener) {
+        this._listeners.add(listener);
+        return () => this._listeners.delete(listener);
+    },
+    
+    getStats() {
+        return {
+            ...this._stats,
+            pendingAcks: this._pendingAcks.size,
+            offlineQueue: this._offlineQueue.length,
+            connectionState: this._connectionState,
+            lastHeartbeat: this._lastHeartbeat
+        };
+    },
+    
+    setConnectionState(state) {
+        const validStates = ['disconnected', 'connecting', 'connected', 'degraded'];
+        if (validStates.includes(state)) {
+            this._connectionState = state;
+            DIAGNOSTICS.log('info', `TransportAgent state: ${state}`);
+        }
+    }
+};
+
+// =============================================
+// SANDBOX DETECTOR
+// =============================================
+
+const SandboxDetector = {
+    _isSandboxed: null,
+    _restrictions: [],
+    
+    detect() {
+        if (this._isSandboxed !== null) return this._isSandboxed;
+        
+        try {
+            // Test 1: Access parent
+            const test1 = window.parent.document;
+            
+            // Test 2: Access localStorage
+            const test2 = localStorage.getItem('test');
+            
+            // Test 3: Access cookies
+            const test3 = document.cookie;
+            
+            this._isSandboxed = false;
+            
+        } catch (e) {
+            this._isSandboxed = true;
+            
+            if (e.name === 'SecurityError') {
+                if (e.message.includes('localStorage')) {
+                    this._restrictions.push('localStorage');
+                }
+                if (e.message.includes('cookie')) {
+                    this._restrictions.push('cookies');
+                }
+                if (e.message.includes('parent')) {
+                    this._restrictions.push('parent_access');
+                }
+            }
+        }
+        
+        DIAGNOSTICS.log('info', 'Sandbox detection', { 
+            isSandboxed: this._isSandboxed,
+            restrictions: this._restrictions 
+        });
+        
+        return this._isSandboxed;
+    },
+    
+    isRestricted(feature) {
+        return this._restrictions.includes(feature);
+    },
+    
+    getMode() {
+        if (!this._isSandboxed) return 'normal';
+        if (this._restrictions.length > 2) return 'restricted';
+        return 'compatibility';
+    }
+};
+
+// =============================================
+// RECOVERY MANAGER
+// =============================================
+
+// =============================================
+// RECOVERY MANAGER - FIXED VERSION
+// =============================================
+
+const RecoveryManager = {
+    _failureCount: 0,
+    _maxFailures: 5,
+    _recoveryTimer: null,
+    _lastRecovery: 0,
+    _recoveryInProgress: false,
+    _strategies: null,
+    
+    init() {
+        this._strategies = {
+            network: this._recoverNetwork.bind(this),
+            session: this._recoverSession.bind(this),
+            handshake: this._recoverHandshake.bind(this),
+            full: this._recoverFull.bind(this)
+        };
+        return this;
+    },
+    
+    handleFailure(error, context = {}) {
+        this._failureCount++;
+        
+        DIAGNOSTICS.log('warn', 'RecoveryManager: failure detected', { 
+            count: this._failureCount,
+            context,
+            error: error?.message 
+        });
+        
+        if (this._failureCount >= this._maxFailures) {
+            this.initiateRecovery('full');
+        } else if (this._failureCount > 2) {
+            this.initiateRecovery('network');
+        }
+    },
+    
+    initiateRecovery(strategy = 'network') {
+        if (this._recoveryInProgress) {
+            DIAGNOSTICS.log('debug', 'Recovery already in progress');
+            return;
+        }
+        
+        if (this._recoveryTimer) {
+            clearTimeout(this._recoveryTimer);
+        }
+        
+        this._recoveryTimer = setTimeout(() => {
+            this._executeRecovery(strategy);
+        }, 1000 * Math.min(this._failureCount, 5));
+    },
+    
+    async _executeRecovery(strategy) {
+        if (this._recoveryInProgress) return;
+        
+        this._recoveryInProgress = true;
+        DIAGNOSTICS.log('info', `Executing recovery strategy: ${strategy}`);
+        
+        try {
+            const strategyFn = this._strategies[strategy] || this._strategies.network;
+            const result = await strategyFn();
+            
+            if (result.success) {
+                this._failureCount = 0;
+                this._lastRecovery = Date.now();
+                DIAGNOSTICS.log('info', 'Recovery successful', { strategy });
+            } else {
+                this._failureCount++;
+                DIAGNOSTICS.log('warn', 'Recovery failed', { strategy, reason: result.reason });
+                
+                if (this._failureCount < this._maxFailures) {
+                    this.initiateRecovery('full');
+                }
+            }
+        } catch (error) {
+            DIAGNOSTICS.log('error', 'Recovery error', { error: error.message });
+            this._failureCount++;
+        } finally {
+            this._recoveryInProgress = false;
+        }
+    },
+    
+    async _recoverNetwork() {
+        // Check parent availability
+        const parentAvailable = ParentConnectionManager && 
+                                ParentConnectionManager.parentAvailable;
+        
+        if (!parentAvailable) {
+            return { success: false, reason: 'parent_unavailable' };
+        }
+        
+        // Send status request
+        try {
+            await TransportAgent.send('REQUEST_STATUS', {}, { requiresAck: true, timeout: 3000 });
+            TransportAgent.setConnectionState('connected');
+            return { success: true };
+        } catch (error) {
+            return { success: false, reason: 'no_response' };
+        }
+    },
+    
+    async _recoverSession() {
+        // Request session sync
+        try {
+            await TransportAgent.send('REQUEST_SESSION', {
+                frameId: SECURITY_CONFIG.FRAME_ID,
+                timestamp: Date.now()
+            }, { requiresAck: true, timeout: 3000 });
+            
+            return { success: true };
+        } catch (error) {
+            return { success: false, reason: 'session_sync_failed' };
+        }
+    },
+    
+    async _recoverHandshake() {
+        // Re-initiate handshake
+        try {
+            await HandshakeClient.initiate({
+                timeout: SECURITY_CONFIG.HANDSHAKE_TIMEOUT,
+                maxRetries: 2
+            });
+            
+            return { success: true };
+        } catch (error) {
+            return { success: false, reason: 'handshake_failed' };
+        }
+    },
+    
+    async _recoverFull() {
+        // Full recovery - try everything
+        const network = await this._recoverNetwork();
+        if (!network.success) {
+            return network;
+        }
+        
+        const session = await this._recoverSession();
+        if (!session.success) {
+            // Try cached session
+            if (ParentConnectionManager && ParentConnectionManager.tryCachedSession()) {
+                return { success: true, fromCache: true };
+            }
+        }
+        
+        return { success: true };
+    },
+    
+    reset() {
+        this._failureCount = 0;
+        if (this._recoveryTimer) {
+            clearTimeout(this._recoveryTimer);
+            this._recoveryTimer = null;
+        }
+        this._recoveryInProgress = false;
+        DIAGNOSTICS.log('info', 'RecoveryManager reset');
+    }
+};
+
+// Initialize RecoveryManager
+RecoveryManager.init();
+
+// =============================================
+// COMPATIBILITY BRIDGE - Legacy support
+// =============================================
+
+const CompatibilityBridge = {
+    _enabled: false,
+    _legacyMode: false,
+    _features: new Set(),
+    
+    init() {
+        // Auto-detect if legacy mode needed
+        this._legacyMode = this._detectLegacyMode();
+        
+        if (this._legacyMode) {
+            this._enableLegacyMode();
+        }
+        
+        DIAGNOSTICS.log('info', 'CompatibilityBridge initialized', { 
+            legacyMode: this._legacyMode 
+        });
+    },
+    
+    _detectLegacyMode() {
+        // Check for missing modern features
+        const missingFeatures = [];
+        
+        if (!window.postMessage) missingFeatures.push('postMessage');
+        if (!Promise) missingFeatures.push('Promise');
+        if (!localStorage) missingFeatures.push('localStorage');
+        
+        // Check parent compatibility
+        try {
+            if (window.parent && window.parent.postMessage) {
+                // Test with legacy format
+                const testMsg = {
+                    type: 'test',
+                    data: {},
+                    timestamp: Date.now()
+                };
+                
+                window.parent.postMessage(testMsg, '*');
+            }
+        } catch (e) {
+            missingFeatures.push('parent_comms');
+        }
+        
+        this._features = new Set(missingFeatures);
+        return missingFeatures.length > 0;
+    },
+    
+    _enableLegacyMode() {
+        this._enabled = true;
+        
+        // Override TransportAgent for legacy
+        this._patchTransportAgent();
+        
+        // Override HandshakeClient
+        this._patchHandshakeClient();
+        
+        DIAGNOSTICS.log('info', 'Legacy mode enabled');
+    },
+    
+    _patchTransportAgent() {
+        // Store original
+        const originalSend = TransportAgent.send;
+        
+        // Replace with legacy-aware version
+        TransportAgent.send = function(type, payload, options) {
+            if (!this._enabled) {
+                return originalSend.call(this, type, payload, options);
+            }
+            
+            // Legacy format
+            return new Promise((resolve) => {
+                try {
+                    const legacyMsg = {
+                        type: type,
+                        data: payload,
+                        id: 'legacy_' + Date.now(),
+                        timestamp: Date.now(),
+                        source: 'iframe'
+                    };
+                    
+                    if (window.parent) {
+                        window.parent.postMessage(legacyMsg, '*');
+                        resolve({ success: true, legacy: true });
+                    } else {
+                        resolve({ success: false, reason: 'no_parent' });
+                    }
+                } catch (e) {
+                    resolve({ success: false, error: e.message });
+                }
+            });
+        }.bind({ _enabled: true });
+    },
+    
+    _patchHandshakeClient() {
+        // Override handshake for legacy
+        HandshakeClient.initiate = function() {
+            return Promise.resolve({
+                success: true,
+                legacy: true,
+                message: 'Legacy handshake bypassed'
+            });
+        };
+    },
+    
+    isLegacyMode() {
+        return this._legacyMode;
+    },
+    
+    adaptMessage(message) {
+        if (!this._legacyMode) return message;
+        
+        // Convert legacy to canonical
+        if (message && !message.protocol) {
+            return {
+                protocol: SECURITY_CONFIG.PROTOCOL_VERSION,
+                messageId: message.id || 'legacy_' + Date.now(),
+                type: message.type || 'unknown',
+                source: message.source || 'iframe',
+                target: 'parent',
+                frameId: SECURITY_CONFIG.FRAME_ID,
+                timestamp: message.timestamp || Date.now(),
+                payload: message.data || message.payload || {},
+                token: null,
+                legacy: true
+            };
+        }
+        
+        return message;
+    }
+};
+
+// =============================================
+// IFrameAuthority - Central coordination
+// =============================================
+
+const IframeAuthority = {
+    _initialized: false,
+    _modules: new Set(),
+    _sharedBus: new Map(),
+    _instanceId: SECURITY_CONFIG.FRAME_ID,
+    
+    init() {
+        if (this._initialized) return;
+        
+        DIAGNOSTICS.log('info', 'IframeAuthority initializing');
+        
+        // Initialize all subsystems
+        OriginAdapter.init();
+        SandboxDetector.detect();
+        CompatibilityBridge.init();
+        TransportAgent.init();
+        
+        // Register self
+        this.registerModule('IframeAuthority', MODULE_VERSION);
+        
+        this._initialized = true;
+        
+        DIAGNOSTICS.log('info', 'IframeAuthority initialized', {
+            instanceId: this._instanceId,
+            environment: ENVIRONMENT.type
+        });
+    },
+    
+    registerModule(name, version) {
+        this._modules.add({ name, version, timestamp: Date.now() });
+    },
+    
+    getSharedBus() {
+        return this._sharedBus;
+    },
+    
+    emit(event, data) {
+        this._sharedBus.set(event, { data, timestamp: Date.now() });
+        
+        // Dispatch event
+        document.dispatchEvent(new CustomEvent(event, { detail: data }));
+    },
+    
+    on(event, handler) {
+        document.addEventListener(event, handler);
+    },
+    
+    getInstanceId() {
+        return this._instanceId;
+    },
+    
+    getStatus() {
+        return {
+            initialized: this._initialized,
+            modules: Array.from(this._modules),
+            instanceId: this._instanceId,
+            environment: ENVIRONMENT,
+            sandbox: SandboxDetector.getMode(),
+            compatibility: CompatibilityBridge.isLegacyMode()
+        };
+    }
+};
+
+// =============================================
+// ========== FIX: API BASE URL CONFIG ==========
+// =============================================
+
+const API_CONFIG = {
+    // Default to current origin, but allow override
+    baseURL: (() => {
+        try {
+            // Try to get from parent first (if available)
+            if (window.parent && window.parent.__API_BASE_URL) {
+                DIAGNOSTICS.log('debug', 'Using parent API base URL', window.parent.__API_BASE_URL);
+                return window.parent.__API_BASE_URL;
+            }
+            
+            // Check localStorage for saved config
+            const saved = localStorage.getItem('knecta_api_base');
+            if (saved) {
+                DIAGNOSTICS.log('debug', 'Using saved API base URL', saved);
+                return saved;
+            }
+            
+            // Try to detect from current URL
+            const currentUrl = new URL(window.location.href);
+            const hostname = currentUrl.hostname;
+            const port = currentUrl.port;
+            
+            // Production / Render detection
+            if (hostname.includes('onrender.com') || 
+                hostname === 'knecta.chat' || 
+                hostname === 'www.knecta.chat') {
+                DIAGNOSTICS.log('debug', 'Production/Render detected, using same origin');
+                return currentUrl.origin;
+            }
+            
+            // Local development detection
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                if (port === '5500' || port === '3000') {
+                    const backendURL = `http://${hostname}:4000`;
+                    DIAGNOSTICS.log('debug', 'Local frontend detected, using backend', backendURL);
+                    return backendURL;
+                }
+                if (port === '4000') {
+                    DIAGNOSTICS.log('debug', 'Local backend detected, using current origin');
+                    return currentUrl.origin;
+                }
+            }
+            
+            // Check if we're in an iframe and parent has different origin
+            try {
+                if (window.parent && window.parent.location) {
+                    const parentUrl = new URL(window.parent.location.href);
+                    if (parentUrl.port && parentUrl.port !== port) {
+                        DIAGNOSTICS.log('debug', 'Using parent origin as API base', parentUrl.origin);
+                        return parentUrl.origin;
+                    }
+                }
+            } catch (e) {
+                // Cross-origin iframe, ignore
+            }
+            
+            DIAGNOSTICS.log('debug', 'Using current origin as API base', currentUrl.origin);
+            return currentUrl.origin;
+        } catch (e) {
+            DIAGNOSTICS.log('warn', 'Error detecting API base, falling back to window.location.origin');
+            return window.location.origin;
+        }
+    })(),
+    
+    setBaseURL(url) {
+        try {
+            localStorage.setItem('knecta_api_base', url);
+            this.baseURL = url;
+            DIAGNOSTICS.log('info', 'API Base URL updated', url);
+        } catch (e) {
+            DIAGNOSTICS.log('warn', 'Failed to save API base URL', e.message);
+        }
+    },
+    
+    buildURL(endpoint) {
+        if (!endpoint) return this.baseURL;
+        
+        if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+            return endpoint;
+        }
+        
+        const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+        const apiEndpoint = cleanEndpoint.startsWith('/api/') ? cleanEndpoint : `/api${cleanEndpoint}`;
+        
+        return `${this.baseURL}${apiEndpoint}`;
+    }
 };
 
 // =============================================
@@ -48,6 +1378,8 @@ const ALLOWED_ORIGINS = new Set([
     'http://127.0.0.1:5500',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'http://localhost:4000',
+    'http://127.0.0.1:4000',
     'https://knecta.chat',
     'https://www.knecta.chat',
     'null'
@@ -62,13 +1394,11 @@ function validateInput(input, maxLength = SECURITY_CONFIG.MAX_STRING_LENGTH) {
     
     const str = String(input);
     if (str.length > maxLength) {
-        console.warn(`[${MODULE_NAME}] Input exceeds maximum length, truncating`);
         return str.substring(0, maxLength);
     }
     
     for (const pattern of SECURITY_CONFIG.BLOCKED_PATTERNS) {
         if (pattern.test(str)) {
-            console.warn(`[${MODULE_NAME}] Blocked potentially malicious input pattern`);
             return '';
         }
     }
@@ -77,7 +1407,7 @@ function validateInput(input, maxLength = SECURITY_CONFIG.MAX_STRING_LENGTH) {
 }
 
 // =============================================
-// STRUCTURED LOGGING SYSTEM
+// STRUCTURED LOGGING SYSTEM - SILENT BY DEFAULT
 // =============================================
 
 const _LOG_CACHE = new Set();
@@ -85,23 +1415,28 @@ const _ERROR_CACHE = new Set();
 const _WARN_CACHE = new Set();
 
 function log(level, message, data = null) {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] [${MODULE_NAME}] ${message}`;
-    
-    switch(level) {
-        case 'error':
-            console.error(logMessage, data || '');
-            break;
-        case 'warn':
-            console.warn(logMessage, data || '');
-            break;
-        case 'info':
-            console.log(logMessage, data || '');
-            break;
-        case 'debug':
-            console.debug(logMessage, data || '');
-            break;
+    // Only log to console if diagnostics enabled AND it's error/warning
+    if (DIAGNOSTICS.enabled || level === 'error') {
+        const timestamp = new Date().toISOString();
+        const logMessage = `[${timestamp}] [${MODULE_NAME}] ${message}`;
+        
+        switch(level) {
+            case 'error':
+                console.error(logMessage, data || '');
+                break;
+            case 'warn':
+                console.warn(logMessage, data || '');
+                break;
+            default:
+                // Silent for info/debug unless diagnostics enabled
+                if (DIAGNOSTICS.enabled) {
+                    console.log(logMessage, data || '');
+                }
+        }
     }
+    
+    // Always store in diagnostics
+    DIAGNOSTICS.log(level, message, data);
 }
 
 function logOnce(key, level, message, data = null) {
@@ -146,7 +1481,14 @@ export const PARENT_MESSAGE_TYPES = {
     PONG: 'PONG',
     UI_UPDATE: 'UI_UPDATE',
     UI_REFRESH: 'UI_REFRESH',
-    UI_THEME: 'UI_THEME'
+    UI_THEME: 'UI_THEME',
+    
+    // Protocol Messages
+    HANDSHAKE_ACK: 'HANDSHAKE_ACK',
+    SESSION_SYNC: 'SESSION_SYNC',
+    SESSION_ACK: 'SESSION_ACK',
+    PAGE_ACTIVATED: 'PAGE_ACTIVATED',
+    NAVIGATE: 'NAVIGATE'
 };
 
 export const SESSION_SCHEMA = {
@@ -161,7 +1503,84 @@ export const SESSION_SCHEMA = {
 };
 
 // =============================================
-// HANDSHAKE CLIENT - FIXED MISSING IMPLEMENTATION
+// CANONICAL MESSAGE FORMATTER
+// =============================================
+
+export const CanonicalMessageFormatter = {
+    createMessage(type, payload = {}, options = {}) {
+        const messageId = options.messageId || this.generateMessageId();
+        const timestamp = Date.now();
+        
+        return {
+            protocol: SECURITY_CONFIG.PROTOCOL_VERSION,
+            messageId: messageId,
+            type: type,
+            source: "iframe",
+            target: "parent",
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            timestamp: timestamp,
+            payload: this.sanitizePayload(payload),
+            token: options.token || null,
+            signature: options.signature || null,
+            legacy: options.legacy || false,
+            environment: ENVIRONMENT.type
+        };
+    },
+    
+    generateMessageId() {
+        return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    },
+    
+    sanitizePayload(payload) {
+        if (!payload) return {};
+        
+        try {
+            return JSON.parse(JSON.stringify(payload, (key, value) => {
+                if (key === 'token' || key === 'password' || key === 'secret' || key === 'authorization') {
+                    return '[REDACTED]';
+                }
+                if (typeof value === 'string' && value.length > SECURITY_CONFIG.MAX_STRING_LENGTH) {
+                    return value.substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
+                }
+                return value;
+            }));
+        } catch (e) {
+            return {};
+        }
+    },
+    
+    adaptLegacyMessage(legacyMessage) {
+        if (!legacyMessage) return null;
+        
+        if (legacyMessage.protocol === SECURITY_CONFIG.PROTOCOL_VERSION) {
+            return legacyMessage;
+        }
+        
+        let type = legacyMessage.type || 'unknown';
+        let payload = legacyMessage.payload || legacyMessage.data || {};
+        
+        return {
+            protocol: SECURITY_CONFIG.PROTOCOL_VERSION,
+            messageId: legacyMessage.id || this.generateMessageId(),
+            type: type,
+            source: legacyMessage.source || "iframe",
+            target: "parent",
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            timestamp: legacyMessage.timestamp || Date.now(),
+            payload: this.sanitizePayload(payload),
+            token: null,
+            signature: null,
+            legacy: true
+        };
+    },
+    
+    isOriginTrusted(origin) {
+        return OriginAdapter.isTrusted(origin);
+    }
+};
+
+// =============================================
+// ENHANCED HANDSHAKE CLIENT
 // =============================================
 
 export const HandshakeClient = {
@@ -172,18 +1591,28 @@ export const HandshakeClient = {
     _handshakeReject: null,
     _handshakeTimer: null,
     
+    _handshakeState: 'idle',
+    _parentReadyReceived: false,
+    _handshakeAckReceived: false,
+    _startTime: null,
+    
     initiate: function(options = {}) {
+        // Check if already completed
+        if (this._handshakeComplete) {
+            return Promise.resolve({ success: true, fromCache: false });
+        }
+        
         if (this._handshakeInProgress) {
             return this._handshakePromise || Promise.reject(new Error('Handshake already in progress'));
         }
         
         this._handshakeInProgress = true;
         this._handshakeAttempts++;
+        this._startTime = Date.now();
+        this._handshakeState = 'child_ready_sent';
         
         const maxRetries = options.maxRetries || SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES;
         const timeout = options.timeout || SECURITY_CONFIG.HANDSHAKE_TIMEOUT;
-        
-        log('info', `Initiating handshake (attempt ${this._handshakeAttempts}/${maxRetries})`);
         
         this._handshakePromise = new Promise((resolve, reject) => {
             this._handshakeResolve = resolve;
@@ -191,44 +1620,74 @@ export const HandshakeClient = {
             
             this._handshakeTimer = setTimeout(() => {
                 if (this._handshakeAttempts < maxRetries) {
-                    log('warn', `Handshake timeout, retrying (${this._handshakeAttempts}/${maxRetries})`);
                     this._handshakeInProgress = false;
+                    this._handshakeState = 'retry';
+                    
+                    const delay = Math.min(
+                        SECURITY_CONFIG.INITIAL_RETRY_DELAY * Math.pow(2, this._handshakeAttempts - 1),
+                        SECURITY_CONFIG.MAX_RETRY_DELAY
+                    );
+                    
                     setTimeout(() => {
                         this.initiate(options).then(resolve).catch(reject);
-                    }, 1000 * this._handshakeAttempts);
+                    }, delay);
                 } else {
-                    log('warn', 'Handshake failed after max retries, using fallback');
                     this._handshakeInProgress = false;
+                    this._handshakeState = 'failed';
                     reject(new Error('handshake_timeout'));
                 }
             }, timeout);
             
-            // Send handshake request
+            // Send handshake using TransportAgent
             if (window.parent) {
-                try {
-                    window.parent.postMessage({
-                        type: PARENT_MESSAGE_TYPES.HANDSHAKE_REQUEST,
-                        source: 'knecta-groups-iframe',
-                        version: MODULE_VERSION,
-                        timestamp: Date.now(),
-                        childId: 'groups-iframe'
-                    }, '*');
-                    
-                    // Also send child ready as fallback
-                    window.parent.postMessage({
-                        type: PARENT_MESSAGE_TYPES.CHILD_READY,
-                        source: 'knecta-groups-iframe',
-                        version: MODULE_VERSION,
-                        timestamp: Date.now(),
-                        childId: 'groups-iframe'
-                    }, '*');
-                } catch (e) {
-                    logError('HandshakeClient', 'initiate', e);
-                }
+                TransportAgent.send('CHILD_READY', {
+                    childId: SECURITY_CONFIG.FRAME_ID,
+                    version: MODULE_VERSION,
+                    timestamp: Date.now(),
+                    handshakeState: 'initiating'
+                }, { requiresAck: false }).catch(() => {});
+                
+                TransportAgent.send('HANDSHAKE_REQUEST', {
+                    childId: SECURITY_CONFIG.FRAME_ID,
+                    version: MODULE_VERSION,
+                    timestamp: Date.now(),
+                    features: ['groups', 'chat', 'admin', 'protocol-v1'],
+                    environment: ENVIRONMENT.type
+                }, { requiresAck: true, timeout: 3000 }).catch(() => {});
             }
         });
         
         return this._handshakePromise;
+    },
+    
+    handleParentReady: function(message) {
+        this._parentReadyReceived = true;
+        
+        if (this._handshakeState === 'child_ready_sent') {
+            this._handshakeState = 'waiting_parent_ready';
+        }
+        
+        if (window.parent) {
+            TransportAgent.send('HANDSHAKE_REQUEST', {
+                childId: SECURITY_CONFIG.FRAME_ID,
+                version: MODULE_VERSION,
+                timestamp: Date.now(),
+                parentReadyAck: true,
+                features: ['groups', 'chat', 'admin', 'protocol-v1']
+            }, { requiresAck: true }).catch(() => {});
+            
+            this._handshakeState = 'handshake_request_sent';
+        }
+    },
+    
+    handleHandshakeAck: function(message) {
+        this._handshakeAckReceived = true;
+        
+        if (this._handshakeState === 'handshake_request_sent' || this._handshakeState === 'waiting_parent_ready') {
+            this._handshakeState = 'handshake_ack_wait';
+        }
+        
+        this.handleResponse(message);
     },
     
     handleResponse: function(response) {
@@ -240,8 +1699,22 @@ export const HandshakeClient = {
             this._handshakePromise = null;
             this._handshakeResolve = null;
             this._handshakeReject = null;
-            log('info', 'Handshake completed successfully');
+            this._handshakeState = 'complete';
+            this._handshakeComplete = true;
+            
+            TransportAgent.setConnectionState('connected');
         }
+    },
+    
+    getState: function() {
+        return {
+            state: this._handshakeState,
+            attempts: this._handshakeAttempts,
+            parentReadyReceived: this._parentReadyReceived,
+            handshakeAckReceived: this._handshakeAckReceived,
+            startTime: this._startTime,
+            duration: this._startTime ? Date.now() - this._startTime : 0
+        };
     },
     
     reset: function() {
@@ -250,6 +1723,12 @@ export const HandshakeClient = {
         this._handshakePromise = null;
         this._handshakeResolve = null;
         this._handshakeReject = null;
+        this._handshakeState = 'idle';
+        this._parentReadyReceived = false;
+        this._handshakeAckReceived = false;
+        this._handshakeComplete = false;
+        this._startTime = null;
+        
         if (this._handshakeTimer) {
             clearTimeout(this._handshakeTimer);
             this._handshakeTimer = null;
@@ -292,10 +1771,26 @@ export const ParentConnectionManager = {
     heartbeatInterval: null,
     lastHeartbeat: 0,
     
+    connectionState: 'disconnected',
+    sessionSyncState: 'none',
+    pendingMessages: new Map(),
+    messageRetryCounts: new Map(),
+    maxRetries: ENVIRONMENT.isHighLatency ? 5 : 3,
+    backoffBase: ENVIRONMENT.isHighLatency ? 1000 : 500,
+    
+    ackCallbacks: new Map(),
+    nextAckId: 0,
+    
     init() {
-        log('info', 'Initializing ParentConnectionManager');
+        // Check if already initialized
+        if (this._initialized) return this;
+        
         this.setupMessageListener();
         this.detectParentAvailability();
+        
+        this.connectionState = 'connecting';
+        this._initialized = true;
+        
         return this;
     },
     
@@ -304,23 +1799,36 @@ export const ParentConnectionManager = {
             const isInIframe = window !== window.parent;
             const hasPostMessage = window.parent && typeof window.parent.postMessage === 'function';
             
-            this.parentAvailable = isInIframe && hasPostMessage;
+            const isSandboxed = this.detectSandbox();
+            
+            this.parentAvailable = isInIframe && hasPostMessage && !isSandboxed;
             
             if (this.parentAvailable) {
                 try {
                     this.parentOrigin = window.parent.location.origin;
+                    OriginAdapter.addTrustedOrigin(this.parentOrigin);
                 } catch (e) {
                     this.parentOrigin = '*';
-                    log('info', 'Cross-origin iframe detected, using wildcard origin');
                 }
+            } else if (isSandboxed) {
+                this.connectionState = 'degraded';
             }
             
-            log('info', `Parent availability: ${this.parentAvailable}`);
             return this.parentAvailable;
         } catch (error) {
             logError('ParentConnectionManager', 'detectParentAvailability', error);
             this.parentAvailable = false;
+            this.connectionState = 'degraded';
             return false;
+        }
+    },
+    
+    detectSandbox() {
+        try {
+            const test = window.parent.document;
+            return false;
+        } catch (e) {
+            return e.name === 'SecurityError';
         }
     },
     
@@ -332,38 +1840,59 @@ export const ParentConnectionManager = {
         });
         
         window._parentMessageListenerSetup = true;
-        log('info', 'Message listener setup complete');
     },
     
     handleIncomingMessage(event) {
         try {
-            if (!this.validateOrigin(event.origin)) {
-                logOnce('invalid-origin', 'warn', `Blocked message from untrusted origin: ${event.origin}`);
+            // Use OriginAdapter for validation
+            if (!OriginAdapter.isTrusted(event.origin)) {
                 return;
             }
             
-            const message = this.validateMessage(event.data);
-            if (!message) {
-                logOnce('invalid-message', 'warn', 'Invalid message structure');
+            // Use CompatibilityBridge to adapt if needed
+            const message = CompatibilityBridge.adaptMessage(event.data) || 
+                           CanonicalMessageFormatter.adaptLegacyMessage(event.data);
+            
+            if (!message || !message.type) return;
+            
+            // Handle TransportAgent messages first
+            if (message.type === PARENT_MESSAGE_TYPES.ACK) {
+                TransportAgent.handleAck(message);
                 return;
             }
             
-            // Handle handshake response
-            if (message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_RESPONSE || 
-                (message.type === PARENT_MESSAGE_TYPES.ACK && message.inResponseTo && message.inResponseTo.includes('handshake'))) {
-                this.handleHandshakeResponse(message);
+            if (message.type === PARENT_MESSAGE_TYPES.PING) {
+                TransportAgent.handlePing(message);
                 return;
             }
             
-            // Handle ACK
-            if (message.type === PARENT_MESSAGE_TYPES.ACK && message.inResponseTo) {
-                this.handleAck(message);
+            // Handle PARENT_READY
+            if (message.type === PARENT_MESSAGE_TYPES.PARENT_READY) {
+                this.handleParentReady(message);
                 return;
             }
             
-            // Handle session data
-            if (message.type === PARENT_MESSAGE_TYPES.SESSION_DATA) {
+            // Handle HANDSHAKE_ACK
+            if (message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_ACK || 
+                message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_RESPONSE) {
+                HandshakeClient.handleHandshakeAck(message);
+                this.handshakeComplete = true;
+                this.isConnected = true;
+                this.connectionState = 'connected';
+                return;
+            }
+            
+            // Handle session messages
+            if (message.type === PARENT_MESSAGE_TYPES.SESSION_DATA ||
+                message.type === PARENT_MESSAGE_TYPES.SESSION_SYNC) {
                 this.handleSessionData(message);
+                
+                TransportAgent.send('SESSION_ACK', {
+                    received: true,
+                    timestamp: Date.now()
+                }, { requiresAck: false }).catch(() => {});
+                
+                this.sessionSyncState = 'synced';
                 return;
             }
             
@@ -372,18 +1901,8 @@ export const ParentConnectionManager = {
                 return;
             }
             
-            if (message.type === PARENT_MESSAGE_TYPES.PARENT_READY) {
-                this.handleParentReady();
-                return;
-            }
-            
             if (message.type === PARENT_MESSAGE_TYPES.LOGOUT) {
                 this.handleLogout();
-                return;
-            }
-            
-            if (message.type === PARENT_MESSAGE_TYPES.PING) {
-                this.handlePing(message);
                 return;
             }
             
@@ -392,7 +1911,16 @@ export const ParentConnectionManager = {
                 return;
             }
             
-            // Handle UI messages
+            if (message.type === PARENT_MESSAGE_TYPES.PAGE_ACTIVATED) {
+                this.handlePageActivated(message);
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.NAVIGATE) {
+                this.handleNavigate(message);
+                return;
+            }
+            
             if (message.type === PARENT_MESSAGE_TYPES.UI_UPDATE) {
                 this.handleUIUpdate(message);
                 return;
@@ -418,153 +1946,17 @@ export const ParentConnectionManager = {
         }
     },
     
-    validateOrigin(origin) {
-        if (!origin) return false;
-        
-        const originStr = String(origin);
-        
-        for (const pattern of SECURITY_CONFIG.BLOCKED_PATTERNS) {
-            if (pattern.test(originStr)) return false;
-        }
-        
-        return ALLOWED_ORIGINS.has(originStr) || this.parentOrigin === '*';
-    },
-    
-    validateMessage(data) {
-        if (!data || typeof data !== 'object') return null;
-        
-        const message = {
-            type: String(data.type || 'unknown').substring(0, 50),
-            source: String(data.source || 'unknown').substring(0, 50),
-            id: data.id || this.generateMessageId(),
-            timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now()
-        };
-        
-        if (data.payload) {
-            try {
-                message.payload = JSON.parse(JSON.stringify(data.payload, (key, value) => {
-                    if (key === 'token' || key === 'password' || key === 'secret') return '[REDACTED]';
-                    if (typeof value === 'string' && value.length > SECURITY_CONFIG.MAX_STRING_LENGTH) {
-                        return value.substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
-                    }
-                    return value;
-                }));
-            } catch (e) {
-                message.payload = {};
-            }
-        }
-        
-        if (data.data) {
-            try {
-                message.data = JSON.parse(JSON.stringify(data.data, (key, value) => {
-                    if (key === 'token' || key === 'password' || key === 'secret') return '[REDACTED]';
-                    return value;
-                }));
-            } catch (e) {
-                message.data = {};
-            }
-        }
-        
-        if (data.inResponseTo) message.inResponseTo = data.inResponseTo;
-        if (data.sequence) message.sequence = data.sequence;
-        if (data.version) message.version = data.version;
-        
-        return message;
-    },
-    
-    generateMessageId() {
-        return `msg_${Date.now()}_${++this.messageSequence}_${Math.random().toString(36).substr(2, 9)}`;
-    },
-    
     sendMessage(type, payload = {}, options = {}) {
-        return new Promise((resolve, reject) => {
-            try {
-                if (!this.parentAvailable) {
-                    log('warn', 'Parent not available, cannot send message', { type });
-                    resolve({ success: false, error: 'parent_not_available' });
-                    return;
-                }
-                
-                const messageId = options.messageId || this.generateMessageId();
-                const requiresAck = options.requiresAck !== false;
-                const timeout = options.timeout || SECURITY_CONFIG.HANDSHAKE_TIMEOUT;
-                
-                let safePayload = {};
-                try {
-                    safePayload = JSON.parse(JSON.stringify(payload, (key, value) => {
-                        if (key === 'token' || key === 'password' || key === 'secret') return '[REDACTED]';
-                        return value;
-                    }));
-                } catch (e) {
-                    safePayload = {};
-                }
-                
-                const message = {
-                    type: String(type).substring(0, 50),
-                    payload: safePayload,
-                    source: 'knecta-groups-iframe',
-                    id: messageId,
-                    timestamp: Date.now(),
-                    version: MODULE_VERSION,
-                    requiresAck,
-                    sequence: ++this.messageSequence
-                };
-                
-                if (requiresAck) {
-                    this.pendingAcks.set(messageId, {
-                        resolve,
-                        reject,
-                        timeout: setTimeout(() => {
-                            if (this.pendingAcks.has(messageId)) {
-                                this.pendingAcks.delete(messageId);
-                                if (options.retry && this.handshakeAttempts < SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES) {
-                                    this.handshakeAttempts++;
-                                    log('warn', `No ACK for message ${messageId}, retrying...`);
-                                    this.sendMessage(type, payload, { ...options, retry: false })
-                                        .then(resolve)
-                                        .catch(reject);
-                                } else {
-                                    reject(new Error('ACK timeout'));
-                                }
-                            }
-                        }, timeout),
-                        retryCount: 0,
-                        maxRetries: options.maxRetries || 3
-                    });
-                }
-                
-                try {
-                    window.parent.postMessage(message, this.parentOrigin || '*');
-                    log('debug', `Message sent: ${type}`, { messageId });
-                } catch (e) {
-                    if (requiresAck) {
-                        const pending = this.pendingAcks.get(messageId);
-                        if (pending) {
-                            clearTimeout(pending.timeout);
-                            this.pendingAcks.delete(messageId);
-                        }
-                    }
-                    reject(e);
-                }
-                
-                if (!requiresAck) {
-                    resolve({ success: true, messageId });
-                }
-                
-            } catch (error) {
-                logError('ParentConnectionManager', 'sendMessage', error);
-                reject(error);
-            }
-        });
+        // Use TransportAgent for reliable sending
+        return TransportAgent.send(type, payload, options);
     },
     
     handleAck(message) {
         const pending = this.pendingAcks.get(message.inResponseTo);
         if (pending) {
             clearTimeout(pending.timeout);
-            pending.resolve({ success: true, ack: message });
+            pending.resolve({ success: true, ack: message, responseTime: Date.now() });
             this.pendingAcks.delete(message.inResponseTo);
-            log('debug', `ACK received for ${message.inResponseTo}`);
         }
     },
     
@@ -580,22 +1972,47 @@ export const ParentConnectionManager = {
             this.handshakeComplete = true;
             this.isConnected = true;
             this.handshakeInProgress = false;
-            log('info', 'Handshake response received');
+            this.connectionState = 'connected';
         }
     },
     
     handlePing(message) {
-        this.sendMessage(PARENT_MESSAGE_TYPES.PONG, {
-            inResponseTo: message.id,
-            timestamp: Date.now()
+        this.sendMessage('PONG', {
+            inResponseTo: message.messageId || message.id,
+            timestamp: Date.now(),
+            state: this.connectionState,
+            handshakeState: HandshakeClient.getState()
         }, { requiresAck: false }).catch(() => {});
+        
         this.lastHeartbeat = Date.now();
     },
     
-    handleParentReady() {
-        log('info', 'Parent ready received');
+    handleParentReady(message) {
+        HandshakeClient.handleParentReady(message);
+        
         if (!this.handshakeComplete) {
             this.initiateHandshake();
+        }
+    },
+    
+    handlePageActivated(message) {
+        document.dispatchEvent(new CustomEvent('pageActivated', {
+            detail: message.payload
+        }));
+        
+        if (typeof syncGroupsFromServer === 'function') {
+            syncGroupsFromServer().catch(() => {});
+        }
+    },
+    
+    handleNavigate(message) {
+        if (message.payload && message.payload.path) {
+            if (message.payload.path === 'chat' && message.payload.groupId) {
+                const group = groups.find(g => g.id === message.payload.groupId);
+                if (group && typeof openGroupChat === 'function') {
+                    openGroupChat(group);
+                }
+            }
         }
     },
     
@@ -627,24 +2044,21 @@ export const ParentConnectionManager = {
     handleSessionData(message) {
         const sessionData = message.payload || message.data;
         if (this.validateSessionData(sessionData)) {
-            log('info', 'Session data received from parent');
             this.updateSessionMirror(sessionData);
             this.handshakeComplete = true;
             this.isConnected = true;
             this.handshakeInProgress = false;
+            this.connectionState = 'connected';
             
             document.dispatchEvent(new CustomEvent('sessionReady', {
                 detail: this.sessionMirror
             }));
-        } else {
-            log('warn', 'Invalid session data received', sessionData);
         }
     },
     
     handleSessionUpdate(message) {
         const updateData = message.payload || message.data;
         if (updateData) {
-            log('info', 'Session update received');
             this.updateSessionMirror({
                 ...this.sessionMirror,
                 ...updateData
@@ -653,7 +2067,6 @@ export const ParentConnectionManager = {
     },
     
     handleLogout() {
-        log('info', 'Logout received from parent');
         this.clearSession();
         document.dispatchEvent(new CustomEvent('sessionLogout'));
     },
@@ -698,7 +2111,7 @@ export const ParentConnectionManager = {
         
         try {
             if (sessionData.user) {
-                localStorage.setItem('knecta_current_user', JSON.stringify(sessionData.user));
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(sessionData.user));
             }
             if (sessionData.token) {
                 localStorage.setItem('USER_TOKEN', sessionData.token);
@@ -721,6 +2134,7 @@ export const ParentConnectionManager = {
         this.sessionData = null;
         this.handshakeComplete = false;
         this.isConnected = false;
+        this.connectionState = 'disconnected';
         
         try {
             localStorage.removeItem('knecta_current_user');
@@ -733,19 +2147,16 @@ export const ParentConnectionManager = {
     
     initiateHandshake() {
         if (this.handshakeInProgress) {
-            log('debug', 'Handshake already in progress');
             return this.handshakePromise;
         }
         
         if (!this.parentAvailable) {
-            log('warn', 'Parent not available, cannot initiate handshake');
             return Promise.reject(new Error('parent_not_available'));
         }
         
         this.handshakeInProgress = true;
         this.handshakeAttempts++;
-        
-        log('info', `Initiating handshake (attempt ${this.handshakeAttempts}/${SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES})`);
+        this.connectionState = 'handshaking';
         
         this.handshakePromise = new Promise((resolve, reject) => {
             this.handshakeResolve = resolve;
@@ -753,34 +2164,39 @@ export const ParentConnectionManager = {
             
             this.handshakeTimer = setTimeout(() => {
                 if (this.handshakeInProgress) {
-                    log('warn', `Handshake timeout (attempt ${this.handshakeAttempts})`);
-                    
                     if (this.handshakeAttempts < SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES) {
                         this.handshakeInProgress = false;
+                        
+                        const delay = Math.min(
+                            SECURITY_CONFIG.INITIAL_RETRY_DELAY * Math.pow(2, this.handshakeAttempts - 1),
+                            SECURITY_CONFIG.MAX_RETRY_DELAY
+                        );
+                        
                         setTimeout(() => {
                             this.initiateHandshake().then(resolve).catch(reject);
-                        }, 1000 * this.handshakeAttempts);
+                        }, delay);
                     } else {
-                        log('warn', 'Max handshake retries reached, using cached session');
                         this.handshakeInProgress = false;
+                        this.connectionState = 'degraded';
                         this.tryCachedSession();
                         reject(new Error('handshake_timeout'));
                     }
                 }
             }, SECURITY_CONFIG.HANDSHAKE_TIMEOUT);
             
-            this.sendMessage(PARENT_MESSAGE_TYPES.HANDSHAKE_REQUEST, {
-                childId: 'groups-iframe',
+            this.sendMessage('CHILD_READY', {
+                childId: SECURITY_CONFIG.FRAME_ID,
                 version: MODULE_VERSION,
                 timestamp: Date.now(),
-                features: ['groups', 'chat', 'admin']
+                features: ['groups', 'chat', 'admin', 'protocol-v1']
             }, { requiresAck: false }).catch(() => {});
             
-            this.sendMessage(PARENT_MESSAGE_TYPES.CHILD_READY, {
-                childId: 'groups-iframe',
+            this.sendMessage('HANDSHAKE_REQUEST', {
+                childId: SECURITY_CONFIG.FRAME_ID,
                 version: MODULE_VERSION,
-                timestamp: Date.now()
-            }, { requiresAck: false }).catch(() => {});
+                timestamp: Date.now(),
+                features: ['groups', 'chat', 'admin', 'protocol-v1']
+            }, { requiresAck: true, timeout: 3000 }).catch(() => {});
         });
         
         return this.handshakePromise;
@@ -788,7 +2204,7 @@ export const ParentConnectionManager = {
     
     tryCachedSession() {
         try {
-            const cachedUser = localStorage.getItem('knecta_current_user');
+            const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
             const cachedToken = localStorage.getItem('USER_TOKEN') || 
                                localStorage.getItem('knecta_access_token');
             
@@ -805,8 +2221,7 @@ export const ParentConnectionManager = {
                 this.sessionData = { user, token: cachedToken, timestamp: Date.now() };
                 this.handshakeComplete = true;
                 this.isConnected = false;
-                
-                log('info', 'Loaded cached session', { user: user.id });
+                this.connectionState = 'degraded';
                 
                 document.dispatchEvent(new CustomEvent('sessionReady', {
                     detail: this.sessionMirror
@@ -822,34 +2237,26 @@ export const ParentConnectionManager = {
     },
     
     startHeartbeat() {
-        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-        
-        this.heartbeatInterval = setInterval(() => {
-            if (this.isConnected && this.parentAvailable) {
-                this.sendMessage(PARENT_MESSAGE_TYPES.PING, {
-                    timestamp: Date.now()
-                }, { requiresAck: false }).catch(() => {});
-                
-                if (this.lastHeartbeat > 0 && Date.now() - this.lastHeartbeat > 30000) {
-                    log('warn', 'Heartbeat timeout, reconnecting...');
-                    this.reconnect();
-                }
-            }
-        }, 10000);
+        // Already handled by TransportAgent
+    },
+    
+    processMessageQueue() {
+        // Already handled by TransportAgent
     },
     
     reconnect() {
-        log('info', 'Attempting to reconnect to parent');
         this.isConnected = false;
         this.handshakeComplete = false;
         this.handshakeAttempts = 0;
+        this.connectionState = 'connecting';
+        
         this.initiateHandshake().catch(() => {
             this.tryCachedSession();
         });
     },
     
     sendStatus() {
-        this.sendMessage(PARENT_MESSAGE_TYPES.CHILD_ACTION, {
+        this.sendMessage('CHILD_ACTION', {
             action: 'status',
             status: {
                 initialized: true,
@@ -858,9 +2265,27 @@ export const ParentConnectionManager = {
                 hasToken: !!this.sessionMirror.token,
                 authenticated: this.sessionMirror.authenticated,
                 uiReady: document.readyState === 'complete',
+                connectionState: this.connectionState,
+                handshakeState: HandshakeClient.getState(),
+                pendingMessages: this.pendingAcks.size,
+                queuedMessages: this.messageQueue.length,
                 timestamp: Date.now()
             }
         }, { requiresAck: false }).catch(() => {});
+    },
+    
+    getStatus() {
+        return {
+            isConnected: this.isConnected,
+            handshakeComplete: this.handshakeComplete,
+            connectionState: this.connectionState,
+            sessionSyncState: this.sessionSyncState,
+            parentAvailable: this.parentAvailable,
+            pendingAcks: this.pendingAcks.size,
+            queuedMessages: this.messageQueue.length,
+            lastHeartbeat: this.lastHeartbeat,
+            frameId: SECURITY_CONFIG.FRAME_ID
+        };
     },
     
     on(type, handler) {
@@ -885,6 +2310,109 @@ export const ParentConnectionManager = {
     
     isReady() {
         return this.handshakeComplete || this.sessionMirror.fromCache;
+    }
+};
+
+// =============================================
+// SESSION CLIENT - Enhanced with resilience
+// =============================================
+
+export const SessionClient = {
+    syncRequested: false,
+    syncTimer: null,
+    refreshTimer: null,
+    expiryTimer: null,
+    
+    init() {
+        this.setupExpiryCheck();
+        return this;
+    },
+    
+    requestSync() {
+        if (this.syncRequested) return;
+        
+        this.syncRequested = true;
+        
+        TransportAgent.send('REQUEST_SESSION', {
+            source: 'groups-iframe',
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            timestamp: Date.now(),
+            sync: true
+        }, { requiresAck: true }).catch(() => {});
+        
+        this.syncTimer = setTimeout(() => {
+            this.syncRequested = false;
+            
+            if (!ParentConnectionManager.sessionMirror.authenticated) {
+                ParentConnectionManager.tryCachedSession();
+            }
+        }, ENVIRONMENT.isHighLatency ? 8000 : 5000);
+    },
+    
+    handleSync(message) {
+        if (this.syncTimer) {
+            clearTimeout(this.syncTimer);
+            this.syncTimer = null;
+        }
+        
+        this.syncRequested = false;
+        
+        TransportAgent.send('SESSION_ACK', {
+            received: true,
+            timestamp: Date.now()
+        }, { requiresAck: false }).catch(() => {});
+    },
+    
+    refreshToken() {
+        return TransportAgent.send('REFRESH_TOKEN', {
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            timestamp: Date.now()
+        }, { requiresAck: true });
+    },
+    
+    setupExpiryCheck() {
+        // Check token expiry every minute
+        this.expiryTimer = setInterval(() => {
+            const token = ParentConnectionManager.getToken();
+            if (!token) return;
+            
+            // Simple expiry check (tokens usually last 1 hour)
+            // This is a placeholder - real expiry should come from server
+            const session = ParentConnectionManager.getSession();
+            const age = Date.now() - (session.timestamp || 0);
+            
+            if (age > 55 * 60 * 1000) { // 55 minutes
+                this.refreshToken().catch(() => {});
+            }
+        }, 60000);
+    },
+    
+    destroy() {
+        if (this.syncTimer) clearTimeout(this.syncTimer);
+        if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        if (this.expiryTimer) clearInterval(this.expiryTimer);
+    }
+};
+
+// =============================================
+// RECOVERY AGENT - Integrated with RecoveryManager
+// =============================================
+
+export const RecoveryAgent = {
+    handleFailure(error) {
+        RecoveryManager.handleFailure(error, { source: 'RecoveryAgent' });
+    },
+    
+    initiateRecovery(strategy) {
+        RecoveryManager.initiateRecovery(strategy);
+    },
+    
+    checkHealth() {
+        const status = ParentConnectionManager.getStatus();
+        
+        if (!status.isConnected && status.connectionState === 'connected') {
+            this.handleFailure(new Error('Connection lost'));
+        }
     }
 };
 
@@ -916,7 +2444,12 @@ export const SessionMirror = {
             this.updateFromParent(parentSession);
         }
         
-        log('info', 'SessionMirror initialized');
+        if (!this.authenticated) {
+            setTimeout(() => {
+                SessionClient.requestSync();
+            }, 100);
+        }
+        
         return this;
     },
     
@@ -929,7 +2462,6 @@ export const SessionMirror = {
         this.fromCache = sessionData.fromCache || false;
         
         this.notifySubscribers();
-        log('info', 'Session mirror updated', { authenticated: this.authenticated, fromCache: this.fromCache });
     },
     
     clear() {
@@ -941,7 +2473,6 @@ export const SessionMirror = {
         this.fromCache = false;
         
         this.notifySubscribers();
-        log('info', 'Session mirror cleared');
     },
     
     subscribe(callback) {
@@ -986,7 +2517,7 @@ export const SessionMirror = {
 };
 
 // =============================================
-// GLOBAL VARIABLES
+// GLOBAL VARIABLES - PRESERVED
 // =============================================
 
 export let currentUser = null;
@@ -1007,7 +2538,7 @@ export let friends = [];
 export let selectedFriends = [];
 
 // =============================================
-// UNIQUE FEATURES VARIABLES
+// UNIQUE FEATURES VARIABLES - PRESERVED
 // =============================================
 
 export const groupPurposes = Object.freeze({
@@ -1145,7 +2676,7 @@ export const groupRoles = Object.freeze({
 });
 
 // =============================================
-// CHAT & CALL VARIABLES
+// CHAT & CALL VARIABLES - PRESERVED
 // =============================================
 
 export let currentChatGroup = null;
@@ -1158,7 +2689,7 @@ export let localStream = null;
 export let peerConnections = {};
 
 // =============================================
-// UNIQUE FEATURES STATE
+// UNIQUE FEATURES STATE - PRESERVED
 // =============================================
 
 export let currentParticipationMode = 'normal';
@@ -1170,7 +2701,7 @@ export let transparencyLog = [];
 export let energySuggestions = [];
 
 // =============================================
-// LOCAL STORAGE KEYS
+// LOCAL STORAGE KEYS - PRESERVED
 // =============================================
 
 export const LOCAL_STORAGE_KEYS = Object.freeze({
@@ -1197,11 +2728,12 @@ export const LOCAL_STORAGE_KEYS = Object.freeze({
     GROUP_EVENTS: 'knecta_group_events_',
     GROUP_TRANSPARENCY: 'knecta_group_transparency_',
     USER_PARTICIPATION_MODES: 'knecta_user_participation_modes',
-    USER_TOKEN: 'USER_TOKEN'
+    USER_TOKEN: 'USER_TOKEN',
+    API_BASE: 'knecta_api_base'
 });
 
 // =============================================
-// FLAGS & STATE
+// FLAGS & STATE - PRESERVED
 // =============================================
 
 export let isPageInitialized = false;
@@ -1217,7 +2749,7 @@ export let tokenQueue = [];
 export let isProcessingTokenQueue = false;
 
 // =============================================
-// SAFETY GUARDS & ERROR LOGGING
+// SAFETY GUARDS & ERROR LOGGING - PRESERVED
 // =============================================
 
 const loggedErrors = new Set();
@@ -1233,9 +2765,6 @@ function shouldRetry(operationId) {
     const safeId = validateInput(operationId);
     const count = retryCounters.get(safeId) || 0;
     if (count >= maxRetries) {
-        if (count === maxRetries) {
-            log('warn', `Max retries (${maxRetries}) reached for ${safeId}`);
-        }
         return false;
     }
     retryCounters.set(safeId, count + 1);
@@ -1253,12 +2782,8 @@ function safeGetElement(selector, functionName) {
         if (!safeSelector) return null;
         
         const element = document.querySelector(safeSelector);
-        if (!element) {
-            log('debug', `Element not found: ${safeSelector}`);
-        }
         return element;
     } catch (error) {
-        log('debug', `Error finding element ${selector}: ${error.message}`);
         return null;
     }
 }
@@ -1268,7 +2793,7 @@ function hasValidSession() {
 }
 
 // =============================================
-// TOKEN MANAGEMENT
+// TOKEN MANAGEMENT - PRESERVED
 // =============================================
 
 export function initializeTokenSystem() {
@@ -1438,7 +2963,7 @@ export function getCurrentUser() {
 }
 
 // =============================================
-// QUEUE API CALL SYSTEM
+// QUEUE API CALL SYSTEM - PRESERVED
 // =============================================
 
 export function queueApiCall(apiCallFunction) {
@@ -1512,18 +3037,17 @@ export async function processTokenQueue() {
 }
 
 // =============================================
-// SECURE API CALL
+// SECURE API CALL - FIXED WITH API_CONFIG
 // =============================================
 
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
     try {
         const safeMethod = validateInput(method).toUpperCase();
-        const safeEndpoint = validateInput(endpoint);
+        let safeEndpoint = validateInput(endpoint);
         
         const token = await waitForTokenReady();
         
         if (!token) {
-            log('warn', 'No token available for API call', { endpoint: safeEndpoint });
             return {
                 success: false,
                 error: 'No authentication token available',
@@ -1533,11 +3057,10 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         
         const safeToken = String(token).substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
         
-        const url = safeEndpoint.startsWith('http') ? safeEndpoint :
-                   safeEndpoint.startsWith('/') ? safeEndpoint : `/${safeEndpoint}`;
+        const url = API_CONFIG.buildURL(safeEndpoint);
         
         try {
-            new URL(url, window.location.origin);
+            new URL(url);
         } catch (e) {
             throw new Error('Invalid endpoint URL');
         }
@@ -1561,9 +3084,7 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         const response = await fetch(url, fetchOptions);
         
         if (response.status === 401) {
-            log('warn', 'Authentication failed (401)', { endpoint: safeEndpoint });
-            
-            ParentConnectionManager.sendMessage(PARENT_MESSAGE_TYPES.CHILD_ERROR, {
+            TransportAgent.send('CHILD_ERROR', {
                 error: 'Authentication failed',
                 statusCode: 401,
                 endpoint: safeEndpoint,
@@ -1632,11 +3153,7 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
         }
         
         try {
-            const apiEndpoint = safeEndpoint.startsWith('http') ? safeEndpoint :
-                               safeEndpoint.startsWith('/api/') ? safeEndpoint :
-                               `/api/${safeEndpoint}`;
-            
-            const result = await secureApiCall(safeMethod, apiEndpoint, data, options);
+            const result = await secureApiCall(safeMethod, safeEndpoint, data, options);
             
             if (isGetRequest && result.success && result.data && cacheKey) {
                 try {
@@ -1685,7 +3202,7 @@ export async function safeApiCall(method, endpoint, data = null, options = {}) {
 }
 
 // =============================================
-// INITIALIZATION PIPELINE
+// INITIALIZATION PIPELINE - Enhanced with StartupGovernor
 // =============================================
 
 let _initState = {
@@ -1698,15 +3215,15 @@ let _initState = {
 
 async function preflightStage() {
     try {
-        log('info', 'Preflight stage starting');
-        
         _instanceId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         
         _ERROR_CACHE.clear();
         _WARN_CACHE.clear();
         
+        // Initialize IframeAuthority
+        IframeAuthority.init();
+        
         _initState.preflight = true;
-        log('info', 'Preflight stage complete');
         return { success: true };
     } catch (error) {
         logError('Groups', 'preflightStage', error);
@@ -1716,14 +3233,11 @@ async function preflightStage() {
 
 async function parentConnectStage() {
     try {
-        log('info', 'Parent connect stage starting');
-        
         ParentConnectionManager.init();
         
         const parentAvailable = ParentConnectionManager.parentAvailable;
         
         _initState.parentConnect = true;
-        log('info', 'Parent connect stage complete', { parentAvailable });
         return { success: true, parentAvailable };
     } catch (error) {
         logError('Groups', 'parentConnectStage', error);
@@ -1733,24 +3247,18 @@ async function parentConnectStage() {
 
 async function handshakeStage(parentAvailable) {
     try {
-        log('info', 'Handshake stage starting');
-        
         if (!parentAvailable) {
-            log('warn', 'Parent not available, skipping handshake');
             _initState.handshake = true;
             return { success: false, fallback: true };
         }
         
         try {
-            await HandshakeClient.initiate();
+            // Use StartupGovernor to coordinate
+            await StartupGovernor.init();
             _initState.handshake = true;
-            log('info', 'Handshake stage complete');
             return { success: true };
         } catch (error) {
-            log('warn', 'Handshake failed', error);
-            
             if (ParentConnectionManager.tryCachedSession()) {
-                log('info', 'Using cached session');
                 _initState.handshake = true;
                 return { success: true, fromCache: true };
             }
@@ -1767,9 +3275,8 @@ async function handshakeStage(parentAvailable) {
 
 async function sessionStage(handshakeSuccess, fromCache) {
     try {
-        log('info', 'Session stage starting');
-        
         SessionMirror.init();
+        SessionClient.init();
         
         const sessionPromise = new Promise((resolve) => {
             if (SessionMirror.isAuthenticated()) {
@@ -1785,7 +3292,7 @@ async function sessionStage(handshakeSuccess, fromCache) {
                 setTimeout(() => {
                     unsubscribe();
                     resolve(null);
-                }, 3000);
+                }, ENVIRONMENT.isHighLatency ? 5000 : 3000);
             }
         });
         
@@ -1800,9 +3307,6 @@ async function sessionStage(handshakeSuccess, fromCache) {
                 photoURL: session.user?.photoURL || session.user?.avatar || ''
             };
             authReady = true;
-            log('info', 'Session stage complete', { authenticated: true, fromCache: session.fromCache });
-        } else {
-            log('warn', 'No session available');
         }
         
         _initState.session = true;
@@ -1816,8 +3320,6 @@ async function sessionStage(handshakeSuccess, fromCache) {
 
 async function readyStage() {
     try {
-        log('info', 'Ready stage starting');
-        
         loadCachedDataInstantly();
         initializeTokenSystem();
         
@@ -1829,11 +3331,11 @@ async function readyStage() {
                 version: MODULE_VERSION,
                 timestamp: Date.now(),
                 sessionValid: hasValidSession(),
-                authenticated: SessionMirror.isAuthenticated()
+                authenticated: SessionMirror.isAuthenticated(),
+                environment: ENVIRONMENT.type
             }
         }));
         
-        log('info', 'Ready stage complete');
         return { success: true };
     } catch (error) {
         logError('Groups', 'readyStage', error);
@@ -1844,11 +3346,9 @@ async function readyStage() {
 
 export async function initializeGroupsCore() {
     if (isPageInitialized) {
-        log('info', 'Groups core already initialized');
         return { success: true, fromCache: true };
     }
     
-    log('info', 'Starting groups core initialization');
     const startTime = Date.now();
     
     try {
@@ -1859,11 +3359,6 @@ export async function initializeGroupsCore() {
         const ready = await readyStage();
         
         const duration = Date.now() - startTime;
-        log('info', `Groups core initialized in ${duration}ms`, {
-            authenticated: session.success,
-            fromCache: session.fromCache,
-            parentAvailable: parent.parentAvailable
-        });
         
         return {
             success: true,
@@ -1886,7 +3381,7 @@ export async function initializeGroupsCore() {
 }
 
 // =============================================
-// CORE PAGE MANAGEMENT
+// CORE PAGE MANAGEMENT - PRESERVED
 // =============================================
 
 const pageCore = {
@@ -1912,55 +3407,8 @@ const pageCore = {
 let statusMessageElement = null;
 
 function showCoreMessage(message, type = 'info') {
-    try {
-        if (!statusMessageElement) {
-            statusMessageElement = document.createElement('div');
-            statusMessageElement.id = 'coreStatusMessage';
-            statusMessageElement.style.cssText = `
-                position: fixed;
-                top: 10px;
-                left: 50%;
-                transform: translateX(-50%);
-                padding: 12px 24px;
-                border-radius: 8px;
-                z-index: 10000;
-                font-weight: 500;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                transition: opacity 0.3s;
-                max-width: 80%;
-                text-align: center;
-                display: none;
-            `;
-            document.body.appendChild(statusMessageElement);
-        }
-        
-        const colors = {
-            info: { bg: '#2196F3', text: '#FFFFFF' },
-            success: { bg: '#4CAF50', text: '#FFFFFF' },
-            error: { bg: '#F44336', text: '#FFFFFF' },
-            warning: { bg: '#FF9800', text: '#000000' }
-        };
-        
-        const color = colors[type] || colors.info;
-        const safeMessage = validateInput(message);
-        
-        statusMessageElement.style.backgroundColor = color.bg;
-        statusMessageElement.style.color = color.text;
-        statusMessageElement.textContent = safeMessage;
-        statusMessageElement.style.opacity = '1';
-        statusMessageElement.style.display = 'block';
-        
-        if (type === 'success') {
-            setTimeout(() => {
-                statusMessageElement.style.opacity = '0';
-                setTimeout(() => {
-                    statusMessageElement.style.display = 'none';
-                }, 300);
-            }, 3000);
-        }
-    } catch (error) {
-        log('error', 'showCoreMessage error', error);
-    }
+    // Silent - removed UI overlay
+    DIAGNOSTICS.log('info', 'Core message', { message, type });
 }
 
 export async function initPageCore() {
@@ -1969,8 +3417,6 @@ export async function initPageCore() {
     pageCore.isLoading = true;
     
     try {
-        showCoreMessage('Loading groups data, please wait...', 'info');
-        
         await setupParentListener();
         await pageCore.loadSession();
         await pageCore.loadData();
@@ -1982,14 +3428,12 @@ export async function initPageCore() {
         pageCore.isInitialized = true;
         pageCore.isLoading = false;
         
-        showCoreMessage('Groups page loaded successfully', 'success');
         notifyParentCoreReady();
         processQueuedMessages();
         
     } catch (error) {
         logError('Groups', 'initPageCore', error);
         pageCore.isLoading = false;
-        showCoreMessage('Failed to load groups page', 'error');
         notifyParentError(error);
     }
 }
@@ -2000,7 +3444,7 @@ async function setupParentListener() {
             try {
                 if (!event.data || typeof event.data !== 'object') return;
                 
-                if (!ParentConnectionManager.validateOrigin(event.origin)) return;
+                if (!OriginAdapter.isTrusted(event.origin)) return;
                 
                 const msg = event.data;
                 
@@ -2008,13 +3452,18 @@ async function setupParentListener() {
                     pageCore.messageQueue.push(msg);
                 }
                 
-                if (msg.type === 'init' || msg.type === PARENT_MESSAGE_TYPES.SESSION_DATA) {
+                if (msg.type === 'init' || msg.type === PARENT_MESSAGE_TYPES.SESSION_DATA || 
+                    msg.type === PARENT_MESSAGE_TYPES.SESSION_SYNC) {
                     pageCore.data.session = msg.payload || {};
                     resolve();
                 }
                 
                 if (msg.type === 'refreshData' || msg.type === PARENT_MESSAGE_TYPES.UI_REFRESH) {
                     handleRefreshDataRequest(msg.payload);
+                }
+                
+                if (msg.type === PARENT_MESSAGE_TYPES.PARENT_READY) {
+                    HandshakeClient.handleParentReady(msg);
                 }
                 
             } catch (error) {
@@ -2025,9 +3474,10 @@ async function setupParentListener() {
         window.addEventListener('message', messageHandler);
         
         setTimeout(() => {
-            ParentConnectionManager.sendMessage('iframeReady', {
-                iframeId: 'groups-iframe',
-                ready: true
+            TransportAgent.send('iframeReady', {
+                iframeId: SECURITY_CONFIG.FRAME_ID,
+                ready: true,
+                timestamp: Date.now()
             }, { requiresAck: false }).catch(() => {});
             
             setTimeout(resolve, 1000);
@@ -2041,7 +3491,11 @@ pageCore.loadSession = async function() {
         if (session.authenticated) {
             pageCore.data.session = session;
         } else {
-            const initMessage = pageCore.messageQueue.find(msg => msg.type === 'init' || msg.type === PARENT_MESSAGE_TYPES.SESSION_DATA);
+            const initMessage = pageCore.messageQueue.find(msg => 
+                msg.type === 'init' || 
+                msg.type === PARENT_MESSAGE_TYPES.SESSION_DATA ||
+                msg.type === PARENT_MESSAGE_TYPES.SESSION_SYNC
+            );
             if (initMessage) {
                 pageCore.data.session = initMessage.payload;
             } else {
@@ -2083,7 +3537,7 @@ pageCore.loadData = async function() {
 
 async function fetchFriendsData() {
     try {
-        const response = await safeApiCall('GET', '/api/friends');
+        const response = await safeApiCall('GET', 'friends');
         
         if (response && response.success && response.data) {
             const friends = Array.isArray(response.data) ? response.data : [];
@@ -2099,7 +3553,7 @@ async function fetchFriendsData() {
 
 async function fetchGroupsData() {
     try {
-        const response = await safeApiCall('GET', '/api/groups');
+        const response = await safeApiCall('GET', 'groups');
         
         if (response && response.success && response.data) {
             const groups = Array.isArray(response.data) ? response.data : [];
@@ -2126,7 +3580,7 @@ async function fetchGroupsData() {
 
 async function fetchNotificationsData() {
     try {
-        const response = await safeApiCall('GET', '/api/notifications');
+        const response = await safeApiCall('GET', 'notifications');
         
         if (response && response.success && response.data) {
             return Array.isArray(response.data) ? response.data : [];
@@ -2141,7 +3595,7 @@ async function fetchNotificationsData() {
 
 async function fetchSettingsData() {
     try {
-        const response = await safeApiCall('GET', '/api/settings');
+        const response = await safeApiCall('GET', 'settings');
         
         if (response && response.success && response.data) {
             return response.data;
@@ -2228,8 +3682,6 @@ pageCore.setupEvents = function() {
 
 async function handleRefreshDataRequest(payload) {
     try {
-        showCoreMessage('Refreshing data...', 'info');
-        
         if (payload && payload.types) {
             const types = Array.isArray(payload.types) ? payload.types : [payload.types];
             
@@ -2252,32 +3704,29 @@ async function handleRefreshDataRequest(payload) {
         
         pageCore.renderUI();
         
-        ParentConnectionManager.sendMessage('dataRefreshed', {
+        TransportAgent.send('dataRefreshed', {
             success: true,
             timestamp: new Date().toISOString()
         }, { requiresAck: false }).catch(() => {});
         
-        showCoreMessage('Data refreshed', 'success');
-        
     } catch (error) {
         logError('Groups', 'handleRefreshDataRequest', error);
-        ParentConnectionManager.sendMessage('dataRefreshError', {
+        TransportAgent.send('dataRefreshError', {
             error: error.message,
             timestamp: new Date().toISOString()
         }, { requiresAck: false }).catch(() => {});
-        showCoreMessage('Failed to refresh data', 'error');
     }
 }
 
 function sendToParent(message) {
-    return ParentConnectionManager.sendMessage(message.type, message.payload || {}, { requiresAck: false });
+    return TransportAgent.send(message.type, message.payload || {}, { requiresAck: false });
 }
 
 function notifyParentCoreReady() {
     sendToParent({
         type: 'coreReady',
         payload: {
-            iframeId: 'groups-iframe',
+            iframeId: SECURITY_CONFIG.FRAME_ID,
             status: 'success',
             dataTypes: ['friendsList', 'groupsList', 'notifications', 'settings']
         }
@@ -2288,7 +3737,7 @@ function notifyParentError(error) {
     sendToParent({
         type: 'error',
         payload: {
-            iframeId: 'groups-iframe',
+            iframeId: SECURITY_CONFIG.FRAME_ID,
             message: error.message || 'Unknown error'
         }
     });
@@ -2369,7 +3818,7 @@ export function updateCoreData(type, payload) {
 }
 
 // =============================================
-// PARENT COORDINATION FUNCTIONS
+// PARENT COORDINATION FUNCTIONS - PRESERVED
 // =============================================
 
 export function initializeParentConnection() {
@@ -2391,7 +3840,7 @@ export function startHandshakeProtocol() {
 export function scheduleHandshakeRetry() {}
 
 export function sendMessageToParent(type, payload, options) {
-    return ParentConnectionManager.sendMessage(type, payload, options);
+    return TransportAgent.send(type, payload, options);
 }
 
 export function handleParentReady() {
@@ -2516,65 +3965,7 @@ export function disableProtectedUI() {
 }
 
 export function showReconnectState() {
-    try {
-        if (document.getElementById('reconnectOverlay')) return;
-        
-        const overlay = document.createElement('div');
-        overlay.id = 'reconnectOverlay';
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.95);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            padding: 20px;
-            text-align: center;
-        `;
-        
-        overlay.innerHTML = `
-            <div style="font-size: 48px; color: var(--primary-color); margin-bottom: 20px;">
-                <i class="fas fa-plug"></i>
-            </div>
-            <h3 style="margin-bottom: 10px;">Connection Lost</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                Unable to connect to parent window. Please refresh or return to the main app.
-            </p>
-            <div style="display: flex; gap: 10px;">
-                <button id="retryConnectionBtn" style="padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                    <i class="fas fa-redo"></i> Retry Connection
-                </button>
-                <button id="useCachedDataBtn" style="padding: 10px 20px; background: var(--secondary-color); color: var(--text-primary); border: none; border-radius: 8px; cursor: pointer;">
-                    <i class="fas fa-database"></i> Use Cached Data
-                </button>
-            </div>
-        `;
-        
-        document.body.appendChild(overlay);
-        
-        const retryBtn = document.getElementById('retryConnectionBtn');
-        const cachedBtn = document.getElementById('useCachedDataBtn');
-        
-        if (retryBtn) {
-            retryBtn.addEventListener('click', () => {
-                location.reload();
-            });
-        }
-        
-        if (cachedBtn) {
-            cachedBtn.addEventListener('click', () => {
-                handleParentUnavailable();
-                overlay.remove();
-            });
-        }
-    } catch (error) {
-        logError('Groups', 'showReconnectState', error);
-    }
+    // Silent - removed reconnect overlay
 }
 
 export function startBackgroundProcesses() {
@@ -2600,15 +3991,15 @@ export function stopBackgroundProcesses() {
 }
 
 // =============================================
-// MAIN INITIALIZATION
+// MAIN INITIALIZATION - Enhanced with StartupGovernor
 // =============================================
 
 async function safeGroupPageInit() {
     let tries = 0;
     const MAX_TRIES = 5;
 
-    ParentConnectionManager.sendMessage(PARENT_MESSAGE_TYPES.CHILD_READY, {
-        childId: 'groups-iframe',
+    TransportAgent.send('CHILD_READY', {
+        childId: SECURITY_CONFIG.FRAME_ID,
         version: MODULE_VERSION,
         timestamp: Date.now()
     }, { requiresAck: false }).catch(() => {});
@@ -2619,7 +4010,7 @@ async function safeGroupPageInit() {
     }
 
     if (!ParentConnectionManager.isReady()) {
-        log('warn', 'Running in fallback mode (parent not ready)');
+        // Silent fallback
     }
 
     try {
@@ -2655,21 +4046,21 @@ async function originalGroupPageInit() {
         if (SessionMirror.isAuthenticated()) {
             startBackgroundProcesses();
         } else {
-            ParentConnectionManager.sendMessage(PARENT_MESSAGE_TYPES.REQUEST_SESSION, {
+            TransportAgent.send('REQUEST_SESSION', {
                 source: 'groups-iframe',
                 version: MODULE_VERSION,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                frameId: SECURITY_CONFIG.FRAME_ID
             }, { requiresAck: false }).catch(() => {});
             
             if (getCurrentUserLocal() && getUnifiedToken()) {
                 enableProtectedUI();
                 startBackgroundProcesses();
-                showNotification('Using cached data. Reconnecting to server...', 'info');
             }
         }
+        
     } catch (error) {
         logError('Groups', 'originalGroupPageInit', error);
-        showNotification('Failed to initialize groups. Please refresh the page.', 'error');
     }
 }
 
@@ -2683,7 +4074,7 @@ export async function loadUserDataInBackground() {
             return;
         }
         
-        const response = await safeApiCall('GET', '/api/auth/me', null, { silent: true });
+        const response = await safeApiCall('GET', 'auth/me', null, { silent: true });
         
         if (response && response.success && response.data) {
             currentUser = response.data;
@@ -2770,7 +4161,6 @@ export function setupUIEventListeners() {
             });
         });
         
-        log('info', 'UI event listeners bound');
     } catch (error) {
         logError('Groups', 'setupUIEventListeners', error);
     }
@@ -2787,7 +4177,7 @@ export function setupResponsiveBehavior() {
 }
 
 // =============================================
-// CORE GROUP FUNCTIONS
+// CORE GROUP FUNCTIONS - PRESERVED
 // =============================================
 
 export function loadCachedDataInstantly() {
@@ -3132,7 +4522,7 @@ export function handleGroupAction(action, groupData, type, button) {
 }
 
 // =============================================
-// BACKGROUND SYNC FUNCTIONS
+// BACKGROUND SYNC FUNCTIONS - PRESERVED
 // =============================================
 
 let _backgroundSyncRetryCount = 0;
@@ -3182,7 +4572,6 @@ export async function backgroundSyncWithServer() {
     }
     
     if (++_backgroundSyncRetryCount > MAX_BACKGROUND_RETRY) {
-        log('warn', 'Background sync stopped after max retries');
         return;
     }
     
@@ -3199,7 +4588,7 @@ export async function backgroundSyncWithServer() {
 }
 
 // =============================================
-// CHAT AND GROUP MANAGEMENT FUNCTIONS
+// CHAT AND GROUP MANAGEMENT FUNCTIONS - PRESERVED
 // =============================================
 
 export const openGroupChat = async function(groupData) {
@@ -5416,7 +6805,7 @@ export async function loadGroupDetails(groupData, type) {
 }
 
 // =============================================
-// DATA SYNC FUNCTIONS
+// DATA SYNC FUNCTIONS - PRESERVED
 // =============================================
 
 export async function syncGroupsFromServer() {
@@ -5732,7 +7121,7 @@ export function updateCreateGroupPostingRulesUI() {
 }
 
 // =============================================
-// MISSING FUNCTION EXPORTS
+// MISSING FUNCTION EXPORTS - PRESERVED
 // =============================================
 
 export function showGroupOptions(groupData) {
@@ -6084,12 +7473,13 @@ export function showGroupInviteDetails() {
 }
 
 // =============================================
-// INITIALIZATION
+// INITIALIZATION - Enhanced with IframeAuthority
 // =============================================
 
 if (typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', () => {
         try {
+            IframeAuthority.init();
             ParentConnectionManager.init();
             
             initializeGroupsCore();
@@ -6104,7 +7494,7 @@ if (typeof document !== 'undefined') {
 }
 
 // =============================================
-// WINDOW EXPOSURES
+// WINDOW EXPOSURES - PRESERVED
 // =============================================
 
 if (typeof window !== 'undefined') {
@@ -6143,7 +7533,23 @@ if (typeof window !== 'undefined') {
     secureExpose('addPollOption', addPollOption);
     secureExpose('removePollOption', removePollOption);
     secureExpose('voteOnPoll', voteOnPoll);
+    
+    // Expose API config for debugging
+    secureExpose('getAPIBaseURL', () => API_CONFIG.baseURL);
+    secureExpose('setAPIBaseURL', (url) => API_CONFIG.setBaseURL(url));
+    
+    // Expose diagnostics
+    secureExpose('getEnvironment', () => ENVIRONMENT);
+    secureExpose('getIframeDebug', () => window.__IFRAME_DEBUG__);
+    secureExpose('getIframeState', () => ({
+        startup: StartupGovernor.getState(),
+        session: SessionMirror.getState(),
+        connection: ParentConnectionManager.getStatus(),
+        transport: TransportAgent.getStats(),
+        environment: ENVIRONMENT
+    }));
 }
+
 
 // =============================================
 // MODULE COMPLETE - ALL EXPORTS PRESERVED

@@ -5,9 +5,10 @@
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
-    <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- Dynamic title based on connection state -->
     <title>Settings | Knecta Chat</title>
     
     <!-- Font Awesome -->
@@ -17,17 +18,128 @@
     <script src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/nano.min.css">
     
+    <!-- Animation Styles - Enhanced -->
+    <style>
+        /* Core Animations */
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.05); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        
+        @keyframes glow {
+            0% { box-shadow: 0 0 0 0 var(--primary-color); }
+            50% { box-shadow: 0 0 10px 2px var(--primary-color); }
+            100% { box-shadow: 0 0 0 0 var(--primary-color); }
+        }
+        
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-5px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        .fa-spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        .glow {
+            animation: glow 2s infinite;
+        }
+        
+        .float {
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        
+        /* Connection quality indicators */
+        .connection-good {
+            color: var(--success-color);
+        }
+        
+        .connection-poor {
+            color: var(--warning-color);
+            animation: pulse 2s infinite;
+        }
+        
+        .connection-degraded {
+            color: var(--danger-color);
+            animation: pulse 1.5s infinite;
+        }
+        
+        .connection-offline {
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
+    </style>
+    
     <link rel="stylesheet" href="settings.css">
 
     <style>
-        /* Layout Styles */
+        /* =============================================
+           LAYOUT STYLES - PRESERVED COMPLETE + ENHANCED
+           ============================================= */
+        
+        /* Base Layout */
         .app-container {
             display: flex;
             height: 100vh;
             background: var(--bg-color);
             color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
 
+        /* Settings Sidebar */
         .settings-sidebar {
             width: 280px;
             background: var(--sidebar-bg);
@@ -36,6 +148,7 @@
             flex-direction: column;
             position: relative;
             z-index: 100;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
 
         .settings-header {
@@ -63,6 +176,11 @@
         .back-btn:hover {
             background: var(--primary-color);
             color: white;
+            transform: scale(1.05);
+        }
+
+        .back-btn:active {
+            transform: scale(0.95);
         }
 
         .settings-title {
@@ -70,6 +188,7 @@
             font-weight: 600;
         }
 
+        /* User Profile Section */
         .settings-user-profile {
             padding: 20px;
             display: flex;
@@ -91,6 +210,26 @@
             font-size: 18px;
             background-size: cover;
             background-position: center;
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .user-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+        }
+
+        .user-avatar:hover::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.1);
+            cursor: pointer;
         }
 
         .user-info {
@@ -115,8 +254,59 @@
             height: 8px;
             border-radius: 50%;
             background: var(--success-color);
+            transition: background-color 0.3s ease;
         }
 
+        .status-indicator.connecting {
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator.reconnecting {
+            background: var(--warning-color);
+            animation: pulse 1s infinite;
+        }
+
+        .status-indicator.offline {
+            background: var(--danger-color);
+        }
+
+        /* Connection Status */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: var(--hover-color);
+            margin-top: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .connection-status.good {
+            color: var(--success-color);
+            background: rgba(52, 199, 89, 0.1);
+        }
+
+        .connection-status.poor {
+            color: var(--warning-color);
+            background: rgba(255, 149, 0, 0.1);
+            animation: pulse 2s infinite;
+        }
+
+        .connection-status.degraded {
+            color: var(--danger-color);
+            background: rgba(255, 59, 48, 0.1);
+            animation: pulse 1.5s infinite;
+        }
+
+        .connection-status.offline {
+            color: var(--text-secondary);
+            background: var(--hover-color);
+            opacity: 0.7;
+        }
+
+        /* Search */
         .settings-search {
             padding: 15px 20px;
             border-bottom: 1px solid var(--border-color);
@@ -134,6 +324,18 @@
             background: var(--bg-color);
             color: var(--text-color);
             font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-color-light);
+        }
+
+        .search-input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .search-icon {
@@ -144,6 +346,26 @@
             color: var(--text-secondary);
         }
 
+        .search-clear {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 5px;
+            display: none;
+        }
+
+        .search-clear:hover {
+            color: var(--primary-color);
+        }
+
+        .search-input:not(:placeholder-shown) + .search-icon + .search-clear {
+            display: block;
+        }
+
+        /* Settings Menu */
         .settings-menu {
             flex: 1;
             overflow-y: auto;
@@ -162,6 +384,7 @@
 
         .menu-item:hover {
             background: var(--hover-color);
+            transform: translateX(5px);
         }
 
         .menu-item.active {
@@ -170,10 +393,28 @@
             border-left: 3px solid var(--primary-color);
         }
 
+        .menu-item.active .menu-icon {
+            color: var(--primary-color);
+        }
+
+        .menu-item.danger {
+            color: var(--danger-color);
+        }
+
+        .menu-item.danger:hover {
+            background: rgba(255, 59, 48, 0.1);
+        }
+
+        .menu-item.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
         .menu-icon {
             width: 20px;
             margin-right: 12px;
             text-align: center;
+            transition: color 0.2s;
         }
 
         .menu-text {
@@ -188,8 +429,18 @@
             border-radius: 12px;
             font-size: 11px;
             font-weight: 600;
+            animation: pulse 2s infinite;
         }
 
+        .menu-badge.danger {
+            background: var(--danger-color);
+        }
+
+        .menu-badge.warning {
+            background: var(--warning-color);
+        }
+
+        /* Settings Content Area */
         .settings-content {
             flex: 1;
             display: flex;
@@ -203,6 +454,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            background: var(--bg-color);
+            z-index: 10;
         }
 
         .content-title {
@@ -239,8 +492,10 @@
             color: white;
         }
 
-        .action-btn.primary:hover {
+        .action-btn.primary:hover:not(:disabled) {
             background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 132, 255, 0.3);
         }
 
         .action-btn.secondary {
@@ -248,8 +503,9 @@
             color: var(--text-color);
         }
 
-        .action-btn.secondary:hover {
+        .action-btn.secondary:hover:not(:disabled) {
             background: var(--border-color);
+            transform: translateY(-2px);
         }
 
         .action-btn.danger {
@@ -257,8 +513,10 @@
             color: white;
         }
 
-        .action-btn.danger:hover {
+        .action-btn.danger:hover:not(:disabled) {
             background: var(--danger-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 59, 48, 0.3);
         }
 
         .action-btn:disabled {
@@ -266,18 +524,36 @@
             cursor: not-allowed;
         }
 
+        .action-btn i {
+            font-size: 14px;
+        }
+
+        /* Content Body */
         .content-body {
             flex: 1;
             overflow-y: auto;
             padding: 30px;
+            scroll-behavior: smooth;
         }
 
+        /* Settings Sections */
         .settings-section {
             background: var(--card-bg);
             border-radius: 12px;
             padding: 25px;
             margin-bottom: 20px;
             border: 1px solid var(--border-color);
+            transition: all 0.2s;
+        }
+
+        .settings-section:hover {
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+
+        .settings-section.danger-zone {
+            border-color: var(--danger-color);
+            border-width: 2px;
         }
 
         .section-header {
@@ -303,16 +579,27 @@
             line-height: 1.5;
         }
 
+        /* Setting Items */
         .setting-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 15px 0;
             border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.2s;
         }
 
         .setting-item:last-child {
             border-bottom: none;
+        }
+
+        .setting-item:hover {
+            background-color: var(--hover-color);
+            padding-left: 10px;
+            padding-right: 10px;
+            margin-left: -10px;
+            margin-right: -10px;
+            border-radius: 8px;
         }
 
         .setting-info {
@@ -331,6 +618,23 @@
             color: var(--text-secondary);
             font-size: 12px;
             cursor: help;
+            position: relative;
+        }
+
+        .setting-label-icon:hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--text-color);
+            color: var(--bg-color);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
         .setting-description {
@@ -345,6 +649,7 @@
             gap: 15px;
         }
 
+        /* Input Styles */
         .setting-input, .setting-textarea {
             padding: 10px 15px;
             border: 1px solid var(--border-color);
@@ -353,6 +658,23 @@
             color: var(--text-color);
             font-size: 14px;
             min-width: 250px;
+            transition: all 0.2s;
+        }
+
+        .setting-input:focus, .setting-textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-color-light);
+        }
+
+        .setting-input:disabled, .setting-textarea:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .setting-input.error, .setting-textarea.error {
+            border-color: var(--danger-color);
+            animation: shake 0.5s;
         }
 
         .setting-textarea {
@@ -374,10 +696,21 @@
             transition: all 0.2s;
         }
 
-        .setting-button:hover {
+        .setting-button:hover:not(:disabled) {
             background: var(--border-color);
+            transform: translateY(-2px);
         }
 
+        .setting-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .setting-button i {
+            font-size: 12px;
+        }
+
+        /* Dropdown */
         .setting-dropdown {
             padding: 10px 15px;
             border: 1px solid var(--border-color);
@@ -387,8 +720,20 @@
             font-size: 14px;
             min-width: 200px;
             cursor: pointer;
+            transition: all 0.2s;
         }
 
+        .setting-dropdown:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .setting-dropdown:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Toggle Switch */
         .toggle-switch {
             position: relative;
             display: inline-block;
@@ -434,9 +779,20 @@
             transform: translateX(20px);
         }
 
+        input:disabled + .toggle-slider {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .toggle-switch:hover .toggle-slider:before {
+            box-shadow: 0 0 5px var(--primary-color);
+        }
+
+        /* Radio Group */
         .radio-group {
             display: flex;
             gap: 20px;
+            flex-wrap: wrap;
         }
 
         .radio-option {
@@ -450,20 +806,35 @@
             margin: 0;
             width: 16px;
             height: 16px;
+            cursor: pointer;
         }
 
         .radio-label {
             font-size: 14px;
+            cursor: pointer;
         }
 
+        .radio-option:hover .radio-label {
+            color: var(--primary-color);
+        }
+
+        /* Color Picker */
         .color-picker {
             width: 36px;
             height: 36px;
             border-radius: 8px;
             border: 2px solid var(--border-color);
             cursor: pointer;
+            transition: all 0.2s;
         }
 
+        .color-picker:hover {
+            transform: scale(1.1);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+            border-color: var(--primary-color);
+        }
+
+        /* Slider */
         .setting-slider {
             width: 200px;
             height: 6px;
@@ -480,9 +851,50 @@
             border-radius: 50%;
             background: var(--primary-color);
             cursor: pointer;
+            transition: all 0.2s;
         }
 
-        /* Modal Styles */
+        .setting-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 10px var(--primary-color);
+        }
+
+        .setting-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .setting-slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 10px var(--primary-color);
+        }
+
+        .setting-slider:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Input Hints */
+        .input-hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        #bioCounter {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        /* =============================================
+           MODAL STYLES - PRESERVED + ENHANCED
+           ============================================= */
+        
         .modal-overlay {
             display: none;
             position: fixed;
@@ -494,6 +906,8 @@
             z-index: 1000;
             align-items: center;
             justify-content: center;
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.2s ease;
         }
 
         .modal-overlay.active {
@@ -508,6 +922,8 @@
             max-height: 90vh;
             display: flex;
             flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            animation: slideIn 0.3s ease;
         }
 
         .modal-header {
@@ -531,10 +947,12 @@
             cursor: pointer;
             padding: 5px;
             border-radius: 4px;
+            transition: all 0.2s;
         }
 
         .modal-close:hover {
             background: var(--hover-color);
+            transform: rotate(90deg);
         }
 
         .modal-body {
@@ -551,6 +969,7 @@
             gap: 10px;
         }
 
+        /* Photo Upload */
         .photo-upload-container {
             text-align: center;
         }
@@ -565,6 +984,13 @@
             overflow: hidden;
             background-size: cover;
             background-position: center;
+            border: 3px solid var(--primary-color);
+            transition: all 0.3s;
+        }
+
+        .photo-preview:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
         }
 
         .photo-change-overlay {
@@ -587,6 +1013,7 @@
             opacity: 1;
         }
 
+        /* Sessions List */
         .sessions-list, .blocked-users-list {
             max-height: 300px;
             overflow-y: auto;
@@ -600,6 +1027,12 @@
             display: flex;
             align-items: center;
             gap: 15px;
+            transition: all 0.2s;
+        }
+
+        .session-item:hover, .blocked-user-item:hover {
+            background: var(--hover-color);
+            transform: translateX(5px);
         }
 
         .session-icon, .blocked-user-icon {
@@ -641,13 +1074,19 @@
             border-radius: 6px;
             font-size: 12px;
             cursor: pointer;
+            transition: all 0.2s;
         }
 
         .terminate-btn:hover, .unblock-btn:hover {
             background: var(--danger-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(255, 59, 48, 0.3);
         }
 
-        /* Notification */
+        /* =============================================
+           NOTIFICATION STYLES - ENHANCED
+           ============================================= */
+        
         .notification {
             position: fixed;
             top: 20px;
@@ -664,6 +1103,7 @@
             opacity: 0;
             transition: all 0.3s;
             max-width: 350px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
         }
 
         .notification.active {
@@ -683,7 +1123,14 @@
             background: var(--primary-color);
         }
 
-        /* Mood Colors Grid */
+        .notification i {
+            font-size: 18px;
+        }
+
+        /* =============================================
+           MOOD COLORS GRID
+           ============================================= */
+        
         .mood-colors-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -702,6 +1149,7 @@
 
         .mood-color-item:hover {
             background: var(--hover-color);
+            transform: translateY(-2px);
         }
 
         .mood-color-item.active {
@@ -715,6 +1163,11 @@
             border-radius: 50%;
             margin: 0 auto 8px;
             border: 2px solid var(--border-color);
+            transition: all 0.2s;
+        }
+
+        .mood-color-item:hover .mood-color-preview {
+            transform: scale(1.1);
         }
 
         .mood-color-label {
@@ -723,7 +1176,10 @@
             font-weight: 500;
         }
 
-        /* Layout Previews */
+        /* =============================================
+           LAYOUT PREVIEWS
+           ============================================= */
+        
         .layout-previews {
             display: flex;
             gap: 15px;
@@ -742,6 +1198,7 @@
 
         .layout-preview:hover {
             border-color: var(--primary-color);
+            transform: translateY(-2px);
         }
 
         .layout-preview.selected {
@@ -761,7 +1218,52 @@
             font-weight: 500;
         }
 
-        /* Shortcut Preview */
+        /* =============================================
+           WALLPAPER SELECTOR
+           ============================================= */
+        
+        .wallpaper-selector {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .wallpaper-option {
+            text-align: center;
+            cursor: pointer;
+            padding: 10px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .wallpaper-option:hover {
+            background: var(--hover-color);
+        }
+
+        .wallpaper-option.selected {
+            border-color: var(--primary-color);
+            background: var(--primary-color-light);
+        }
+
+        .wallpaper-preview {
+            width: 100%;
+            height: 100px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .wallpaper-name {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* =============================================
+           SHORTCUT PREVIEW
+           ============================================= */
+        
         .shortcut-preview {
             display: inline-flex;
             align-items: center;
@@ -788,7 +1290,10 @@
             font-weight: 500;
         }
 
-        /* Storage Info */
+        /* =============================================
+           STORAGE INFO
+           ============================================= */
+        
         .storage-info {
             background: var(--hover-color);
             padding: 20px;
@@ -824,7 +1329,10 @@
             transition: width 0.3s;
         }
 
-        /* Error Message */
+        /* =============================================
+           ERROR MESSAGES
+           ============================================= */
+        
         .error-message {
             color: var(--danger-color);
             font-size: 12px;
@@ -832,9 +1340,197 @@
             padding: 5px;
             background: rgba(255, 59, 48, 0.1);
             border-radius: 4px;
+            display: none;
         }
 
-        /* Responsive */
+        .error-message.visible {
+            display: block;
+            animation: shake 0.5s;
+        }
+
+        /* =============================================
+           LOADING SPINNER
+           ============================================= */
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        .loading-spinner.large {
+            width: 40px;
+            height: 40px;
+            border-width: 3px;
+        }
+
+        .loading-spinner.small {
+            width: 16px;
+            height: 16px;
+            border-width: 2px;
+        }
+
+        /* =============================================
+           KEYBOARD SHORTCUT HINT
+           ============================================= */
+        
+        .shortcut-hint {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            z-index: 100;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .shortcut-hint:hover {
+            opacity: 1;
+        }
+
+        .shortcut-hint kbd {
+            background: var(--hover-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        /* =============================================
+           SANDBOX WARNING BANNER
+           ============================================= */
+        
+        .sandbox-warning {
+            background: var(--warning-color);
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            font-size: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(0); }
+        }
+
+        .sandbox-warning i {
+            font-size: 14px;
+        }
+
+        .sandbox-warning button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .sandbox-warning button:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* =============================================
+           COMPATIBILITY MODE BADGE
+           ============================================= */
+        
+        .compatibility-badge {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: var(--text-secondary);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            opacity: 0.7;
+            z-index: 999;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        /* =============================================
+           CONNECTION QUALITY INDICATORS
+           ============================================= */
+        
+        .connection-quality {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 12px;
+            background: var(--hover-color);
+        }
+
+        .connection-quality.good {
+            color: var(--success-color);
+        }
+
+        .connection-quality.poor {
+            color: var(--warning-color);
+        }
+
+        .connection-quality.degraded {
+            color: var(--danger-color);
+        }
+
+        .connection-quality.offline {
+            color: var(--text-secondary);
+        }
+
+        /* =============================================
+           OFFLINE MODE INDICATOR
+           ============================================= */
+        
+        body.offline .online-only {
+            opacity: 0.5;
+            pointer-events: none;
+            filter: grayscale(0.5);
+        }
+
+        body.offline .offline-badge {
+            display: block;
+        }
+
+        .offline-badge {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--danger-color);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 1002;
+            animation: pulse 2s infinite;
+        }
+
+        /* =============================================
+           RESPONSIVE DESIGN
+           ============================================= */
+        
         @media (max-width: 768px) {
             .app-container {
                 flex-direction: column;
@@ -879,9 +1575,83 @@
             .layout-previews {
                 flex-direction: column;
             }
+            
+            .wallpaper-selector {
+                grid-template-columns: 1fr;
+            }
+            
+            .shortcut-hint {
+                display: none;
+            }
+            
+            .modal-container {
+                width: 95%;
+                margin: 10px;
+            }
         }
 
-        /* Theme Variables */
+        /* Small phones */
+        @media (max-width: 480px) {
+            .settings-header {
+                padding: 15px;
+            }
+            
+            .settings-user-profile {
+                padding: 15px;
+            }
+            
+            .content-body {
+                padding: 15px;
+            }
+            
+            .settings-section {
+                padding: 15px;
+            }
+            
+            .action-btn {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            
+            .modal-header, .modal-body, .modal-footer {
+                padding: 15px;
+            }
+        }
+
+        /* =============================================
+           PRINT STYLES
+           ============================================= */
+        
+        @media print {
+            .settings-sidebar,
+            .content-actions,
+            .modal-overlay,
+            .notification,
+            .shortcut-hint,
+            .sandbox-warning,
+            .compatibility-badge,
+            .offline-badge {
+                display: none !important;
+            }
+            
+            .settings-content {
+                width: 100%;
+            }
+            
+            .setting-item {
+                break-inside: avoid;
+            }
+            
+            .settings-section {
+                box-shadow: none;
+                border: 1px solid #ccc;
+            }
+        }
+
+        /* =============================================
+           THEME VARIABLES - PRESERVED + ENHANCED
+           ============================================= */
+        
         :root {
             --bg-color: #ffffff;
             --sidebar-bg: #f8f9fa;
@@ -897,6 +1667,14 @@
             --warning-color: #ff9500;
             --border-color: #e0e0e0;
             --hover-color: #f0f0f0;
+            
+            /* Additional theme variables */
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --overlay-color: rgba(0, 0, 0, 0.5);
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            --base-font-size: 16px;
+            --border-radius: 8px;
+            --transition-speed: 0.2s;
         }
 
         .dark-theme {
@@ -907,12 +1685,85 @@
             --text-secondary: #aaaaaa;
             --border-color: #404040;
             --hover-color: #363636;
+            --shadow-color: rgba(0, 0, 0, 0.3);
+        }
+
+        /* Dark theme specific adjustments */
+        .dark-theme .setting-input,
+        .dark-theme .setting-textarea,
+        .dark-theme .setting-dropdown {
+            background: #363636;
+            border-color: #505050;
+            color: #ffffff;
+        }
+
+        .dark-theme .modal-container {
+            background: #2d2d2d;
+        }
+
+        .dark-theme .storage-info {
+            background: #363636;
+        }
+
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+            :root {
+                --border-color: #000000;
+                --text-secondary: #000000;
+            }
+            
+            .dark-theme {
+                --border-color: #ffffff;
+                --text-secondary: #ffffff;
+            }
+        }
+
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        /* Failsafe disabled elements styling */
+        .failsafe-disabled {
+            opacity: 0.5;
+            cursor: not-allowed !important;
+            pointer-events: none;
+            filter: grayscale(0.5);
+        }
+
+        /* Slow connection indicator */
+        body.slow-connection .setting-item,
+        body.slow-connection .menu-item {
+            transition: all 0.5s ease;
+        }
+
+        /* Compatibility mode styling */
+        .compatibility-mode .advanced-feature {
+            display: none !important;
         }
     </style>
 
 </head>
 <body>
-    <!-- Modals -->
+    <!-- Offline Mode Badge - Only shown when offline -->
+    <div class="offline-badge" id="offlineBadge">
+        <i class="fas fa-wifi-slash"></i> Offline
+    </div>
+
+    <!-- Keyboard shortcut hint - Hidden by default, appears on hover -->
+    <div class="shortcut-hint">
+        <kbd>Ctrl</kbd> + <kbd>S</kbd> save • <kbd>Esc</kbd> close • <kbd>Ctrl</kbd> + <kbd>F</kbd> search
+    </div>
+
+    <!-- =============================================
+         MODALS - PRESERVED WITH ENHANCEMENTS
+         ============================================= -->
+    
+    <!-- Change Photo Modal -->
     <div class="modal-overlay" id="changePhotoModal">
         <div class="modal-container">
             <div class="modal-header">
@@ -932,7 +1783,7 @@
                         <p style="margin-bottom: 10px; color: var(--text-secondary); font-size: 14px;">
                             Choose a new profile photo
                         </p>
-                        <div style="display: flex; gap: 10px; justify-content: center;">
+                        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
                             <button class="action-btn secondary" id="takePhotoBtn">
                                 <i class="fas fa-camera"></i> Take Photo
                             </button>
@@ -955,6 +1806,7 @@
         </div>
     </div>
     
+    <!-- Change Password Modal -->
     <div class="modal-overlay" id="changePasswordModal">
         <div class="modal-container">
             <div class="modal-header">
@@ -978,7 +1830,7 @@
                         </label>
                         <input type="password" class="setting-input" id="newPassword" style="width: 100%;" 
                                placeholder="Enter new password">
-                        <div class="error-message" id="passwordError" style="display: none;"></div>
+                        <div class="error-message" id="passwordError"></div>
                     </div>
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
@@ -991,12 +1843,23 @@
                         <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px;">
                             <i class="fas fa-info-circle"></i> Password Requirements:
                         </p>
-                        <ul style="font-size: 12px; color: var(--text-secondary); padding-left: 20px;">
+                        <ul style="font-size: 12px; color: var(--text-secondary); padding-left: 20px; margin: 0;">
                             <li>At least 8 characters long</li>
                             <li>Include uppercase and lowercase letters</li>
                             <li>Include at least one number</li>
                             <li>Include at least one special character</li>
                         </ul>
+                    </div>
+                    
+                    <!-- Password strength meter -->
+                    <div id="passwordStrength" style="margin-top: 15px; display: none;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="font-size: 12px;">Password strength:</span>
+                            <span id="strengthText" style="font-size: 12px; font-weight: 500;">Weak</span>
+                        </div>
+                        <div style="height: 4px; background: var(--border-color); border-radius: 2px; overflow: hidden;">
+                            <div id="strengthBar" style="width: 0%; height: 100%; background: var(--danger-color); transition: all 0.3s;"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1007,6 +1870,7 @@
         </div>
     </div>
     
+    <!-- Active Sessions Modal -->
     <div class="modal-overlay" id="sessionsModal">
         <div class="modal-container">
             <div class="modal-header">
@@ -1018,6 +1882,10 @@
             <div class="modal-body">
                 <div class="sessions-list" id="sessionsList">
                     <!-- Sessions will be loaded here -->
+                    <div style="text-align: center; padding: 20px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
+                        <p style="margin-top: 10px; color: var(--text-secondary);">Loading sessions...</p>
+                    </div>
                 </div>
                 <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px;">
                     <button class="action-btn danger" id="terminateAllSessionsBtn" style="width: 100%;">
@@ -1031,6 +1899,7 @@
         </div>
     </div>
     
+    <!-- Blocked Users Modal -->
     <div class="modal-overlay" id="blockedUsersModal">
         <div class="modal-container">
             <div class="modal-header">
@@ -1042,6 +1911,10 @@
             <div class="modal-body">
                 <div class="blocked-users-list" id="blockedUsersList">
                     <!-- Blocked users will be loaded here -->
+                    <div style="text-align: center; padding: 20px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
+                        <p style="margin-top: 10px; color: var(--text-secondary);">Loading blocked users...</p>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1050,6 +1923,7 @@
         </div>
     </div>
     
+    <!-- Confirmation Modal -->
     <div class="modal-overlay" id="confirmationModal">
         <div class="modal-container">
             <div class="modal-header">
@@ -1074,7 +1948,10 @@
         <span id="notificationText">Operation completed successfully</span>
     </div>
     
-    <!-- Main App Container -->
+    <!-- =============================================
+         MAIN APP CONTAINER
+         ============================================= -->
+    
     <div class="app-container">
         <!-- Settings Sidebar -->
         <div class="settings-sidebar">
@@ -1086,14 +1963,19 @@
             </div>
             
             <div class="settings-user-profile">
-                <div class="user-avatar" id="userAvatarPreview">
+                <div class="user-avatar" id="userAvatarPreview" title="Click to change profile photo">
                     <!-- User avatar will be loaded here -->
                 </div>
                 <div class="user-info">
-                    <div class="user-name" id="userNamePreview">Loading user data...</div>
+                    <div class="user-name" id="userNamePreview">Loading...</div>
                     <div class="user-status">
                         <div class="status-indicator" id="userStatusIndicator"></div>
                         <span id="userStatusText">Connecting...</span>
+                    </div>
+                    <!-- Connection quality indicator - hidden by default, appears when degraded -->
+                    <div class="connection-status" id="connectionStatus" style="display: none;">
+                        <i class="fas fa-wifi"></i>
+                        <span id="connectionQualityText">Connected</span>
                     </div>
                 </div>
             </div>
@@ -1102,11 +1984,24 @@
                 <div class="search-container">
                     <input type="text" class="search-input" id="settingsSearch" placeholder="Search settings...">
                     <i class="fas fa-search search-icon"></i>
+                    <i class="fas fa-times search-clear" id="searchClear"></i>
                 </div>
             </div>
             
             <div class="settings-menu" id="settingsMenu">
                 <!-- Menu items will be dynamically generated -->
+                <div style="text-align: center; padding: 20px;">
+                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
+                    <p style="margin-top: 10px; color: var(--text-secondary);">Loading menu...</p>
+                </div>
+            </div>
+            
+            <!-- Version info and connection mode - Minimal, no console noise -->
+            <div style="padding: 15px 20px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-secondary); text-align: center;">
+                <span>Knecta Chat</span>
+                <span style="margin: 0 5px;">•</span>
+                <span id="connectionMode">Ready</span>
+                <div id="environmentBadge" style="margin-top: 5px; font-size: 10px; opacity: 0.7;"></div>
             </div>
         </div>
         
@@ -1114,34 +2009,24 @@
         <div class="settings-content">
             <div class="content-header">
                 <div>
-                    <div class="content-title" id="contentTitle">Initializing...</div>
-                    <div class="content-subtitle" id="contentSubtitle">Loading settings...</div>
+                    <div class="content-title" id="contentTitle">Settings</div>
+                    <div class="content-subtitle" id="contentSubtitle">Manage your preferences</div>
                 </div>
                 <div class="content-actions">
                     <button class="action-btn secondary" id="resetSectionBtn" disabled>
-                        <i class="fas fa-undo"></i> Reset Section
+                        <i class="fas fa-undo"></i> Reset
                     </button>
                     <button class="action-btn primary" id="saveSectionBtn" disabled>
-                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                        <i class="fas fa-save"></i> Save
                     </button>
                 </div>
             </div>
             
             <div class="content-body" id="settingsContent">
+                <!-- Content will be loaded dynamically -->
                 <div class="settings-section" style="text-align: center; padding: 50px;">
                     <div class="section-header">
-                        <h3><i class="fas fa-spinner fa-spin section-icon"></i> Initializing Settings</h3>
-                        <div class="section-description">
-                            Please wait while we load your settings from the server...
-                        </div>
-                    </div>
-                    <div class="section-body">
-                        <p id="apiStatus">Checking API connection...</p>
-                        <div style="margin-top: 20px;">
-                            <div style="display: inline-block; width: 100px; height: 4px; background: var(--border-color); border-radius: 2px; overflow: hidden;">
-                                <div id="loadingBar" style="width: 0%; height: 100%; background: var(--primary-color); transition: width 0.3s;"></div>
-                            </div>
-                        </div>
+                        <h3><i class="fas fa-spinner fa-spin section-icon"></i> Loading</h3>
                     </div>
                 </div>
             </div>
@@ -1150,12 +2035,268 @@
     
     <!-- Color Picker (hidden) -->
     <div id="colorPickerContainer" style="display: none;"></div>
+    
+    <!-- Fallback color picker (hidden) -->
+    <div id="fallbackColorPickerContainer" style="display: none;"></div>
 
     <!-- API must load first -->
    
-    <!-- Settings JS -->
-     
+    <!-- Settings JS - Core and UI -->
     <script type="module" src="settings-core.js"></script>
-<script type="module" src="settings-ui.js"></script>
+    <script type="module" src="settings-ui.js"></script>
+    
+    <!-- =============================================
+         INLINE ERROR BOUNDARY AND INITIALIZATION - SILENT
+         ============================================= -->
+    
+    <script>
+        // =============================================
+        // GLOBAL ERROR HANDLING - SILENT IN PRODUCTION
+        // =============================================
+        
+        (function() {
+            // Store original console methods
+            const originalConsole = {
+                error: console.error,
+                warn: console.warn,
+                log: console.log
+            };
+            
+            // Error queue for diagnostics - silent unless debug mode
+            window.__ERROR_QUEUE__ = [];
+            const isDebug = window.location.search.includes('debug=true');
+            
+            // Override console to capture errors silently
+            console.error = function() {
+                window.__ERROR_QUEUE__.push({
+                    type: 'error',
+                    message: Array.from(arguments).join(' '),
+                    timestamp: Date.now()
+                });
+                if (isDebug) {
+                    originalConsole.error.apply(console, arguments);
+                }
+            };
+            
+            console.warn = function() {
+                window.__ERROR_QUEUE__.push({
+                    type: 'warn',
+                    message: Array.from(arguments).join(' '),
+                    timestamp: Date.now()
+                });
+                if (isDebug) {
+                    originalConsole.warn.apply(console, arguments);
+                }
+            };
+            
+            // Global error handler - silent recovery
+            window.addEventListener('error', function(event) {
+                if (isDebug) {
+                    console.error('Global error caught:', event.error);
+                }
+                
+                const errorData = {
+                    message: event.message,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    error: event.error ? event.error.stack : null,
+                    timestamp: Date.now()
+                };
+                
+                window.__ERROR_QUEUE__.push({
+                    type: 'global',
+                    ...errorData
+                });
+                
+                // Show retry button only if in debug mode
+                const retryBtn = document.getElementById('retryInitBtn');
+                if (retryBtn && isDebug) {
+                    retryBtn.style.display = 'inline-flex';
+                }
+                
+                return false;
+            });
+            
+            window.addEventListener('unhandledrejection', function(event) {
+                if (isDebug) {
+                    console.error('Unhandled promise rejection:', event.reason);
+                }
+                
+                window.__ERROR_QUEUE__.push({
+                    type: 'unhandledrejection',
+                    reason: event.reason ? event.reason.toString() : 'Unknown',
+                    stack: event.reason ? event.reason.stack : null,
+                    timestamp: Date.now()
+                });
+            });
+            
+            // =============================================
+            // DOM CONTENT LOADED HANDLER - SILENT
+            // =============================================
+            
+            document.addEventListener('DOMContentLoaded', function() {
+                // =============================================
+                // UI ELEMENT SETUP - SILENT
+                // =============================================
+                
+                // Search clear button
+                const searchInput = document.getElementById('settingsSearch');
+                const searchClear = document.getElementById('searchClear');
+                
+                if (searchInput && searchClear) {
+                    searchClear.addEventListener('click', function() {
+                        searchInput.value = '';
+                        searchInput.dispatchEvent(new Event('input'));
+                        searchInput.focus();
+                    });
+                }
+                
+                // Update connection mode based on URL - silent
+                const connectionMode = document.getElementById('connectionMode');
+                if (connectionMode) {
+                    if (window.self !== window.top) {
+                        connectionMode.textContent = 'Embedded';
+                    } else {
+                        connectionMode.textContent = 'Standalone';
+                    }
+                }
+                
+                // Detect environment - silent
+                const environmentBadge = document.getElementById('environmentBadge');
+                if (environmentBadge) {
+                    const hostname = window.location.hostname;
+                    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                        environmentBadge.textContent = 'Dev';
+                    } else if (hostname.includes('onrender.com')) {
+                        environmentBadge.textContent = 'Render';
+                    } else if (window.location.protocol === 'https:') {
+                        environmentBadge.textContent = 'Secure';
+                    }
+                }
+                
+                // Add avatar click handler
+                const userAvatar = document.getElementById('userAvatarPreview');
+                if (userAvatar) {
+                    userAvatar.addEventListener('click', function() {
+                        const modal = document.getElementById('changePhotoModal');
+                        if (modal) {
+                            modal.classList.add('active');
+                        }
+                    });
+                }
+                
+                // =============================================
+                // PASSWORD STRENGTH METER - SILENT
+                // =============================================
+                
+                const newPassword = document.getElementById('newPassword');
+                const strengthDiv = document.getElementById('passwordStrength');
+                const strengthBar = document.getElementById('strengthBar');
+                const strengthText = document.getElementById('strengthText');
+                
+                if (newPassword && strengthDiv && strengthBar && strengthText) {
+                    newPassword.addEventListener('input', function() {
+                        const password = this.value;
+                        if (password.length === 0) {
+                            strengthDiv.style.display = 'none';
+                            return;
+                        }
+                        
+                        strengthDiv.style.display = 'block';
+                        
+                        let strength = 0;
+                        
+                        // Length check
+                        if (password.length >= 8) strength += 25;
+                        
+                        // Uppercase check
+                        if (/[A-Z]/.test(password)) strength += 25;
+                        
+                        // Lowercase check
+                        if (/[a-z]/.test(password)) strength += 25;
+                        
+                        // Number check
+                        if (/[0-9]/.test(password)) strength += 15;
+                        
+                        // Special character check
+                        if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) strength += 10;
+                        
+                        strengthBar.style.width = strength + '%';
+                        
+                        if (strength < 30) {
+                            strengthBar.style.background = 'var(--danger-color)';
+                            strengthText.textContent = 'Weak';
+                            strengthText.style.color = 'var(--danger-color)';
+                        } else if (strength < 60) {
+                            strengthBar.style.background = 'var(--warning-color)';
+                            strengthText.textContent = 'Medium';
+                            strengthText.style.color = 'var(--warning-color)';
+                        } else if (strength < 85) {
+                            strengthBar.style.background = 'var(--success-color)';
+                            strengthText.textContent = 'Good';
+                            strengthText.style.color = 'var(--success-color)';
+                        } else {
+                            strengthBar.style.background = 'var(--success-color)';
+                            strengthText.textContent = 'Strong';
+                            strengthText.style.color = 'var(--success-color)';
+                        }
+                    });
+                }
+                
+                // =============================================
+                // ONLINE/OFFLINE HANDLING - SILENT
+                // =============================================
+                
+                const offlineBadge = document.getElementById('offlineBadge');
+                
+                window.addEventListener('online', function() {
+                    document.body.classList.remove('offline');
+                    if (offlineBadge) offlineBadge.style.display = 'none';
+                });
+                
+                window.addEventListener('offline', function() {
+                    document.body.classList.add('offline');
+                    if (offlineBadge) offlineBadge.style.display = 'block';
+                });
+                
+                // Initial online check
+                if (!navigator.onLine) {
+                    document.body.classList.add('offline');
+                    if (offlineBadge) offlineBadge.style.display = 'block';
+                }
+                
+                // =============================================
+                // EXPOSE DEBUG INTERFACE - SILENT
+                // =============================================
+                
+                window.__HTML_DEBUG__ = {
+                    getErrors: () => window.__ERROR_QUEUE__,
+                    clearErrors: () => { window.__ERROR_QUEUE__ = []; },
+                    getEnvironment: () => ({
+                        hostname: window.location.hostname,
+                        protocol: window.location.protocol,
+                        inIframe: window.self !== window.top,
+                        online: navigator.onLine
+                    })
+                };
+            });
+            
+            // =============================================
+            // PERFORMANCE MARKERS - SILENT
+            // =============================================
+            
+            performance.mark('html-loaded');
+            
+            window.addEventListener('load', function() {
+                performance.mark('window-loaded');
+                if (window.location.search.includes('debug=true')) {
+                    performance.measure('load-time', 'html-loaded', 'window-loaded');
+                    console.log('[HTML] Load time:', performance.getEntriesByName('load-time')[0].duration.toFixed(2) + 'ms');
+                }
+            });
+            
+        })();
+    </script>
 </body>
 </html>

@@ -5,9 +5,8 @@
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
     <link rel="icon" href="../icons/moodchat-512.png">
-    <meta name="theme-color" content="#000000">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Marketplace | Knecta Chat</title>
     
     <!-- Font Awesome -->
@@ -26,389 +25,251 @@
     
     <!-- Chart.js for Analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Link CSS -->
+    
+    <!-- Link CSS (external file) -->
     <link rel="stylesheet" href="Tool.css">
 
+    <!-- Only minimal inline styles for dynamic elements that can't be in external CSS -->
     <style>
-        /* Add missing styles for UI elements */
-        .trust-indicator {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-left: 5px;
-            text-transform: uppercase;
-        }
+        /* =============================================
+           ONLY DYNAMIC/ENHANCED UI ELEMENTS v5.0
+           (Non-duplicate - not in Tool.css)
+           ============================================= */
         
-        .trust-new {
-            background-color: #e0e0e0;
-            color: #666;
-        }
-        
-        .trust-responsive {
-            background-color: #bbdefb;
-            color: #1565c0;
-        }
-        
-        .trust-reliable {
-            background-color: #c8e6c9;
-            color: #2e7d32;
-        }
-        
-        .trust-verified {
-            background-color: #fff3e0;
-            color: #ef6c00;
-        }
-        
-        .trust-pro {
-            background-color: #f3e5f5;
-            color: #7b1fa2;
-        }
-        
-        .availability-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-left: 5px;
-        }
-        
-        .availability-free {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-        }
-        
-        .availability-busy {
-            background-color: #fff3e0;
-            color: #ef6c00;
-        }
-        
-        .availability-urgent {
-            background-color: #ffebee;
-            color: #c62828;
-        }
-        
-        .premium-badge {
-            display: inline-flex;
-            align-items: center;
-            background: linear-gradient(45deg, #FFD700, #FFA500);
-            color: #000;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-left: 5px;
-        }
-        
-        .featured-badge {
-            display: inline-flex;
-            align-items: center;
-            background: linear-gradient(45deg, #FF4081, #F50057);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-left: 5px;
-        }
-        
-        .verified-badge {
-            display: inline-flex;
-            align-items: center;
-            background: linear-gradient(45deg, #4CAF50, #2E7D32);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-left: 5px;
-        }
-        
-        .team-badge {
-            display: inline-flex;
-            align-items: center;
-            background: linear-gradient(45deg, #2196F3, #0D47A1);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-left: 5px;
-        }
-        
-        .listing-detail-media {
-            width: 100%;
+        /* Debug Panel - Dynamic overlay */
+        #debugPanel {
+            position: fixed;
+            bottom: 60px;
+            left: 10px;
+            z-index: 10000;
+            background: rgba(0,0,0,0.95);
+            color: #0f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            max-width: 400px;
             max-height: 400px;
-            object-fit: contain;
-            border-radius: 12px;
-            margin-bottom: 20px;
+            overflow: auto;
+            display: none;
+            backdrop-filter: blur(4px);
+            border: 1px solid #444;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         }
-        
-        .meta-badge {
+
+        #debugToggle {
+            position: fixed;
+            bottom: 60px;
+            left: 10px;
+            z-index: 10000;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            min-width: 44px;
+            min-height: 44px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        #debugToggle:hover {
+            opacity: 1;
+        }
+
+        /* Connection Status Bar - Dynamic overlay */
+        #connectionStatusBar {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            gap: 8px;
+            z-index: 10000;
+            font-size: 11px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+            pointer-events: none;
+            flex-wrap: wrap;
+            max-width: 300px;
+            transition: opacity 0.3s ease, background 0.3s ease;
+            opacity: 0.8;
+        }
+
+        .status-dot {
             display: inline-flex;
             align-items: center;
-            background-color: rgba(0, 0, 0, 0.05);
-            padding: 6px 12px;
-            border-radius: 20px;
-            margin-right: 8px;
-            margin-bottom: 8px;
-            font-size: 12px;
-            gap: 5px;
+            gap: 4px;
         }
-        
-        .premium-feature {
-            border-left: 3px solid #FFD700;
-            padding-left: 10px;
-            background-color: rgba(255, 215, 0, 0.05);
-        }
-        
-        .reaction-picker {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        
-        .reaction-option {
-            font-size: 24px;
-            padding: 10px;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-            background-color: rgba(0, 0, 0, 0.05);
-        }
-        
-        .reaction-option:hover {
-            background-color: rgba(0, 0, 0, 0.1);
-            transform: scale(1.1);
-        }
-        
-        .reaction-option.premium {
-            background: linear-gradient(45deg, #FFD700, #FFA500);
+
+        /* Reconnection Message - Dynamic overlay */
+        #reconnectionMessage {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 193, 7, 0.95);
             color: #000;
-        }
-        
-        .heatmap-grid {
-            display: grid;
-            grid-template-columns: repeat(24, 1fr);
-            gap: 2px;
-            margin-top: 10px;
-        }
-        
-        .heatmap-cell {
-            width: 20px;
-            height: 20px;
-            border-radius: 3px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-        }
-        
-        .file-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px;
-            background-color: rgba(0, 0, 0, 0.05);
-            border-radius: 8px;
-            margin-top: 10px;
-        }
-        
-        .tip-container {
-            position: relative;
-        }
-        
-        .tip-amounts {
-            display: none;
-            position: absolute;
-            bottom: 100%;
-            left: 0;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-            padding: 10px;
-            z-index: 1000;
-            min-width: 150px;
-        }
-        
-        .tip-amounts.show {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 5px;
-        }
-        
-        .tip-option {
-            padding: 8px;
-            border-radius: 8px;
-            background-color: rgba(0, 0, 0, 0.05);
-            cursor: pointer;
-            text-align: center;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-        
-        .tip-option:hover {
-            background-color: rgba(0, 132, 255, 0.1);
-        }
-        
-        .team-member {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-        }
-        
-        .team-member-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .team-member-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: #ccc;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-size: cover;
-            background-position: center;
-        }
-        
-        .team-member-role {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 2px;
-        }
-        
-        .leaderboard-item {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 15px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 12px;
-            margin-bottom: 10px;
-            background-color: rgba(0, 0, 0, 0.02);
-        }
-        
-        .leaderboard-rank {
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            background-color: rgba(0, 0, 0, 0.1);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-        }
-        
-        .leaderboard-info {
-            flex: 1;
-        }
-        
-        .leaderboard-stats {
-            display: flex;
-            gap: 15px;
-            margin-top: 5px;
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        .leaderboard-stats span {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-        }
-        
-        .saved-item, .note-item {
-            padding: 15px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .saved-item:hover, .note-item:hover {
-            background-color: rgba(0, 0, 0, 0.05);
-        }
-        
-        .circle-option.selected {
-            background-color: rgba(0, 132, 255, 0.1);
-            border-color: var(--primary-color);
-        }
-        
-        .circle-option.premium {
-            border-left: 3px solid #FFD700;
-        }
-        
-        .template-option.selected, .mood-option.selected, 
-        .duration-option.selected, .schedule-option.selected,
-        .export-option.selected, .payment-method.selected {
-            background-color: rgba(0, 132, 255, 0.1);
-            border-color: var(--primary-color);
-        }
-        
-        .payment-method {
-            padding: 20px;
-            border-radius: 12px;
-            border: 2px solid transparent;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        
-        .payment-method:hover {
-            background-color: rgba(0, 0, 0, 0.05);
-        }
-        
-        .payment-form {
-            margin-top: 20px;
-            display: grid;
-            gap: 10px;
-        }
-        
-        .payment-form input {
-            padding: 10px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
+            padding: 12px 20px;
+            border-radius: 30px;
             font-size: 14px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            backdrop-filter: blur(4px);
         }
-        
-        .ar-preview-placeholder {
-            padding: 40px;
-            text-align: center;
-            background-color: rgba(0, 0, 0, 0.05);
-            border-radius: 12px;
-            border: 2px dashed rgba(0, 0, 0, 0.1);
+
+        /* Upload Progress - Dynamic overlay */
+        #uploadProgress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--primary-color);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.2s;
+            z-index: 2000;
         }
-        
-        .loading-spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(0, 0, 0, 0.1);
-            border-radius: 50%;
-            border-top-color: var(--primary-color);
-            animation: spin 1s linear infinite;
+
+        /* Marketplace Status Message - Dynamic overlay */
+        #marketplaceStatusMessage {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 8px;
+            z-index: 9999;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: all 0.3s ease;
+            background: var(--primary-color);
+            color: white;
         }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        .empty-state {
+
+        /* Loading indicator for skeleton */
+        .loading-placeholder {
             text-align: center;
             padding: 40px 20px;
             color: var(--text-secondary);
         }
-        
-        .empty-state .subtext {
-            font-size: 14px;
-            margin-top: 5px;
-            color: var(--text-secondary);
+
+        .skeleton-loading {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .skeleton-item {
+            height: 80px;
+            background: linear-gradient(90deg, var(--border-color) 25%, var(--hover-bg) 50%, var(--border-color) 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: 8px;
+        }
+
+        .skeleton-spotlight {
+            height: 60px;
+            background: linear-gradient(90deg, var(--border-color) 25%, var(--hover-bg) 50%, var(--border-color) 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Error boundary fallback */
+        .error-boundary-fallback {
+            padding: 40px;
+            text-align: center;
+            background: var(--secondary-color);
+            border-radius: 12px;
+            border: 1px solid var(--error-color);
+        }
+
+        .error-retry-btn {
+            padding: 10px 20px;
+            margin-top: 15px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            min-height: 44px;
+        }
+
+        /* File info styling */
+        .file-info {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: var(--secondary-color);
+            border-radius: 8px;
+        }
+
+        /* Tip amounts container */
+        .tip-amounts.show {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        /* Ensure all touch targets are accessible */
+        button, .listing-item, .spotlight-item, .circle-option, 
+        .template-option, .availability-option, .mood-option, 
+        .duration-option, .schedule-option, .export-option {
+            min-height: 44px;
+            min-width: 44px;
+        }
+
+        /* Responsive adjustments for dynamic elements */
+        @media (max-width: 480px) {
+            #connectionStatusBar {
+                bottom: 5px;
+                right: 5px;
+                font-size: 10px;
+                padding: 6px 12px;
+                max-width: 300px;
+            }
+
+            #debugPanel {
+                left: 5px;
+                right: 5px;
+                max-width: none;
+                font-size: 10px;
+                max-height: 300px;
+            }
+
+            #marketplaceStatusMessage {
+                font-size: 12px;
+                padding: 8px 16px;
+            }
+        }
+
+        @media print {
+            #connectionStatusBar,
+            #debugToggle,
+            #debugPanel,
+            #reconnectionMessage,
+            #marketplaceStatusMessage,
+            #uploadProgress {
+                display: none !important;
+            }
         }
     </style>
 </head>
@@ -417,18 +278,24 @@
         <!-- Sidebar with marketplace list -->
         <div class="sidebar active" id="sidebar">
             <div class="sidebar-header">
-                <h2>Marketplace <span class="premium-badge" id="premiumStatusBadge" style="display: none;">PRO</span></h2>
-                <div style="display: flex; gap: 10px;">
-                    <button class="add-listing-btn" id="viewAnalyticsBtn" title="Analytics">
+                <h2>
+                    Marketplace 
+                    <span class="premium-badge" id="premiumStatusBadge" style="display: none;">PRO</span>
+                </h2>
+                <div style="display: flex; gap: 8px;">
+                    <button class="add-listing-btn" id="viewAnalyticsBtn" title="Analytics" style="width: 44px; height: 44px; border-radius: 50%; background: var(--secondary-color); border: none; cursor: pointer;">
                         <i class="fas fa-chart-bar"></i>
                     </button>
-                    <button class="add-listing-btn" id="viewSavedBtn" title="Saved Items">
+                    <button class="add-listing-btn" id="viewSavedBtn" title="Saved Items" style="width: 44px; height: 44px; border-radius: 50%; background: var(--secondary-color); border: none; cursor: pointer;">
                         <i class="fas fa-bookmark"></i>
                     </button>
-                    <button class="add-listing-btn" id="viewNotesBtn" title="My Notes">
+                    <button class="add-listing-btn" id="viewNotesBtn" title="My Notes" style="width: 44px; height: 44px; border-radius: 50%; background: var(--secondary-color); border: none; cursor: pointer;">
                         <i class="fas fa-sticky-note"></i>
                     </button>
-                    <button class="add-listing-btn" id="createListingBtn" title="Create Listing">
+                    <button class="add-listing-btn" id="viewTrustStatsBtn" title="Trust Stats" style="width: 44px; height: 44px; border-radius: 50%; background: var(--secondary-color); border: none; cursor: pointer;">
+                        <i class="fas fa-shield-alt"></i>
+                    </button>
+                    <button class="add-listing-btn" id="createListingBtn" title="Create Listing" style="width: 44px; height: 44px; border-radius: 50%; background: var(--primary-color); border: none; color: white; cursor: pointer;">
                         <i class="fas fa-plus"></i>
                     </button>
                 </div>
@@ -443,6 +310,12 @@
                 <button class="marketplace-category-btn" id="myTab">My Listings</button>
                 <button class="marketplace-category-btn" id="premiumTab">Premium <span class="premium-badge" style="font-size: 8px; padding: 1px 4px;">PRO</span></button>
                 <button class="marketplace-category-btn" id="spotlightTab">Spotlight <span class="featured-badge" style="font-size: 8px; padding: 1px 4px;">FEATURED</span></button>
+                <button class="marketplace-category-btn" id="viewTeamBtn" title="Team Management">
+                    <i class="fas fa-users"></i> Team
+                </button>
+                <button class="marketplace-category-btn" id="viewLeaderboardBtn" title="Leaderboard">
+                    <i class="fas fa-trophy"></i> Leaderboard
+                </button>
             </div>
             
             <!-- Spotlight Section -->
@@ -460,6 +333,7 @@
             <div class="mood-filter-indicator" id="moodFilterIndicator" style="display: none;">
                 <i class="fas fa-filter"></i>
                 <span id="currentMoodFilter">Browsing</span>
+                <i class="fas fa-times" style="margin-left: auto;"></i>
             </div>
             
             <!-- My Listings Section -->
@@ -502,7 +376,7 @@
                 
                 <div class="marketplace-list-content" id="marketplaceListContent">
                     <!-- Listing items will be loaded here -->
-                    <div class="loading-placeholder" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                    <div class="loading-placeholder">
                         <div class="loading-spinner" style="margin: 0 auto 15px;"></div>
                         <p>Loading marketplace listings...</p>
                     </div>
@@ -597,7 +471,7 @@
                     <div class="service-listing-container">
                         <div class="input-group">
                             <label for="serviceTitle">Service Title</label>
-                            <input type="text" class="text-input" id="serviceTitle" placeholder="e.g., Graphic Design, Math Tutoring, Phone Repair">
+                            <input type="text" class="text-input" id="serviceTitle" placeholder="e.g., Graphic Design, Math Tutoring, Phone Repair" list="serviceCategories">
                         </div>
                         
                         <div class="input-group">
@@ -613,7 +487,7 @@
                         <div class="input-group">
                             <label>Availability Mood</label>
                             <div class="availability-options">
-                                <div class="availability-option" data-availability="free">
+                                <div class="availability-option selected" data-availability="free">
                                     <i class="fas fa-check-circle"></i>
                                     <div>Free</div>
                                     <small>Available now</small>
@@ -656,8 +530,8 @@
                                 <i class="fas fa-cloud-upload-alt"></i>
                             </div>
                             <h4>Upload Digital File</h4>
-                            <p style="color: var(--text-secondary); margin-top: 10px;">Supports: PDF, DOC, ZIP, Images, Audio</p>
-                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Max: 50MB (Premium: 500MB)</p>
+                            <p style="color: var(--text-secondary); margin-top: 10px;">Supports: PDF, DOC, ZIP, Images, Audio, Video</p>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;"><i class="fas fa-info-circle"></i> Max: 50MB (Premium: 500MB)</p>
                             <input type="file" id="digitalUploadInput" accept=".pdf,.doc,.docx,.zip,.jpg,.jpeg,.png,.mp3,.wav,.mp4,.mov,.avi" style="display: none;">
                         </div>
                         
@@ -692,8 +566,10 @@
                             <div style="font-weight: 600; margin-bottom: 5px;">Featured Listing</div>
                             <div style="font-size: 12px; color: var(--text-secondary);">Appear in Spotlight section</div>
                             <div style="margin-top: 10px;">
-                                <input type="checkbox" id="featuredListingCheckbox">
-                                <label for="featuredListingCheckbox" style="font-size: 12px;">Enable ($5/day)</label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="featuredListingCheckbox">
+                                    <span style="font-size: 12px;">Enable ($5/day)</span>
+                                </label>
                             </div>
                         </div>
                         
@@ -704,8 +580,10 @@
                             <div style="font-weight: 600; margin-bottom: 5px;">Boost Listing</div>
                             <div style="font-size: 12px; color: var(--text-secondary);">2x more visibility</div>
                             <div style="margin-top: 10px;">
-                                <input type="checkbox" id="boostListingCheckbox">
-                                <label for="boostListingCheckbox" style="font-size: 12px;">Enable ($3/day)</label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="boostListingCheckbox">
+                                    <span style="font-size: 12px;">Enable ($3/day)</span>
+                                </label>
                             </div>
                         </div>
                         
@@ -716,7 +594,7 @@
                             <div style="font-weight: 600; margin-bottom: 5px;">Video Intro</div>
                             <div style="font-size: 12px; color: var(--text-secondary);">Add video presentation</div>
                             <div style="margin-top: 10px;">
-                                <button class="action-btn secondary" style="padding: 8px 12px; font-size: 12px;" id="uploadVideoBtn">
+                                <button class="action-btn secondary" style="padding: 8px 12px; font-size: 12px; width: 100%;" id="uploadVideoBtn">
                                     <i class="fas fa-upload"></i> Upload Video
                                 </button>
                             </div>
@@ -729,8 +607,10 @@
                             <div style="font-weight: 600; margin-bottom: 5px;">Priority Messaging</div>
                             <div style="font-size: 12px; color: var(--text-secondary);">Messages appear first</div>
                             <div style="margin-top: 10px;">
-                                <input type="checkbox" id="priorityMessagingCheckbox">
-                                <label for="priorityMessagingCheckbox" style="font-size: 12px;">Enable ($2/day)</label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="priorityMessagingCheckbox">
+                                    <span style="font-size: 12px;">Enable ($2/day)</span>
+                                </label>
                             </div>
                         </div>
                         
@@ -741,8 +621,10 @@
                             <div style="font-weight: 600; margin-bottom: 5px;">Auto-Renew</div>
                             <div style="font-size: 12px; color: var(--text-secondary);">Keep listing active</div>
                             <div style="margin-top: 10px;">
-                                <input type="checkbox" id="autoRenewCheckbox">
-                                <label for="autoRenewCheckbox" style="font-size: 12px;">Enable ($1/day)</label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="autoRenewCheckbox">
+                                    <span style="font-size: 12px;">Enable ($1/day)</span>
+                                </label>
                             </div>
                         </div>
                         
@@ -753,15 +635,18 @@
                             <div style="font-weight: 600; margin-bottom: 5px;">Verified Badge</div>
                             <div style="font-size: 12px; color: var(--text-secondary);">Build trust instantly</div>
                             <div style="margin-top: 10px;">
-                                <input type="checkbox" id="verifiedBadgeCheckbox">
-                                <label for="verifiedBadgeCheckbox" style="font-size: 12px;">Enable ($10/month)</label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="verifiedBadgeCheckbox">
+                                    <span style="font-size: 12px;">Enable ($10/month)</span>
+                                </label>
                             </div>
                         </div>
                     </div>
                     
                     <div class="input-group" style="margin-top: 20px;">
                         <label>Advanced Analytics</label>
-                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 5px;">
+                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 5px; padding: 10px; background: var(--secondary-color); border-radius: 8px;">
+                            <i class="fas fa-chart-pie" style="margin-right: 8px;"></i>
                             Premium users get detailed performance insights for each listing.
                         </div>
                     </div>
@@ -770,7 +655,7 @@
                 <!-- Templates Tab -->
                 <div class="create-listing-tab-content" id="templatesTab">
                     <div class="premium-templates-container">
-                        <div class="template-option" data-template="basic">
+                        <div class="template-option selected" data-template="basic">
                             <div class="template-icon">
                                 <i class="fas fa-file-alt"></i>
                             </div>
@@ -824,7 +709,7 @@
                         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px;">
                             <div>
                                 <label style="font-size: 12px;">Primary Color</label>
-                                <input type="color" class="text-input" id="templatePrimaryColor" value="#0084ff" style="height: 40px;">
+                                <input type="color" class="text-input" id="templatePrimaryColor" value="#0084ff" style="height: 40px; padding: 5px;">
                             </div>
                             <div>
                                 <label style="font-size: 12px;">Font Style</label>
@@ -845,7 +730,7 @@
                         <div class="input-group">
                             <label>Who can see this listing?</label>
                             <div class="circles-selection">
-                                <div class="circle-option" data-circle="friends">
+                                <div class="circle-option selected" data-circle="friends">
                                     <i class="fas fa-user-friends"></i>
                                     <div>Friends Only</div>
                                     <small>Safer, trusted</small>
@@ -951,7 +836,8 @@
                         <div class="duration-options">
                             <div class="duration-option" data-duration="24h">24 Hours</div>
                             <div class="duration-option" data-duration="3d">3 Days</div>
-                            <div class="duration-option" data-duration="7d">7 Days</div>
+                            <div class="duration-option selected" data-duration="7d">7 Days</div>
+                            <div class="duration-option premium" data-duration="14d">14 Days</div>
                             <div class="duration-option premium" data-duration="30d">30 Days</div>
                             <div class="duration-option" data-duration="event">Event-Based</div>
                         </div>
@@ -983,9 +869,9 @@
                         </div>
                     </div>
                     
-                    <div class="notes-container">
+                    <div class="input-group">
                         <label for="sellerNotes">Private Notes (For you)</label>
-                        <textarea class="private-notes" id="sellerNotes" placeholder="Add private notes about this listing..."></textarea>
+                        <textarea class="private-notes textarea-input" id="sellerNotes" placeholder="Add private notes about this listing..."></textarea>
                     </div>
                     
                     <div class="premium-feature" id="teamNotesFeature" style="display: none;">
@@ -993,7 +879,7 @@
                             <i class="fas fa-users" style="color: var(--team-color);"></i>
                             <div style="font-weight: 600;">Team Notes (Premium)</div>
                         </div>
-                        <textarea class="private-notes" id="teamNotes" placeholder="Add shared notes for your team..."></textarea>
+                        <textarea class="private-notes textarea-input" id="teamNotes" placeholder="Add shared notes for your team..."></textarea>
                     </div>
                 </div>
                 
@@ -1005,7 +891,7 @@
                         </div>
                         <h4>Bulk Upload Listings</h4>
                         <p style="color: var(--text-secondary); margin-top: 10px;">Upload CSV or JSON file with multiple listings</p>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Supports: CSV, JSON (Max: 100 listings)</p>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;"><i class="fas fa-info-circle"></i> Supports: CSV, JSON (Max: 100 listings)</p>
                         <input type="file" id="bulkUploadInput" accept=".csv,.json" style="display: none;">
                     </div>
                     
@@ -1025,11 +911,11 @@
                     <div class="input-group">
                         <label>Processing Options</label>
                         <div style="margin-top: 10px;">
-                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
                                 <input type="checkbox" id="autoPublishBulk">
                                 <span>Auto-publish after upload</span>
                             </label>
-                            <label style="display: flex; align-items: center; gap: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                 <input type="checkbox" id="scheduleBulk">
                                 <span>Schedule listings</span>
                             </label>
@@ -1127,7 +1013,8 @@
                 
                 <div class="analytics-card" style="margin-top: 20px;">
                     <div class="analytics-card-title">Competitor Insights (Premium)</div>
-                    <div style="font-size: 14px; margin-top: 10px;" id="competitorInsights">
+                    <div style="font-size: 14px; margin-top: 10px; padding: 10px; background: var(--secondary-color); border-radius: 8px;" id="competitorInsights">
+                        <i class="fas fa-lock" style="margin-right: 8px;"></i>
                         Upgrade to Premium to see competitor data and trends
                     </div>
                 </div>
@@ -1156,11 +1043,11 @@
                         <div style="font-weight: 600;">Analytics Alerts (Premium)</div>
                     </div>
                     <div style="margin-top: 10px;">
-                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
                             <input type="checkbox" id="alertPoorPerformance">
                             <span>Alert on poor performance</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                             <input type="checkbox" id="alertTrending">
                             <span>Alert when trending</span>
                         </label>
@@ -1211,7 +1098,7 @@
                             <span>500MB Uploads</span>
                         </div>
                     </div>
-                    <button class="action-btn primary" data-plan-select="monthly">
+                    <button class="action-btn primary" data-plan-select="monthly" style="width: 100%;">
                         Select Plan
                     </button>
                 </div>
@@ -1237,7 +1124,7 @@
                             <span>Bulk Upload</span>
                         </div>
                     </div>
-                    <button class="action-btn premium" data-plan-select="quarterly">
+                    <button class="action-btn premium" data-plan-select="quarterly" style="width: 100%;">
                         Most Popular
                     </button>
                 </div>
@@ -1263,7 +1150,7 @@
                             <span>Priority Sync</span>
                         </div>
                     </div>
-                    <button class="action-btn primary" data-plan-select="yearly">
+                    <button class="action-btn primary" data-plan-select="yearly" style="width: 100%;">
                         Best Value
                     </button>
                 </div>
@@ -1289,7 +1176,7 @@
                             <span>API Access</span>
                         </div>
                     </div>
-                    <button class="action-btn primary" data-plan-select="business">
+                    <button class="action-btn primary" data-plan-select="business" style="width: 100%;">
                         For Teams
                     </button>
                 </div>
@@ -1313,12 +1200,12 @@
                 </div>
                 
                 <div class="payment-form" id="cardPaymentForm" style="display: none;">
-                    <input type="text" placeholder="Card Number" id="cardNumber">
+                    <input type="text" class="text-input" placeholder="Card Number" id="cardNumber">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <input type="text" placeholder="MM/YY" id="cardExpiry">
-                        <input type="text" placeholder="CVC" id="cardCvc">
+                        <input type="text" class="text-input" placeholder="MM/YY" id="cardExpiry">
+                        <input type="text" class="text-input" placeholder="CVC" id="cardCvc">
                     </div>
-                    <input type="text" placeholder="Cardholder Name" id="cardName">
+                    <input type="text" class="text-input" placeholder="Cardholder Name" id="cardName">
                 </div>
                 
                 <div class="action-buttons">
@@ -1352,7 +1239,7 @@
                 </button>
             </div>
             
-            <div class="team-members" id="teamMembersList">
+            <div class="team-members" id="teamMembersList" style="padding: 20px;">
                 <!-- Team members will be loaded here -->
             </div>
             
@@ -1396,7 +1283,7 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="my-notes-list" id="myNotesList">
+            <div class="my-notes-list" id="myNotesList" style="padding: 20px;">
                 <!-- Notes will be added here -->
             </div>
             <div class="action-buttons">
@@ -1412,6 +1299,9 @@
         <div class="trust-stats-container">
             <div class="create-listing-header">
                 <h3>Trust Statistics</h3>
+                <button class="add-listing-btn" id="closeTrustStatsModal">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
             <div class="trust-stats-content">
                 <div class="trust-stat-item">
@@ -1431,24 +1321,19 @@
                     <span class="trust-stat-value" id="trustScore">New</span>
                 </div>
             </div>
-            <div class="action-buttons">
-                <button class="action-btn secondary" id="closeTrustStatsModal">
-                    <i class="fas fa-times"></i> Close
-                </button>
-            </div>
         </div>
     </div>
     
     <!-- Leaderboard Modal -->
-    <div class="my-notes-modal" id="leaderboardModal">
-        <div class="my-notes-container">
+    <div class="leaderboard-modal" id="leaderboardModal">
+        <div class="leaderboard-container">
             <div class="create-listing-header">
                 <h3>Top Sellers Leaderboard</h3>
                 <button class="add-listing-btn" id="closeLeaderboardModal">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="my-notes-list" id="leaderboardList">
+            <div class="leaderboard-list" id="leaderboardList" style="padding: 20px;">
                 <!-- Leaderboard items will be added here -->
             </div>
             <div class="action-buttons">
@@ -1509,9 +1394,8 @@
     <div class="upload-progress" id="uploadProgress"></div>
 
     <!-- API.js must load BEFORE Tool.js -->
-     
-     <script type="module" src="Tool-core.js"></script>
-<script type="module" src="Tool-ui.js"></script>
+    <script type="module" src="Tool-core.js"></script>
+    <script type="module" src="Tool-ui.js"></script>
 
 </body>
 </html>

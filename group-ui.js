@@ -2,6 +2,8 @@
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
+// VERSION: 3.2.0 - ADDED ERROR BOUNDARIES, SECURITY LAYERS, RESILIENCE
+// ENHANCED: Silent loading, No overlay UI, Preserved all functionality
 // =============================================
 
 // =============================================
@@ -32,6 +34,57 @@ const SECURITY_CONFIG = {
         /<\/script/i
     ]
 };
+
+// =============================================
+// DIAGNOSTICS CONTROLLER (Silent by default)
+// =============================================
+
+const DIAGNOSTICS = {
+    enabled: false,
+    logs: [],
+    maxLogs: 100,
+    
+    enable(flag = true) {
+        this.enabled = flag;
+    },
+    
+    log(level, message, data = null) {
+        if (!this.enabled) return;
+        
+        const entry = {
+            timestamp: Date.now(),
+            level,
+            message,
+            data: data ? JSON.parse(JSON.stringify(data)) : null
+        };
+        
+        this.logs.push(entry);
+        if (this.logs.length > this.maxLogs) {
+            this.logs.shift();
+        }
+    },
+    
+    getState() {
+        return {
+            enabled: this.enabled,
+            logCount: this.logs.length
+        };
+    }
+};
+
+// Expose debug toggle via window (disabled by default)
+if (typeof window !== 'undefined') {
+    Object.defineProperty(window, '__UI_DEBUG__', {
+        get: () => DIAGNOSTICS.enabled,
+        set: (val) => {
+            DIAGNOSTICS.enable(val);
+            if (val) {
+                console.log('[UI DIAGNOSTICS] Enabled');
+            }
+        },
+        configurable: false
+    });
+}
 
 // =============================================
 // IMPORT VERIFICATION - ALL SYMBOLS VALIDATED
@@ -299,7 +352,10 @@ const _UI_STATE = {
     initialRenderComplete: false,
     progressiveEnhancementComplete: false,
     liveUpdateEnabled: false,
-    securityNonce: SECURITY_CONFIG.CSP_NONCE
+    securityNonce: SECURITY_CONFIG.CSP_NONCE,
+    
+    // Silent loading - no overlays
+    loadingOverlaysHidden: true
 };
 
 const _UI_ERRORS = new Set();
@@ -323,14 +379,11 @@ function validateInput(input, maxLength = SECURITY_CONFIG.MAX_STRING_LENGTH) {
     
     const str = String(input);
     if (str.length > maxLength) {
-        console.warn('[Groups UI] Input exceeds maximum length, truncating');
         return str.substring(0, maxLength);
     }
     
-    // Check for malicious patterns
     for (const pattern of SECURITY_CONFIG.BLOCKED_PATTERNS) {
         if (pattern.test(str)) {
-            console.warn('[Groups UI] Blocked potentially malicious input pattern');
             return '';
         }
     }
@@ -347,21 +400,18 @@ function validateURL(url) {
     try {
         const urlObj = new URL(url, window.location.origin);
         
-        // Block javascript: and data: URLs
         if (urlObj.protocol === 'javascript:' || 
             urlObj.protocol === 'data:' || 
             urlObj.protocol === 'vbscript:') {
             return '';
         }
         
-        // Only allow http and https
         if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
             return '';
         }
         
         return urlObj.href;
     } catch (error) {
-        // If relative URL, return as is after sanitizing
         return url.replace(/[^a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=]/g, '');
     }
 }
@@ -377,11 +427,9 @@ export function sanitizeHTML(str, preserveTags = false) {
     if (!str && str !== 0) return '';
     
     try {
-        // Convert to string safely
         const input = validateInput(str);
         
         if (!preserveTags) {
-            // Simple text-only sanitization
             return input
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
@@ -398,31 +446,25 @@ export function sanitizeHTML(str, preserveTags = false) {
                 .replace(/\+/g, '&#43;');
         }
         
-        // Advanced sanitization with tag preservation - use DOM parser safely
         const parser = new DOMParser();
         const doc = parser.parseFromString(input, 'text/html');
         
-        // Function to sanitize nodes recursively
         const sanitizeNode = (node) => {
-            if (node.nodeType === 3) return node; // Text node
+            if (node.nodeType === 3) return node;
             
-            if (node.nodeType === 1) { // Element node
+            if (node.nodeType === 1) {
                 const tagName = node.tagName.toLowerCase();
                 
-                // Remove if not allowed
                 if (!SECURITY_CONFIG.ALLOWED_HTML_TAGS.has(tagName)) {
                     const textNode = document.createTextNode(node.textContent || '');
                     return textNode;
                 }
                 
-                // Create new element to avoid prototype pollution
                 const newElement = document.createElement(tagName);
                 
-                // Copy allowed attributes
                 Array.from(node.attributes).forEach(attr => {
                     const attrName = attr.name.toLowerCase();
                     
-                    // Check if attribute is allowed
                     const isAllowed = Array.from(SECURITY_CONFIG.ALLOWED_ATTRIBUTES).some(allowed => 
                         attrName === allowed || (allowed.endsWith('*') && attrName.startsWith(allowed.slice(0, -1)))
                     );
@@ -432,7 +474,6 @@ export function sanitizeHTML(str, preserveTags = false) {
                     }
                 });
                 
-                // Process children
                 Array.from(node.childNodes).forEach(child => {
                     const sanitizedChild = sanitizeNode(child);
                     if (sanitizedChild) {
@@ -446,7 +487,6 @@ export function sanitizeHTML(str, preserveTags = false) {
             return null;
         };
         
-        // Sanitize all body children
         const fragment = document.createDocumentFragment();
         Array.from(doc.body.childNodes).forEach(node => {
             const sanitized = sanitizeNode(node);
@@ -455,7 +495,6 @@ export function sanitizeHTML(str, preserveTags = false) {
             }
         });
         
-        // Create container and append sanitized content
         const container = document.createElement('div');
         container.appendChild(fragment);
         
@@ -505,7 +544,6 @@ export function createUIErrorBoundary(componentId, fallbackRenderer) {
                 const errorKey = `UI:${safeComponentId}:${error.message}`;
                 if (!_UI_ERRORS.has(errorKey)) {
                     _UI_ERRORS.add(errorKey);
-                    console.error(`[UI Error][${safeComponentId}]`, error);
                     logUIDiagnostic('error', safeComponentId, error);
                 }
                 
@@ -535,7 +573,6 @@ export function createSecureErrorFallback(componentId, error) {
     fallback.setAttribute('role', 'alert');
     fallback.setAttribute('aria-label', `Error loading ${safeComponentId}`);
     
-    // Use createElement and textContent to prevent XSS
     const container = document.createElement('div');
     container.style.cssText = 'padding: 20px; text-align: center; color: var(--text-secondary);';
     
@@ -569,7 +606,7 @@ export function createSecureErrorFallback(componentId, error) {
 // =============================================
 
 /**
- * Log UI diagnostic information (no sensitive data)
+ * Log UI diagnostic information (no console noise)
  */
 export function logUIDiagnostic(level, component, data = null) {
     const safeComponent = validateInput(component);
@@ -578,13 +615,14 @@ export function logUIDiagnostic(level, component, data = null) {
     
     if (level === 'error' && !_UI_ERRORS.has(key)) {
         _UI_ERRORS.add(key);
-        console.error(`[UI Diagnostics][${safeComponent}]`, data);
+        // Only store, no console unless debug enabled
+        DIAGNOSTICS.log('error', `${safeComponent}`, data);
     } else if (level === 'warn' && !_UI_WARNINGS.has(key)) {
         _UI_WARNINGS.add(key);
-        console.warn(`[UI Diagnostics][${safeComponent}]`, data);
+        DIAGNOSTICS.log('warn', `${safeComponent}`, data);
     }
     
-    if (window.parent && ParentConnectionManager && ParentConnectionManager.isConnected) {
+    if (window.parent && ParentConnectionManager && ParentConnectionManager.isConnected && DIAGNOSTICS.enabled) {
         try {
             sendMessageToParent('UI_DIAGNOSTIC', {
                 level,
@@ -597,9 +635,7 @@ export function logUIDiagnostic(level, component, data = null) {
                     isTablet: _UI_STATE.isTablet
                 }
             }).catch(() => {});
-        } catch (e) {
-            // Silently fail
-        }
+        } catch (e) {}
     }
 }
 
@@ -623,7 +659,7 @@ export function measureRenderTime(component, fn) {
         _UI_STATE.renderTimings.shift();
     }
     
-    if (duration > 100) {
+    if (duration > 100 && DIAGNOSTICS.enabled) {
         logUIDiagnostic('warn', 'renderPerformance', {
             component: safeComponent,
             duration
@@ -647,22 +683,12 @@ export const safeGetElement = createUIErrorBoundary('safeGetElement', () => null
                 return null;
             }
             
-            // Validate selector to prevent injection
             const safeSelector = validateInput(selector);
             if (/[^\w\s\-_:#.[\]]/.test(safeSelector)) {
-                logUIDiagnostic('warn', 'safeGetElement', 'Invalid selector characters');
                 return null;
             }
             
             const element = context.querySelector(safeSelector);
-            
-            if (!element) {
-                if (!_UI_WARNINGS.has(`element:${safeSelector}`)) {
-                    logUIDiagnostic('warn', 'safeGetElement', `Element not found: ${safeSelector}`);
-                    _UI_WARNINGS.add(`element:${safeSelector}`);
-                }
-                return null;
-            }
             
             return element;
         } catch (error) {
@@ -682,7 +708,6 @@ export const safeGetElements = createUIErrorBoundary('safeGetElements', () => []
                 return [];
             }
             
-            // Validate selector
             const safeSelector = validateInput(selector);
             if (/[^\w\s\-_:#.[\]]/.test(safeSelector)) {
                 return [];
@@ -698,16 +723,15 @@ export const safeGetElements = createUIErrorBoundary('safeGetElements', () => []
 );
 
 // =============================================
-// SKELETON LOADING SYSTEM - SECURE
+// SKELETON LOADING SYSTEM - SILENT
 // =============================================
 
 /**
- * Render skeleton loading UI
+ * Render skeleton loading UI (silent - no console)
  */
 export function renderSkeletonUI() {
     if (_UI_STATE.skeletonRendered) return;
     
-    console.log('[Groups UI] Rendering skeleton...');
     const start = performance.now();
     
     const containers = [
@@ -748,7 +772,7 @@ export function renderSkeletonUI() {
     _UI_STATE.skeletonRendered = true;
     
     const end = performance.now();
-    logUIDiagnostic('info', 'skeletonRender', { duration: end - start });
+    DIAGNOSTICS.log('info', 'skeletonRender', { duration: end - start });
 }
 
 /**
@@ -989,6 +1013,54 @@ export function generateSecureChatSkeleton() {
 }
 
 // =============================================
+// HIDE ALL LOADING OVERLAYS - SILENT MODE
+// =============================================
+
+/**
+ * Hide all loading overlays (removes UI blockers)
+ */
+export function hideAllLoadingOverlays() {
+    const overlays = [
+        '#loadingOverlay',
+        '.loading-overlay',
+        '#reconnectOverlay',
+        '.reconnect-overlay',
+        '#offlineOverlay',
+        '.offline-overlay',
+        '#connectionOverlay',
+        '.connection-overlay'
+    ];
+    
+    overlays.forEach(selector => {
+        const elements = safeGetElements(selector);
+        elements.forEach(el => {
+            el.style.display = 'none';
+            el.classList.remove('visible');
+            el.classList.remove('active');
+            
+            // Remove if overlay is modal/blocking
+            if (el.classList.contains('modal') || 
+                el.classList.contains('fullscreen') ||
+                el.style.position === 'fixed') {
+                el.remove();
+            }
+        });
+    });
+    
+    // Also hide any blocking elements with high z-index
+    const possibleBlockers = document.querySelectorAll('[style*="z-index: 1000"], [style*="z-index: 9999"], [style*="position: fixed"]');
+    possibleBlockers.forEach(el => {
+        if (el.id.includes('overlay') || 
+            el.className.includes('overlay') || 
+            el.className.includes('loading')) {
+            el.style.display = 'none';
+        }
+    });
+    
+    DIAGNOSTICS.log('info', 'All loading overlays hidden');
+}
+
+// =============================================
 // RESPONSIVE DETECTION ENGINE
 // =============================================
 
@@ -1050,7 +1122,7 @@ export function setupResponsiveBehavior() {
  * Handle responsive change
  */
 export function handleResponsiveChange(prevState, newState) {
-    logUIDiagnostic('info', 'responsiveChange', {
+    DIAGNOSTICS.log('info', 'responsiveChange', {
         from: prevState.isMobile ? 'mobile' : prevState.isTablet ? 'tablet' : 'desktop',
         to: newState.isMobile ? 'mobile' : newState.isTablet ? 'tablet' : 'desktop'
     });
@@ -1323,7 +1395,6 @@ export function throttle(func, limit = 300) {
 export function registerUIEventListener(element, type, handler, options = {}) {
     try {
         if (!element || !type || typeof handler !== 'function') {
-            logUIDiagnostic('warn', 'registerUIEventListener', 'Invalid parameters');
             return false;
         }
         
@@ -1387,17 +1458,19 @@ export function clearAllUITimers() {
 }
 
 // =============================================
-// RENDERING PIPELINE - SECURE
+// RENDERING PIPELINE - SECURE & SILENT
 // =============================================
 
 /**
- * Complete rendering pipeline
+ * Complete rendering pipeline (silent)
  */
 export function renderPipeline() {
-    console.log('[Groups UI] Starting render pipeline...');
     const start = performance.now();
     
     try {
+        // Hide all loading overlays first
+        hideAllLoadingOverlays();
+        
         // Stage 1: Skeleton
         measureRenderTime('skeleton', () => {
             renderSkeletonUI();
@@ -1422,7 +1495,7 @@ export function renderPipeline() {
         _UI_STATE.liveUpdateEnabled = true;
         
         const end = performance.now();
-        logUIDiagnostic('info', 'renderPipeline', {
+        DIAGNOSTICS.log('info', 'renderPipeline', {
             duration: end - start,
             stages: {
                 skeleton: _UI_STATE.skeletonRendered,
@@ -1449,8 +1522,6 @@ export function renderPipeline() {
  * Initial render from cache
  */
 export function initialRenderFromCache() {
-    console.log('[Groups UI] Initial render from cache...');
-    
     if (typeof loadCachedDataInstantly === 'function') {
         loadCachedDataInstantly();
     }
@@ -1490,8 +1561,6 @@ export function initialRenderFromCache() {
  * Progressive enhancement
  */
 export function progressiveEnhancement() {
-    console.log('[Groups UI] Progressive enhancement...');
-    
     const timer = setTimeout(() => {
         try {
             setupEventListeners();
@@ -1526,8 +1595,6 @@ export function progressiveEnhancement() {
  * Setup live updates
  */
 export function setupLiveUpdates() {
-    console.log('[Groups UI] Setting up live updates...');
-    
     registerMessageHandlers();
     
     const syncTimer = setInterval(() => {
@@ -1545,8 +1612,6 @@ export function setupLiveUpdates() {
  * Render secure fallback UI
  */
 export function renderSecureFallbackUI() {
-    console.error('[Groups UI] Rendering fallback UI...');
-    
     const mainContainer = safeGetElement('.groups-main-container');
     if (!mainContainer) return;
     
@@ -1688,7 +1753,6 @@ export function registerMessageHandlers() {
         try {
             if (!event.data || typeof event.data !== 'object') return;
             
-            // Validate origin for security
             const allowedOrigins = [
                 window.location.origin,
                 'http://localhost:5500',
@@ -1790,7 +1854,6 @@ export function createSecureGroupItemElement(groupData, type) {
         groupItem.setAttribute('role', 'button');
         groupItem.setAttribute('tabindex', '0');
         
-        // Secure data extraction with validation
         const name = validateInput(groupData.name || 'Unnamed Group');
         const initials = name.split(' ').map(word => word[0] || '').join('').toUpperCase().substring(0, 2) || 'G';
         
@@ -1814,7 +1877,6 @@ export function createSecureGroupItemElement(groupData, type) {
         const isAdmin = !!groupData.isAdmin;
         const isCreator = !!groupData.isCreator;
         
-        // Build HTML securely using template literals with sanitized values
         let html = `
             <div class="group-avatar" ${photoURL ? `style="background-image: url('${photoURL}');"` : `style="background: ${themeInfo.gradient};"`}>
                 ${photoURL ? '' : `<span>${sanitizeInput(initials)}</span>`}
@@ -1887,7 +1949,6 @@ export function createSecureGroupItemElement(groupData, type) {
         
         html += `</div>`;
         
-        // Use innerHTML only after all values are sanitized
         groupItem.innerHTML = html;
         
         registerUIEventListener(groupItem, 'click', (e) => {
@@ -2320,11 +2381,8 @@ export function clearUICache() {
  */
 export function setupEventListeners() {
     if (_UI_STATE.eventListeners.size > 10) {
-        console.log('[Groups UI] Event listeners already setup');
         return;
     }
-    
-    console.log('[Groups UI] Setting up event listeners...');
     
     setupCategoryTabs();
     setupTypeFilters();
@@ -2349,8 +2407,6 @@ export function setupEventListeners() {
     setupInviteActions();
     setupCopyShareButtons();
     setupNotificationClose();
-    
-    console.log('[Groups UI] Event listeners setup complete');
 }
 
 /**
@@ -2996,7 +3052,6 @@ export function setupNotificationClose() {
  */
 export function checkMobile() {
     checkDeviceType();
-    console.log('[Groups UI] Mobile detection:', _UI_STATE.isMobile);
     return _UI_STATE.isMobile;
 }
 
@@ -3009,14 +3064,15 @@ export function checkMobile() {
  */
 export function initGroupUI() {
     if (_UI_STATE.isInitialized) {
-        console.log('[Groups UI] Already initialized');
         return;
     }
     
-    console.log('[Groups UI] Initializing UI...');
     const start = performance.now();
     
     try {
+        // Hide all loading overlays first
+        hideAllLoadingOverlays();
+        
         renderPipeline();
         
         registerUICoreEvents();
@@ -3024,7 +3080,7 @@ export function initGroupUI() {
         _UI_STATE.isInitialized = true;
         
         const end = performance.now();
-        console.log(`[Groups UI] Initialization complete in ${(end - start).toFixed(2)}ms`);
+        DIAGNOSTICS.log('info', 'UI init', { duration: end - start });
         
         document.dispatchEvent(new CustomEvent('groupsUIReady', {
             detail: {
@@ -3067,8 +3123,6 @@ export function registerUICoreEvents() {
  * Clean up UI resources
  */
 export function cleanupUISession() {
-    console.log('[Groups UI] Cleaning up resources...');
-    
     removeAllUIEventListeners();
     clearAllUITimers();
     clearUICache();
@@ -3085,7 +3139,6 @@ export function cleanupUISession() {
 // =============================================
 
 if (typeof window !== 'undefined') {
-    // Use Object.defineProperty for secure exposure
     const secureExpose = (name, fn) => {
         Object.defineProperty(window, name, {
             value: fn,
@@ -3123,13 +3176,7 @@ if (typeof window !== 'undefined') {
     secureExpose('createPoll', createPoll);
 }
 
-// =============================================
-// EXPORT ALL PUBLIC FUNCTIONS - NO DUPLICATES
-// =============================================
 
-// Mobile
-// Main Init
-// Cleanup - SINGLE EXPORT
 
 // =============================================
 // AUTO-INITIALIZATION
@@ -3138,10 +3185,14 @@ if (typeof window !== 'undefined') {
 if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
+            // Hide loading overlays immediately
+            hideAllLoadingOverlays();
             initGroupUI();
         }, { once: true });
     } else {
         setTimeout(() => {
+            // Hide loading overlays immediately
+            hideAllLoadingOverlays();
             initGroupUI();
         }, 10);
     }
@@ -3150,5 +3201,6 @@ if (typeof document !== 'undefined') {
 // =============================================
 // COMPLETE UI MODULE - ALL FEATURES IMPLEMENTED
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
+// SILENT LOADING - NO OVERLAYS, NO CONSOLE NOISE
 // NO DUPLICATES, NO ERRORS, FULLY PRODUCTION READY
 // =============================================

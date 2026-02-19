@@ -26,6 +26,7 @@
     <link rel="stylesheet" href="group.css">
 
     <style>
+        /* ========== EXISTING STYLES - PRESERVED ========== */
         /* Group Purpose Styles */
         .group-purpose-tag {
             display: inline-block;
@@ -239,11 +240,642 @@
         .group-item:nth-child(8) { animation-delay: 0.4s; }
         .group-item:nth-child(9) { animation-delay: 0.45s; }
         .group-item:nth-child(10) { animation-delay: 0.5s; }
+        
+        /* ========== MODIFIED: Connection Status at Bottom ========== */
+        .connection-status {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.9);
+            border-radius: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-size: 11px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(0,0,0,0.05);
+            opacity: 0.8;
+        }
+        
+        .connection-status:hover {
+            opacity: 1;
+        }
+        
+        .connection-status.connected {
+            background: #e8f5e8;
+            color: #2e7d32;
+            border-color: #2e7d3230;
+        }
+        
+        .connection-status.connecting {
+            background: #fff3e0;
+            color: #f57c00;
+            border-color: #f57c0030;
+        }
+        
+        .connection-status.disconnected {
+            background: #ffebee;
+            color: #c62828;
+            border-color: #c6282830;
+        }
+        
+        .connection-status.degraded {
+            background: #f3e5f5;
+            color: #7b1fa2;
+            border-color: #7b1fa230;
+        }
+        
+        .connection-status .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .connection-status.connected .status-dot {
+            background: #2e7d32;
+            box-shadow: 0 0 8px #2e7d32;
+            animation: pulse-green 2s infinite;
+        }
+        
+        .connection-status.connecting .status-dot {
+            background: #f57c00;
+            animation: pulse-orange 1.5s infinite;
+        }
+        
+        .connection-status.disconnected .status-dot {
+            background: #c62828;
+        }
+        
+        .connection-status.degraded .status-dot {
+            background: #7b1fa2;
+        }
+        
+        @keyframes pulse-green {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+        
+        @keyframes pulse-orange {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        
+        /* ========== MODIFIED: Debug Panel (Hidden by default) ========== */
+        .debug-panel {
+            position: fixed;
+            bottom: 60px;
+            right: 10px;
+            width: 300px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: rgba(0,0,0,0.8);
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 20000;
+            display: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            backdrop-filter: blur(4px);
+            border: 1px solid #333;
+        }
+        
+        .debug-panel.visible {
+            display: block;
+        }
+        
+        .debug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #333;
+            color: #fff;
+            font-weight: bold;
+        }
+        
+        .debug-close {
+            cursor: pointer;
+            color: #ff5555;
+            font-size: 14px;
+        }
+        
+        .debug-section {
+            margin-bottom: 10px;
+            padding: 5px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+        }
+        
+        .debug-section-title {
+            color: #ffaa00;
+            font-weight: bold;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        
+        .debug-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+            line-height: 1.4;
+        }
+        
+        .debug-label {
+            color: #88ff88;
+        }
+        
+        .debug-value {
+            color: #ffffff;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .debug-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            background: #333;
+            color: #fff;
+            margin-left: 4px;
+        }
+        
+        /* ========== MODIFIED: Loading Overlay - HIDDEN BY DEFAULT ========== */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.95);
+            z-index: 15000;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s;
+            pointer-events: none;
+            opacity: 0;
+        }
+        
+        .loading-overlay.visible {
+            display: flex;
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        /* Ensure it's hidden initially */
+        .loading-overlay:not(.visible) {
+            display: none !important;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color, #667eea);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading-progress {
+            width: 200px;
+            height: 4px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .loading-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color, #667eea), #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .loading-status {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-top: 10px;
+        }
+        
+        /* ========== MODIFIED: Retry Banner at Bottom ========== */
+        .retry-banner {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ff9800;
+            color: white;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 11000;
+            font-size: 13px;
+            border-radius: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            gap: 15px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        
+        .retry-banner.visible {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .retry-banner button {
+            background: white;
+            color: #ff9800;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        
+        .retry-banner button:hover {
+            background: #f0f0f0;
+        }
+        
+        /* ========== MODIFIED: Connection Metrics at Bottom Left ========== */
+        .connection-metrics {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 16px;
+            font-size: 9px;
+            font-family: monospace;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+            display: flex;
+            gap: 8px;
+            display: none;
+            opacity: 0.7;
+        }
+        
+        .connection-metrics.visible {
+            display: flex;
+        }
+        
+        .metric-item {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        
+        .metric-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+        
+        .metric-dot.green { background: #4caf50; }
+        .metric-dot.yellow { background: #ff9800; }
+        .metric-dot.red { background: #f44336; }
+        
+        /* ========== MODIFIED: Toast Notifications (Bottom) ========== */
+        .toast-container {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            max-width: 90%;
+            width: 400px;
+        }
+        
+        .toast {
+            background: white;
+            border-radius: 8px;
+            padding: 10px 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideUp 0.3s ease;
+            pointer-events: auto;
+            border-left: 4px solid;
+        }
+        
+        .toast.success { border-left-color: #4caf50; }
+        .toast.error { border-left-color: #f44336; }
+        .toast.warning { border-left-color: #ff9800; }
+        .toast.info { border-left-color: #2196f3; }
+        
+        .toast-icon {
+            font-size: 18px;
+        }
+        
+        .toast.success .toast-icon { color: #4caf50; }
+        .toast.error .toast-icon { color: #f44336; }
+        .toast.warning .toast-icon { color: #ff9800; }
+        .toast.info .toast-icon { color: #2196f3; }
+        
+        .toast-content {
+            flex: 1;
+            font-size: 13px;
+        }
+        
+        .toast-close {
+            cursor: pointer;
+            color: #999;
+            font-size: 14px;
+        }
+        
+        .toast-close:hover {
+            color: #666;
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* ========== MODIFIED: Debug Toggle Button at Bottom ========== */
+        .debug-toggle {
+            position: fixed;
+            bottom: 10px;
+            right: 60px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 21000;
+            font-size: 16px;
+            backdrop-filter: blur(4px);
+            transition: background 0.2s;
+            opacity: 0.5;
+        }
+        
+        .debug-toggle:hover {
+            background: rgba(0,0,0,0.7);
+            opacity: 1;
+        }
+        
+        /* ========== MODIFIED: Fallback UI Enhancements ========== */
+        .fallback-ui {
+            animation: fadeIn 0.5s;
+        }
+        
+        .fallback-ui button {
+            transition: transform 0.2s;
+        }
+        
+        .fallback-ui button:hover {
+            transform: scale(1.05);
+        }
+        
+        .error-retry-btn {
+            transition: background 0.2s;
+        }
+        
+        .error-retry-btn:hover {
+            background: var(--primary-dark, #5a67d8) !important;
+        }
+        
+        /* ========== MODIFIED: Skeleton Loading Enhancements ========== */
+        .skeleton-group-item,
+        .skeleton-invite-item,
+        .skeleton-friend-item,
+        .skeleton-member-item,
+        .skeleton-message {
+            animation: shimmer 1.5s infinite;
+            background: linear-gradient(
+                90deg,
+                #f0f0f0 25%,
+                #f8f8f8 50%,
+                #f0f0f0 75%
+            );
+            background-size: 200% 100%;
+        }
+        
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        .skeleton-avatar {
+            background: #e0e0e0 !important;
+            border-radius: 50%;
+        }
+        
+        .skeleton-title {
+            background: #e0e0e0;
+            border-radius: 4px;
+        }
+        
+        .skeleton-text {
+            background: #e0e0e0;
+            border-radius: 4px;
+        }
+        
+        .skeleton-icon {
+            background: #e0e0e0;
+        }
+        
+        /* ========== MODIFIED: Error Boundary Styles ========== */
+        .ui-error-boundary {
+            padding: 20px;
+            margin: 10px;
+            border: 1px solid #ff9800;
+            border-radius: 8px;
+            background: #fff3e0;
+            text-align: center;
+        }
+        
+        /* ========== MODIFIED: Hide all loading overlays by default ========== */
+        .offline-overlay,
+        .offline-indicator,
+        .local-storage-indicator,
+        .cache-indicator,
+        #offlineOverlay,
+        #offlineIndicator,
+        #localStorageIndicator,
+        #cacheIndicator,
+        #reconnectOverlay {
+            display: none !important;
+        }
+        
+        /* ========== MODIFIED: Ensure connection status at bottom doesn't interfere ========== */
+        .app-container {
+            padding-bottom: 50px; /* Space for bottom status */
+        }
+        
+        /* ========== MODIFIED: Make status more subtle ========== */
+        .connection-status .status-text {
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
-    <!-- Offline Overlay -->
-    <div class="offline-overlay" id="offlineOverlay" style="display: none;">
+    <!-- ========== MODIFIED: Toast Container at Bottom ========== -->
+    <div class="toast-container" id="toastContainer"></div>
+    
+    <!-- ========== MODIFIED: Connection Status at Bottom ========== -->
+    <div class="connection-status" id="connectionStatus" style="display: none;">
+        <span class="status-dot"></span>
+        <span class="status-text" id="connectionStatusText">Connecting...</span>
+    </div>
+    
+    <!-- ========== MODIFIED: Loading Overlay - Hidden by default ========== -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <div class="loading-progress">
+            <div class="loading-progress-bar" id="loadingProgressBar"></div>
+        </div>
+        <div class="loading-status" id="loadingStatus">Initializing...</div>
+    </div>
+    
+    <!-- ========== MODIFIED: Retry Banner at Bottom ========== -->
+    <div class="retry-banner" id="retryBanner">
+        <span><i class="fas fa-exclamation-triangle"></i> Connection lost</span>
+        <button id="retryNowBtn">Retry</button>
+    </div>
+    
+    <!-- ========== MODIFIED: Connection Metrics at Bottom Left ========== -->
+    <div class="connection-metrics" id="connectionMetrics">
+        <div class="metric-item">
+            <span class="metric-dot" id="handshakeMetric"></span>
+            <span>HS</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-dot" id="sessionMetric"></span>
+            <span>S</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-dot" id="heartbeatMetric"></span>
+            <span>HB</span>
+        </div>
+    </div>
+    
+    <!-- ========== MODIFIED: Debug Toggle at Bottom ========== -->
+    <div class="debug-toggle" id="debugToggle" title="Toggle Debug Panel">
+        <i class="fas fa-bug"></i>
+    </div>
+    
+    <!-- ========== MODIFIED: Debug Panel at Bottom ========== -->
+    <div class="debug-panel" id="debugPanel">
+        <div class="debug-header">
+            <span>🔍 Debug Panel</span>
+            <span class="debug-close" id="debugClose">✕</span>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-section-title">Connection</div>
+            <div class="debug-row">
+                <span class="debug-label">State:</span>
+                <span class="debug-value" id="debugConnState">disconnected</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Parent Available:</span>
+                <span class="debug-value" id="debugParentAvailable">false</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Handshake:</span>
+                <span class="debug-value" id="debugHandshake">idle</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Session:</span>
+                <span class="debug-value" id="debugSession">none</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Frame ID:</span>
+                <span class="debug-value" id="debugFrameId">-</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-section-title">Performance</div>
+            <div class="debug-row">
+                <span class="debug-label">Render Time:</span>
+                <span class="debug-value" id="debugRenderTime">0ms</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Pending ACKs:</span>
+                <span class="debug-value" id="debugPendingAcks">0</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Queued Msgs:</span>
+                <span class="debug-value" id="debugQueuedMsgs">0</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-section-title">Session</div>
+            <div class="debug-row">
+                <span class="debug-label">User:</span>
+                <span class="debug-value" id="debugUser">none</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Auth:</span>
+                <span class="debug-value" id="debugAuth">false</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">From Cache:</span>
+                <span class="debug-value" id="debugFromCache">false</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-section-title">Timing</div>
+            <div class="debug-row">
+                <span class="debug-label">Uptime:</span>
+                <span class="debug-value" id="debugUptime">0s</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Last Heartbeat:</span>
+                <span class="debug-value" id="debugLastHeartbeat">-</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ========== EXISTING: Offline Overlay - HIDDEN ========== -->
+    <div class="offline-overlay" id="offlineOverlay" style="display: none !important;">
         <div class="offline-icon">
             <i class="fas fa-wifi-slash"></i>
         </div>
@@ -257,20 +889,20 @@
         </button>
     </div>
     
-    <!-- Offline Indicator -->
-    <div class="offline-indicator" id="offlineIndicator" style="display: none;">
+    <!-- ========== EXISTING: Offline Indicator - HIDDEN ========== -->
+    <div class="offline-indicator" id="offlineIndicator" style="display: none !important;">
         <i class="fas fa-wifi-slash"></i>
         <span>Offline</span>
     </div>
     
-    <!-- Local Storage Indicator -->
-    <div class="local-storage-indicator" id="localStorageIndicator" style="display: none;">
+    <!-- ========== EXISTING: Local Storage Indicator - HIDDEN ========== -->
+    <div class="local-storage-indicator" id="localStorageIndicator" style="display: none !important;">
         <i class="fas fa-database"></i>
         <span>Loaded from Local Storage</span>
     </div>
     
     <div class="app-container">
-        <!-- Sidebar with group list -->
+        <!-- ========== EXISTING: Sidebar with group list ========== -->
         <div class="sidebar active" id="sidebar">
             <div class="sidebar-header">
                 <h2>Groups</h2>
@@ -296,8 +928,8 @@
                 </div>
             </div>
             
-            <!-- Cache Indicator (shown when offline) -->
-            <div class="cache-indicator" id="cacheIndicator" style="display: none;">
+            <!-- ========== EXISTING: Cache Indicator - HIDDEN ========== -->
+            <div class="cache-indicator" id="cacheIndicator" style="display: none !important;">
                 <i class="fas fa-database"></i>
                 <span>Showing cached groups data. Some features may be limited.</span>
             </div>
@@ -324,7 +956,7 @@
                     </button>
                 </div>
                 
-                <!-- Group Stats -->
+                <!-- ========== EXISTING: Group Stats ========== -->
                 <div class="group-stats">
                     <div class="stats-container">
                         <div class="stat-item">
@@ -342,7 +974,7 @@
                     </div>
                 </div>
                 
-                <!-- Type Filters -->
+                <!-- ========== EXISTING: Type Filters ========== -->
                 <div class="type-filters">
                     <div class="type-filters-container">
                         <button class="type-filter-btn active" data-type="all">All</button>
@@ -355,7 +987,7 @@
                 </div>
                 
                 <div class="group-list-content">
-                    <!-- All Groups Section -->
+                    <!-- ========== EXISTING: All Groups Section ========== -->
                     <div class="groups-section active" id="allGroupsSection">
                         <div class="groups-list" id="allGroupsList">
                             <div class="loading-placeholder">
@@ -365,21 +997,21 @@
                         </div>
                     </div>
                     
-                    <!-- My Groups Section -->
+                    <!-- ========== EXISTING: My Groups Section ========== -->
                     <div class="groups-section" id="myGroupsSection">
                         <div class="groups-list" id="myGroupsList">
                             <!-- User-created groups will be loaded here -->
                         </div>
                     </div>
                     
-                    <!-- Joined Groups Section -->
+                    <!-- ========== EXISTING: Joined Groups Section ========== -->
                     <div class="groups-section" id="joinedSection">
                         <div class="groups-list" id="joinedList">
                             <!-- Joined groups will be loaded here -->
                         </div>
                     </div>
                     
-                    <!-- Invites Section -->
+                    <!-- ========== EXISTING: Invites Section ========== -->
                     <div class="groups-section" id="invitesSection">
                         <div class="section-title">
                             <span>Group Invites</span>
@@ -390,7 +1022,7 @@
                         </div>
                     </div>
                     
-                    <!-- Admin Groups Section -->
+                    <!-- ========== EXISTING: Admin Groups Section ========== -->
                     <div class="groups-section" id="adminSection">
                         <div class="groups-list" id="adminList">
                             <!-- Admin groups will be loaded here -->
@@ -400,7 +1032,7 @@
             </div>
         </div>
         
-        <!-- Group Details Panel -->
+        <!-- ========== EXISTING: Group Details Panel ========== -->
         <div class="group-details-panel" id="groupDetailsPanel">
             <div class="group-details-header">
                 <button class="back-btn" id="backBtn">
@@ -415,9 +1047,7 @@
             </div>
         </div>
         
-        <!-- ============================================= -->
-        <!-- GROUP CHAT PANEL -->
-        <!-- ============================================= -->
+        <!-- ========== EXISTING: GROUP CHAT PANEL ========== -->
         <div class="group-chat-panel" id="groupChatPanel">
             <div class="chat-header">
                 <div class="chat-header-info" id="chatHeaderInfo">
@@ -430,11 +1060,11 @@
                             <span id="chatMemberCount">0 members</span>
                             <span>•</span>
                             <span id="chatActive">Active now</span>
-                            <!-- ADDED: Group Purpose & Pulse -->
+                            <!-- EXISTING: Group Purpose & Pulse -->
                             <span id="chatPurposeTag" class="group-purpose-tag" style="display: none;"></span>
                             <span id="chatPulse" class="group-pulse" style="display: none;"></span>
                         </div>
-                        <!-- ADDED: Group Mood & Posting Rules -->
+                        <!-- EXISTING: Group Mood & Posting Rules -->
                         <div id="chatMoodRules" style="display: none; margin-top: 4px;">
                             <span id="chatMood" class="group-mood-indicator"></span>
                             <span id="chatPostingRules" class="posting-rules-banner"></span>
@@ -461,7 +1091,7 @@
             </div>
             
             <div class="chat-input-container">
-                <!-- ADDED: Topic Selection & Silent Mode -->
+                <!-- EXISTING: Topic Selection & Silent Mode -->
                 <div id="topicSelection" style="display: none; padding: 5px 10px; background: var(--secondary-color); border-bottom: 1px solid var(--border-color);">
                     <select id="messageTopic" style="width: 100%; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 12px;">
                         <option value="">Select topic (optional)</option>
@@ -477,11 +1107,11 @@
                     <button class="chat-input-btn" id="chatEmojiBtn" title="Emoji">
                         <i class="far fa-smile"></i>
                     </button>
-                    <!-- ADDED: Silent Participation Mode Toggle -->
+                    <!-- EXISTING: Silent Participation Mode Toggle -->
                     <button class="chat-input-btn" id="silentModeBtn" title="Toggle Silent Mode" style="display: none;">
                         <i class="fas fa-eye"></i>
                     </button>
-                    <!-- ADDED: Anonymous Posting Toggle -->
+                    <!-- EXISTING: Anonymous Posting Toggle -->
                     <button class="chat-input-btn" id="anonymousModeBtn" title="Toggle Anonymous Posting" style="display: none;">
                         <i class="fas fa-user-secret"></i>
                     </button>
@@ -492,7 +1122,7 @@
                 </button>
             </div>
             
-            <!-- ADDED: Group Notes Panel -->
+            <!-- ========== EXISTING: Group Notes Panel ========== -->
             <div id="groupNotesPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <h4 style="margin: 0;"><i class="fas fa-sticky-note"></i> Group Notes</h4>
@@ -510,7 +1140,7 @@
                 </div>
             </div>
             
-            <!-- ADDED: Event Countdown Panel -->
+            <!-- ========== EXISTING: Event Countdown Panel ========== -->
             <div id="eventCountdownPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
                 <h4 style="margin: 0 0 10px 0;"><i class="fas fa-calendar-alt"></i> Event Countdown</h4>
                 <div id="eventCountdownDisplay" class="event-countdown">
@@ -521,14 +1151,14 @@
                 </button>
             </div>
             
-            <!-- ADDED: Energy Suggestion Panel -->
+            <!-- ========== EXISTING: Energy Suggestion Panel ========== -->
             <div id="energySuggestionPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
                 <div class="energy-suggestion" id="energySuggestionContent">
                     <i class="fas fa-lightbulb"></i> Group is active. All good!
                 </div>
             </div>
             
-            <!-- ADDED: Admin Transparency Log -->
+            <!-- ========== EXISTING: Admin Transparency Log ========== -->
             <div id="adminTransparencyPanel" style="display: none; border-top: 1px solid var(--border-color); padding: 15px;">
                 <h4 style="margin: 0 0 10px 0;"><i class="fas fa-history"></i> Recent Changes</h4>
                 <div id="adminTransparencyLog" class="admin-transparency-log">
@@ -537,9 +1167,7 @@
             </div>
         </div>
         
-        <!-- ============================================= -->
-        <!-- GROUP CALL PANEL -->
-        <!-- ============================================= -->
+        <!-- ========== EXISTING: GROUP CALL PANEL ========== -->
         <div class="group-call-panel" id="groupCallPanel">
             <div class="call-header">
                 <div class="call-header-info">
@@ -582,7 +1210,7 @@
         </div>
     </div>
     
-    <!-- Create Group Modal (UPDATED with new features) -->
+    <!-- ========== EXISTING: Create Group Modal (UPDATED with new features) ========== -->
     <div class="create-group-modal" id="createGroupModal">
         <div class="create-group-container">
             <div class="create-group-header">
@@ -600,7 +1228,7 @@
             </div>
             
             <div class="create-group-content">
-                <!-- Basic Tab -->
+                <!-- ========== EXISTING: Basic Tab ========== -->
                 <div class="create-group-tab-content active" id="basicTab">
                     <div class="input-group">
                         <label class="input-label">Group Name *</label>
@@ -628,7 +1256,7 @@
                     </div>
                 </div>
                 
-                <!-- Settings Tab -->
+                <!-- ========== EXISTING: Settings Tab ========== -->
                 <div class="create-group-tab-content" id="settingsTab">
                     <div class="input-group">
                         <label class="input-label">Welcome Message</label>
@@ -667,7 +1295,7 @@
                     </div>
                 </div>
                 
-                <!-- ADDED: Purpose Tab with New Features -->
+                <!-- ========== EXISTING: Purpose Tab with New Features ========== -->
                 <div class="create-group-tab-content" id="purposeTab">
                     <div class="input-group">
                         <label class="input-label">Group Purpose *</label>
@@ -761,7 +1389,7 @@
                     </div>
                 </div>
                 
-                <!-- Theme Tab -->
+                <!-- ========== EXISTING: Theme Tab ========== -->
                 <div class="create-group-tab-content" id="themeTab">
                     <div class="input-group">
                         <label class="input-label">Group Theme Color</label>
@@ -846,9 +1474,7 @@
         </div>
     </div>
     
-    <!-- ============================================= -->
-    <!-- ADMIN MANAGEMENT MODAL (UPDATED with transparency features) -->
-    <!-- ============================================= -->
+    <!-- ========== EXISTING: ADMIN MANAGEMENT MODAL ========== -->
     <div class="admin-management-modal" id="adminManagementModal">
         <div class="admin-management-container">
             <div class="admin-management-header">
@@ -865,7 +1491,7 @@
             </div>
             
             <div class="admin-management-content">
-                <!-- Members Tab -->
+                <!-- ========== EXISTING: Members Tab ========== -->
                 <div class="admin-management-section active" id="adminMembersTab">
                     <div class="admin-actions">
                         <button class="admin-action-btn" id="adminAddMemberBtn">
@@ -884,7 +1510,7 @@
                     </div>
                 </div>
                 
-                <!-- Settings Tab -->
+                <!-- ========== EXISTING: Settings Tab ========== -->
                 <div class="admin-management-section" id="adminSettingsTab">
                     <div class="admin-settings-form">
                         <div class="admin-settings-group">
@@ -958,7 +1584,7 @@
                     </div>
                 </div>
                 
-                <!-- ADDED: Purpose Management Tab -->
+                <!-- ========== EXISTING: Purpose Management Tab ========== -->
                 <div class="admin-management-section" id="adminPurposeTab">
                     <div class="admin-settings-form">
                         <div class="admin-settings-group">
@@ -1053,7 +1679,7 @@
                     </div>
                 </div>
                 
-                <!-- Analytics Tab -->
+                <!-- ========== EXISTING: Analytics Tab ========== -->
                 <div class="admin-management-section" id="adminAnalyticsTab">
                     <div class="admin-analytics-content">
                         <div class="admin-analytics-stats">
@@ -1085,7 +1711,7 @@
                     </div>
                 </div>
                 
-                <!-- ADDED: Transparency Tab -->
+                <!-- ========== EXISTING: Transparency Tab ========== -->
                 <div class="admin-management-section" id="adminTransparencyTab">
                     <div class="admin-transparency-content">
                         <div class="admin-settings-group">
@@ -1151,7 +1777,7 @@
         </div>
     </div>
     
-    <!-- Friend Selection Modal -->
+    <!-- ========== EXISTING: Friend Selection Modal ========== -->
     <div class="friend-selection-modal" id="friendSelectionModal">
         <div class="friend-selection-container">
             <div class="friend-selection-header">
@@ -1171,7 +1797,7 @@
         </div>
     </div>
     
-    <!-- Group Invite Modal -->
+    <!-- ========== EXISTING: Group Invite Modal ========== -->
     <div class="group-invite-modal" id="groupInviteModal">
         <div class="group-invite-container">
             <div class="group-invite-header">
@@ -1179,7 +1805,7 @@
                     <i class="fas fa-users"></i>
                 </div>
                 <div class="group-invite-name" id="inviteName">Family Chat</div>
-                <!-- ADDED: Purpose and Mood in Invite -->
+                <!-- EXISTING: Purpose and Mood in Invite -->
                 <div class="group-purpose-tag" id="invitePurpose" style="margin: 5px 0;"></div>
                 <div class="group-mood-indicator" id="inviteMood" style="margin: 5px 0;"></div>
                 <div class="group-invite-topic" id="inviteTopic">#family #updates</div>
@@ -1202,11 +1828,86 @@
         </div>
     </div>
     
-    <!-- Notification -->
+    <!-- ========== EXISTING: Notification ========== -->
     <div class="notification" id="notification">
         <i class="fas fa-check-circle"></i>
         <span id="notificationText">Operation completed successfully</span>
     </div>
 
+    <!-- ========== MODIFIED: Script to initialize debug panel with bottom placement ========== -->
+    <script>
+        // Debug panel toggle functionality
+        (function() {
+            const debugToggle = document.getElementById('debugToggle');
+            const debugPanel = document.getElementById('debugPanel');
+            const debugClose = document.getElementById('debugClose');
+            
+            if (debugToggle && debugPanel && debugClose) {
+                debugToggle.addEventListener('click', () => {
+                    debugPanel.classList.toggle('visible');
+                });
+                
+                debugClose.addEventListener('click', () => {
+                    debugPanel.classList.remove('visible');
+                });
+                
+                // Show debug panel in development (you can remove this condition for production)
+                if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                    // Auto-show in development after 2 seconds - but at bottom
+                    setTimeout(() => {
+                        debugPanel.classList.add('visible');
+                    }, 2000);
+                }
+            }
+            
+            // Retry button handler
+            const retryBtn = document.getElementById('retryNowBtn');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => {
+                    window.location.reload();
+                });
+            }
+            
+            // Dismiss offline button - but overlay is hidden, so just ignore
+            const dismissOfflineBtn = document.getElementById('dismissOfflineBtn');
+            if (dismissOfflineBtn) {
+                dismissOfflineBtn.addEventListener('click', () => {
+                    // Already hidden
+                });
+            }
+            
+            // Hide all loading overlays immediately
+            const hideAllOverlays = function() {
+                const overlays = [
+                    '#loadingOverlay',
+                    '#offlineOverlay',
+                    '#reconnectOverlay',
+                    '.loading-overlay',
+                    '.offline-overlay',
+                    '.reconnect-overlay'
+                ];
+                
+                overlays.forEach(selector => {
+                    document.querySelectorAll(selector).forEach(el => {
+                        el.style.display = 'none';
+                        el.classList.remove('visible');
+                    });
+                });
+            };
+            
+            hideAllOverlays();
+            
+            // Show connection status only when needed
+            const connectionStatus = document.getElementById('connectionStatus');
+            if (connectionStatus) {
+                // Only show when not connected for long periods
+                setTimeout(() => {
+                    if (connectionStatus.style.display !== 'none') {
+                        // Keep hidden initially, will be shown by core if needed
+                    }
+                }, 5000);
+            }
+        })();
+    </script>
 </body>
 </html>

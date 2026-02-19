@@ -1,25 +1,1775 @@
 // =============================================
 // STATUS SYSTEM - CENTRALIZED TOKEN ACCESS - CORE
-// HARDENED VERSION v2.2 - COMPLETE FIXED VERSION
+// HARDENED ENHANCED VERSION v5.0 - PARENT INTEGRATION
+// WITH IFRAME AUTHORITY, STARTUP GOVERNOR & RESILIENCE ENGINE
+// COMPLETE RELIABILITY OVERHAUL - PRESERVES ALL EXISTING FEATURES
 // =============================================
 // EXPORT CONTRACT: ALL SYMBOLS REQUIRED BY status-ui.js
 // =============================================
 
 // =============================================
-// SECURITY & SANDBOX CONFIGURATION
+// ENVIRONMENT AUTO-DETECTION SYSTEM (ENHANCED)
 // =============================================
-const TRUSTED_ORIGINS = new Set([
-    window.location.origin,
-    'http://127.0.0.1:5500',
-    'http://localhost:5500',
-    'http://127.0.0.1:3000',
-    'http://localhost:3000',
-    'https://127.0.0.1:5500',
-    'https://localhost:5500',
-    'https://127.0.0.1:3000',
-    'https://localhost:3000'
-]);
+const IframeEnvironment = {
+    type: 'UNKNOWN',
+    isLocalDev: false,
+    isRenderHosted: false,
+    isVPNNetwork: false,
+    isProduction: false,
+    isSandboxed: false,
+    isSecure: false,
+    latency: 0,
+    bandwidth: 0,
+    connectionType: 'unknown',
+    effectiveType: 'unknown',
+    rtt: 0,
+    downlink: 0,
+    saveData: false,
+    
+    detect() {
+        try {
+            const start = performance.now();
+            
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+            const isSecureContext = window.isSecureContext || protocol === 'https:';
+            
+            // Local development detection
+            this.isLocalDev = (
+                hostname === 'localhost' ||
+                hostname === '127.0.0.1' ||
+                hostname.startsWith('192.168.') ||
+                hostname.startsWith('10.') ||
+                hostname.includes('.local') ||
+                hostname.includes('.test') ||
+                protocol === 'file:' ||
+                hostname.includes('::1')
+            );
+            
+            // Render.com hosted detection
+            this.isRenderHosted = (
+                hostname.includes('.onrender.com') ||
+                hostname.includes('.render.com') ||
+                hostname.includes('render.com')
+            );
+            
+            // VPN/High latency detection using Network Information API
+            if (navigator.connection) {
+                const conn = navigator.connection;
+                this.latency = conn.rtt || 0;
+                this.bandwidth = conn.downlink || 0;
+                this.connectionType = conn.type || 'unknown';
+                this.effectiveType = conn.effectiveType || 'unknown';
+                this.rtt = conn.rtt || 0;
+                this.downlink = conn.downlink || 0;
+                this.saveData = conn.saveData || false;
+                
+                // Detect VPN based on latency patterns
+                this.isVPNNetwork = (
+                    this.latency > 300 ||
+                    this.effectiveType === 'slow-2g' ||
+                    this.effectiveType === '2g' ||
+                    (this.latency > 150 && this.latency < 300 && this.saveData)
+                );
+            } else {
+                // Fallback detection using fetch timing
+                const end = performance.now();
+                this.latency = end - start;
+                this.isVPNNetwork = this.latency > 300;
+            }
+            
+            // Production detection
+            this.isProduction = (
+                !this.isLocalDev &&
+                !this.isRenderHosted &&
+                isSecureContext &&
+                !hostname.includes('.local') &&
+                !hostname.includes('.test') &&
+                hostname.includes('.')
+            );
+            
+            // Sandbox detection
+            try {
+                this.isSandboxed = (
+                    !window.parent ||
+                    window.parent === window ||
+                    (() => {
+                        try {
+                            return !window.parent.location;
+                        } catch {
+                            return true;
+                        }
+                    })()
+                );
+            } catch {
+                this.isSandboxed = true;
+            }
+            
+            this.isSecure = isSecureContext;
+            
+            // Determine environment type
+            if (this.isLocalDev) this.type = 'LOCAL_DEV';
+            else if (this.isRenderHosted) this.type = 'RENDER_HOSTED';
+            else if (this.isVPNNetwork) this.type = 'VPN_NETWORK';
+            else if (this.isProduction) this.type = 'PRODUCTION';
+            else this.type = 'UNKNOWN';
+            
+            this.logEnvironment();
+            return this.type;
+        } catch (e) {
+            this.type = 'UNKNOWN';
+            return this.type;
+        }
+    },
+    
+    getConfig() {
+        const baseConfig = {
+            handshakeTimeout: 15000,
+            heartbeatInterval: 30000,
+            maxRetries: 5,
+            maxRecoveryAttempts: 3,
+            originChecks: 'standard',
+            crypto: 'enabled',
+            compatibilityMode: false,
+            batchMessages: false,
+            keepalive: false,
+            offlineBufferSize: 100,
+            retryBackoff: 'exponential',
+            jitter: true
+        };
+        
+        switch(this.type) {
+            case 'LOCAL_DEV':
+                return {
+                    ...baseConfig,
+                    handshakeTimeout: 10000,
+                    heartbeatInterval: 30000,
+                    maxRetries: 5,
+                    maxRecoveryAttempts: 5,
+                    originChecks: 'relaxed',
+                    crypto: 'disabled',
+                    compatibilityMode: true,
+                    batchMessages: false,
+                    keepalive: false
+                };
+            case 'RENDER_HOSTED':
+                return {
+                    ...baseConfig,
+                    handshakeTimeout: 15000,
+                    heartbeatInterval: 25000,
+                    maxRetries: 7,
+                    maxRecoveryAttempts: 4,
+                    originChecks: 'strict',
+                    crypto: 'enabled',
+                    compatibilityMode: false,
+                    batchMessages: true,
+                    keepalive: true
+                };
+            case 'VPN_NETWORK':
+                return {
+                    ...baseConfig,
+                    handshakeTimeout: 30000,
+                    heartbeatInterval: 45000,
+                    maxRetries: 10,
+                    maxRecoveryAttempts: 5,
+                    originChecks: 'standard',
+                    crypto: 'enabled',
+                    compatibilityMode: false,
+                    batchMessages: true,
+                    keepalive: true,
+                    offlineBufferSize: 200,
+                    retryBackoff: 'fibonacci'
+                };
+            case 'PRODUCTION':
+                return {
+                    ...baseConfig,
+                    handshakeTimeout: 10000,
+                    heartbeatInterval: 20000,
+                    maxRetries: 3,
+                    maxRecoveryAttempts: 2,
+                    originChecks: 'strict',
+                    crypto: 'enabled',
+                    compatibilityMode: false,
+                    batchMessages: false,
+                    keepalive: false
+                };
+            default:
+                return baseConfig;
+        }
+    },
+    
+    getCapabilities() {
+        return {
+            localStorage: !!window.localStorage,
+            sessionStorage: !!window.sessionStorage,
+            serviceWorker: 'serviceWorker' in navigator,
+            indexedDB: !!window.indexedDB,
+            webWorker: !!window.Worker,
+            webSocket: !!window.WebSocket,
+            webRTC: !!window.RTCPeerConnection,
+            crypto: !!window.crypto && !!window.crypto.subtle,
+            mediaDevices: !!navigator.mediaDevices,
+            geolocation: !!navigator.geolocation,
+            notifications: 'Notification' in window,
+            bluetooth: !!navigator.bluetooth,
+            usb: !!navigator.usb,
+            hid: !!navigator.hid,
+            serial: !!navigator.serial,
+            webShare: !!navigator.share,
+            webAssembly: !!window.WebAssembly,
+            bigInt: typeof BigInt !== 'undefined',
+            webGL: (() => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+                } catch {
+                    return false;
+                }
+            })(),
+            webGL2: (() => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    return !!canvas.getContext('webgl2');
+                } catch {
+                    return false;
+                }
+            })(),
+            webAudio: !!window.AudioContext || !!window.webkitAudioContext,
+            webMIDI: !!navigator.requestMIDIAccess,
+            webUSB: !!navigator.usb,
+            webBluetooth: !!navigator.bluetooth,
+            webNFC: !!navigator.nfc,
+            webXR: !!navigator.xr,
+            webVTT: !!window.VTTCue,
+            webAnimation: !!document.createElement('div').animate,
+            webSpeech: !!window.SpeechRecognition || !!window.webkitSpeechRecognition,
+            webPayment: !!window.PaymentRequest,
+            webCredentials: !!navigator.credentials,
+            webLocks: !!navigator.locks,
+            webStorage: !!window.localStorage,
+            webDatabase: !!window.openDatabase,
+            webSQL: !!window.openDatabase,
+            webIndexedDB: !!window.indexedDB,
+            webFileSystem: !!window.requestFileSystem || !!window.webkitRequestFileSystem,
+            webFileReader: !!window.FileReader,
+            webFileWriter: !!window.FileWriter,
+            webFile: !!window.File,
+            webBlob: !!window.Blob,
+            webFormData: !!window.FormData,
+            webURL: !!window.URL,
+            webURLSearchParams: !!window.URLSearchParams,
+            webHeaders: !!window.Headers,
+            webRequest: !!window.Request,
+            webResponse: !!window.Response,
+            webFetch: !!window.fetch,
+            webAbortController: !!window.AbortController,
+            webAbortSignal: !!window.AbortSignal,
+            webIntersectionObserver: !!window.IntersectionObserver,
+            webMutationObserver: !!window.MutationObserver,
+            webResizeObserver: !!window.ResizeObserver,
+            webPerformanceObserver: !!window.PerformanceObserver,
+            webReportingObserver: !!window.ReportingObserver,
+            webGamepad: !!navigator.getGamepads,
+            webBattery: !!navigator.getBattery,
+            webVibrate: !!navigator.vibrate,
+            webWakeLock: !!navigator.wakeLock,
+            webSMS: !!navigator.sms,
+            webContacts: !!navigator.contacts,
+            webClipboard: !!navigator.clipboard,
+            webPermissions: !!navigator.permissions,
+            webPresentation: !!navigator.presentation,
+            webNetworkInformation: !!navigator.connection,
+            webDeviceMemory: !!navigator.deviceMemory,
+            webHardwareConcurrency: !!navigator.hardwareConcurrency,
+            webMaxTouchPoints: !!navigator.maxTouchPoints,
+            webCookieEnabled: navigator.cookieEnabled,
+            webDoNotTrack: navigator.doNotTrack,
+            webLanguages: !!navigator.languages,
+            webPlatform: !!navigator.platform,
+            webProduct: !!navigator.product,
+            webVendor: !!navigator.vendor
+        };
+    },
+    
+    logEnvironment() {
+        console.log(`[Environment] Type: ${this.type}`);
+        console.log(`[Environment] LocalDev: ${this.isLocalDev}, Render: ${this.isRenderHosted}, VPN: ${this.isVPNNetwork}, Production: ${this.isProduction}`);
+        console.log(`[Environment] Latency: ${this.latency}ms, Bandwidth: ${this.bandwidth}Mbps, Connection: ${this.connectionType}`);
+        console.log(`[Environment] Sandboxed: ${this.isSandboxed}, Secure: ${this.isSecure}`);
+    }
+};
 
+// Initialize the detector
+IframeEnvironment.detect();
+
+// =============================================
+// COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY
+// =============================================
+const CompatibilityBridge = {
+    version: '5.0',
+    legacyMode: false,
+    adapters: new Map(),
+    transforms: new Map(),
+    fallbacks: new Map(),
+    
+    initialize() {
+        this.legacyMode = IframeEnvironment.type === 'LOCAL_DEV' || IframeEnvironment.isSandboxed;
+        this.registerAdapters();
+        this.registerTransforms();
+        this.registerFallbacks();
+        console.log('[CompatibilityBridge] Initialized, legacy mode:', this.legacyMode);
+        return this;
+    },
+    
+    registerAdapters() {
+        // Message adapters
+        this.adapters.set('message', {
+            toLegacy: (msg) => {
+                if (!msg) return msg;
+                return {
+                    ...msg,
+                    type: msg.type || msg.event,
+                    data: msg.payload || msg.data,
+                    id: msg.messageId || msg.id,
+                    timestamp: msg.timestamp || Date.now()
+                };
+            },
+            fromLegacy: (msg) => {
+                if (!msg) return msg;
+                return {
+                    ...msg,
+                    type: msg.type || msg.event,
+                    payload: msg.data || msg.payload,
+                    messageId: msg.id || msg.messageId,
+                    timestamp: msg.timestamp || Date.now()
+                };
+            }
+        });
+        
+        // Session adapters
+        this.adapters.set('session', {
+            toLegacy: (session) => {
+                if (!session) return session;
+                return {
+                    ...session,
+                    user: session.user || session.userData,
+                    token: session.token || session.accessToken,
+                    refreshToken: session.refreshToken || session.refresh_token
+                };
+            },
+            fromLegacy: (session) => {
+                if (!session) return session;
+                return {
+                    ...session,
+                    user: session.user || session.userData,
+                    token: session.token || session.accessToken,
+                    refreshToken: session.refreshToken || session.refresh_token
+                };
+            }
+        });
+        
+        // Storage adapters
+        this.adapters.set('storage', {
+            toLegacy: (key, value) => {
+                return { key, value };
+            },
+            fromLegacy: (key, value) => {
+                return { key, value };
+            }
+        });
+    },
+    
+    registerTransforms() {
+        this.transforms.set('handshake', (data) => {
+            if (this.legacyMode) {
+                return {
+                    ...data,
+                    protocol: '1.0',
+                    handshake: data.handshake || data.handshakeId
+                };
+            }
+            return data;
+        });
+        
+        this.transforms.set('status', (data) => {
+            if (this.legacyMode) {
+                return {
+                    ...data,
+                    statusId: data.statusId || data.id,
+                    userId: data.userId || data.user?.id
+                };
+            }
+            return data;
+        });
+        
+        this.transforms.set('reaction', (data) => {
+            if (this.legacyMode) {
+                return {
+                    ...data,
+                    reactionType: data.reactionType || data.reaction,
+                    statusId: data.statusId || data.id
+                };
+            }
+            return data;
+        });
+    },
+    
+    registerFallbacks() {
+        this.fallbacks.set('postMessage', (target, message, origin) => {
+            try {
+                if (typeof target.postMessage === 'function') {
+                    return target.postMessage(message, origin || '*');
+                }
+                return false;
+            } catch (e) {
+                return false;
+            }
+        });
+        
+        this.fallbacks.set('localStorage', {
+            get: (key) => {
+                try {
+                    return localStorage.getItem(key);
+                } catch {
+                    return null;
+                }
+            },
+            set: (key, value) => {
+                try {
+                    localStorage.setItem(key, value);
+                    return true;
+                } catch {
+                    return false;
+                }
+            },
+            remove: (key) => {
+                try {
+                    localStorage.removeItem(key);
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+        });
+        
+        this.fallbacks.set('fetch', async (url, options) => {
+            try {
+                return await fetch(url, options);
+            } catch (e) {
+                throw new Error('Fetch failed in compatibility mode');
+            }
+        });
+    },
+    
+    adapt(type, data, direction = 'to') {
+        const adapter = this.adapters.get(type);
+        if (!adapter) return data;
+        
+        try {
+            return direction === 'to' ? adapter.toLegacy(data) : adapter.fromLegacy(data);
+        } catch (e) {
+            return data;
+        }
+    },
+    
+    transform(type, data) {
+        const transform = this.transforms.get(type);
+        if (!transform) return data;
+        
+        try {
+            return transform(data);
+        } catch (e) {
+            return data;
+        }
+    },
+    
+    fallback(type, ...args) {
+        const fallback = this.fallbacks.get(type);
+        if (!fallback) return null;
+        
+        try {
+            return typeof fallback === 'function' ? fallback(...args) : fallback;
+        } catch (e) {
+            return null;
+        }
+    },
+    
+    isLegacy() {
+        return this.legacyMode;
+    }
+}.initialize();
+
+// =============================================
+// STANDALONE MODE DETECTION
+// =============================================
+const isStandaloneMode = !window.parent || window.parent === window || !document.referrer;
+
+if (isStandaloneMode) {
+    console.warn('[Status] Running in standalone mode - parent communication disabled');
+    
+    // Override TransportAgent.send to be no-op in standalone mode
+    const originalSend = TransportAgent?.send;
+    if (typeof TransportAgent !== 'undefined') {
+        TransportAgent.send = function(type, payload = {}, options = {}) {
+            if (type === 'PING' || type === 'HEARTBEAT') {
+                return Promise.resolve({ success: true, standalone: true });
+            }
+            
+            if (options.requiresAck) {
+                if (type === 'CHILD_READY' || type === 'HANDSHAKE_REQUEST' || type === 'SESSION_SYNC') {
+                    setTimeout(() => {
+                        const mockResponse = {
+                            type: type === 'CHILD_READY' ? 'PARENT_READY' : 
+                                  type === 'HANDSHAKE_REQUEST' ? 'HANDSHAKE_ACK' : 'SESSION_SYNC',
+                            inResponseTo: options.messageId,
+                            payload: {
+                                session: {
+                                    user: { id: 'guest', displayName: 'Guest User' },
+                                    token: 'standalone-token',
+                                    permissions: ['guest', 'view_statuses']
+                                }
+                            }
+                        };
+                        
+                        if (typeof receiveFromParent !== 'undefined') {
+                            receiveFromParent({ data: mockResponse, origin: window.location.origin });
+                        }
+                    }, 100);
+                    
+                    return new Promise((resolve) => {
+                        setTimeout(() => resolve({ success: true, standalone: true }), 200);
+                    });
+                }
+            }
+            
+            return Promise.resolve({ success: true, standalone: true });
+        };
+    }
+    
+    // Override startEnhancedHeartbeat
+    if (typeof startEnhancedHeartbeat !== 'undefined') {
+        const originalHeartbeat = startEnhancedHeartbeat;
+        startEnhancedHeartbeat = function() {
+            console.log('[Status] Heartbeat disabled in standalone mode');
+            return;
+        };
+    }
+    
+    // Mark as handshake complete
+    setTimeout(() => {
+        if (typeof state !== 'undefined') {
+            state.parentDetected = true;
+            state.handshakeComplete = true;
+            state.handshakeState = 'active';
+            state.sessionActive = true;
+            state.isGuestMode = false;
+            state.sessionMirror = {
+                validated: true,
+                user: { id: 'guest', displayName: 'Guest User' },
+                token: 'standalone-token',
+                permissions: ['guest', 'view_statuses']
+            };
+        }
+        
+        if (typeof isTokenReady !== 'undefined') {
+            isTokenReady = true;
+            if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                triggerTokenReadyCallbacks();
+            }
+        }
+        
+        console.log('[Status] Standalone mode activated');
+    }, 500);
+}
+
+// =============================================
+// IFRAME AUTHORITY - CENTRALIZED CONTROL
+// =============================================
+const IframeAuthority = {
+    id: `iframe_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`,
+    instanceId: `instance_${Date.now()}_${Math.random().toString(36).substr(2, 15)}`,
+    parentOrigin: null,
+    parentDetected: false,
+    parentCapabilities: new Set(),
+    securityLevel: 'standard',
+    compatibilityMode: IframeEnvironment.type === 'LOCAL_DEV' || IframeEnvironment.isSandboxed,
+    backendDomain: 'https://moodchat-fy56.onrender.com',
+    frontendDomain: 'https://moodfronted.onrender.com',
+    trustedDomains: new Set([
+        'https://moodchat-fy56.onrender.com',
+        'https://moodfronted.onrender.com',
+        'http://localhost:3000',
+        'http://localhost:5500',
+        'http://localhost:5000',
+        'http://localhost:8080',
+        'https://localhost:3000',
+        'https://localhost:5500',
+        'https://localhost:5000',
+        'https://localhost:8080',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:5500',
+        'http://127.0.0.1:5000',
+        'http://127.0.0.1:8080',
+        'https://127.0.0.1:3000',
+        'https://127.0.0.1:5500',
+        'https://127.0.0.1:5000',
+        'https://127.0.0.1:8080'
+    ]),
+    
+    initialize() {
+        this.detectParent();
+        this.validateSecurityContext();
+        this.addTrustedDomain(this.backendDomain);
+        this.addTrustedDomain(this.frontendDomain);
+        return this;
+    },
+    
+    detectParent() {
+        try {
+            this.parentDetected = !!(window.parent && window.parent !== window);
+            if (this.parentDetected && document.referrer) {
+                try {
+                    this.parentOrigin = new URL(document.referrer).origin;
+                    this.addTrustedDomain(this.parentOrigin);
+                } catch {}
+            }
+        } catch (e) {
+            this.parentDetected = false;
+        }
+    },
+    
+    validateSecurityContext() {
+        if (this.compatibilityMode || IframeEnvironment.isSandboxed) {
+            this.securityLevel = 'compatibility';
+        } else if (IframeEnvironment.type === 'PRODUCTION') {
+            this.securityLevel = 'strict';
+        } else {
+            this.securityLevel = 'standard';
+        }
+    },
+    
+    addTrustedDomain(domain) {
+        if (domain) {
+            this.trustedDomains.add(domain);
+        }
+    },
+    
+    isTrustedOrigin(origin) {
+        if (!origin) return false;
+        if (this.securityLevel === 'compatibility') return true;
+        
+        // Check exact match
+        if (this.trustedDomains.has(origin)) return true;
+        
+        // Check wildcard patterns
+        if (origin.includes('.onrender.com') || origin.includes('.render.com')) return true;
+        
+        // Check localhost variations
+        if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+        
+        // Parent origin from referrer
+        if (this.parentOrigin && origin === this.parentOrigin) return true;
+        
+        return false;
+    },
+    
+    getCapabilities() {
+        return Array.from(this.parentCapabilities);
+    },
+    
+    getBackendURL(path = '') {
+        return `${this.backendDomain}${path}`;
+    },
+    
+    getFrontendURL(path = '') {
+        return `${this.frontendDomain}${path}`;
+    }
+}.initialize();
+
+// =============================================
+// DIAGNOSTICS AGENT - TELEMETRY & DEBUGGING
+// =============================================
+const DiagnosticsAgent = {
+    enabled: window.location.search.includes('debug=true') || false,
+    reports: [],
+    maxReports: 100,
+    metrics: {
+        startTime: Date.now(),
+        messagesSent: 0,
+        messagesReceived: 0,
+        errors: 0,
+        warnings: 0,
+        handshakeAttempts: 0,
+        handshakeSuccess: 0,
+        handshakeFailures: 0,
+        recoveryAttempts: 0,
+        recoverySuccess: 0,
+        recoveryFailures: 0,
+        tokenRefreshes: 0,
+        apiCalls: 0,
+        apiErrors: 0,
+        storageReads: 0,
+        storageWrites: 0,
+        storageErrors: 0,
+        offlineOperations: 0
+    },
+    events: [],
+    maxEvents: 1000,
+    
+    enable() {
+        this.enabled = true;
+        this.log('info', 'Diagnostics', 'Diagnostics enabled');
+    },
+    
+    disable() {
+        this.enabled = false;
+        this.log('info', 'Diagnostics', 'Diagnostics disabled');
+    },
+    
+    log(level, module, message, data = null) {
+        if (!this.enabled && level !== 'error') return;
+        
+        const entry = {
+            timestamp: Date.now(),
+            level,
+            module,
+            message,
+            data: this.sanitize(data),
+            id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
+        };
+        
+        this.events.push(entry);
+        
+        if (this.events.length > this.maxEvents) {
+            this.events.shift();
+        }
+        
+        if (level === 'error') {
+            this.metrics.errors++;
+            console.error(`[${module}] ${message}`, data || '');
+        } else if (level === 'warn') {
+            this.metrics.warnings++;
+            console.warn(`[${module}] ${message}`, data || '');
+        } else if (level === 'debug' && this.enabled) {
+            console.debug(`[${module}] ${message}`, data || '');
+        } else if (level === 'info' && this.enabled) {
+            console.info(`[${module}] ${message}`, data || '');
+        }
+    },
+    
+    sanitize(data) {
+        if (!data) return data;
+        if (typeof data !== 'object') return data;
+        
+        try {
+            return JSON.parse(JSON.stringify(data, (key, value) => {
+                if (key === 'token' || key === 'accessToken' || key === 'refreshToken') {
+                    return '[REDACTED]';
+                }
+                if (typeof value === 'string' && value.length > 1000) {
+                    return value.substring(0, 1000) + '... [truncated]';
+                }
+                return value;
+            }));
+        } catch {
+            return data;
+        }
+    },
+    
+    error(module, message, data) {
+        this.log('error', module, message, data);
+    },
+    
+    warn(module, message, data) {
+        this.log('warn', module, message, data);
+    },
+    
+    info(module, message, data) {
+        this.log('info', module, message, data);
+    },
+    
+    debug(module, message, data) {
+        this.log('debug', module, message, data);
+    },
+    
+    increment(metric) {
+        if (this.metrics[metric] !== undefined) {
+            this.metrics[metric]++;
+        }
+    },
+    
+    getReport() {
+        return {
+            timestamp: Date.now(),
+            uptime: Date.now() - this.metrics.startTime,
+            metrics: { ...this.metrics },
+            recentEvents: this.events.slice(-20),
+            environment: {
+                type: IframeEnvironment.type,
+                isLocalDev: IframeEnvironment.isLocalDev,
+                isRenderHosted: IframeEnvironment.isRenderHosted,
+                isVPNNetwork: IframeEnvironment.isVPNNetwork,
+                isProduction: IframeEnvironment.isProduction,
+                isSandboxed: IframeEnvironment.isSandboxed,
+                latency: IframeEnvironment.latency,
+                connectionType: IframeEnvironment.connectionType
+            },
+            authority: {
+                id: IframeAuthority.id,
+                instanceId: IframeAuthority.instanceId,
+                parentDetected: IframeAuthority.parentDetected,
+                parentOrigin: IframeAuthority.parentOrigin,
+                securityLevel: IframeAuthority.securityLevel,
+                compatibilityMode: IframeAuthority.compatibilityMode
+            }
+        };
+    },
+    
+    clear() {
+        this.events = [];
+        this.metrics = {
+            startTime: Date.now(),
+            messagesSent: 0,
+            messagesReceived: 0,
+            errors: 0,
+            warnings: 0,
+            handshakeAttempts: 0,
+            handshakeSuccess: 0,
+            handshakeFailures: 0,
+            recoveryAttempts: 0,
+            recoverySuccess: 0,
+            recoveryFailures: 0,
+            tokenRefreshes: 0,
+            apiCalls: 0,
+            apiErrors: 0,
+            storageReads: 0,
+            storageWrites: 0,
+            storageErrors: 0,
+            offlineOperations: 0
+        };
+    }
+};
+
+// Enable diagnostics if URL parameter present
+if (window.location.search.includes('debug=true')) {
+    DiagnosticsAgent.enable();
+}
+
+// =============================================
+// LOGGING SYSTEM - STRUCTURED, NO SPAM
+// =============================================
+const LOG_LEVEL = {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3
+};
+
+let currentLogLevel = LOG_LEVEL.INFO;
+const errorCache = new Set();
+const warningCache = new Set();
+
+function log(level, module, message, data = null) {
+    try {
+        if (level < currentLogLevel) return;
+        
+        const timestamp = new Date().toISOString();
+        const prefix = `[${timestamp}] [${module}]`;
+        
+        if (level === LOG_LEVEL.ERROR) {
+            const key = `${module}:${message}`;
+            if (!errorCache.has(key)) {
+                errorCache.add(key);
+                DiagnosticsAgent.error(module, message, data);
+                setTimeout(() => errorCache.delete(key), 60000);
+            }
+        } else if (level === LOG_LEVEL.WARN) {
+            const key = `${module}:${message}`;
+            if (!warningCache.has(key)) {
+                warningCache.add(key);
+                DiagnosticsAgent.warn(module, message, data);
+                setTimeout(() => warningCache.delete(key), 30000);
+            }
+        } else if (level === LOG_LEVEL.DEBUG) {
+            DiagnosticsAgent.debug(module, message, data);
+        } else {
+            DiagnosticsAgent.info(module, message, data);
+        }
+    } catch (e) {}
+}
+
+// =============================================
+// SAFE STORAGE LAYER - FALLBACK TO MEMORY
+// =============================================
+const SafeStorage = {
+    memoryStore: new Map(),
+    storageAvailable: true,
+    storageType: 'localStorage',
+    quota: 5 * 1024 * 1024, // 5MB
+    used: 0,
+    
+    initialize() {
+        this.checkAvailability();
+        this.calculateUsage();
+        DiagnosticsAgent.info('Storage', 'Storage layer initialized', {
+            available: this.storageAvailable,
+            type: this.storageType
+        });
+        return this;
+    },
+    
+    checkAvailability() {
+        try {
+            const testKey = '_knecta_storage_test_';
+            const testValue = 'test';
+            
+            localStorage.setItem(testKey, testValue);
+            const result = localStorage.getItem(testKey);
+            localStorage.removeItem(testKey);
+            
+            this.storageAvailable = result === testValue;
+            this.storageType = 'localStorage';
+        } catch (e) {
+            try {
+                sessionStorage.setItem('_test_', 'test');
+                sessionStorage.removeItem('_test_');
+                this.storageAvailable = true;
+                this.storageType = 'sessionStorage';
+            } catch {
+                this.storageAvailable = false;
+                this.storageType = 'memory';
+            }
+        }
+    },
+    
+    calculateUsage() {
+        if (!this.storageAvailable || this.storageType === 'memory') return 0;
+        
+        try {
+            let total = 0;
+            const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
+            
+            for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
+                const value = storage.getItem(key);
+                total += (key.length + (value ? value.length : 0)) * 2; // Approximate bytes
+            }
+            
+            this.used = total;
+            return total;
+        } catch {
+            return 0;
+        }
+    },
+    
+    hasQuota(size) {
+        return this.used + size <= this.quota;
+    },
+    
+    get(key, fallback = null) {
+        DiagnosticsAgent.increment('storageReads');
+        
+        if (this.storageAvailable) {
+            try {
+                const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
+                const value = storage.getItem(key);
+                if (value !== null) return value;
+            } catch (e) {
+                DiagnosticsAgent.increment('storageErrors');
+                DiagnosticsAgent.warn('Storage', `Error reading ${key}`, e);
+            }
+        }
+        
+        return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
+    },
+    
+    set(key, value) {
+        DiagnosticsAgent.increment('storageWrites');
+        
+        let success = false;
+        const size = (key.length + value.length) * 2;
+        
+        if (this.storageAvailable && this.hasQuota(size)) {
+            try {
+                const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
+                storage.setItem(key, String(value));
+                this.used += size;
+                success = true;
+            } catch (e) {
+                DiagnosticsAgent.increment('storageErrors');
+                DiagnosticsAgent.warn('Storage', `Error writing ${key}`, e);
+            }
+        }
+        
+        this.memoryStore.set(key, String(value));
+        return success;
+    },
+    
+    remove(key) {
+        if (this.storageAvailable) {
+            try {
+                const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
+                const value = storage.getItem(key);
+                if (value) {
+                    storage.removeItem(key);
+                    this.used -= (key.length + value.length) * 2;
+                }
+            } catch (e) {
+                DiagnosticsAgent.warn('Storage', `Error removing ${key}`, e);
+            }
+        }
+        this.memoryStore.delete(key);
+    },
+    
+    getJSON(key, fallback = null) {
+        const value = this.get(key);
+        if (!value) return fallback;
+        
+        try {
+            return JSON.parse(value);
+        } catch (e) {
+            DiagnosticsAgent.warn('Storage', `Error parsing JSON for ${key}`, e);
+            return fallback;
+        }
+    },
+    
+    setJSON(key, value) {
+        try {
+            return this.set(key, JSON.stringify(value));
+        } catch (e) {
+            DiagnosticsAgent.warn('Storage', `Error stringifying JSON for ${key}`, e);
+            return false;
+        }
+    },
+    
+    clear() {
+        this.memoryStore.clear();
+        
+        if (this.storageAvailable) {
+            try {
+                const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
+                storage.clear();
+                this.used = 0;
+            } catch (e) {
+                DiagnosticsAgent.warn('Storage', 'Error clearing storage', e);
+            }
+        }
+    },
+    
+    keys() {
+        const keys = new Set();
+        
+        if (this.storageAvailable) {
+            try {
+                const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
+                for (let i = 0; i < storage.length; i++) {
+                    keys.add(storage.key(i));
+                }
+            } catch (e) {
+                DiagnosticsAgent.warn('Storage', 'Error getting keys', e);
+            }
+        }
+        
+        this.memoryStore.forEach((_, key) => keys.add(key));
+        return Array.from(keys);
+    },
+    
+    size() {
+        return this.keys().length;
+    }
+}.initialize();
+
+// =============================================
+// STARTUP GOVERNOR - PREVENTS DUPLICATE INITIALIZATION
+// =============================================
+const StartupGovernor = {
+    state: 'INIT', // INIT, WAIT_PARENT, HANDSHAKING, SYNCING, ACTIVE, DEGRADED, RECOVERING
+    lock: false,
+    initializationAttempted: false,
+    handshakeAttempted: false,
+    handshakeCompleted: false,
+    handshakeStartTime: null,
+    handshakeEndTime: null,
+    parentReadyReceived: false,
+    childReadySent: false,
+    handshakeRetries: 0,
+    maxHandshakeRetries: IframeEnvironment.getConfig().maxRetries,
+    handshakeTimeout: IframeEnvironment.getConfig().handshakeTimeout,
+    stateChangeListeners: new Set(),
+    mutex: false,
+    recoveryAttempts: 0,
+    maxRecoveryAttempts: IframeEnvironment.getConfig().maxRecoveryAttempts,
+    
+    transition(newState) {
+        if (this.state === newState) return;
+        
+        const oldState = this.state;
+        this.state = newState;
+        
+        DiagnosticsAgent.info('Governor', `State transition: ${oldState} → ${newState}`);
+        
+        this.stateChangeListeners.forEach(listener => {
+            try {
+                listener(oldState, newState);
+            } catch (e) {
+                DiagnosticsAgent.error('Governor', 'Listener error', e);
+            }
+        });
+        
+        document.dispatchEvent(new CustomEvent('governorStateChange', {
+            detail: { oldState, newState }
+        }));
+    },
+    
+    canInitialize() {
+        if (this.mutex) return false;
+        if (this.lock) return false;
+        if (this.initializationAttempted && this.handshakeCompleted) return false;
+        return true;
+    },
+    
+    acquireLock() {
+        if (this.mutex) return false;
+        this.mutex = true;
+        return true;
+    },
+    
+    releaseLock() {
+        this.mutex = false;
+    },
+    
+    startHandshake() {
+        if (this.handshakeAttempted && this.handshakeCompleted) return false;
+        
+        this.transition('WAIT_PARENT');
+        this.handshakeAttempted = true;
+        this.handshakeStartTime = Date.now();
+        DiagnosticsAgent.increment('handshakeAttempts');
+        
+        return true;
+    },
+    
+    completeHandshake() {
+        this.transition('SYNCING');
+        this.handshakeCompleted = true;
+        this.handshakeEndTime = Date.now();
+        DiagnosticsAgent.increment('handshakeSuccess');
+    },
+    
+    activate() {
+        this.transition('ACTIVE');
+        this.recoveryAttempts = 0;
+    },
+    
+    degrade(reason) {
+        this.transition('DEGRADED');
+        DiagnosticsAgent.warn('Governor', `Degraded mode: ${reason}`);
+    },
+    
+    recover() {
+        this.transition('RECOVERING');
+        this.recoveryAttempts++;
+        DiagnosticsAgent.increment('recoveryAttempts');
+    },
+    
+    recoverySucceeded() {
+        DiagnosticsAgent.increment('recoverySuccess');
+        this.activate();
+    },
+    
+    recoveryFailed() {
+        DiagnosticsAgent.increment('recoveryFailures');
+        this.degrade('Recovery failed');
+    },
+    
+    isActive() {
+        return this.state === 'ACTIVE';
+    },
+    
+    isHandshaking() {
+        return this.state === 'HANDSHAKING' || this.state === 'WAIT_PARENT' || this.state === 'SYNCING';
+    },
+    
+    shouldRetryHandshake() {
+        return this.handshakeRetries < this.maxHandshakeRetries && !this.handshakeCompleted;
+    },
+    
+    shouldAttemptRecovery() {
+        return this.recoveryAttempts < this.maxRecoveryAttempts;
+    },
+    
+    incrementRetry() {
+        this.handshakeRetries++;
+    },
+    
+    resetRetries() {
+        this.handshakeRetries = 0;
+    },
+    
+    getMetrics() {
+        return {
+            state: this.state,
+            handshakeCompleted: this.handshakeCompleted,
+            handshakeRetries: this.handshakeRetries,
+            handshakeDuration: this.handshakeEndTime ? this.handshakeEndTime - this.handshakeStartTime : null,
+            parentReadyReceived: this.parentReadyReceived,
+            childReadySent: this.childReadySent,
+            recoveryAttempts: this.recoveryAttempts
+        };
+    }
+};
+
+// =============================================
+// ORIGIN TRUST ADAPTER - DYNAMIC TRUST EVALUATION
+// =============================================
+const OriginTrustAdapter = {
+    trustedOrigins: new Set(),
+    blockedOrigins: new Set(),
+    dynamicTrustCache: new Map(),
+    trustLevel: 'standard', // relaxed, standard, strict
+    parentOrigin: null,
+    backendDomain: 'https://moodchat-fy56.onrender.com',
+    frontendDomain: 'https://moodfronted.onrender.com',
+    
+    initialize() {
+        this.loadBuiltinTrustedOrigins();
+        this.setTrustLevelFromEnvironment();
+        this.addTrustedOrigin(this.backendDomain);
+        this.addTrustedOrigin(this.frontendDomain);
+        
+        DiagnosticsAgent.info('OriginTrust', 'Origin trust adapter initialized', {
+            trustLevel: this.trustLevel,
+            trustedCount: this.trustedOrigins.size
+        });
+        
+        return this;
+    },
+    
+    loadBuiltinTrustedOrigins() {
+        const builtin = [
+            window.location.origin,
+            'http://localhost',
+            'http://127.0.0.1',
+            'https://localhost',
+            'https://127.0.0.1',
+            'http://localhost:3000',
+            'http://localhost:5500',
+            'http://localhost:5000',
+            'http://localhost:8080',
+            'https://localhost:3000',
+            'https://localhost:5500',
+            'https://localhost:5000',
+            'https://localhost:8080',
+            'http://127.0.0.1:3000',
+            'http://127.0.0.1:5500',
+            'http://127.0.0.1:5000',
+            'http://127.0.0.1:8080',
+            'https://127.0.0.1:3000',
+            'https://127.0.0.1:5500',
+            'https://127.0.0.1:5000',
+            'https://127.0.0.1:8080',
+            'https://moodchat-fy56.onrender.com',
+            'https://moodfronted.onrender.com'
+        ];
+        
+        builtin.forEach(origin => this.trustedOrigins.add(origin));
+        
+        // Render.com domains (wildcard)
+        this.trustedOrigins.add('https://*.onrender.com');
+        this.trustedOrigins.add('https://*.render.com');
+    },
+    
+    setTrustLevelFromEnvironment() {
+        if (IframeEnvironment.type === 'LOCAL_DEV' || IframeAuthority.compatibilityMode) {
+            this.trustLevel = 'relaxed';
+        } else if (IframeEnvironment.type === 'PRODUCTION') {
+            this.trustLevel = 'strict';
+        } else {
+            this.trustLevel = 'standard';
+        }
+    },
+    
+    isTrusted(origin) {
+        if (!origin) return false;
+        
+        // Check cache
+        if (this.dynamicTrustCache.has(origin)) {
+            return this.dynamicTrustCache.get(origin);
+        }
+        
+        // Check blocked
+        if (this.blockedOrigins.has(origin)) {
+            this.dynamicTrustCache.set(origin, false);
+            return false;
+        }
+        
+        // Check trusted set
+        if (this.trustedOrigins.has(origin)) {
+            this.dynamicTrustCache.set(origin, true);
+            return true;
+        }
+        
+        // Check wildcard patterns
+        for (const trusted of this.trustedOrigins) {
+            if (trusted.includes('*')) {
+                const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
+                const regex = new RegExp(`^${pattern}$`);
+                if (regex.test(origin)) {
+                    this.dynamicTrustCache.set(origin, true);
+                    return true;
+                }
+            }
+        }
+        
+        // Check if ends with trusted domain
+        for (const trusted of this.trustedOrigins) {
+            if (!trusted.includes('*') && origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
+                this.dynamicTrustCache.set(origin, true);
+                return true;
+            }
+        }
+        
+        // Relaxed trust - accept if same origin or subdomain
+        if (this.trustLevel === 'relaxed') {
+            try {
+                const originHostname = new URL(origin).hostname;
+                const currentHostname = window.location.hostname;
+                
+                if (originHostname === currentHostname ||
+                    originHostname.endsWith('.' + currentHostname) ||
+                    currentHostname.endsWith('.' + originHostname)) {
+                    this.dynamicTrustCache.set(origin, true);
+                    return true;
+                }
+            } catch {}
+        }
+        
+        // Check if from parent referrer
+        if (this.parentOrigin && origin === this.parentOrigin) {
+            this.dynamicTrustCache.set(origin, true);
+            return true;
+        }
+        
+        // Default based on trust level
+        const trusted = this.trustLevel === 'relaxed' || 
+                       (this.trustLevel === 'standard' && origin.startsWith('https://'));
+        
+        this.dynamicTrustCache.set(origin, trusted);
+        return trusted;
+    },
+    
+    addTrustedOrigin(origin) {
+        if (origin) {
+            this.trustedOrigins.add(origin);
+            this.dynamicTrustCache.delete(origin);
+        }
+    },
+    
+    blockOrigin(origin) {
+        if (origin) {
+            this.blockedOrigins.add(origin);
+            this.dynamicTrustCache.delete(origin);
+        }
+    },
+    
+    setParentOrigin(origin) {
+        if (origin) {
+            this.parentOrigin = origin;
+            this.addTrustedOrigin(origin);
+        }
+    },
+    
+    validateMessageOrigin(origin) {
+        if (!origin) return false;
+        if (this.trustLevel === 'relaxed' && !origin.includes('chrome-extension')) return true;
+        return this.isTrusted(origin);
+    },
+    
+    getTrustLevel() {
+        return this.trustLevel;
+    },
+    
+    reset() {
+        this.dynamicTrustCache.clear();
+        this.blockedOrigins.clear();
+    }
+}.initialize();
+
+// =============================================
+// MESSAGE BUS - CENTRALIZED COMMUNICATION
+// =============================================
+const MessageBus = {
+    channels: new Map(),
+    messageQueue: [],
+    processing: false,
+    maxQueueSize: 100,
+    messageCounter: 0,
+    pendingAcks: new Map(),
+    messageHandlers: new Map(),
+    history: new Map(),
+    maxHistory: 100,
+    
+    createChannel(channelName) {
+        if (!this.channels.has(channelName)) {
+            this.channels.set(channelName, {
+                subscribers: new Set(),
+                messageHistory: []
+            });
+        }
+        return this.channels.get(channelName);
+    },
+    
+    subscribe(channelName, handler) {
+        const channel = this.createChannel(channelName);
+        channel.subscribers.add(handler);
+        
+        DiagnosticsAgent.debug('MessageBus', `Subscribed to ${channelName}`);
+        
+        return () => {
+            channel.subscribers.delete(handler);
+            DiagnosticsAgent.debug('MessageBus', `Unsubscribed from ${channelName}`);
+        };
+    },
+    
+    publish(channelName, message) {
+        const channel = this.channels.get(channelName);
+        if (!channel) return;
+        
+        const messageId = ++this.messageCounter;
+        const enrichedMessage = {
+            ...message,
+            messageId,
+            timestamp: Date.now(),
+            channel: channelName,
+            source: 'message-bus',
+            busId: `bus_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
+        };
+        
+        // Store in history
+        channel.messageHistory.push(enrichedMessage);
+        if (channel.messageHistory.length > 50) {
+            channel.messageHistory.shift();
+        }
+        
+        // Global history
+        if (!this.history.has(channelName)) {
+            this.history.set(channelName, []);
+        }
+        const history = this.history.get(channelName);
+        history.push(enrichedMessage);
+        if (history.length > this.maxHistory) {
+            history.shift();
+        }
+        
+        // Notify subscribers
+        channel.subscribers.forEach(handler => {
+            try {
+                handler(enrichedMessage);
+            } catch (e) {
+                DiagnosticsAgent.error('MessageBus', `Subscriber error: ${e.message}`, e);
+            }
+        });
+        
+        DiagnosticsAgent.debug('MessageBus', `Published to ${channelName}`, { messageId });
+    },
+    
+    request(channelName, message, timeout = 5000) {
+        return new Promise((resolve, reject) => {
+            const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const responseChannel = `${channelName}_response_${requestId}`;
+            
+            const timeoutId = setTimeout(() => {
+                this.unsubscribe(responseChannel, responseHandler);
+                reject(new Error(`Request timeout on channel ${channelName}`));
+                DiagnosticsAgent.warn('MessageBus', `Request timeout: ${channelName}`, { requestId });
+            }, timeout);
+            
+            const responseHandler = (response) => {
+                clearTimeout(timeoutId);
+                this.unsubscribe(responseChannel, responseHandler);
+                resolve(response);
+                DiagnosticsAgent.debug('MessageBus', `Request completed: ${channelName}`, { requestId });
+            };
+            
+            this.subscribe(responseChannel, responseHandler);
+            this.publish(channelName, {
+                ...message,
+                requestId,
+                responseChannel
+            });
+            
+            DiagnosticsAgent.debug('MessageBus', `Request sent: ${channelName}`, { requestId });
+        });
+    },
+    
+    addMessageHandler(type, handler) {
+        if (!this.messageHandlers.has(type)) {
+            this.messageHandlers.set(type, new Set());
+        }
+        this.messageHandlers.get(type).add(handler);
+        
+        DiagnosticsAgent.debug('MessageBus', `Handler added for ${type}`);
+    },
+    
+    removeMessageHandler(type, handler) {
+        const handlers = this.messageHandlers.get(type);
+        if (handlers) {
+            handlers.delete(handler);
+            DiagnosticsAgent.debug('MessageBus', `Handler removed for ${type}`);
+        }
+    },
+    
+    processMessage(message) {
+        const handlers = this.messageHandlers.get(message.type);
+        if (handlers) {
+            handlers.forEach(handler => {
+                try {
+                    handler(message);
+                } catch (e) {
+                    DiagnosticsAgent.error('MessageBus', `Handler error for ${message.type}`, e);
+                }
+            });
+        }
+    },
+    
+    getHistory(channelName) {
+        return this.history.get(channelName) || [];
+    },
+    
+    clearHistory() {
+        this.history.clear();
+        this.channels.forEach(channel => {
+            channel.messageHistory = [];
+        });
+    }
+};
+
+// =============================================
+// RELIABILITY ENGINE - ACK/RETRY WITH EXPONENTIAL BACKOFF
+// =============================================
+const ReliabilityEngine = {
+    messageQueue: [],
+    retryQueue: new Map(),
+    pendingAcks: new Map(),
+    maxRetries: IframeEnvironment.getConfig().maxRetries,
+    baseDelay: 1000,
+    maxDelay: 30000,
+    jitter: true,
+    backoffType: IframeEnvironment.getConfig().retryBackoff,
+    processing: false,
+    stats: {
+        sent: 0,
+        received: 0,
+        retried: 0,
+        failed: 0,
+        timedout: 0,
+        queued: 0
+    },
+    
+    initialize() {
+        DiagnosticsAgent.info('Reliability', 'Reliability engine initialized', {
+            maxRetries: this.maxRetries,
+            backoffType: this.backoffType
+        });
+        return this;
+    },
+    
+    send(message, options = {}) {
+        return new Promise((resolve, reject) => {
+            const messageId = message.messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+            
+            const enhancedMessage = {
+                ...message,
+                messageId,
+                timestamp: Date.now(),
+                retryCount: 0,
+                maxRetries: options.maxRetries || this.maxRetries,
+                requiresAck: options.requiresAck !== false,
+                timeout: options.timeout || 10000,
+                priority: options.priority || 'normal'
+            };
+            
+            this.stats.sent++;
+            
+            if (enhancedMessage.requiresAck) {
+                const timer = setTimeout(() => {
+                    if (this.pendingAcks.has(messageId)) {
+                        const handler = this.pendingAcks.get(messageId);
+                        
+                        if (enhancedMessage.retryCount < enhancedMessage.maxRetries) {
+                            this.retry(messageId, enhancedMessage, handler);
+                        } else {
+                            this.stats.timedout++;
+                            handler.reject(new Error('ACK timeout'));
+                            this.pendingAcks.delete(messageId);
+                            DiagnosticsAgent.warn('Reliability', `Message timeout: ${messageId}`, {
+                                retries: enhancedMessage.retryCount
+                            });
+                        }
+                    }
+                }, enhancedMessage.timeout);
+                
+                this.pendingAcks.set(messageId, {
+                    resolve,
+                    reject,
+                    timer,
+                    message: enhancedMessage,
+                    startTime: Date.now()
+                });
+            }
+            
+            try {
+                if (typeof window.parent !== 'undefined' && window.parent !== window) {
+                    window.parent.postMessage(enhancedMessage, '*');
+                    
+                    if (!enhancedMessage.requiresAck) {
+                        resolve({ success: true, messageId });
+                    }
+                } else {
+                    this.queueMessage(enhancedMessage, resolve, reject);
+                }
+            } catch (error) {
+                if (enhancedMessage.retryCount < enhancedMessage.maxRetries) {
+                    this.queueForRetry(enhancedMessage, resolve, reject);
+                } else {
+                    this.stats.failed++;
+                    reject(error);
+                }
+            }
+        });
+    },
+    
+    queueMessage(message, resolve, reject) {
+        this.messageQueue.push({ message, resolve, reject, timestamp: Date.now() });
+        this.stats.queued++;
+        
+        if (!this.processing) {
+            this.processQueue();
+        }
+    },
+    
+    async processQueue() {
+        if (this.processing || this.messageQueue.length === 0) return;
+        
+        this.processing = true;
+        
+        while (this.messageQueue.length > 0) {
+            const item = this.messageQueue.shift();
+            
+            // Remove expired items (older than 5 minutes)
+            if (Date.now() - item.timestamp > 300000) {
+                item.reject(new Error('Message expired in queue'));
+                continue;
+            }
+            
+            try {
+                const result = await this.send(item.message, { requiresAck: true });
+                item.resolve(result);
+            } catch (error) {
+                item.reject(error);
+            }
+            
+            // Small delay between messages
+            await new Promise(r => setTimeout(r, 10));
+        }
+        
+        this.processing = false;
+    },
+    
+    queueForRetry(message, resolve, reject) {
+        const retryId = `retry_${message.messageId}_${Date.now()}`;
+        
+        const retryItem = {
+            message,
+            resolve,
+            reject,
+            attempt: message.retryCount + 1,
+            timestamp: Date.now()
+        };
+        
+        this.retryQueue.set(retryId, retryItem);
+        
+        const delay = this.calculateDelay(message.retryCount);
+        
+        setTimeout(() => {
+            this.processRetry(retryId);
+        }, delay);
+        
+        this.stats.retried++;
+        DiagnosticsAgent.debug('Reliability', `Queued for retry: ${message.messageId}`, {
+            attempt: message.retryCount + 1,
+            delay
+        });
+    },
+    
+    calculateDelay(attempt) {
+        let delay;
+        
+        if (this.backoffType === 'exponential') {
+            delay = Math.min(this.baseDelay * Math.pow(2, attempt), this.maxDelay);
+        } else if (this.backoffType === 'fibonacci') {
+            const fib = [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
+            delay = Math.min(this.baseDelay * fib[Math.min(attempt, fib.length - 1)], this.maxDelay);
+        } else {
+            delay = Math.min(this.baseDelay * (attempt + 1), this.maxDelay);
+        }
+        
+        if (this.jitter) {
+            const jitterFactor = 0.1 + (Math.random() * 0.3);
+            delay = Math.floor(delay * (1 + jitterFactor));
+        }
+        
+        return delay;
+    },
+    
+    processRetry(retryId) {
+        const item = this.retryQueue.get(retryId);
+        if (!item) return;
+        
+        this.retryQueue.delete(retryId);
+        
+        item.message.retryCount = item.attempt;
+        
+        this.send(item.message, { requiresAck: true })
+            .then(item.resolve)
+            .catch(item.reject);
+    },
+    
+    handleAck(messageId) {
+        const handler = this.pendingAcks.get(messageId);
+        if (handler) {
+            clearTimeout(handler.timer);
+            handler.resolve({ success: true, messageId, ack: true });
+            this.pendingAcks.delete(messageId);
+            this.stats.received++;
+            DiagnosticsAgent.debug('Reliability', `ACK received: ${messageId}`, {
+                latency: Date.now() - handler.startTime
+            });
+        }
+    },
+    
+    getStats() {
+        return { ...this.stats, pendingAcks: this.pendingAcks.size, retryQueue: this.retryQueue.size };
+    },
+    
+    reset() {
+        this.messageQueue = [];
+        this.retryQueue.clear();
+        this.pendingAcks.clear();
+        this.stats = {
+            sent: 0,
+            received: 0,
+            retried: 0,
+            failed: 0,
+            timedout: 0,
+            queued: 0
+        };
+    }
+}.initialize();
+
+// =============================================
+// MESSAGE TYPES - ENHANCED
+// =============================================
 const MESSAGE_TYPES = {
     READY: 'STATUS_READY',
     ACK: 'STATUS_ACK',
@@ -45,18 +1795,930 @@ const MESSAGE_TYPES = {
     USER_INACTIVE: 'USER_INACTIVE',
     HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
     HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
-    PARENT_READY: 'PARENT_READY'
-};
-
-const LOG_LEVEL = {
-    DEBUG: 0,
-    INFO: 1,
-    WARN: 2,
-    ERROR: 3
+    PARENT_READY: 'PARENT_READY',
+    CHILD_READY: 'CHILD_READY',
+    HANDSHAKE_ACK: 'HANDSHAKE_ACK',
+    SESSION_SYNC: 'SESSION_SYNC',
+    SESSION_ACK: 'SESSION_ACK',
+    PING: 'PING',
+    PONG: 'PONG',
+    PAGE_ACTIVATED: 'PAGE_ACTIVATED',
+    NAVIGATE: 'NAVIGATE',
+    CAPABILITY_REQUEST: 'CAPABILITY_REQUEST',
+    CAPABILITY_RESPONSE: 'CAPABILITY_RESPONSE',
+    TOKEN_REFRESH: 'TOKEN_REFRESH',
+    TOKEN_REFRESH_RESPONSE: 'TOKEN_REFRESH_RESPONSE',
+    ORIGIN_VALIDATION: 'ORIGIN_VALIDATION',
+    ORIGIN_VALIDATION_RESPONSE: 'ORIGIN_VALIDATION_RESPONSE',
+    CONFIG_REQUEST: 'CONFIG_REQUEST',
+    CONFIG_RESPONSE: 'CONFIG_RESPONSE',
+    DIAGNOSTICS: 'DIAGNOSTICS',
+    RECOVERY_REQUEST: 'RECOVERY_REQUEST',
+    RECOVERY_RESPONSE: 'RECOVERY_RESPONSE',
+    STATUS_VIEW: 'STATUS_VIEW',
+    STATUS_REACT: 'STATUS_REACT',
+    STATUS_REPLY: 'STATUS_REPLY',
+    STATUS_PIN: 'STATUS_PIN',
+    STATUS_UNPIN: 'STATUS_UNPIN',
+    STATUS_MUTE: 'STATUS_MUTE',
+    STATUS_UNMUTE: 'STATUS_UNMUTE',
+    STATUS_REPORT: 'STATUS_REPORT',
+    STATUS_DRAFT_SAVE: 'STATUS_DRAFT_SAVE',
+    STATUS_DRAFT_LOAD: 'STATUS_DRAFT_LOAD',
+    STATUS_DRAFT_DELETE: 'STATUS_DRAFT_DELETE',
+    STATUS_SCHEDULE: 'STATUS_SCHEDULE',
+    STATUS_SCHEDULE_CANCEL: 'STATUS_SCHEDULE_CANCEL',
+    HIGHLIGHT_CREATE: 'HIGHLIGHT_CREATE',
+    HIGHLIGHT_UPDATE: 'HIGHLIGHT_UPDATE',
+    HIGHLIGHT_DELETE: 'HIGHLIGHT_DELETE',
+    HIGHLIGHT_ADD_STATUS: 'HIGHLIGHT_ADD_STATUS',
+    HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS'
 };
 
 // =============================================
-// GLOBAL STATE - MODULE SCOPED
+// RECOVERY MANAGER - SYSTEM RESILIENCE
+// =============================================
+const RecoveryManager = {
+    recoveryAttempts: 0,
+    maxRecoveryAttempts: IframeEnvironment.getConfig().maxRecoveryAttempts,
+    recoveryInProgress: false,
+    lastRecoveryTime: null,
+    recoveryStrategies: new Map(),
+    recoveryHistory: [],
+    
+    initialize() {
+        this.registerStrategies();
+        DiagnosticsAgent.info('Recovery', 'Recovery manager initialized', {
+            maxAttempts: this.maxRecoveryAttempts
+        });
+        return this;
+    },
+    
+    registerStrategies() {
+        this.recoveryStrategies.set('handshake', this.recoverHandshake.bind(this));
+        this.recoveryStrategies.set('session', this.recoverSession.bind(this));
+        this.recoveryStrategies.set('connection', this.recoverConnection.bind(this));
+        this.recoveryStrategies.set('token', this.recoverToken.bind(this));
+        this.recoveryStrategies.set('storage', this.recoverStorage.bind(this));
+        this.recoveryStrategies.set('ui', this.recoverUI.bind(this));
+        this.recoveryStrategies.set('parent', this.recoverParent.bind(this));
+    },
+    
+    async recover(problem, context = {}) {
+        if (this.recoveryInProgress) {
+            DiagnosticsAgent.warn('Recovery', 'Recovery already in progress');
+            return { success: false, reason: 'Recovery already in progress' };
+        }
+        
+        if (!StartupGovernor.shouldAttemptRecovery()) {
+            DiagnosticsAgent.warn('Recovery', 'Max recovery attempts exceeded');
+            return { success: false, reason: 'Max attempts exceeded' };
+        }
+        
+        this.recoveryAttempts++;
+        this.recoveryInProgress = true;
+        this.lastRecoveryTime = Date.now();
+        
+        DiagnosticsAgent.info('Recovery', `Attempting recovery for: ${problem}`, {
+            attempt: this.recoveryAttempts,
+            maxAttempts: this.maxRecoveryAttempts
+        });
+        
+        const strategy = this.recoveryStrategies.get(problem);
+        if (!strategy) {
+            this.recoveryInProgress = false;
+            return { success: false, reason: 'No recovery strategy' };
+        }
+        
+        try {
+            const result = await strategy(context);
+            
+            this.recoveryHistory.push({
+                problem,
+                attempt: this.recoveryAttempts,
+                success: result.success,
+                timestamp: Date.now()
+            });
+            
+            if (result.success) {
+                StartupGovernor.recoverySucceeded();
+                DiagnosticsAgent.info('Recovery', `Recovery successful for: ${problem}`);
+            } else {
+                StartupGovernor.recoveryFailed();
+                DiagnosticsAgent.warn('Recovery', `Recovery failed for: ${problem}`, result);
+            }
+            
+            this.recoveryInProgress = false;
+            return result;
+        } catch (error) {
+            this.recoveryInProgress = false;
+            StartupGovernor.recoveryFailed();
+            
+            DiagnosticsAgent.error('Recovery', `Recovery error for ${problem}`, error);
+            
+            return { success: false, error: error.message };
+        }
+    },
+    
+    async recoverHandshake(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting handshake recovery');
+        
+        StartupGovernor.recover();
+        
+        if (typeof state !== 'undefined') {
+            state.handshakeComplete = false;
+            state.handshakeState = 'idle';
+            state.childReadySent = false;
+            state.parentReadyReceived = false;
+            state.handshakeAckReceived = false;
+            state.sessionSyncReceived = false;
+        }
+        
+        await new Promise(r => setTimeout(r, 1000));
+        
+        try {
+            if (typeof HandshakeClient !== 'undefined' && HandshakeClient.execute) {
+                const result = await HandshakeClient.execute({ 
+                    maxRetries: 3,
+                    force: true 
+                });
+                
+                if (result && result.success) {
+                    StartupGovernor.activate();
+                    return { success: true };
+                }
+            }
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+        
+        return { success: false };
+    },
+    
+    async recoverSession(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting session recovery');
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                const response = await sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
+                    timestamp: Date.now(),
+                    frameId: IframeAuthority.id,
+                    force: true
+                }, { requiresAck: true, timeout: 10000 });
+                
+                if (response && response.payload && response.payload.session) {
+                    if (typeof updateSessionMirror !== 'undefined') {
+                        updateSessionMirror(response.payload.session, 'recovery');
+                    }
+                    return { success: true };
+                }
+            }
+        } catch (error) {
+            DiagnosticsAgent.error('Recovery', 'Session recovery failed', error);
+        }
+        
+        // Try to load from cache
+        if (typeof SafeStorage !== 'undefined') {
+            const cached = SafeStorage.getJSON('session_cache');
+            if (cached) {
+                if (typeof updateSessionMirror !== 'undefined') {
+                    updateSessionMirror(cached, 'cache');
+                }
+                return { success: true, cached: true };
+            }
+        }
+        
+        return { success: false };
+    },
+    
+    async recoverConnection(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting connection recovery');
+        
+        try {
+            if (typeof TransportAgent !== 'undefined') {
+                if (TransportAgent.stopHeartbeat) TransportAgent.stopHeartbeat();
+                await new Promise(r => setTimeout(r, 2000));
+                if (TransportAgent.startHeartbeat) TransportAgent.startHeartbeat();
+            }
+            
+            if (typeof sendToParent !== 'undefined') {
+                await sendToParent('PING', {
+                    timestamp: Date.now(),
+                    frameId: IframeAuthority.id
+                }, { requiresAck: true, timeout: 5000 });
+                
+                return { success: true };
+            }
+        } catch (error) {
+            DiagnosticsAgent.error('Recovery', 'Connection recovery failed', error);
+        }
+        
+        return { success: false };
+    },
+    
+    async recoverToken(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting token recovery');
+        
+        if (typeof state === 'undefined' || !state.sessionMirror?.refreshToken) {
+            return { success: false, reason: 'No refresh token' };
+        }
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                const response = await sendToParent(MESSAGE_TYPES.TOKEN_REFRESH, {
+                    timestamp: Date.now(),
+                    refreshToken: state.sessionMirror.refreshToken
+                }, { requiresAck: true, timeout: 10000 });
+                
+                if (response && response.payload && response.payload.token) {
+                    state.token = response.payload.token;
+                    state.sessionMirror.token = response.payload.token;
+                    state.sessionMirror.lastRefresh = Date.now();
+                    
+                    if (response.payload.refreshToken) {
+                        state.sessionMirror.refreshToken = response.payload.refreshToken;
+                    }
+                    
+                    SafeStorage.set(UNIFIED_TOKEN_KEY, state.token);
+                    
+                    return { success: true };
+                }
+            }
+        } catch (error) {
+            DiagnosticsAgent.error('Recovery', 'Token recovery failed', error);
+        }
+        
+        return { success: false };
+    },
+    
+    async recoverStorage(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting storage recovery');
+        
+        try {
+            SafeStorage.initialize();
+            return { success: true };
+        } catch (error) {
+            DiagnosticsAgent.error('Recovery', 'Storage recovery failed', error);
+        }
+        
+        return { success: false };
+    },
+    
+    async recoverUI(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting UI recovery');
+        
+        if (typeof window !== 'undefined') {
+            document.dispatchEvent(new CustomEvent('uiRecovery', {
+                detail: { timestamp: Date.now() }
+            }));
+        }
+        
+        return { success: true };
+    },
+    
+    async recoverParent(context) {
+        DiagnosticsAgent.info('Recovery', 'Attempting parent recovery');
+        
+        try {
+            if (typeof window.parent !== 'undefined' && window.parent !== window) {
+                IframeAuthority.detectParent();
+                
+                if (IframeAuthority.parentDetected) {
+                    return { success: true };
+                }
+            }
+        } catch (error) {
+            DiagnosticsAgent.error('Recovery', 'Parent recovery failed', error);
+        }
+        
+        return { success: false };
+    },
+    
+    canRecover() {
+        return this.recoveryAttempts < this.maxRecoveryAttempts && !this.recoveryInProgress;
+    },
+    
+    reset() {
+        this.recoveryAttempts = 0;
+        this.recoveryInProgress = false;
+        this.recoveryHistory = [];
+    },
+    
+    getHistory() {
+        return [...this.recoveryHistory];
+    }
+}.initialize();
+
+// =============================================
+// IFRAME HANDSHAKE AUTHORITY - SINGLE HANDSHAKE CONTROLLER
+// =============================================
+const IframeHandshakeAuthority = {
+    status: 'idle', // idle, in-progress, complete, failed
+    handshakeId: null,
+    startTime: null,
+    endTime: null,
+    resolve: null,
+    reject: null,
+    timer: null,
+    retries: 0,
+    maxRetries: IframeEnvironment.getConfig().maxRetries,
+    childReadySent: false,
+    parentReadyReceived: false,
+    handshakeAckReceived: false,
+    sessionSyncReceived: false,
+    handshakePromise: null,
+    handshakeInProgress: false,
+    handshakeLock: false,
+    
+    initialize() {
+        this.reset();
+        DiagnosticsAgent.info('Handshake', 'Handshake authority initialized', {
+            maxRetries: this.maxRetries
+        });
+        return this;
+    },
+    
+    reset() {
+        this.status = 'idle';
+        this.handshakeId = null;
+        this.startTime = null;
+        this.endTime = null;
+        this.resolve = null;
+        this.reject = null;
+        this.retries = 0;
+        this.childReadySent = false;
+        this.parentReadyReceived = false;
+        this.handshakeAckReceived = false;
+        this.sessionSyncReceived = false;
+        this.handshakeInProgress = false;
+        
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+    },
+    
+    async execute(options = {}) {
+        // Check if already in progress
+        if (this.handshakeInProgress) {
+            DiagnosticsAgent.warn('Handshake', 'Handshake already in progress');
+            return this.handshakePromise;
+        }
+        
+        // Check if already complete
+        if (typeof state !== 'undefined' && state.handshakeComplete) {
+            DiagnosticsAgent.info('Handshake', 'Handshake already complete');
+            return { success: true, cached: true };
+        }
+        
+        // Check if we should start
+        if (!StartupGovernor.canInitialize()) {
+            DiagnosticsAgent.warn('Handshake', 'Startup governor prevented handshake');
+            return { success: false, reason: 'Governor blocked' };
+        }
+        
+        // Acquire lock
+        if (this.handshakeLock) {
+            return { success: false, reason: 'Lock acquired by another instance' };
+        }
+        
+        this.handshakeLock = true;
+        
+        this.reset();
+        this.status = 'in-progress';
+        this.handshakeId = `handshake_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
+        this.startTime = Date.now();
+        this.maxRetries = options.maxRetries || this.maxRetries;
+        this.handshakeInProgress = true;
+        
+        DiagnosticsAgent.info('Handshake', `Starting handshake ${this.handshakeId}`, {
+            attempt: this.retries + 1,
+            maxRetries: this.maxRetries
+        });
+        
+        if (typeof state !== 'undefined') {
+            state.handshakeId = this.handshakeId;
+            state.handshakeState = 'handshake_started';
+            state.handshakeStartTime = Date.now();
+        }
+        
+        this.handshakePromise = new Promise((resolve, reject) => {
+            this.resolve = resolve;
+            this.reject = reject;
+            this.startHandshakeSequence();
+        });
+        
+        return this.handshakePromise;
+    },
+    
+    async startHandshakeSequence() {
+        try {
+            // Step 1: Send CHILD_READY
+            await this.sendChildReady();
+            
+            // Step 2: Wait for PARENT_READY
+            await this.waitForParentReady();
+            
+            // Step 3: Send HANDSHAKE_REQUEST
+            await this.sendHandshakeRequest();
+            
+            // Step 4: Wait for HANDSHAKE_ACK
+            await this.waitForHandshakeAck();
+            
+            // Step 5: Request SESSION_SYNC
+            await this.requestSessionSync();
+            
+            // Step 6: Wait for SESSION_SYNC
+            await this.waitForSessionSync();
+            
+            // Step 7: Negotiate capabilities
+            await this.negotiateCapabilities();
+            
+            // Step 8: Validate origin
+            if (!IframeAuthority.compatibilityMode) {
+                await this.validateOrigin();
+            }
+            
+            // Step 9: Complete handshake
+            this.completeHandshake();
+            
+        } catch (error) {
+            this.handleHandshakeError(error);
+        } finally {
+            this.handshakeLock = false;
+            this.handshakeInProgress = false;
+        }
+    },
+    
+    async sendChildReady() {
+        DiagnosticsAgent.info('Handshake', 'Sending CHILD_READY');
+        
+        const payload = {
+            frameId: IframeAuthority.id,
+            instanceId: IframeAuthority.instanceId,
+            timestamp: Date.now(),
+            protocolVersion: '5.0',
+            module: 'status',
+            environment: IframeEnvironment.type,
+            capabilities: IframeEnvironment.getCapabilities(),
+            userAgent: navigator.userAgent,
+            screenSize: {
+                width: window.innerWidth,
+                height: window.innerHeight
+            },
+            connection: {
+                online: navigator.onLine,
+                type: IframeEnvironment.connectionType,
+                latency: IframeEnvironment.latency,
+                effectiveType: IframeEnvironment.effectiveType
+            },
+            handshakeId: this.handshakeId
+        };
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                await sendToParent(MESSAGE_TYPES.CHILD_READY, payload, {
+                    requiresAck: true,
+                    timeout: IframeEnvironment.isVPNNetwork ? 10000 : 5000,
+                    retry: true,
+                    messageId: this.handshakeId + '_child_ready'
+                });
+                
+                this.childReadySent = true;
+                
+                if (typeof state !== 'undefined') {
+                    state.childReadySent = true;
+                    state.handshakeState = 'child_ready_sent';
+                }
+                
+                DiagnosticsAgent.info('Handshake', 'CHILD_READY sent successfully');
+            }
+        } catch (error) {
+            DiagnosticsAgent.warn('Handshake', 'CHILD_READY failed, continuing', error);
+        }
+    },
+    
+    waitForParentReady() {
+        return new Promise((resolve) => {
+            if (this.parentReadyReceived) {
+                resolve();
+                return;
+            }
+            
+            const timeout = setTimeout(() => {
+                if (!this.parentReadyReceived) {
+                    DiagnosticsAgent.warn('Handshake', 'PARENT_READY timeout, continuing');
+                    resolve();
+                }
+            }, IframeEnvironment.isVPNNetwork ? 6000 : 3000);
+            
+            const handler = (message) => {
+                if (message.type === MESSAGE_TYPES.PARENT_READY) {
+                    clearTimeout(timeout);
+                    
+                    if (typeof MessageBus !== 'undefined') {
+                        MessageBus.removeMessageHandler(MESSAGE_TYPES.PARENT_READY, handler);
+                    }
+                    
+                    this.parentReadyReceived = true;
+                    
+                    if (typeof StartupGovernor !== 'undefined') {
+                        StartupGovernor.parentReadyReceived = true;
+                    }
+                    
+                    if (typeof state !== 'undefined') {
+                        state.parentReadyReceived = true;
+                        state.handshakeState = 'parent_ready_received';
+                    }
+                    
+                    DiagnosticsAgent.info('Handshake', 'PARENT_READY received');
+                    resolve();
+                }
+            };
+            
+            if (typeof MessageBus !== 'undefined') {
+                MessageBus.addMessageHandler(MESSAGE_TYPES.PARENT_READY, handler);
+            }
+        });
+    },
+    
+    async sendHandshakeRequest() {
+        DiagnosticsAgent.info('Handshake', 'Sending HANDSHAKE_REQUEST');
+        
+        const payload = {
+            messageId: this.handshakeId,
+            timestamp: Date.now(),
+            protocolVersion: '5.0',
+            module: 'status',
+            frameId: IframeAuthority.id,
+            instanceId: IframeAuthority.instanceId,
+            environment: IframeEnvironment.type,
+            session: {
+                cached: typeof state !== 'undefined' && state.sessionMirror?.validated || false,
+                token: typeof state !== 'undefined' && state.sessionMirror?.token ? 'present' : 'none',
+                timestamp: typeof state !== 'undefined' ? state.sessionMirror?.timestamp : 0
+            },
+            capabilities: IframeEnvironment.getCapabilities(),
+            security: {
+                signatureRequired: IframeEnvironment.type === 'PRODUCTION',
+                originValidation: true
+            },
+            handshakeId: this.handshakeId
+        };
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                const response = await sendToParent(MESSAGE_TYPES.HANDSHAKE_REQUEST, payload, {
+                    requiresAck: true,
+                    timeout: IframeEnvironment.isVPNNetwork ? 10000 : 5000,
+                    messageId: this.handshakeId,
+                    retry: true
+                });
+                
+                if (typeof state !== 'undefined') {
+                    state.handshakeState = 'handshake_sent';
+                }
+                
+                DiagnosticsAgent.info('Handshake', 'HANDSHAKE_REQUEST sent successfully');
+                
+                return response;
+            }
+        } catch (error) {
+            DiagnosticsAgent.warn('Handshake', 'HANDSHAKE_REQUEST failed', error);
+            throw error;
+        }
+    },
+    
+    waitForHandshakeAck() {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                if (!this.handshakeAckReceived) {
+                    DiagnosticsAgent.warn('Handshake', 'HANDSHAKE_ACK timeout');
+                    
+                    if (this.retries > 0) {
+                        reject(new Error('HANDSHAKE_ACK timeout'));
+                    } else {
+                        resolve();
+                    }
+                }
+            }, IframeEnvironment.isVPNNetwork ? 10000 : 5000);
+            
+            const handler = (message) => {
+                if (message.type === MESSAGE_TYPES.HANDSHAKE_ACK && 
+                    (message.inResponseTo === this.handshakeId || message.payload?.inResponseTo === this.handshakeId)) {
+                    
+                    clearTimeout(timeout);
+                    
+                    if (typeof MessageBus !== 'undefined') {
+                        MessageBus.removeMessageHandler(MESSAGE_TYPES.HANDSHAKE_ACK, handler);
+                    }
+                    
+                    this.handshakeAckReceived = true;
+                    
+                    if (typeof state !== 'undefined') {
+                        state.handshakeAckReceived = true;
+                        state.handshakeState = 'handshake_acked';
+                    }
+                    
+                    // Process any session data in the ACK
+                    if (message.payload && message.payload.session) {
+                        if (typeof updateSessionMirror !== 'undefined') {
+                            updateSessionMirror(message.payload.session, 'handshake_ack');
+                        }
+                    }
+                    
+                    DiagnosticsAgent.info('Handshake', 'HANDSHAKE_ACK received');
+                    resolve();
+                }
+            };
+            
+            if (typeof MessageBus !== 'undefined') {
+                MessageBus.addMessageHandler(MESSAGE_TYPES.HANDSHAKE_ACK, handler);
+            }
+        });
+    },
+    
+    async requestSessionSync() {
+        DiagnosticsAgent.info('Handshake', 'Requesting SESSION_SYNC');
+        
+        const payload = {
+            messageId: this.handshakeId + '_session',
+            timestamp: Date.now(),
+            frameId: IframeAuthority.id,
+            instanceId: IframeAuthority.instanceId,
+            cached: typeof state !== 'undefined' && state.sessionMirror?.validated || false,
+            capabilities: IframeEnvironment.getCapabilities(),
+            handshakeId: this.handshakeId
+        };
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                await sendToParent(MESSAGE_TYPES.SESSION_SYNC, payload, {
+                    requiresAck: true,
+                    timeout: IframeEnvironment.isVPNNetwork ? 10000 : 5000,
+                    messageId: this.handshakeId + '_session',
+                    retry: true
+                });
+                
+                if (typeof state !== 'undefined') {
+                    state.handshakeState = 'session_requested';
+                }
+                
+                DiagnosticsAgent.info('Handshake', 'SESSION_SYNC requested');
+            }
+        } catch (error) {
+            DiagnosticsAgent.warn('Handshake', 'SESSION_SYNC request failed', error);
+        }
+    },
+    
+    waitForSessionSync() {
+        return new Promise((resolve) => {
+            if (this.sessionSyncReceived) {
+                resolve();
+                return;
+            }
+            
+            const timeout = setTimeout(() => {
+                if (!this.sessionSyncReceived) {
+                    DiagnosticsAgent.warn('Handshake', 'SESSION_SYNC timeout');
+                    
+                    // If we have cached session, continue
+                    if (typeof state !== 'undefined' && state.sessionMirror?.validated) {
+                        if (typeof activateSessionFromMirror !== 'undefined') {
+                            activateSessionFromMirror();
+                        }
+                        resolve();
+                    } else {
+                        // Enable guest mode and continue
+                        if (typeof enableGuestMode !== 'undefined') {
+                            enableGuestMode();
+                        }
+                        resolve();
+                    }
+                }
+            }, IframeEnvironment.isVPNNetwork ? 10000 : 5000);
+            
+            const handler = (message) => {
+                if (message.type === MESSAGE_TYPES.SESSION_SYNC) {
+                    clearTimeout(timeout);
+                    
+                    if (typeof MessageBus !== 'undefined') {
+                        MessageBus.removeMessageHandler(MESSAGE_TYPES.SESSION_SYNC, handler);
+                    }
+                    
+                    this.sessionSyncReceived = true;
+                    
+                    if (typeof state !== 'undefined') {
+                        state.sessionSyncReceived = true;
+                    }
+                    
+                    // Process session data
+                    if (message.payload) {
+                        if (typeof updateSessionMirror !== 'undefined') {
+                            updateSessionMirror(message.payload, 'session_sync');
+                        }
+                    }
+                    
+                    DiagnosticsAgent.info('Handshake', 'SESSION_SYNC received');
+                    resolve();
+                }
+            };
+            
+            if (typeof MessageBus !== 'undefined') {
+                MessageBus.addMessageHandler(MESSAGE_TYPES.SESSION_SYNC, handler);
+            }
+        });
+    },
+    
+    async negotiateCapabilities() {
+        DiagnosticsAgent.info('Handshake', 'Negotiating capabilities');
+        
+        const payload = {
+            messageId: this.handshakeId + '_capabilities',
+            timestamp: Date.now(),
+            frameId: IframeAuthority.id,
+            capabilities: Object.keys(IframeEnvironment.getCapabilities()),
+            required: ['session', 'heartbeat', 'retry', 'storage']
+        };
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                const response = await sendToParent(MESSAGE_TYPES.CAPABILITY_REQUEST, payload, {
+                    requiresAck: true,
+                    timeout: IframeEnvironment.isVPNNetwork ? 6000 : 3000,
+                    messageId: this.handshakeId + '_capabilities'
+                });
+                
+                if (response && response.payload && response.payload.capabilities) {
+                    response.payload.capabilities.forEach(cap => {
+                        if (typeof IframeAuthority !== 'undefined') {
+                            IframeAuthority.parentCapabilities.add(cap);
+                        }
+                    });
+                }
+                
+                DiagnosticsAgent.info('Handshake', 'Capabilities negotiated');
+            }
+        } catch (error) {
+            DiagnosticsAgent.warn('Handshake', 'Capability negotiation failed', error);
+        }
+    },
+    
+    async validateOrigin() {
+        DiagnosticsAgent.info('Handshake', 'Validating origin');
+        
+        if (typeof state !== 'undefined' && state.securityContext?.originValidated) {
+            return;
+        }
+        
+        const payload = {
+            messageId: this.handshakeId + '_origin',
+            timestamp: Date.now(),
+            frameId: IframeAuthority.id,
+            origin: window.location.origin,
+            instanceId: IframeAuthority.instanceId,
+            backendDomain: IframeAuthority.backendDomain,
+            frontendDomain: IframeAuthority.frontendDomain
+        };
+        
+        try {
+            if (typeof sendToParent !== 'undefined') {
+                const response = await sendToParent(MESSAGE_TYPES.ORIGIN_VALIDATION, payload, {
+                    requiresAck: true,
+                    timeout: 3000,
+                    messageId: this.handshakeId + '_origin'
+                });
+                
+                if (response && response.payload && response.payload.valid) {
+                    if (typeof state !== 'undefined') {
+                        state.securityContext.originValidated = true;
+                    }
+                    
+                    DiagnosticsAgent.info('Handshake', 'Origin validated');
+                }
+            }
+        } catch (error) {
+            DiagnosticsAgent.warn('Handshake', 'Origin validation failed', error);
+        }
+    },
+    
+    completeHandshake() {
+        this.status = 'complete';
+        this.endTime = Date.now();
+        
+        if (typeof state !== 'undefined') {
+            state.handshakeComplete = true;
+            state.handshakeState = 'active';
+            state.handshakeEndTime = Date.now();
+            state.metrics.lastHandshake = Date.now();
+            state.handshakeRetries = 0;
+        }
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.completeHandshake();
+            StartupGovernor.activate();
+        }
+        
+        const duration = this.endTime - this.startTime;
+        DiagnosticsAgent.info('Handshake', `Handshake complete in ${duration}ms`, {
+            handshakeId: this.handshakeId,
+            duration
+        });
+        
+        if (this.resolve) {
+            this.resolve({ 
+                success: true, 
+                session: typeof getSessionMirror !== 'undefined' ? getSessionMirror() : null,
+                protocolVersion: '5.0',
+                capabilities: typeof IframeAuthority !== 'undefined' ? Array.from(IframeAuthority.parentCapabilities) : []
+            });
+        }
+        
+        // Send completion acknowledgment
+        if (typeof sendToParent !== 'undefined') {
+            sendToParent(MESSAGE_TYPES.ACK, {
+                inResponseTo: this.handshakeId,
+                status: 'success',
+                timestamp: Date.now(),
+                frameId: IframeAuthority.id
+            }, { requiresAck: false, silent: true });
+        }
+        
+        // Start heartbeat
+        if (typeof startEnhancedHeartbeat !== 'undefined') {
+            startEnhancedHeartbeat();
+        }
+        
+        // Request configuration
+        if (typeof requestParentConfig !== 'undefined') {
+            requestParentConfig();
+        }
+    },
+    
+    handleHandshakeError(error) {
+        this.retries++;
+        this.status = 'failed';
+        
+        if (typeof state !== 'undefined') {
+            state.metrics.handshakeFailures++;
+        }
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.incrementRetry();
+        }
+        
+        DiagnosticsAgent.error('Handshake', `Handshake error: ${error.message}`, {
+            attempt: this.retries,
+            maxRetries: this.maxRetries
+        });
+        
+        if (this.retries < this.maxRetries) {
+            // Retry with exponential backoff
+            const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
+            const delay = Math.min(baseDelay * Math.pow(2, this.retries - 1), 10000);
+            
+            DiagnosticsAgent.info('Handshake', `Retrying in ${delay}ms`);
+            
+            setTimeout(() => {
+                this.startHandshakeSequence();
+            }, delay);
+        } else {
+            // Max retries exceeded, enable guest mode
+            DiagnosticsAgent.warn('Handshake', 'Max retries exceeded, enabling guest mode');
+            
+            if (typeof state !== 'undefined' && state.sessionMirror?.validated) {
+                if (typeof activateSessionFromMirror !== 'undefined') {
+                    activateSessionFromMirror();
+                }
+            } else {
+                if (typeof enableGuestMode !== 'undefined') {
+                    enableGuestMode();
+                }
+            }
+            
+            if (typeof state !== 'undefined') {
+                state.handshakeComplete = true;
+                state.handshakeState = 'active_fallback';
+            }
+            
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.degrade('Handshake failed, using fallback');
+            }
+            
+            if (this.reject) {
+                this.reject(error);
+            }
+            
+            // Attempt recovery
+            if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
+                RecoveryManager.recover('handshake', { error });
+            }
+        }
+    }
+}.initialize();
+
+// =============================================
+// GLOBAL STATE - MODULE SCOPED (PRESERVED)
 // =============================================
 const state = {
     initialized: false,
@@ -68,6 +2730,40 @@ const state = {
     readyState: 'preflight',
     shutdownInProgress: false,
     
+    // Enhanced handshake tracking
+    handshakeState: 'idle',
+    handshakeStartTime: null,
+    handshakeEndTime: null,
+    handshakeRetryCount: 0,
+    handshakeMaxRetries: IframeEnvironment.getConfig().maxRetries,
+    handshakeTimeoutMs: IframeEnvironment.getConfig().handshakeTimeout,
+    parentReadyReceived: false,
+    childReadySent: false,
+    handshakeAckReceived: false,
+    sessionSyncReceived: false,
+    pageActivated: false,
+    
+    // Frame identification
+    frameId: IframeAuthority.id,
+    instanceId: IframeAuthority.instanceId,
+    sessionId: null,
+    
+    // Capability tracking
+    capabilities: new Map(),
+    parentCapabilities: new Set(),
+    
+    // Security context
+    securityContext: {
+        originValidated: false,
+        parentOrigin: null,
+        signatureRequired: !IframeEnvironment.isSandboxed && IframeEnvironment.type !== 'LOCAL_DEV',
+        encryptionRequired: false,
+        hmacKey: null,
+        timestampTolerance: IframeEnvironment.isVPNNetwork ? 60000 : 30000,
+        replayProtection: !IframeEnvironment.isSandboxed,
+        messageSequence: new Map()
+    },
+    
     // Session Mirror Layer
     sessionMirror: {
         token: null,
@@ -77,7 +2773,11 @@ const state = {
         timestamp: 0,
         messageId: null,
         validated: false,
-        source: null
+        source: null,
+        refreshToken: null,
+        lastRefresh: null,
+        refreshInProgress: false,
+        capabilities: []
     },
     
     sessionData: null,
@@ -93,6 +2793,25 @@ const state = {
     messageSequence: new Map(),
     originValidated: false,
     
+    // Retry queue with backoff
+    retryQueue: [],
+    retryTimers: new Map(),
+    maxRetryAttempts: IframeEnvironment.getConfig().maxRetries,
+    baseRetryDelay: 1000,
+    maxRetryDelay: 30000,
+    
+    // Offline buffer
+    offlineBuffer: [],
+    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    offlineModeEnabled: false,
+    
+    // Heartbeat tracking
+    heartbeatInterval: null,
+    lastHeartbeatSent: null,
+    lastHeartbeatReceived: null,
+    heartbeatMissed: 0,
+    maxMissedHeartbeats: 3,
+    
     listeners: new Set(),
     intervals: new Set(),
     timeouts: new Set(),
@@ -107,194 +2826,626 @@ const state = {
         errorsLogged: 0,
         startTime: Date.now(),
         lastHandshake: 0,
-        handshakeFailures: 0
+        handshakeFailures: 0,
+        retryCount: 0,
+        offlineOperations: 0,
+        tokenRefreshes: 0,
+        originValidations: 0,
+        capabilityNegotiations: 0,
+        recoveryAttempts: 0,
+        successfulRecoveries: 0
     },
     
-    // Handshake tracking
     handshakeId: null,
     handshakePromise: null,
     handshakeResolve: null,
     handshakeReject: null,
     handshakeTimer: null,
     handshakeRetries: 0,
-    maxHandshakeRetries: 3,
+    maxHandshakeRetries: IframeEnvironment.getConfig().maxRetries,
     
-    // Protocol version
-    protocolVersion: '2.0',
-    parentProtocolVersion: null
-};
-
-const CIRCUIT_BREAKER = {
-    failures: {},
-    threshold: 5,
-    timeout: 30000,
-    lastFailure: {}
+    protocolVersion: '5.0',
+    parentProtocolVersion: null,
+    
+    diagnosticsEnabled: false,
+    diagnosticData: []
 };
 
 // =============================================
-// LOGGING SYSTEM - STRUCTURED, NO SPAM
+// IFRAME TRANSPORT - CENTRALIZED COMMUNICATION LAYER
 // =============================================
-let currentLogLevel = LOG_LEVEL.INFO;
-const errorCache = new Set();
-const warningCache = new Set();
-const metricCache = {
-    lastHeartbeat: null,
-    messagesPerMinute: 0,
-    errorRate: 0
-};
-
-function log(level, module, message, data = null) {
-    try {
-        if (level < currentLogLevel) return;
-        
-        const timestamp = new Date().toISOString();
-        const prefix = `[${timestamp}] [${module}]`;
-        
-        if (level === LOG_LEVEL.ERROR) {
-            const key = `${module}:${message}`;
-            if (!errorCache.has(key)) {
-                errorCache.add(key);
-                console.error(`${prefix} ${message}`, data || '');
-                state.metrics.errorsLogged++;
+const IframeTransport = {
+    version: '5.0',
+    messageQueue: [],
+    isProcessing: false,
+    retryQueue: new Map(),
+    maxRetries: IframeEnvironment.getConfig().maxRetries,
+    baseRetryDelay: 1000,
+    maxRetryDelay: 30000,
+    messageCounter: 0,
+    pendingAcks: new Map(),
+    heartbeatInterval: null,
+    lastHeartbeatSent: null,
+    lastHeartbeatReceived: null,
+    heartbeatMissed: 0,
+    maxMissedHeartbeats: 3,
+    connectionStatus: 'disconnected',
+    offlineBuffer: [],
+    batchMessages: IframeEnvironment.getConfig().batchMessages,
+    keepalive: IframeEnvironment.getConfig().keepalive,
+    
+    initialize() {
+        DiagnosticsAgent.info('Transport', 'Transport layer initialized', {
+            batchMessages: this.batchMessages,
+            keepalive: this.keepalive
+        });
+        return this;
+    },
+    
+    send(type, payload = {}, options = {}) {
+        return new Promise((resolve, reject) => {
+            try {
+                if (!IframeAuthority.parentDetected && !options.bypassParentCheck) {
+                    if (options.offlineQueue) {
+                        this.queueOffline(type, payload, options, resolve, reject);
+                    } else {
+                        reject(new Error('Parent not detected'));
+                    }
+                    return;
+                }
+                
+                const messageId = `msg_${Date.now()}_${++this.messageCounter}_${Math.random().toString(36).substr(2, 6)}`;
+                const timestamp = Date.now();
+                
+                const message = {
+                    protocol: options.protocol || 'KYN-5.0',
+                    version: this.version,
+                    messageId,
+                    type,
+                    source: 'iframe',
+                    target: options.target || 'parent',
+                    frameId: IframeAuthority.id,
+                    instanceId: IframeAuthority.instanceId,
+                    timestamp,
+                    payload: this.sanitizePayload(payload),
+                    requiresAck: options.requiresAck !== false,
+                    retryCount: options.retryCount || 0,
+                    maxRetries: options.maxRetries || this.maxRetries,
+                    priority: options.priority || 'normal',
+                    ...options
+                };
+                
+                if (options.includeToken !== false && typeof state !== 'undefined' && state.token) {
+                    message.token = state.token;
+                }
+                
+                if (options.legacy || CompatibilityBridge.isLegacy()) {
+                    message.legacy = true;
+                }
+                
+                if (message.requiresAck) {
+                    const timeout = options.timeout || (IframeEnvironment.isVPNNetwork ? 15000 : 10000);
+                    
+                    const timer = setTimeout(() => {
+                        if (this.pendingAcks.has(messageId)) {
+                            const handler = this.pendingAcks.get(messageId);
+                            
+                            if (message.retryCount < message.maxRetries) {
+                                this.retryMessage(message, options, handler);
+                            } else {
+                                handler.reject(new Error('ACK timeout'));
+                                this.pendingAcks.delete(messageId);
+                                DiagnosticsAgent.warn('Transport', `ACK timeout: ${messageId}`, {
+                                    type,
+                                    retries: message.retryCount
+                                });
+                            }
+                        }
+                    }, timeout);
+                    
+                    this.pendingAcks.set(messageId, {
+                        resolve,
+                        reject,
+                        timer,
+                        timestamp,
+                        message,
+                        startTime: Date.now()
+                    });
+                }
+                
+                // Send via postMessage
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage(message, '*');
+                    DiagnosticsAgent.increment('messagesSent');
+                    
+                    if (!message.requiresAck) {
+                        resolve({ success: true, messageId });
+                    }
+                } else {
+                    this.queueOffline(type, payload, options, resolve, reject);
+                }
+                
+                this.cleanupPendingAcks();
+                
+            } catch (error) {
+                DiagnosticsAgent.error('Transport', `Send error: ${error.message}`, { type });
+                
+                if (options.retry !== false) {
+                    this.retryMessage({ type, payload, options }, options, { reject });
+                } else {
+                    reject(error);
+                }
             }
-        } else if (level === LOG_LEVEL.WARN) {
-            const key = `${module}:${message}`;
-            if (!warningCache.has(key)) {
-                warningCache.add(key);
-                console.warn(`${prefix} ${message}`, data || '');
-            }
-        } else if (level === LOG_LEVEL.DEBUG) {
-            console.debug(`${prefix} ${message}`, data || '');
-        } else {
-            console.log(`${prefix} ${message}`, data || '');
+        });
+    },
+    
+    sanitizePayload(payload) {
+        if (!payload || typeof payload !== 'object') return payload;
+        
+        try {
+            return JSON.parse(JSON.stringify(payload, (key, value) => {
+                if (typeof value === 'string' && value.length > 10000) {
+                    return value.substring(0, 10000) + '... [truncated]';
+                }
+                if (key === 'token' && typeof value === 'string') {
+                    return '[REDACTED]';
+                }
+                return value;
+            }));
+        } catch {
+            return payload;
         }
-    } catch (e) {}
-}
+    },
+    
+    queueOffline(type, payload, options, resolve, reject) {
+        const offlineItem = {
+            id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`,
+            type,
+            payload,
+            options,
+            resolve,
+            reject,
+            timestamp: Date.now()
+        };
+        
+        this.offlineBuffer.push(offlineItem);
+        
+        DiagnosticsAgent.info('Transport', `Queued offline message: ${type}`, {
+            queueSize: this.offlineBuffer.length
+        });
+        
+        DiagnosticsAgent.increment('offlineOperations');
+    },
+    
+    retryMessage(message, options, handler) {
+        const retryId = `retry_${message.messageId || Date.now()}_${message.retryCount || 0}`;
+        const retryCount = (message.retryCount || 0) + 1;
+        
+        const retryItem = {
+            message,
+            options,
+            handler,
+            retryCount,
+            timestamp: Date.now()
+        };
+        
+        this.retryQueue.set(retryId, retryItem);
+        
+        const delay = this.calculateRetryDelay(retryCount);
+        
+        setTimeout(() => {
+            this.processRetry(retryId);
+        }, delay);
+        
+        DiagnosticsAgent.debug('Transport', `Scheduled retry: ${message.type}`, {
+            retryCount,
+            delay
+        });
+    },
+    
+    calculateRetryDelay(attempt) {
+        const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
+        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), this.maxRetryDelay);
+        
+        // Add jitter
+        const jitter = Math.random() * 200;
+        return delay + jitter;
+    },
+    
+    processRetry(retryId) {
+        const item = this.retryQueue.get(retryId);
+        if (!item) return;
+        
+        this.retryQueue.delete(retryId);
+        
+        const message = {
+            ...item.message,
+            retryCount: item.retryCount
+        };
+        
+        this.send(message.type, message.payload, {
+            ...item.options,
+            retry: false,
+            requiresAck: true,
+            timeout: IframeEnvironment.isVPNNetwork ? 15000 : 10000
+        })
+        .then(item.handler?.resolve || (() => {}))
+        .catch(item.handler?.reject || (() => {}));
+    },
+    
+    handleAck(messageId) {
+        const handler = this.pendingAcks.get(messageId);
+        if (handler) {
+            clearTimeout(handler.timer);
+            handler.resolve({ success: true, messageId, ack: true });
+            this.pendingAcks.delete(messageId);
+            
+            DiagnosticsAgent.debug('Transport', `ACK received: ${messageId}`, {
+                latency: Date.now() - handler.startTime
+            });
+        }
+    },
+    
+    cleanupPendingAcks() {
+        const now = Date.now();
+        for (const [id, handler] of this.pendingAcks.entries()) {
+            if (now - handler.timestamp > 30000) {
+                clearTimeout(handler.timer);
+                this.pendingAcks.delete(id);
+            }
+        }
+    },
+    
+    startHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+        }
+        
+        this.heartbeatInterval = setInterval(() => {
+            this.sendHeartbeat();
+        }, IframeEnvironment.getConfig().heartbeatInterval || 30000);
+        
+        DiagnosticsAgent.info('Transport', 'Heartbeat started');
+    },
+    
+    async sendHeartbeat() {
+        if (!IframeAuthority.parentDetected) return;
+        
+        this.lastHeartbeatSent = Date.now();
+        
+        try {
+            await this.send('PING', {
+                timestamp: this.lastHeartbeatSent,
+                frameId: IframeAuthority.id,
+                instanceId: IframeAuthority.instanceId,
+                state: typeof StartupGovernor !== 'undefined' ? StartupGovernor.state : 'unknown',
+                queueSize: this.messageQueue.length,
+                offlineBuffer: this.offlineBuffer.length,
+                metrics: {
+                    messagesSent: DiagnosticsAgent.metrics.messagesSent,
+                    errors: DiagnosticsAgent.metrics.errors
+                }
+            }, { requiresAck: false, silent: true });
+            
+            // Check for missed heartbeats
+            if (this.lastHeartbeatReceived) {
+                const timeSinceResponse = Date.now() - this.lastHeartbeatReceived;
+                if (timeSinceResponse > IframeEnvironment.getConfig().heartbeatInterval * 2) {
+                    this.heartbeatMissed++;
+                    
+                    if (this.heartbeatMissed >= this.maxMissedHeartbeats) {
+                        this.connectionStatus = 'degraded';
+                        
+                        if (typeof StartupGovernor !== 'undefined') {
+                            StartupGovernor.degrade('Heartbeat missed');
+                        }
+                        
+                        // Attempt recovery
+                        if (typeof RecoveryManager !== 'undefined') {
+                            RecoveryManager.recover('connection');
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            DiagnosticsAgent.debug('Transport', 'Heartbeat send failed', e);
+        }
+    },
+    
+    handlePong() {
+        this.lastHeartbeatReceived = Date.now();
+        this.heartbeatMissed = 0;
+        this.connectionStatus = 'connected';
+    },
+    
+    stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+    },
+    
+    async processOfflineQueue() {
+        if (this.offlineBuffer.length === 0 || !IframeAuthority.parentDetected) return;
+        
+        DiagnosticsAgent.info('Transport', 'Processing offline queue', {
+            size: this.offlineBuffer.length
+        });
+        
+        const queue = [...this.offlineBuffer];
+        this.offlineBuffer = [];
+        
+        for (const item of queue) {
+            try {
+                const result = await this.send(item.type, item.payload, item.options);
+                item.resolve(result);
+            } catch (error) {
+                item.reject(error);
+            }
+            
+            // Small delay between messages
+            await new Promise(r => setTimeout(r, 10));
+        }
+    },
+    
+    getStatus() {
+        return {
+            connectionStatus: this.connectionStatus,
+            pendingAcks: this.pendingAcks.size,
+            retryQueue: this.retryQueue.size,
+            offlineBuffer: this.offlineBuffer.length,
+            heartbeatMissed: this.heartbeatMissed,
+            lastHeartbeatSent: this.lastHeartbeatSent,
+            lastHeartbeatReceived: this.lastHeartbeatReceived
+        };
+    }
+}.initialize();
+
+// =============================================
+// NAVIGATION GUARD - PROTECTS PAGE TRANSITIONS
+// =============================================
+const NavigationGuard = {
+    active: false,
+    pendingOperations: 0,
+    guardElement: null,
+    beforeUnloadHandler: null,
+    navigationListeners: new Set(),
+    historyState: [],
+    maxHistory: 50,
+    
+    initialize() {
+        this.createGuardElement();
+        this.setupBeforeUnload();
+        this.setupHistoryTracking();
+        this.setupNavigationListeners();
+        
+        DiagnosticsAgent.info('Navigation', 'Navigation guard initialized');
+        return this;
+    },
+    
+    createGuardElement() {
+        if (document.getElementById('navigationGuard')) return;
+        
+        const guard = document.createElement('div');
+        guard.id = 'navigationGuard';
+        guard.className = 'navigation-guard';
+        guard.innerHTML = `
+            <i class="fas fa-sync-alt fa-spin"></i>
+            <span>Operation in progress. Please wait...</span>
+        `;
+        
+        document.body.appendChild(guard);
+        this.guardElement = guard;
+    },
+    
+    setupBeforeUnload() {
+        this.beforeUnloadHandler = (e) => {
+            if (this.pendingOperations > 0) {
+                e.preventDefault();
+                e.returnValue = 'There are pending operations. Are you sure you want to leave?';
+                return e.returnValue;
+            }
+        };
+        
+        window.addEventListener('beforeunload', this.beforeUnloadHandler);
+    },
+    
+    setupHistoryTracking() {
+        const pushState = history.pushState;
+        const replaceState = history.replaceState;
+        
+        history.pushState = (...args) => {
+            const result = pushState.apply(history, args);
+            this.trackHistoryChange('push', args[2]);
+            return result;
+        };
+        
+        history.replaceState = (...args) => {
+            const result = replaceState.apply(history, args);
+            this.trackHistoryChange('replace', args[2]);
+            return result;
+        };
+        
+        window.addEventListener('popstate', () => {
+            this.trackHistoryChange('pop', window.location.pathname);
+        });
+    },
+    
+    trackHistoryChange(type, url) {
+        this.historyState.push({
+            type,
+            url,
+            timestamp: Date.now()
+        });
+        
+        if (this.historyState.length > this.maxHistory) {
+            this.historyState.shift();
+        }
+        
+        DiagnosticsAgent.debug('Navigation', `History ${type}`, { url });
+    },
+    
+    setupNavigationListeners() {
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (link && link.href && link.target !== '_blank') {
+                this.handleNavigation(link.href);
+            }
+        });
+        
+        window.addEventListener('pagehide', () => {
+            this.handlePageHide();
+        });
+    },
+    
+    handleNavigation(url) {
+        if (this.pendingOperations > 0) {
+            if (!confirm('There are pending operations. Navigate away?')) {
+                return false;
+            }
+        }
+        return true;
+    },
+    
+    handlePageHide() {
+        if (this.pendingOperations > 0 && typeof sendToParent !== 'undefined') {
+            sendToParent('PAGE_HIDE', {
+                pendingOperations: this.pendingOperations,
+                timestamp: Date.now()
+            }, { requiresAck: false, silent: true });
+        }
+    },
+    
+    startOperation(operation) {
+        this.pendingOperations++;
+        this.active = true;
+        this.updateGuard();
+        
+        DiagnosticsAgent.debug('Navigation', `Operation started: ${operation}`, {
+            pending: this.pendingOperations
+        });
+    },
+    
+    endOperation(operation) {
+        this.pendingOperations = Math.max(0, this.pendingOperations - 1);
+        this.active = this.pendingOperations > 0;
+        this.updateGuard();
+        
+        DiagnosticsAgent.debug('Navigation', `Operation ended: ${operation}`, {
+            pending: this.pendingOperations
+        });
+    },
+    
+    updateGuard() {
+        if (!this.guardElement) return;
+        
+        if (this.pendingOperations > 0) {
+            this.guardElement.classList.add('active');
+        } else {
+            this.guardElement.classList.remove('active');
+        }
+    },
+    
+    wrapOperation(fn, operationName) {
+        return async (...args) => {
+            this.startOperation(operationName);
+            try {
+                return await fn(...args);
+            } finally {
+                this.endOperation(operationName);
+            }
+        };
+    },
+    
+    addNavigationListener(listener) {
+        this.navigationListeners.add(listener);
+        return () => this.navigationListeners.delete(listener);
+    },
+    
+    getState() {
+        return {
+            active: this.active,
+            pendingOperations: this.pendingOperations,
+            historySize: this.historyState.length
+        };
+    },
+    
+    reset() {
+        this.pendingOperations = 0;
+        this.active = false;
+        this.updateGuard();
+        this.historyState = [];
+    }
+}.initialize();
 
 // =============================================
 // ERROR BOUNDARY SYSTEM
 // =============================================
 function createErrorBoundary(fn, featureName, fallback = null) {
     return async function(...args) {
-        if (state.disabledFeatures.has(featureName)) {
+        if (typeof state !== 'undefined' && state.disabledFeatures?.has(featureName)) {
             return typeof fallback === 'function' ? fallback(...args) : fallback;
         }
 
         try {
             return await fn(...args);
         } catch (error) {
-            log(LOG_LEVEL.ERROR, 'ErrorBoundary', `${featureName}: ${error.message}`);
+            DiagnosticsAgent.error('ErrorBoundary', `${featureName}: ${error.message}`, error);
             
-            state.disabledFeatures.add(featureName);
+            if (typeof state !== 'undefined' && state.disabledFeatures) {
+                state.disabledFeatures.add(featureName);
+            }
             
             const key = featureName.split(':')[0];
-            CIRCUIT_BREAKER.failures[key] = (CIRCUIT_BREAKER.failures[key] || 0) + 1;
-            CIRCUIT_BREAKER.lastFailure[key] = Date.now();
+            if (typeof CIRCUIT_BREAKER !== 'undefined') {
+                CIRCUIT_BREAKER.failures[key] = (CIRCUIT_BREAKER.failures[key] || 0) + 1;
+                CIRCUIT_BREAKER.lastFailure[key] = Date.now();
+            }
             
             return typeof fallback === 'function' ? fallback(...args) : fallback;
         }
     };
 }
 
-function isCircuitOpen(service) {
-    const failures = CIRCUIT_BREAKER.failures[service] || 0;
-    const lastFailure = CIRCUIT_BREAKER.lastFailure[service] || 0;
-    const timeSinceFailure = Date.now() - lastFailure;
-    
-    if (failures >= CIRCUIT_BREAKER.threshold && timeSinceFailure < CIRCUIT_BREAKER.timeout) {
-        return true;
-    }
-    
-    if (timeSinceFailure >= CIRCUIT_BREAKER.timeout) {
-        CIRCUIT_BREAKER.failures[service] = 0;
-        return false;
-    }
-    
-    return false;
-}
-
 // =============================================
-// SECURE STORAGE ABSTRACTION
+// CIRCUIT BREAKER
 // =============================================
-const SecureStorage = {
-    memoryStore: new Map(),
-    storageAvailable: true,
+const CIRCUIT_BREAKER = {
+    failures: {},
+    threshold: 5,
+    timeout: 30000,
+    lastFailure: {},
     
-    init() {
-        try {
-            const testKey = '_kynecta_test_';
-            localStorage.setItem(testKey, 'test');
-            localStorage.removeItem(testKey);
-            this.storageAvailable = true;
-        } catch (e) {
-            this.storageAvailable = false;
-            log(LOG_LEVEL.WARN, 'Storage', 'localStorage unavailable, using memory fallback');
+    isOpen(service) {
+        const failures = this.failures[service] || 0;
+        const lastFailure = this.lastFailure[service] || 0;
+        const timeSinceFailure = Date.now() - lastFailure;
+        
+        if (failures >= this.threshold && timeSinceFailure < this.timeout) {
+            return true;
         }
-        return this;
-    },
-    
-    get(key, fallback = null) {
-        if (this.storageAvailable) {
-            try {
-                const value = localStorage.getItem(key);
-                if (value !== null) return value;
-            } catch (e) {
-                log(LOG_LEVEL.WARN, 'Storage', `Error reading ${key} from localStorage`);
-            }
-        }
-        return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
-    },
-    
-    set(key, value) {
-        let success = false;
-        if (this.storageAvailable) {
-            try {
-                localStorage.setItem(key, String(value));
-                success = true;
-            } catch (e) {
-                log(LOG_LEVEL.WARN, 'Storage', `Error writing ${key} to localStorage`);
-            }
-        }
-        this.memoryStore.set(key, String(value));
-        return success;
-    },
-    
-    remove(key) {
-        if (this.storageAvailable) {
-            try {
-                localStorage.removeItem(key);
-            } catch (e) {}
-        }
-        this.memoryStore.delete(key);
-    },
-    
-    getJSON(key, fallback = null) {
-        const value = this.get(key);
-        if (!value) return fallback;
-        try {
-            return JSON.parse(value);
-        } catch (e) {
-            return fallback;
-        }
-    },
-    
-    setJSON(key, value) {
-        try {
-            return this.set(key, JSON.stringify(value));
-        } catch (e) {
+        
+        if (timeSinceFailure >= this.timeout) {
+            this.failures[service] = 0;
             return false;
         }
+        
+        return false;
     },
     
-    clear() {
-        this.memoryStore.clear();
-        if (this.storageAvailable) {
-            try {
-                localStorage.clear();
-            } catch (e) {}
-        }
+    recordFailure(service) {
+        this.failures[service] = (this.failures[service] || 0) + 1;
+        this.lastFailure[service] = Date.now();
+    },
+    
+    recordSuccess(service) {
+        this.failures[service] = 0;
     }
-}.init();
+};
+
+function isCircuitOpen(service) {
+    return CIRCUIT_BREAKER.isOpen(service);
+}
 
 // =============================================
 // MESSAGE FIREWALL & PARSER
@@ -303,9 +3454,11 @@ const MessageFirewall = {
     validators: new Map(),
     replayCache: new Set(),
     maxCacheSize: 1000,
+    sequenceTracker: new Map(),
     
     init() {
         this.registerValidators();
+        DiagnosticsAgent.info('Firewall', 'Message firewall initialized');
         return this;
     },
     
@@ -348,25 +3501,82 @@ const MessageFirewall = {
         this.validators.set('API_ERROR', (msg) => {
             return msg.payload && msg.payload.requestId;
         });
+        
+        this.validators.set('PARENT_READY', (msg) => {
+            return msg.payload && msg.payload.timestamp;
+        });
+        
+        this.validators.set('CHILD_READY', (msg) => {
+            return msg.payload && msg.payload.frameId && msg.payload.instanceId;
+        });
+        
+        this.validators.set('HANDSHAKE_ACK', (msg) => {
+            return msg.inResponseTo || msg.payload?.inResponseTo;
+        });
+        
+        this.validators.set('SESSION_SYNC', (msg) => {
+            return msg.payload && 
+                   (msg.payload.sessionId || msg.payload.token || msg.payload.user);
+        });
+        
+        this.validators.set('SESSION_ACK', (msg) => {
+            return msg.inResponseTo || msg.payload?.inResponseTo;
+        });
+        
+        this.validators.set('PING', (msg) => {
+            return msg.payload && msg.payload.timestamp;
+        });
+        
+        this.validators.set('PONG', (msg) => {
+            return msg.inResponseTo || msg.payload?.inResponseTo;
+        });
+        
+        this.validators.set('PAGE_ACTIVATED', (msg) => {
+            return msg.payload && msg.payload.timestamp;
+        });
+        
+        this.validators.set('NAVIGATE', (msg) => {
+            return msg.payload && msg.payload.path;
+        });
+        
+        this.validators.set('CAPABILITY_RESPONSE', (msg) => {
+            return msg.payload && Array.isArray(msg.payload.capabilities);
+        });
+        
+        this.validators.set('TOKEN_REFRESH_RESPONSE', (msg) => {
+            return msg.payload && (msg.payload.token || msg.payload.error);
+        });
+        
+        this.validators.set('ORIGIN_VALIDATION_RESPONSE', (msg) => {
+            return msg.payload && msg.payload.valid !== undefined;
+        });
+        
+        this.validators.set('CONFIG_RESPONSE', (msg) => {
+            return msg.payload && msg.payload.config;
+        });
+        
+        this.validators.set('RECOVERY_RESPONSE', (msg) => {
+            return msg.payload && msg.payload.success !== undefined;
+        });
     },
     
     validate(message, origin) {
         try {
             // Structural validation
             if (!message || typeof message !== 'object') {
-                log(LOG_LEVEL.WARN, 'Firewall', 'Invalid message structure');
+                DiagnosticsAgent.warn('Firewall', 'Invalid message structure');
                 return false;
             }
             
-            // Origin validation
-            if (!isValidOrigin(origin)) {
-                log(LOG_LEVEL.WARN, 'Firewall', `Invalid origin: ${origin}`);
+            // Origin validation using trust adapter
+            if (!OriginTrustAdapter.validateMessageOrigin(origin)) {
+                DiagnosticsAgent.warn('Firewall', `Invalid origin: ${origin}`);
                 return false;
             }
             
             // Required fields
             if (!message.type) {
-                log(LOG_LEVEL.WARN, 'Firewall', 'Missing message type');
+                DiagnosticsAgent.warn('Firewall', 'Missing message type');
                 return false;
             }
             
@@ -375,8 +3585,8 @@ const MessageFirewall = {
                 const msgId = message.messageId || message.id;
                 const cacheKey = `${origin}:${msgId}`;
                 
-                if (this.replayCache.has(cacheKey)) {
-                    log(LOG_LEVEL.WARN, 'Firewall', `Replay detected: ${msgId}`);
+                if (this.replayCache.has(cacheKey) && state.securityContext.replayProtection) {
+                    DiagnosticsAgent.warn('Firewall', `Replay detected: ${msgId}`);
                     return false;
                 }
                 
@@ -387,16 +3597,42 @@ const MessageFirewall = {
                 }
             }
             
+            // Sequence validation
+            if (message.sequence && state.securityContext.replayProtection) {
+                const sourceKey = `${origin}:${message.source || 'unknown'}`;
+                const lastSequence = this.sequenceTracker.get(sourceKey) || 0;
+                
+                if (message.sequence <= lastSequence) {
+                    DiagnosticsAgent.warn('Firewall', `Out of sequence: ${message.sequence} <= ${lastSequence}`);
+                    return false;
+                }
+                
+                this.sequenceTracker.set(sourceKey, message.sequence);
+            }
+            
+            // Timestamp validation
+            if (message.timestamp && state.securityContext.timestampTolerance > 0) {
+                const now = Date.now();
+                const tolerance = state.securityContext.timestampTolerance;
+                
+                if (Math.abs(now - message.timestamp) > tolerance) {
+                    DiagnosticsAgent.warn('Firewall', `Timestamp out of tolerance: ${Math.abs(now - message.timestamp)}ms`);
+                    if (!IframeAuthority.compatibilityMode) {
+                        return false;
+                    }
+                }
+            }
+            
             // Schema validation
             const validator = this.validators.get(message.type);
-            if (validator && !validator(message)) {
-                log(LOG_LEVEL.WARN, 'Firewall', `Schema validation failed for ${message.type}`);
+            if (validator && !validator(message) && !IframeAuthority.compatibilityMode) {
+                DiagnosticsAgent.warn('Firewall', `Schema validation failed for ${message.type}`);
                 return false;
             }
             
             return true;
         } catch (e) {
-            log(LOG_LEVEL.ERROR, 'Firewall', `Validation error: ${e.message}`);
+            DiagnosticsAgent.error('Firewall', `Validation error: ${e.message}`, e);
             return false;
         }
     },
@@ -439,7 +3675,7 @@ const MessageFirewall = {
 // MESSAGE ID GENERATOR
 // =============================================
 function generateMessageId() {
-    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${++state.messageId}`;
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${state.messageId++}`;
 }
 
 function generateSequenceId() {
@@ -450,20 +3686,62 @@ function generateHandshakeId() {
     return `handshake_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
 }
 
+function generateFrameId() {
+    return `frame_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
+}
+
+function generateInstanceId() {
+    return `instance_${Date.now()}_${Math.random().toString(36).substr(2, 15)}`;
+}
+
 // =============================================
 // ORIGIN VALIDATION & SECURITY
 // =============================================
+const TRUSTED_ORIGINS = new Set([
+    window.location.origin,
+    'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'http://127.0.0.1:5000',
+    'http://localhost:5000',
+    'http://127.0.0.1:8080',
+    'http://localhost:8080',
+    'https://127.0.0.1:5500',
+    'https://localhost:5500',
+    'https://127.0.0.1:3000',
+    'https://localhost:3000',
+    'https://127.0.0.1:5000',
+    'https://localhost:5000',
+    'https://127.0.0.1:8080',
+    'https://localhost:8080',
+    'https://*.onrender.com',
+    'https://moodchat-fy56.onrender.com',
+    'https://moodfronted.onrender.com'
+]);
+
 function isValidOrigin(origin) {
     try {
         if (!origin) return false;
         if (origin === window.location.origin) return true;
         if (TRUSTED_ORIGINS.has(origin)) return true;
         
+        // Check wildcard patterns
         for (const trusted of TRUSTED_ORIGINS) {
-            if (origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
+            if (trusted.includes('*')) {
+                const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
+                const regex = new RegExp(`^${pattern}$`);
+                if (regex.test(origin)) return true;
+            } else if (origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
                 return true;
             }
         }
+        
+        // Check for render.com domains
+        if (origin.includes('.onrender.com') || origin.includes('.render.com')) {
+            return true;
+        }
+        
         return false;
     } catch (e) {
         return false;
@@ -475,15 +3753,99 @@ function validateMessage(message, origin) {
 }
 
 function signMessage(message) {
-    return {
+    const signed = {
         ...message,
         id: generateMessageId(),
         messageId: generateMessageId(),
         timestamp: Date.now(),
         origin: window.location.origin,
-        signature: btoa(`${message.type}:${Date.now()}:${state.messageId}`),
-        protocolVersion: state.protocolVersion
+        protocolVersion: state.protocolVersion,
+        frameId: state.frameId,
+        instanceId: state.instanceId,
+        source: 'status-core',
+        target: 'parent'
     };
+    
+    // Add signature if token available and not in compatibility mode
+    if (state.token && state.securityContext.signatureRequired && !IframeAuthority.compatibilityMode) {
+        try {
+            const payload = JSON.stringify(signed.payload || {});
+            signed.signature = btoa(`${signed.type}:${signed.timestamp}:${state.token.substring(0, 10)}:${payload.length}`);
+        } catch (e) {}
+    }
+    
+    return signed;
+}
+
+// =============================================
+// CANONICAL MESSAGE FORMATTER
+// =============================================
+function formatCanonicalMessage(type, payload = {}, options = {}) {
+    const message = {
+        protocol: options.protocol || 'KYN-5.0',
+        messageId: options.messageId || generateMessageId(),
+        type: type,
+        source: options.source || 'iframe',
+        target: options.target || 'parent',
+        frameId: state.frameId,
+        instanceId: state.instanceId,
+        timestamp: Date.now(),
+        payload: payload,
+        sequence: options.sequence || Date.now()
+    };
+    
+    // Add token if available and required
+    if (options.includeToken !== false && state.token) {
+        message.token = state.token;
+    }
+    
+    // Add signature if required
+    if (options.sign !== false && state.securityContext.signatureRequired && state.token && !IframeAuthority.compatibilityMode) {
+        try {
+            const signaturePayload = `${message.type}:${message.timestamp}:${message.messageId}:${state.frameId}`;
+            message.signature = btoa(signaturePayload);
+        } catch (e) {}
+    }
+    
+    // Add legacy flag for compatibility
+    if (options.legacy) {
+        message.legacy = true;
+    }
+    
+    return message;
+}
+
+// =============================================
+// LEGACY MESSAGE ADAPTER
+// =============================================
+function adaptLegacyMessage(message) {
+    try {
+        // Already in canonical format
+        if (message.protocol) return message;
+        
+        const adapted = {
+            protocol: 'KYN-1.0',
+            messageId: message.id || message.messageId || generateMessageId(),
+            type: message.type,
+            source: message.source || 'iframe',
+            target: 'parent',
+            frameId: state.frameId,
+            instanceId: state.instanceId,
+            timestamp: message.timestamp || Date.now(),
+            payload: message.payload || message.data || {},
+            legacy: true
+        };
+        
+        // Copy legacy fields
+        if (message.inResponseTo) adapted.inResponseTo = message.inResponseTo;
+        if (message.token) adapted.token = message.token;
+        if (message.signature) adapted.signature = message.signature;
+        
+        return adapted;
+    } catch (e) {
+        DiagnosticsAgent.error('Adapter', `Failed to adapt legacy message: ${e.message}`, e);
+        return message;
+    }
 }
 
 // =============================================
@@ -507,32 +3869,259 @@ function removeMessageHandler(type, handler) {
 
 const receiveFromParent = createErrorBoundary(async function(event) {
     try {
+        // Update online status
+        if (typeof state !== 'undefined') {
+            state.isOnline = navigator.onLine;
+        }
+        
+        // Validate message using trust adapter
+        if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
+            DiagnosticsAgent.warn('Receive', `Message from untrusted origin: ${event.origin}`);
+            return;
+        }
+        
+        // Validate message
         if (!validateMessage(event.data, event.origin)) {
             return;
         }
         
-        const message = MessageFirewall.sanitize(event.data);
-        state.metrics.messagesReceived++;
+        // Adapt legacy message if needed
+        const adaptedMessage = adaptLegacyMessage(event.data);
+        const message = MessageFirewall.sanitize(adaptedMessage);
+        
+        if (typeof state !== 'undefined') {
+            state.metrics.messagesReceived++;
+        }
+        
+        // Update parent origin
+        if (typeof state !== 'undefined' && !state.securityContext.parentOrigin) {
+            state.securityContext.parentOrigin = event.origin;
+            OriginTrustAdapter.setParentOrigin(event.origin);
+        }
         
         // Update parent protocol version
         if (message.protocolVersion) {
-            state.parentProtocolVersion = message.protocolVersion;
+            if (typeof state !== 'undefined') {
+                state.parentProtocolVersion = message.protocolVersion;
+            }
+        } else if (message.protocol) {
+            if (typeof state !== 'undefined') {
+                state.parentProtocolVersion = message.protocol;
+            }
         }
         
-        // Handle ACK messages
-        if ((message.type === MESSAGE_TYPES.ACK || message.type === 'ACK') && 
+        // Handle ACK messages via ReliabilityEngine
+        if ((message.type === MESSAGE_TYPES.ACK || message.type === 'ACK' || message.type === MESSAGE_TYPES.HANDSHAKE_ACK) && 
             (message.inResponseTo || message.payload?.inResponseTo)) {
             const responseTo = message.inResponseTo || message.payload.inResponseTo;
-            const ackHandler = state.pendingAcks.get(responseTo);
-            if (ackHandler) {
-                ackHandler.resolve(message);
-                state.pendingAcks.delete(responseTo);
-                if (ackHandler.timer) clearTimeout(ackHandler.timer);
+            
+            if (typeof IframeTransport !== 'undefined') {
+                IframeTransport.handleAck(responseTo);
+            }
+            
+            if (typeof ReliabilityEngine !== 'undefined') {
+                ReliabilityEngine.handleAck(responseTo);
+            }
+            
+            if (message.type === MESSAGE_TYPES.HANDSHAKE_ACK) {
+                if (typeof state !== 'undefined') {
+                    state.handshakeAckReceived = true;
+                    state.handshakeState = 'handshake_acked';
+                }
             }
             return;
         }
         
-        // Handle legacy ACK format
+        // Handle PONG responses
+        if (message.type === MESSAGE_TYPES.PONG) {
+            if (typeof state !== 'undefined') {
+                state.lastHeartbeatReceived = Date.now();
+                state.heartbeatMissed = 0;
+            }
+            
+            if (typeof IframeTransport !== 'undefined') {
+                IframeTransport.handlePong();
+            }
+            return;
+        }
+        
+        // Handle PAGE_ACTIVATED
+        if (message.type === MESSAGE_TYPES.PAGE_ACTIVATED) {
+            if (typeof state !== 'undefined') {
+                state.pageActivated = true;
+            }
+            DiagnosticsAgent.info('Parent', 'PAGE_ACTIVATED received', message.payload);
+        }
+        
+        // Handle PARENT_READY
+        if (message.type === MESSAGE_TYPES.PARENT_READY) {
+            if (typeof state !== 'undefined') {
+                state.parentReadyReceived = true;
+                state.handshakeState = 'parent_ready_received';
+            }
+            
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.parentReadyReceived = true;
+            }
+            
+            DiagnosticsAgent.info('Parent', 'PARENT_READY received', message.payload);
+            
+            // Continue handshake if not already complete
+            if (typeof state !== 'undefined' && !state.handshakeComplete && 
+                typeof StartupGovernor !== 'undefined' && StartupGovernor.shouldRetryHandshake()) {
+                setTimeout(() => {
+                    if (typeof sendHandshakeRequest !== 'undefined') {
+                        sendHandshakeRequest();
+                    }
+                }, 100);
+            }
+        }
+        
+        // Handle SESSION_SYNC
+        if (message.type === MESSAGE_TYPES.SESSION_SYNC) {
+            if (typeof state !== 'undefined') {
+                state.sessionSyncReceived = true;
+            }
+            
+            DiagnosticsAgent.info('Session', 'SESSION_SYNC received', message.payload);
+            
+            const sessionData = message.payload;
+            
+            // Update session mirror
+            if (sessionData.token || sessionData.user) {
+                if (typeof updateSessionMirror !== 'undefined') {
+                    updateSessionMirror(sessionData, 'session_sync');
+                }
+            }
+            
+            // Send SESSION_ACK
+            if (typeof sendToParent !== 'undefined') {
+                sendToParent(MESSAGE_TYPES.SESSION_ACK, {
+                    inResponseTo: message.messageId,
+                    status: 'success',
+                    timestamp: Date.now(),
+                    frameId: IframeAuthority.id
+                }, { requiresAck: false, silent: true });
+            }
+            
+            // Update handshake state
+            if (typeof state !== 'undefined') {
+                state.handshakeState = 'session_received';
+                state.handshakeComplete = true;
+                state.handshakeEndTime = Date.now();
+            }
+            
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.completeHandshake();
+            }
+            
+            // Trigger callbacks
+            if (typeof isTokenReady !== 'undefined') {
+                isTokenReady = true;
+                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                    triggerTokenReadyCallbacks();
+                }
+            }
+            
+            if (typeof processPendingApiRequests !== 'undefined') {
+                processPendingApiRequests();
+            }
+            
+            // Activate
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.activate();
+            }
+        }
+        
+        // Handle SESSION_ACK
+        if (message.type === MESSAGE_TYPES.SESSION_ACK) {
+            DiagnosticsAgent.info('Session', 'SESSION_ACK received', message.payload);
+        }
+        
+        // Handle PING
+        if (message.type === MESSAGE_TYPES.PING) {
+            if (typeof sendToParent !== 'undefined') {
+                sendToParent(MESSAGE_TYPES.PONG, {
+                    inResponseTo: message.messageId,
+                    timestamp: Date.now()
+                }, { requiresAck: false, silent: true });
+            }
+        }
+        
+        // Handle CAPABILITY_RESPONSE
+        if (message.type === MESSAGE_TYPES.CAPABILITY_RESPONSE) {
+            if (message.payload && Array.isArray(message.payload.capabilities)) {
+                message.payload.capabilities.forEach(cap => {
+                    if (typeof state !== 'undefined' && state.parentCapabilities) {
+                        state.parentCapabilities.add(cap);
+                    }
+                    if (typeof IframeAuthority !== 'undefined') {
+                        IframeAuthority.parentCapabilities.add(cap);
+                    }
+                });
+                
+                if (typeof state !== 'undefined') {
+                    state.metrics.capabilityNegotiations++;
+                }
+                
+                DiagnosticsAgent.info('Capability', 'Capabilities received', { capabilities: message.payload.capabilities });
+            }
+        }
+        
+        // Handle TOKEN_REFRESH_RESPONSE
+        if (message.type === MESSAGE_TYPES.TOKEN_REFRESH_RESPONSE) {
+            if (message.payload && message.payload.token) {
+                if (typeof state !== 'undefined') {
+                    state.token = message.payload.token;
+                }
+                
+                SafeStorage.set(UNIFIED_TOKEN_KEY, message.payload.token);
+                
+                if (message.payload.refreshToken && typeof state !== 'undefined') {
+                    state.sessionMirror.refreshToken = message.payload.refreshToken;
+                }
+                
+                if (typeof state !== 'undefined') {
+                    state.metrics.tokenRefreshes++;
+                }
+                
+                DiagnosticsAgent.info('Session', 'Token refreshed', { success: true });
+            }
+        }
+        
+        // Handle ORIGIN_VALIDATION_RESPONSE
+        if (message.type === MESSAGE_TYPES.ORIGIN_VALIDATION_RESPONSE) {
+            if (message.payload && message.payload.valid) {
+                if (typeof state !== 'undefined') {
+                    state.securityContext.originValidated = true;
+                    state.metrics.originValidations++;
+                }
+                
+                DiagnosticsAgent.info('Security', 'Origin validated', { origin: event.origin });
+            }
+        }
+        
+        // Handle CONFIG_RESPONSE
+        if (message.type === MESSAGE_TYPES.CONFIG_RESPONSE) {
+            if (message.payload && message.payload.config) {
+                if (typeof applyParentConfig !== 'undefined') {
+                    applyParentConfig(message.payload.config);
+                }
+            }
+        }
+        
+        // Handle RECOVERY_RESPONSE
+        if (message.type === MESSAGE_TYPES.RECOVERY_RESPONSE) {
+            if (message.payload && message.payload.success) {
+                if (typeof state !== 'undefined') {
+                    state.metrics.successfulRecoveries++;
+                }
+                
+                DiagnosticsAgent.info('Recovery', 'Recovery successful', message.payload);
+            }
+        }
+        
+        // Handle legacy STATUS_ACK
         if (message.type === 'STATUS_ACK' && message.inResponseTo) {
             const ackHandler = state.pendingAcks.get(message.inResponseTo);
             if (ackHandler) {
@@ -543,285 +4132,352 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             return;
         }
         
+        // Publish to message bus
+        if (typeof MessageBus !== 'undefined') {
+            MessageBus.publish('parent-messages', message);
+        }
+        
         const handlers = messageHandlers.get(message.type) || [];
         for (const handler of handlers) {
             handler(message, event.origin);
         }
         
     } catch (e) {
-        log(LOG_LEVEL.ERROR, 'Receive', e.message);
+        DiagnosticsAgent.error('Receive', e.message, e);
+        
+        // Attempt recovery for critical errors
+        if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
+            RecoveryManager.recover('connection', { error: e });
+        }
     }
 }, 'receiveFromParent', null);
 
 const sendToParent = createErrorBoundary(async function(type, payload = {}, options = {}) {
-    return new Promise((resolve, reject) => {
-        try {
-            if (!state.parentDetected || !window.parent || window.parent === window) {
-                if (!options.silent) {
-                    log(LOG_LEVEL.WARN, 'Send', 'Parent not available');
-                }
-                resolve(null);
-                return;
-            }
-            
-            if (isCircuitOpen('sendToParent')) {
-                log(LOG_LEVEL.WARN, 'Send', 'Circuit breaker open, skipping');
-                resolve(null);
-                return;
-            }
-            
-            const message = signMessage({
-                type,
-                payload,
-                source: 'status-core',
-                requiresAck: options.requiresAck !== false,
-                inResponseTo: options.inResponseTo,
-                messageId: options.messageId || generateMessageId(),
-                protocolVersion: state.protocolVersion
-            });
-            
-            state.metrics.messagesSent++;
-            
-            if (message.requiresAck) {
-                const timeout = options.timeout || 5000;
-                const timer = setTimeout(() => {
-                    if (state.pendingAcks.has(message.id)) {
-                        const handler = state.pendingAcks.get(message.id);
-                        handler.reject(new Error('ACK timeout'));
-                        state.pendingAcks.delete(message.id);
-                        CIRCUIT_BREAKER.failures.sendToParent = (CIRCUIT_BREAKER.failures.sendToParent || 0) + 1;
-                        
-                        log(LOG_LEVEL.WARN, 'Send', `ACK timeout for ${type} (${message.id})`);
-                    }
-                }, timeout);
-                
-                state.pendingAcks.set(message.id, {
-                    resolve,
-                    reject,
-                    timer,
-                    timestamp: Date.now(),
-                    type
-                });
-            }
-            
-            window.parent.postMessage(message, '*');
-            
-            if (!message.requiresAck) {
-                resolve({ success: true, id: message.id });
-            }
-            
-            // Cleanup old pending acks
-            const now = Date.now();
-            for (const [id, handler] of state.pendingAcks.entries()) {
-                if (now - handler.timestamp > 30000) {
-                    clearTimeout(handler.timer);
-                    state.pendingAcks.delete(id);
-                }
-            }
-            
-        } catch (e) {
-            log(LOG_LEVEL.ERROR, 'Send', e.message);
-            reject(e);
-        }
-    });
+    return IframeTransport.send(type, payload, options);
 }, 'sendToParent', null);
 
 // =============================================
-// HANDSHAKE CLIENT - COMPLETE IMPLEMENTATION
+// RETRY QUEUE WITH EXPONENTIAL BACKOFF
 // =============================================
-const HandshakeClient = {
-    status: 'idle', // idle, in-progress, complete, failed
-    handshakeId: null,
-    startTime: null,
-    resolve: null,
-    reject: null,
-    timer: null,
-    retries: 0,
-    maxRetries: 3,
+function queueForRetry(type, payload, options, resolve, reject) {
+    const retryItem = {
+        id: generateMessageId(),
+        type,
+        payload,
+        options: {
+            ...options,
+            retry: false
+        },
+        resolve,
+        reject,
+        attempts: 0,
+        timestamp: Date.now(),
+        frameId: state.frameId,
+        instanceId: state.instanceId
+    };
     
-    init() {
-        this.reset();
-        log(LOG_LEVEL.INFO, 'Handshake', 'Handshake client initialized');
+    state.retryQueue.push(retryItem);
+    state.metrics.retryCount++;
+    
+    DiagnosticsAgent.debug('Retry', `Queued ${type} for retry (queue size: ${state.retryQueue.length})`);
+    
+    // Start retry processor if not already running
+    if (!state.retryTimers.has('processor')) {
+        processRetryQueue();
+    }
+}
+
+async function processRetryQueue() {
+    if (state.retryQueue.length === 0) return;
+    
+    DiagnosticsAgent.debug('Retry', 'Processing retry queue', { size: state.retryQueue.length });
+    
+    const now = Date.now();
+    const remainingItems = [];
+    
+    for (const item of state.retryQueue) {
+        // Remove items older than 5 minutes
+        if (now - item.timestamp > 300000) {
+            item.reject(new Error('Retry timeout'));
+            continue;
+        }
+        
+        // Increment attempt counter
+        item.attempts++;
+        
+        if (item.attempts > state.maxRetryAttempts) {
+            item.reject(new Error('Max retry attempts exceeded'));
+            continue;
+        }
+        
+        // Calculate backoff delay with environment awareness
+        const baseDelay = IframeEnvironment.isVPNNetwork ? state.baseRetryDelay * 2 : state.baseRetryDelay;
+        const delay = Math.min(baseDelay * Math.pow(2, item.attempts - 1), state.maxRetryDelay);
+        const jitter = Math.random() * 200;
+        const totalDelay = delay + jitter;
+        
+        // Schedule retry
+        const timer = setTimeout(async () => {
+            DiagnosticsAgent.debug('Retry', `Retrying ${item.type} (attempt ${item.attempts})`);
+            
+            try {
+                const result = await sendToParent(item.type, item.payload, {
+                    ...item.options,
+                    retry: false,
+                    requiresAck: true,
+                    timeout: IframeEnvironment.isVPNNetwork ? 15000 : 10000
+                });
+                
+                item.resolve(result);
+            } catch (error) {
+                // Re-queue for next attempt
+                if (item.attempts < state.maxRetryAttempts) {
+                    state.retryQueue.push(item);
+                } else {
+                    item.reject(error);
+                }
+            }
+        }, totalDelay);
+        
+        state.retryTimers.set(item.id, timer);
+    }
+    
+    state.retryQueue = remainingItems;
+    
+    // Schedule next processing
+    const nextTimer = setTimeout(processRetryQueue, 5000);
+    state.retryTimers.set('processor', nextTimer);
+}
+
+// =============================================
+// ENHANCED HANDSHAKE CLIENT
+// =============================================
+const HandshakeClient = IframeHandshakeAuthority;
+
+// =============================================
+// SESSION CLIENT - RESILIENT SESSION MANAGEMENT
+// =============================================
+const SessionClient = {
+    session: null,
+    sessionValid: false,
+    sessionExpiry: null,
+    refreshInProgress: false,
+    refreshTimer: null,
+    sessionListeners: new Set(),
+    offlineMode: false,
+    
+    initialize() {
+        this.loadCachedSession();
+        this.setupRefreshTimer();
+        DiagnosticsAgent.info('Session', 'Session client initialized');
         return this;
     },
     
-    reset() {
-        this.status = 'idle';
-        this.handshakeId = null;
-        this.startTime = null;
-        this.resolve = null;
-        this.reject = null;
-        if (this.timer) clearTimeout(this.timer);
-        this.timer = null;
-        this.retries = 0;
+    loadCachedSession() {
+        try {
+            const cached = SafeStorage.getJSON('session_cache');
+            if (cached && cached.token && cached.user) {
+                this.session = cached;
+                this.sessionValid = true;
+                this.sessionExpiry = cached.expiry ? new Date(cached.expiry) : null;
+                
+                if (this.sessionExpiry && this.sessionExpiry > new Date()) {
+                    DiagnosticsAgent.info('Session', 'Loaded valid cached session');
+                    return true;
+                }
+            }
+        } catch (e) {
+            DiagnosticsAgent.warn('Session', 'Failed to load cached session', e);
+        }
+        return false;
     },
     
-    async execute(options = {}) {
-        if (this.status === 'in-progress') {
-            log(LOG_LEVEL.WARN, 'Handshake', 'Handshake already in progress');
-            return state.handshakePromise;
+    setupRefreshTimer() {
+        if (this.refreshTimer) {
+            clearInterval(this.refreshTimer);
         }
         
-        if (state.handshakeComplete) {
-            log(LOG_LEVEL.INFO, 'Handshake', 'Handshake already complete');
-            return { success: true, cached: true };
+        // Check session every 5 minutes
+        this.refreshTimer = setInterval(() => {
+            this.checkSession();
+        }, 300000);
+    },
+    
+    async checkSession() {
+        if (!this.sessionValid) return;
+        
+        // Check if session is about to expire (within 5 minutes)
+        if (this.sessionExpiry) {
+            const timeToExpiry = this.sessionExpiry - new Date();
+            if (timeToExpiry < 300000 && timeToExpiry > 0) {
+                await this.refreshSession();
+            }
         }
+    },
+    
+    async refreshSession() {
+        if (this.refreshInProgress) return this.session;
         
-        this.reset();
-        this.status = 'in-progress';
-        this.handshakeId = generateHandshakeId();
-        this.startTime = Date.now();
-        this.maxRetries = options.maxRetries || 3;
+        this.refreshInProgress = true;
+        DiagnosticsAgent.info('Session', 'Refreshing session');
         
-        log(LOG_LEVEL.INFO, 'Handshake', `Starting handshake ${this.handshakeId} (attempt ${this.retries + 1}/${this.maxRetries})`);
-        
-        state.handshakeId = this.handshakeId;
-        state.handshakePromise = new Promise((resolve, reject) => {
-            this.resolve = resolve;
-            this.reject = reject;
+        try {
+            const response = await sendToParent(MESSAGE_TYPES.TOKEN_REFRESH, {
+                timestamp: Date.now(),
+                refreshToken: this.session?.refreshToken
+            }, { requiresAck: true, timeout: 10000 });
             
-            this.sendHandshakeRequest();
+            if (response && response.payload && response.payload.token) {
+                this.session.token = response.payload.token;
+                if (response.payload.refreshToken) {
+                    this.session.refreshToken = response.payload.refreshToken;
+                }
+                if (response.payload.expiry) {
+                    this.session.expiry = response.payload.expiry;
+                    this.sessionExpiry = new Date(response.payload.expiry);
+                }
+                
+                this.cacheSession();
+                this.notifyListeners('refreshed', this.session);
+                
+                DiagnosticsAgent.info('Session', 'Session refreshed successfully');
+                
+                return this.session;
+            }
+        } catch (error) {
+            DiagnosticsAgent.error('Session', 'Session refresh failed', error);
+            
+            // If refresh fails, try recovery
+            if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
+                RecoveryManager.recover('token', { error });
+            }
+            
+            // Enable offline mode
+            this.offlineMode = true;
+        } finally {
+            this.refreshInProgress = false;
+        }
+        
+        return this.session;
+    },
+    
+    updateSession(sessionData, source = 'parent') {
+        if (!sessionData) return false;
+        
+        const oldSession = this.session ? { ...this.session } : null;
+        
+        if (sessionData.token) {
+            if (!this.session) this.session = {};
+            this.session.token = sessionData.token;
+            if (typeof state !== 'undefined') {
+                state.token = sessionData.token;
+            }
+        }
+        
+        if (sessionData.user) {
+            if (!this.session) this.session = {};
+            this.session.user = {
+                id: sessionData.user.id || sessionData.user.userId,
+                displayName: sessionData.user.displayName || sessionData.user.name,
+                photoURL: sessionData.user.photoURL || sessionData.user.avatar,
+                email: sessionData.user.email,
+                isGuest: sessionData.user.isGuest || false
+            };
+            if (typeof state !== 'undefined') {
+                state.user = this.session.user;
+            }
+        }
+        
+        if (sessionData.refreshToken) {
+            if (!this.session) this.session = {};
+            this.session.refreshToken = sessionData.refreshToken;
+        }
+        
+        if (sessionData.expiry) {
+            this.session.expiry = sessionData.expiry;
+            this.sessionExpiry = new Date(sessionData.expiry);
+        }
+        
+        if (sessionData.permissions) {
+            if (!this.session) this.session = {};
+            this.session.permissions = [...sessionData.permissions];
+            if (typeof state !== 'undefined') {
+                state.permissionsGranted = [...sessionData.permissions];
+            }
+        }
+        
+        if (sessionData.sessionId && typeof state !== 'undefined') {
+            state.sessionId = sessionData.sessionId;
+        }
+        
+        this.sessionValid = true;
+        this.cacheSession();
+        
+        DiagnosticsAgent.info('Session', `Session updated from ${source}`, {
+            user: this.session?.user?.id,
+            hasToken: !!this.session?.token
         });
         
-        return state.handshakePromise;
+        this.notifyListeners('updated', this.session, oldSession);
+        
+        // Disable offline mode
+        this.offlineMode = false;
+        
+        return true;
     },
     
-    sendHandshakeRequest() {
-        const payload = {
-            messageId: this.handshakeId,
-            timestamp: Date.now(),
-            protocolVersion: state.protocolVersion,
-            module: 'status',
-            session: {
-                cached: state.sessionMirror.validated,
-                token: state.sessionMirror.token ? 'present' : 'none',
-                timestamp: state.sessionMirror.timestamp
+    clearSession() {
+        this.session = null;
+        this.sessionValid = false;
+        this.sessionExpiry = null;
+        this.offlineMode = true;
+        
+        SafeStorage.remove('session_cache');
+        
+        DiagnosticsAgent.info('Session', 'Session cleared');
+        this.notifyListeners('cleared', null);
+    },
+    
+    cacheSession() {
+        if (this.session) {
+            SafeStorage.setJSON('session_cache', this.session);
+        }
+    },
+    
+    getSession() {
+        return this.session ? { ...this.session } : null;
+    },
+    
+    isAuthenticated() {
+        return this.sessionValid && !!this.session?.token && !!this.session?.user;
+    },
+    
+    isGuest() {
+        return !this.isAuthenticated() || this.session?.user?.isGuest === true;
+    },
+    
+    isOfflineMode() {
+        return this.offlineMode;
+    },
+    
+    addListener(listener) {
+        this.sessionListeners.add(listener);
+        return () => this.sessionListeners.delete(listener);
+    },
+    
+    notifyListeners(event, session, oldSession = null) {
+        this.sessionListeners.forEach(listener => {
+            try {
+                listener({ event, session, oldSession });
+            } catch (e) {
+                DiagnosticsAgent.error('Session', 'Listener error', e);
             }
-        };
-        
-        const timeout = this.retries === 0 ? 3000 : 5000;
-        
-        this.timer = setTimeout(() => {
-            this.handleTimeout();
-        }, timeout);
-        
-        sendToParent(MESSAGE_TYPES.HANDSHAKE_REQUEST, payload, { 
-            requiresAck: false,
-            messageId: this.handshakeId
-        }).catch(e => {
-            log(LOG_LEVEL.ERROR, 'Handshake', `Send failed: ${e.message}`);
         });
-    },
-    
-    handleTimeout() {
-        this.retries++;
-        
-        if (this.retries < this.maxRetries) {
-            log(LOG_LEVEL.WARN, 'Handshake', `Attempt ${this.retries}/${this.maxRetries} timed out, retrying...`);
-            
-            const delay = Math.min(500 * Math.pow(1.5, this.retries), 3000);
-            setTimeout(() => {
-                this.sendHandshakeRequest();
-            }, delay);
-        } else {
-            this.status = 'failed';
-            log(LOG_LEVEL.ERROR, 'Handshake', `Handshake failed after ${this.maxRetries} attempts`);
-            
-            if (this.reject) {
-                this.reject(new Error('Handshake timeout'));
-            }
-            
-            state.metrics.handshakeFailures++;
-            
-            // Attempt legacy handshake
-            this.attemptLegacyHandshake();
-        }
-    },
-    
-    handleResponse(message) {
-        if (this.status !== 'in-progress') return;
-        
-        clearTimeout(this.timer);
-        
-        const payload = message.payload || message.data || {};
-        
-        // Validate response
-        if (payload.messageId !== this.handshakeId) {
-            log(LOG_LEVEL.WARN, 'Handshake', `Message ID mismatch: expected ${this.handshakeId}, got ${payload.messageId}`);
-            return;
-        }
-        
-        // Process session data
-        if (payload.session) {
-            updateSessionMirror(payload.session, 'handshake');
-        }
-        
-        this.status = 'complete';
-        state.handshakeComplete = true;
-        state.parentProtocolVersion = payload.protocolVersion || '1.0';
-        state.metrics.lastHandshake = Date.now();
-        
-        log(LOG_LEVEL.INFO, 'Handshake', `Handshake complete in ${Date.now() - this.startTime}ms (protocol: ${state.parentProtocolVersion})`);
-        
-        if (this.resolve) {
-            this.resolve({ 
-                success: true, 
-                session: payload.session,
-                protocolVersion: state.parentProtocolVersion
-            });
-        }
-        
-        // Send acknowledgment
-        sendToParent(MESSAGE_TYPES.ACK, {
-            inResponseTo: this.handshakeId,
-            status: 'success',
-            timestamp: Date.now()
-        }, { requiresAck: false }).catch(() => {});
-    },
-    
-    attemptLegacyHandshake() {
-        log(LOG_LEVEL.INFO, 'Handshake', 'Attempting legacy handshake');
-        
-        // Try multiple legacy message types
-        const messages = [
-            { type: MESSAGE_TYPES.READY, payload: { module: 'status', timestamp: Date.now(), version: '1.0' } },
-            { type: MESSAGE_TYPES.IFRAME_READY, payload: { module: 'status', timestamp: Date.now() } },
-            { type: MESSAGE_TYPES.CHILD_LOADED, payload: { module: 'status', timestamp: Date.now() } }
-        ];
-        
-        messages.forEach(msg => {
-            sendToParent(msg.type, msg.payload, { requiresAck: false }).catch(() => {});
-        });
-        
-        // Set a longer timeout for legacy handshake
-        setTimeout(() => {
-            if (!state.handshakeComplete && state.parentDetected) {
-                log(LOG_LEVEL.WARN, 'Handshake', 'Legacy handshake timeout, enabling guest mode');
-                enableGuestMode();
-            }
-        }, 5000);
-    },
-    
-    handleSessionInit(message) {
-        const payload = message.payload || message.data || {};
-        
-        if (payload.token || payload.user) {
-            updateSessionMirror(payload, 'session_init');
-            
-            // Send ACK with same messageId
-            if (message.messageId || message.id) {
-                sendToParent(MESSAGE_TYPES.ACK, {
-                    inResponseTo: message.messageId || message.id,
-                    status: 'success',
-                    timestamp: Date.now()
-                }, { requiresAck: false }).catch(() => {});
-            }
-        }
     }
-}.init();
+}.initialize();
 
 // =============================================
-// SESSION MIRROR LAYER
+// SESSION MIRROR LAYER - ENHANCED
 // =============================================
 function updateSessionMirror(sessionData, source = 'parent') {
     try {
@@ -833,6 +4489,11 @@ function updateSessionMirror(sessionData, source = 'parent') {
         if (sessionData.token && typeof sessionData.token === 'string') {
             state.sessionMirror.token = sessionData.token;
             state.token = sessionData.token;
+        }
+        
+        // Update refresh token if provided
+        if (sessionData.refreshToken) {
+            state.sessionMirror.refreshToken = sessionData.refreshToken;
         }
         
         // Update user if provided
@@ -853,10 +4514,20 @@ function updateSessionMirror(sessionData, source = 'parent') {
             state.permissionsGranted = [...sessionData.permissions];
         }
         
+        // Update capabilities
+        if (sessionData.capabilities && Array.isArray(sessionData.capabilities)) {
+            state.sessionMirror.capabilities = [...sessionData.capabilities];
+        }
+        
         // Update expiry
         if (sessionData.expiry) {
             state.sessionMirror.expiry = new Date(sessionData.expiry);
             state.sessionExpiry = state.sessionMirror.expiry;
+        }
+        
+        // Update session ID
+        if (sessionData.sessionId) {
+            state.sessionId = sessionData.sessionId;
         }
         
         // Update metadata
@@ -870,28 +4541,39 @@ function updateSessionMirror(sessionData, source = 'parent') {
             state.sessionActive = true;
             state.isGuestMode = false;
             
-            log(LOG_LEVEL.INFO, 'Session', `Session mirror updated from ${source}`, {
+            // Also update session client
+            SessionClient.updateSession(sessionData, source);
+            
+            DiagnosticsAgent.info('Session', `Session mirror updated from ${source}`, {
                 user: state.sessionMirror.user?.id,
                 hasToken: !!state.sessionMirror.token
             });
             
             // Cache session
-            if (SecureStorage.storageAvailable) {
-                SecureStorage.setJSON(UNIFIED_TOKEN_KEY, state.sessionMirror.token);
-                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, state.sessionMirror.user);
+            SafeStorage.setJSON(UNIFIED_TOKEN_KEY, state.sessionMirror.token);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, state.sessionMirror.user);
+            if (state.sessionMirror.refreshToken) {
+                SafeStorage.setJSON('REFRESH_TOKEN', state.sessionMirror.refreshToken);
             }
             
             // Trigger callbacks
-            isTokenReady = true;
-            triggerTokenReadyCallbacks();
-            processPendingApiRequests();
+            if (typeof isTokenReady !== 'undefined') {
+                isTokenReady = true;
+                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                    triggerTokenReadyCallbacks();
+                }
+            }
+            
+            if (typeof processPendingApiRequests !== 'undefined') {
+                processPendingApiRequests();
+            }
             
             return true;
         }
         
         return false;
     } catch (error) {
-        safeLogError('Session', 'updateSessionMirror', error);
+        DiagnosticsAgent.error('Session', 'updateSessionMirror error', error);
         return false;
     }
 }
@@ -899,7 +4581,8 @@ function updateSessionMirror(sessionData, source = 'parent') {
 function getSessionMirror() {
     return {
         ...state.sessionMirror,
-        user: state.sessionMirror.user ? { ...state.sessionMirror.user } : null
+        user: state.sessionMirror.user ? { ...state.sessionMirror.user } : null,
+        capabilities: state.sessionMirror.capabilities ? [...state.sessionMirror.capabilities] : []
     };
 }
 
@@ -911,10 +4594,249 @@ function isSessionMirrorValid() {
 }
 
 // =============================================
+// ENHANCED HEARTBEAT SYSTEM
+// =============================================
+function startEnhancedHeartbeat() {
+    if (state.heartbeatInterval) {
+        clearInterval(state.heartbeatInterval);
+    }
+    
+    state.heartbeatInterval = setInterval(async () => {
+        try {
+            if (!state.parentDetected || !state.handshakeComplete) return;
+            
+            state.lastHeartbeatSent = Date.now();
+            
+            await sendToParent(MESSAGE_TYPES.PING, {
+                timestamp: state.lastHeartbeatSent,
+                frameId: state.frameId,
+                instanceId: state.instanceId,
+                readyState: state.readyState,
+                guestMode: state.isGuestMode,
+                sessionValid: isSessionMirrorValid(),
+                online: state.isOnline,
+                environment: IframeEnvironment.type,
+                metrics: {
+                    messagesSent: state.metrics.messagesSent,
+                    messagesReceived: state.metrics.messagesReceived,
+                    uptime: Date.now() - state.metrics.startTime,
+                    retryQueue: state.retryQueue.length,
+                    pendingAcks: state.pendingAcks.size,
+                    handshakeState: state.handshakeState
+                }
+            }, { requiresAck: false, silent: true });
+            
+            // Check for missed heartbeats
+            if (state.lastHeartbeatReceived) {
+                const timeSinceLastResponse = Date.now() - state.lastHeartbeatReceived;
+                const heartbeatThreshold = IframeEnvironment.isVPNNetwork ? 60000 : 45000;
+                
+                if (timeSinceLastResponse > heartbeatThreshold) {
+                    state.heartbeatMissed++;
+                    
+                    if (state.heartbeatMissed >= state.maxMissedHeartbeats) {
+                        DiagnosticsAgent.warn('Heartbeat', `Missed ${state.heartbeatMissed} heartbeats, checking connection`);
+                        
+                        // Trigger recovery
+                        if (typeof RecoveryManager !== 'undefined') {
+                            RecoveryManager.recover('connection');
+                        }
+                    }
+                }
+            }
+            
+        } catch (e) {
+            DiagnosticsAgent.debug('Heartbeat', 'Heartbeat send failed', e);
+        }
+    }, IframeEnvironment.getConfig().heartbeatInterval || 30000);
+    
+    state.intervals.add(state.heartbeatInterval);
+}
+
+async function triggerConnectionRecovery() {
+    if (state.metrics.recoveryAttempts > 3) {
+        DiagnosticsAgent.warn('Recovery', 'Max recovery attempts exceeded');
+        return;
+    }
+    
+    state.metrics.recoveryAttempts++;
+    DiagnosticsAgent.info('Recovery', 'Starting connection recovery', { attempt: state.metrics.recoveryAttempts });
+    
+    try {
+        // Send recovery request
+        const response = await sendToParent(MESSAGE_TYPES.RECOVERY_REQUEST, {
+            timestamp: Date.now(),
+            frameId: state.frameId,
+            instanceId: state.instanceId,
+            metrics: {
+                heartbeatMissed: state.heartbeatMissed,
+                lastHeartbeatSent: state.lastHeartbeatSent,
+                lastHeartbeatReceived: state.lastHeartbeatReceived
+            }
+        }, { requiresAck: true, timeout: 10000 });
+        
+        if (response && response.payload && response.payload.success) {
+            state.heartbeatMissed = 0;
+            DiagnosticsAgent.info('Recovery', 'Connection recovered');
+        }
+    } catch (error) {
+        DiagnosticsAgent.error('Recovery', 'Recovery failed', error);
+        
+        // If recovery fails, attempt re-handshake
+        if (state.metrics.recoveryAttempts >= 2) {
+            DiagnosticsAgent.warn('Recovery', 'Attempting full re-handshake');
+            if (typeof reestablishConnection !== 'undefined') {
+                reestablishConnection();
+            }
+        }
+    }
+}
+
+async function reestablishConnection() {
+    DiagnosticsAgent.info('Connection', 'Re-establishing connection');
+    
+    state.handshakeComplete = false;
+    state.handshakeState = 'reconnecting';
+    
+    if (typeof StartupGovernor !== 'undefined') {
+        StartupGovernor.recover();
+    }
+    
+    try {
+        const result = await HandshakeClient.execute({ maxRetries: 3 });
+        
+        if (result && result.success) {
+            DiagnosticsAgent.info('Connection', 'Connection re-established');
+            state.heartbeatMissed = 0;
+            
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.activate();
+            }
+        }
+    } catch (error) {
+        DiagnosticsAgent.error('Connection', 'Failed to re-establish connection', error);
+        
+        // Enable offline mode
+        state.offlineModeEnabled = true;
+        if (typeof isOfflineMode !== 'undefined') {
+            isOfflineMode = true;
+        }
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.degrade('Connection lost');
+        }
+        
+        // Show offline UI
+        document.dispatchEvent(new CustomEvent('connectionLost', {
+            detail: { message: 'Connection lost. Using offline mode.' }
+        }));
+    }
+}
+
+// =============================================
+// PARENT CONFIGURATION REQUEST
+// =============================================
+async function requestParentConfig() {
+    try {
+        const response = await sendToParent(MESSAGE_TYPES.CONFIG_REQUEST, {
+            timestamp: Date.now(),
+            frameId: state.frameId,
+            instanceId: state.instanceId,
+            required: ['heartbeatInterval', 'sessionTimeout', 'maxRetries']
+        }, { requiresAck: true, timeout: 5000 });
+        
+        if (response && response.payload && response.payload.config) {
+            applyParentConfig(response.payload.config);
+        }
+    } catch (error) {
+        DiagnosticsAgent.warn('Config', 'Failed to get parent config', error);
+    }
+}
+
+function applyParentConfig(config) {
+    try {
+        DiagnosticsAgent.info('Config', 'Applying parent configuration', config);
+        
+        if (config.heartbeatInterval) {
+            // Adjust heartbeat interval if needed
+            IframeEnvironment.getConfig().heartbeatInterval = config.heartbeatInterval;
+        }
+        
+        if (config.sessionTimeout) {
+            state.sessionExpiry = new Date(Date.now() + config.sessionTimeout);
+        }
+        
+        if (config.maxRetries) {
+            state.maxRetryAttempts = config.maxRetries;
+        }
+        
+        if (config.security) {
+            if (config.security.signatureRequired !== undefined) {
+                state.securityContext.signatureRequired = config.security.signatureRequired && !IframeAuthority.compatibilityMode;
+            }
+            if (config.security.timestampTolerance) {
+                state.securityContext.timestampTolerance = config.security.timestampTolerance;
+            }
+        }
+        
+        document.dispatchEvent(new CustomEvent('configApplied', {
+            detail: config
+        }));
+        
+    } catch (error) {
+        DiagnosticsAgent.error('Config', 'Failed to apply config', error);
+    }
+}
+
+// =============================================
+// TOKEN REFRESH HANDLER
+// =============================================
+async function refreshToken() {
+    if (state.sessionMirror.refreshInProgress) return state.token;
+    
+    state.sessionMirror.refreshInProgress = true;
+    
+    try {
+        const response = await sendToParent(MESSAGE_TYPES.TOKEN_REFRESH, {
+            timestamp: Date.now(),
+            frameId: state.frameId,
+            instanceId: state.instanceId,
+            refreshToken: state.sessionMirror.refreshToken
+        }, { requiresAck: true, timeout: 10000 });
+        
+        if (response && response.payload && response.payload.token) {
+            state.token = response.payload.token;
+            state.sessionMirror.token = response.payload.token;
+            state.sessionMirror.lastRefresh = Date.now();
+            
+            if (response.payload.refreshToken) {
+                state.sessionMirror.refreshToken = response.payload.refreshToken;
+            }
+            
+            SafeStorage.set(UNIFIED_TOKEN_KEY, state.token);
+            
+            DiagnosticsAgent.info('Session', 'Token refreshed successfully');
+            return state.token;
+        }
+    } catch (error) {
+        DiagnosticsAgent.error('Session', 'Token refresh failed', error);
+        
+        // Try recovery
+        if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
+            RecoveryManager.recover('token', { error });
+        }
+    } finally {
+        state.sessionMirror.refreshInProgress = false;
+    }
+    
+    return state.token;
+}
+
+// =============================================
 // PARENT AVAILABILITY DETECTION
 // =============================================
 const ParentDetector = {
-    status: 'unknown', // unknown, available, unavailable, degraded
+    status: 'unknown',
     checkCount: 0,
     maxChecks: 5,
     checkInterval: null,
@@ -932,13 +4854,14 @@ const ParentDetector = {
                 if (isAvailable) {
                     this.status = 'available';
                     state.parentDetected = true;
+                    IframeAuthority.parentDetected = true;
                     
                     if (this.checkInterval) {
                         clearInterval(this.checkInterval);
                         this.checkInterval = null;
                     }
                     
-                    log(LOG_LEVEL.INFO, 'Parent', 'Parent detected and available');
+                    DiagnosticsAgent.info('Parent', 'Parent detected and available');
                     resolve(true);
                     return;
                 }
@@ -946,13 +4869,14 @@ const ParentDetector = {
                 if (this.checkCount >= this.maxChecks) {
                     this.status = 'unavailable';
                     state.parentDetected = false;
+                    IframeAuthority.parentDetected = false;
                     
                     if (this.checkInterval) {
                         clearInterval(this.checkInterval);
                         this.checkInterval = null;
                     }
                     
-                    log(LOG_LEVEL.WARN, 'Parent', 'Parent not available after max checks');
+                    DiagnosticsAgent.warn('Parent', 'Parent not available after max checks');
                     resolve(false);
                     return;
                 }
@@ -1011,25 +4935,29 @@ const ParentDetector = {
 // INITIALIZATION PIPELINE - PREFLIGHT → READY
 // =============================================
 async function preflightStage() {
-    log(LOG_LEVEL.INFO, 'Init', 'Preflight stage');
+    DiagnosticsAgent.info('Init', 'Preflight stage');
     try {
         if (typeof window === 'undefined') throw new Error('Window not available');
         if (typeof document === 'undefined') throw new Error('Document not available');
+        
+        // Detect environment
+        IframeEnvironment.detect();
+        
         return { success: true };
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Init', `Preflight failed: ${error.message}`);
+        DiagnosticsAgent.error('Init', `Preflight failed: ${error.message}`, error);
         return { success: false, fallback: true };
     }
 }
 
 async function dependencyCheckStage() {
-    log(LOG_LEVEL.INFO, 'Init', 'Dependency check stage');
+    DiagnosticsAgent.info('Init', 'Dependency check stage');
     try {
         const requiredApis = ['localStorage', 'postMessage', 'addEventListener'];
         const missing = requiredApis.filter(api => typeof window[api] === 'undefined');
         
         if (missing.length > 0) {
-            log(LOG_LEVEL.WARN, 'Init', `Missing dependencies: ${missing.join(', ')}`);
+            DiagnosticsAgent.warn('Init', `Missing dependencies: ${missing.join(', ')}`);
             state.dependenciesLoaded = false;
             return { success: false, fallback: true, missing };
         }
@@ -1037,44 +4965,44 @@ async function dependencyCheckStage() {
         state.dependenciesLoaded = true;
         return { success: true };
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Init', `Dependency check failed: ${error.message}`);
+        DiagnosticsAgent.error('Init', `Dependency check failed: ${error.message}`, error);
         state.dependenciesLoaded = false;
         return { success: false, fallback: true };
     }
 }
 
 async function parentDetectStage(timeout = 2000) {
-    log(LOG_LEVEL.INFO, 'Init', 'Parent detect stage');
+    DiagnosticsAgent.info('Init', 'Parent detect stage');
     
     const detected = await ParentDetector.detect();
     
     if (detected) {
         return { success: true };
     } else {
-        log(LOG_LEVEL.WARN, 'Init', 'Parent not detected');
+        DiagnosticsAgent.warn('Init', 'Parent not detected');
         return { success: false, fallback: true };
     }
 }
 
 async function handshakeStage(options = {}) {
-    log(LOG_LEVEL.INFO, 'Init', 'Handshake stage');
+    DiagnosticsAgent.info('Init', 'Handshake stage');
     
     if (!state.parentDetected) {
-        log(LOG_LEVEL.WARN, 'Init', 'Parent not detected, skipping handshake');
+        DiagnosticsAgent.warn('Init', 'Parent not detected, skipping handshake');
         state.handshakeComplete = false;
         return { success: false, fallback: true };
     }
     
     try {
         const result = await HandshakeClient.execute({
-            maxRetries: options.maxRetries || 3
+            maxRetries: options.maxRetries || IframeEnvironment.getConfig().maxRetries
         });
         
         if (result && result.success) {
             return { success: true };
         }
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Init', `Handshake failed: ${error.message}`);
+        DiagnosticsAgent.error('Init', `Handshake failed: ${error.message}`, error);
     }
     
     state.handshakeComplete = false;
@@ -1082,16 +5010,16 @@ async function handshakeStage(options = {}) {
 }
 
 async function sessionSyncStage(timeout = 5000) {
-    log(LOG_LEVEL.INFO, 'Init', 'Session sync stage');
+    DiagnosticsAgent.info('Init', 'Session sync stage');
     
     if (!state.handshakeComplete || !state.parentDetected) {
         if (state.sessionMirror.validated) {
-            log(LOG_LEVEL.INFO, 'Init', 'Using cached session mirror');
+            DiagnosticsAgent.info('Init', 'Using cached session mirror');
             activateSessionFromMirror();
             return { success: true, guestMode: false, cached: true };
         }
         
-        log(LOG_LEVEL.WARN, 'Init', 'Handshake incomplete, enabling guest mode');
+        DiagnosticsAgent.warn('Init', 'Handshake incomplete, enabling guest mode');
         enableGuestMode();
         return { success: false, guestMode: true };
     }
@@ -1103,11 +5031,13 @@ async function sessionSyncStage(timeout = 5000) {
                 
                 if (message.type === MESSAGE_TYPES.SESSION || 
                     message.type === MESSAGE_TYPES.SESSION_DATA ||
-                    message.type === MESSAGE_TYPES.SESSION_UPDATE) {
+                    message.type === MESSAGE_TYPES.SESSION_UPDATE ||
+                    message.type === MESSAGE_TYPES.SESSION_SYNC) {
                     
                     removeMessageHandler(MESSAGE_TYPES.SESSION, handler);
                     removeMessageHandler(MESSAGE_TYPES.SESSION_DATA, handler);
                     removeMessageHandler(MESSAGE_TYPES.SESSION_UPDATE, handler);
+                    removeMessageHandler(MESSAGE_TYPES.SESSION_SYNC, handler);
                     
                     resolveSession(payload);
                 }
@@ -1116,11 +5046,13 @@ async function sessionSyncStage(timeout = 5000) {
             addMessageHandler(MESSAGE_TYPES.SESSION, handler);
             addMessageHandler(MESSAGE_TYPES.SESSION_DATA, handler);
             addMessageHandler(MESSAGE_TYPES.SESSION_UPDATE, handler);
+            addMessageHandler(MESSAGE_TYPES.SESSION_SYNC, handler);
             
             await sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
                 module: 'status',
                 timestamp: Date.now(),
-                handshakeId: state.handshakeId
+                handshakeId: state.handshakeId,
+                frameId: state.frameId
             }, { requiresAck: false });
         });
         
@@ -1135,15 +5067,15 @@ async function sessionSyncStage(timeout = 5000) {
             updateSessionMirror(sessionData, 'session_sync');
             activateSessionFromMirror();
             
-            log(LOG_LEVEL.INFO, 'Init', 'Authenticated session established');
+            DiagnosticsAgent.info('Init', 'Authenticated session established');
             return { success: true, guestMode: false, user: state.user };
         }
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Init', `Session sync failed: ${error.message}`);
+        DiagnosticsAgent.error('Init', `Session sync failed: ${error.message}`, error);
     }
     
     if (state.sessionMirror.validated) {
-        log(LOG_LEVEL.INFO, 'Init', 'Falling back to cached session mirror');
+        DiagnosticsAgent.info('Init', 'Falling back to cached session mirror');
         activateSessionFromMirror();
         return { success: true, guestMode: false, cached: true };
     }
@@ -1165,10 +5097,11 @@ function activateSessionFromMirror() {
         user: state.user,
         token: state.token,
         permissions: state.permissionsGranted,
-        expiry: state.sessionMirror.expiry
+        expiry: state.sessionMirror.expiry,
+        capabilities: state.sessionMirror.capabilities
     };
     
-    log(LOG_LEVEL.INFO, 'Session', 'Activated from mirror', {
+    DiagnosticsAgent.info('Session', 'Activated from mirror', {
         user: state.user?.id,
         hasToken: !!state.token
     });
@@ -1177,7 +5110,7 @@ function activateSessionFromMirror() {
 }
 
 async function serviceInitStage() {
-    log(LOG_LEVEL.INFO, 'Init', 'Service init stage');
+    DiagnosticsAgent.info('Init', 'Service init stage');
     try {
         const cachedSession = loadCachedSession();
         if (cachedSession && !state.sessionActive && !state.sessionMirror.validated) {
@@ -1186,31 +5119,42 @@ async function serviceInitStage() {
         
         return { success: true };
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Init', `Service init failed: ${error.message}`);
+        DiagnosticsAgent.error('Init', `Service init failed: ${error.message}`, error);
         return { success: false, fallback: true };
     }
 }
 
 function readyStage() {
-    log(LOG_LEVEL.INFO, 'Init', 'Ready stage');
+    DiagnosticsAgent.info('Init', 'Ready stage');
     state.initialized = true;
     state.readyState = 'ready';
+    
+    if (typeof StartupGovernor !== 'undefined') {
+        StartupGovernor.activate();
+    }
     
     window.addEventListener('message', receiveFromParent);
     state.listeners.add({ type: 'message', handler: receiveFromParent });
     
-    startHeartbeat();
+    startEnhancedHeartbeat();
     
     return { success: true, state: state.readyState, guestMode: state.isGuestMode };
 }
 
 const initializeCore = createErrorBoundary(async function(options = {}) {
     if (state.initialized) {
-        log(LOG_LEVEL.WARN, 'Core', 'Already initialized');
+        DiagnosticsAgent.warn('Core', 'Already initialized');
         return { success: true, state: state.readyState };
     }
     
-    log(LOG_LEVEL.INFO, 'Core', 'Starting initialization pipeline');
+    if (!StartupGovernor.canInitialize()) {
+        DiagnosticsAgent.warn('Core', 'Startup governor blocked initialization');
+        return { success: false, reason: 'Governor blocked' };
+    }
+    
+    StartupGovernor.acquireLock();
+    
+    DiagnosticsAgent.info('Core', 'Starting enhanced initialization pipeline');
     
     try {
         state.readyState = 'preflight';
@@ -1223,7 +5167,7 @@ const initializeCore = createErrorBoundary(async function(options = {}) {
         await parentDetectStage(options.parentTimeout || 2000);
         
         state.readyState = 'handshake';
-        await handshakeStage({ maxRetries: options.handshakeRetries || 3 });
+        await handshakeStage({ maxRetries: options.handshakeRetries || IframeEnvironment.getConfig().maxRetries });
         
         state.readyState = 'sessionSync';
         await sessionSyncStage(options.sessionTimeout || 5000);
@@ -1232,10 +5176,13 @@ const initializeCore = createErrorBoundary(async function(options = {}) {
         await serviceInitStage();
         
         state.readyState = 'ready';
-        return readyStage();
+        const result = readyStage();
+        
+        StartupGovernor.releaseLock();
+        return result;
         
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Core', `Initialization failed: ${error.message}`);
+        DiagnosticsAgent.error('Core', `Initialization failed: ${error.message}`, error);
         
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
@@ -1245,11 +5192,17 @@ const initializeCore = createErrorBoundary(async function(options = {}) {
         
         state.initialized = true;
         state.readyState = 'ready';
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.degrade('Initialization failed');
+            StartupGovernor.releaseLock();
+        }
+        
         return { success: false, state: 'ready', guestMode: state.isGuestMode };
     }
 }, 'initializeCore', { success: false, guestMode: true });
 
-const startHandshake = createErrorBoundary(async function(options = { retries: 3 }) {
+const startHandshake = createErrorBoundary(async function(options = { retries: 5 }) {
     return handshakeStage({ maxRetries: options.retries });
 }, 'startHandshake', { success: false });
 
@@ -1278,49 +5231,36 @@ function enableGuestMode() {
         guestMode: true
     };
     
-    log(LOG_LEVEL.INFO, 'Guest', 'Guest mode enabled');
+    DiagnosticsAgent.info('Guest', 'Guest mode enabled');
 }
 
 function loadCachedSession() {
     try {
-        const userData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.USER);
+        const userData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER);
         const token = getUnifiedToken();
+        const refreshToken = SafeStorage.getJSON('REFRESH_TOKEN');
         
         if (userData && token) {
             const user = userData;
             if (user && user.id) {
-                return { user, token, permissions: ['view_statuses'] };
+                return { 
+                    user, 
+                    token, 
+                    refreshToken,
+                    permissions: ['view_statuses'],
+                    capabilities: []
+                };
             }
         }
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Session', `Failed to load cached session: ${error.message}`);
+        DiagnosticsAgent.error('Session', `Failed to load cached session: ${error.message}`, error);
     }
     return null;
 }
 
 function startHeartbeat() {
-    const interval = setInterval(async () => {
-        try {
-            if (!state.parentDetected || !state.handshakeComplete) return;
-            
-            metricCache.lastHeartbeat = Date.now();
-            
-            await sendToParent(MESSAGE_TYPES.HEARTBEAT, {
-                timestamp: Date.now(),
-                readyState: state.readyState,
-                guestMode: state.isGuestMode,
-                sessionValid: isSessionMirrorValid(),
-                metrics: {
-                    messagesSent: state.metrics.messagesSent,
-                    messagesReceived: state.metrics.messagesReceived,
-                    uptime: Date.now() - state.metrics.startTime
-                }
-            }, { requiresAck: false, silent: true });
-            
-        } catch (e) {}
-    }, 30000);
-    
-    state.intervals.add(interval);
+    // Legacy heartbeat - replaced by enhanced version
+    startEnhancedHeartbeat();
 }
 
 // =============================================
@@ -1330,15 +5270,22 @@ const shutdownCore = createErrorBoundary(async function() {
     if (state.shutdownInProgress) return;
     
     state.shutdownInProgress = true;
-    log(LOG_LEVEL.INFO, 'Core', 'Shutting down');
+    DiagnosticsAgent.info('Core', 'Shutting down');
     
     try {
+        // Clear intervals
         state.intervals.forEach(clearInterval);
         state.intervals.clear();
         
+        // Clear timeouts
         state.timeouts.forEach(clearTimeout);
         state.timeouts.clear();
         
+        // Clear retry timers
+        state.retryTimers.forEach((timer) => clearTimeout(timer));
+        state.retryTimers.clear();
+        
+        // Clear event listeners
         state.listeners.forEach(({ type, handler }) => {
             try {
                 window.removeEventListener(type, handler);
@@ -1346,27 +5293,34 @@ const shutdownCore = createErrorBoundary(async function() {
         });
         state.listeners.clear();
         
+        // Clear pending ACKs
         state.pendingAcks.forEach((handler) => {
             clearTimeout(handler.timer);
         });
         state.pendingAcks.clear();
         
+        // Clear queues
         state.pendingRequests.clear();
         state.messageCache.clear();
+        state.retryQueue = [];
         
+        // Clear message handlers
         messageHandlers.clear();
         
+        // Notify parent
         if (state.parentDetected && state.handshakeComplete) {
             await sendToParent(MESSAGE_TYPES.STATUS_SHUTDOWN, {
                 timestamp: Date.now(),
-                metrics: state.metrics
+                metrics: state.metrics,
+                frameId: state.frameId,
+                instanceId: state.instanceId
             }, { requiresAck: false, silent: true });
         }
         
-        log(LOG_LEVEL.INFO, 'Core', 'Shutdown complete');
+        DiagnosticsAgent.info('Core', 'Shutdown complete');
         
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Core', `Shutdown error: ${error.message}`);
+        DiagnosticsAgent.error('Core', `Shutdown error: ${error.message}`, error);
     } finally {
         state.shutdownInProgress = false;
     }
@@ -1382,7 +5336,7 @@ addMessageHandler(MESSAGE_TYPES.STATUS, (message) => {
     }));
 });
 addMessageHandler(MESSAGE_TYPES.ERROR, (message) => {
-    log(LOG_LEVEL.ERROR, 'Parent', 'Error from parent', message.payload);
+    DiagnosticsAgent.error('Parent', 'Error from parent', message.payload);
 });
 addMessageHandler(MESSAGE_TYPES.DATA, (message) => {
     document.dispatchEvent(new CustomEvent('coreData', {
@@ -1409,23 +5363,27 @@ addMessageHandler(MESSAGE_TYPES.SESSION_UPDATE, (message) => {
 addMessageHandler(MESSAGE_TYPES.AUTH_VALIDATED, (message) => {
     const payload = message.payload || message.data || {};
     if (payload.success) {
-        isTokenReady = true;
-        triggerTokenReadyCallbacks();
+        if (typeof isTokenReady !== 'undefined') {
+            isTokenReady = true;
+            if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                triggerTokenReadyCallbacks();
+            }
+        }
     }
 });
 
 // Parent ready handler
 addMessageHandler(MESSAGE_TYPES.PARENT_READY, (message) => {
-    log(LOG_LEVEL.INFO, 'Parent', 'Parent ready signal received');
+    DiagnosticsAgent.info('Parent', 'Parent ready signal received');
     
-    if (!state.handshakeComplete) {
+    if (!state.handshakeComplete && StartupGovernor.shouldRetryHandshake()) {
         HandshakeClient.execute().catch(() => {});
     }
 });
 
 // Logout handler
 addMessageHandler(MESSAGE_TYPES.LOGOUT, (message) => {
-    log(LOG_LEVEL.INFO, 'Session', 'Logout received from parent');
+    DiagnosticsAgent.info('Session', 'Logout received from parent');
     handleLogout(message.payload);
 });
 
@@ -1437,22 +5395,84 @@ addMessageHandler(MESSAGE_TYPES.API_ERROR, (message) => {
     handleApiError(message.payload);
 });
 
+// Enhanced handlers
+addMessageHandler(MESSAGE_TYPES.PONG, (message) => {
+    state.lastHeartbeatReceived = Date.now();
+    state.heartbeatMissed = 0;
+    IframeTransport.handlePong();
+});
+
+addMessageHandler(MESSAGE_TYPES.PAGE_ACTIVATED, (message) => {
+    state.pageActivated = true;
+    DiagnosticsAgent.info('Parent', 'Page activated');
+});
+
+addMessageHandler(MESSAGE_TYPES.NAVIGATE, (message) => {
+    DiagnosticsAgent.info('Parent', 'Navigate request', message.payload);
+    
+    if (message.payload && message.payload.path) {
+        // Handle navigation if needed
+        document.dispatchEvent(new CustomEvent('navigate', {
+            detail: message.payload
+        }));
+    }
+});
+
+addMessageHandler(MESSAGE_TYPES.CAPABILITY_RESPONSE, (message) => {
+    if (message.payload && Array.isArray(message.payload.capabilities)) {
+        message.payload.capabilities.forEach(cap => {
+            state.parentCapabilities.add(cap);
+            IframeAuthority.parentCapabilities.add(cap);
+        });
+    }
+});
+
+addMessageHandler(MESSAGE_TYPES.TOKEN_REFRESH_RESPONSE, (message) => {
+    if (message.payload && message.payload.token) {
+        state.token = message.payload.token;
+        SafeStorage.set(UNIFIED_TOKEN_KEY, message.payload.token);
+        
+        if (message.payload.refreshToken) {
+            state.sessionMirror.refreshToken = message.payload.refreshToken;
+        }
+    }
+});
+
+addMessageHandler(MESSAGE_TYPES.ORIGIN_VALIDATION_RESPONSE, (message) => {
+    if (message.payload && message.payload.valid) {
+        state.securityContext.originValidated = true;
+    }
+});
+
+addMessageHandler(MESSAGE_TYPES.CONFIG_RESPONSE, (message) => {
+    if (message.payload && message.payload.config) {
+        applyParentConfig(message.payload.config);
+    }
+});
+
+addMessageHandler(MESSAGE_TYPES.RECOVERY_RESPONSE, (message) => {
+    if (message.payload && message.payload.success) {
+        state.metrics.successfulRecoveries++;
+        DiagnosticsAgent.info('Recovery', 'Recovery successful');
+    }
+});
+
 // =============================================
 // FEATURE ISOLATION SYSTEM
 // =============================================
 function registerFeature(name, implementation) {
     try {
         if (state.features.has(name)) {
-            log(LOG_LEVEL.WARN, 'Feature', `Duplicate registration: ${name}`);
+            DiagnosticsAgent.warn('Feature', `Duplicate registration: ${name}`);
             return false;
         }
         
         const wrappedImplementation = createErrorBoundary(implementation, `Feature:${name}`, null);
         state.features.set(name, wrappedImplementation);
-        log(LOG_LEVEL.DEBUG, 'Feature', `Registered: ${name}`);
+        DiagnosticsAgent.debug('Feature', `Registered: ${name}`);
         return true;
     } catch (e) {
-        log(LOG_LEVEL.ERROR, 'Feature', `Registration failed ${name}: ${e.message}`);
+        DiagnosticsAgent.error('Feature', `Registration failed ${name}: ${e.message}`, e);
         return false;
     }
 }
@@ -1460,7 +5480,7 @@ function registerFeature(name, implementation) {
 function executeFeature(name, ...args) {
     try {
         if (isCircuitOpen(`feature:${name}`)) {
-            log(LOG_LEVEL.WARN, 'Feature', `Circuit breaker open: ${name}`);
+            DiagnosticsAgent.warn('Feature', `Circuit breaker open: ${name}`);
             return null;
         }
         
@@ -1470,13 +5490,13 @@ function executeFeature(name, ...args) {
         
         const feature = state.features.get(name);
         if (!feature) {
-            log(LOG_LEVEL.WARN, 'Feature', `Not found: ${name}`);
+            DiagnosticsAgent.warn('Feature', `Not found: ${name}`);
             return null;
         }
         
         return feature(...args);
     } catch (error) {
-        log(LOG_LEVEL.ERROR, 'Feature', `Execution failed ${name}: ${error.message}`);
+        DiagnosticsAgent.error('Feature', `Execution failed ${name}: ${error.message}`, error);
         state.disabledFeatures.add(name);
         return null;
     }
@@ -1495,7 +5515,8 @@ function getSession() {
             guestMode: false,
             permissions: [...state.sessionMirror.permissions],
             validated: true,
-            source: state.sessionMirror.source
+            source: state.sessionMirror.source,
+            capabilities: state.sessionMirror.capabilities ? [...state.sessionMirror.capabilities] : []
         };
     }
     
@@ -1506,7 +5527,8 @@ function getSession() {
         expiry: state.sessionExpiry,
         guestMode: state.isGuestMode,
         permissions: [...state.permissionsGranted],
-        validated: state.sessionMirror.validated
+        validated: state.sessionMirror.validated,
+        capabilities: []
     };
 }
 
@@ -1531,18 +5553,59 @@ function getHealthMetrics() {
         initialized: state.initialized,
         parentDetected: state.parentDetected,
         handshakeComplete: state.handshakeComplete,
+        handshakeState: state.handshakeState,
         sessionActive: state.sessionActive,
         sessionMirrorValid: state.sessionMirror.validated,
         guestMode: state.isGuestMode,
         protocolVersion: state.protocolVersion,
         parentProtocolVersion: state.parentProtocolVersion,
+        frameId: state.frameId,
+        instanceId: state.instanceId,
+        sessionId: state.sessionId,
         circuitBreakers: { ...CIRCUIT_BREAKER.failures },
         disabledFeatures: Array.from(state.disabledFeatures),
         pendingAcks: state.pendingAcks.size,
         pendingRequests: state.pendingRequests.size,
+        retryQueue: state.retryQueue.length,
+        offlineBuffer: state.offlineBuffer.length,
         features: state.features.size,
         messageCacheSize: state.messageCache.size,
-        lastHeartbeat: metricCache.lastHeartbeat
+        lastHeartbeat: state.lastHeartbeatSent,
+        lastHeartbeatReceived: state.lastHeartbeatReceived,
+        heartbeatMissed: state.heartbeatMissed,
+        isOnline: state.isOnline,
+        offlineModeEnabled: state.offlineModeEnabled,
+        parentCapabilities: Array.from(state.parentCapabilities),
+        originValidated: state.securityContext.originValidated,
+        diagnosticsEnabled: state.diagnosticsEnabled,
+        
+        // Environment metrics
+        environment: IframeEnvironment.type,
+        environmentDetails: {
+            isLocalDev: IframeEnvironment.isLocalDev,
+            isRenderHosted: IframeEnvironment.isRenderHosted,
+            isVPNNetwork: IframeEnvironment.isVPNNetwork,
+            isProduction: IframeEnvironment.isProduction,
+            isSandboxed: IframeEnvironment.isSandboxed,
+            latency: IframeEnvironment.latency,
+            connectionType: IframeEnvironment.connectionType
+        },
+        
+        // Startup governor state
+        governor: StartupGovernor.getMetrics(),
+        
+        // Transport status
+        transport: IframeTransport.getStatus(),
+        
+        // Session client
+        sessionClient: {
+            sessionValid: SessionClient.sessionValid,
+            sessionExpiry: SessionClient.sessionExpiry,
+            offlineMode: SessionClient.offlineMode
+        },
+        
+        // Navigation guard
+        navigation: NavigationGuard.getState()
     };
 }
 
@@ -1564,7 +5627,15 @@ const parentCoordinator = {
     sessionRequestSent: false,
     trustedOrigins: TRUSTED_ORIGINS,
     lastMessageOrigin: null,
-    sequenceId: null
+    sequenceId: null,
+    
+    // Enhanced fields
+    frameId: state.frameId,
+    instanceId: state.instanceId,
+    handshakeState: 'idle',
+    childReadySent: false,
+    parentReadyReceived: false,
+    capabilities: new Set()
 };
 
 function initializeParentCoordination() {
@@ -1587,7 +5658,7 @@ function initializeParentCoordination() {
         startSecureHandshake();
         
     } catch (error) {
-        safeLogError('Status', 'initializeParentCoordination', error);
+        DiagnosticsAgent.error('Parent', 'initializeParentCoordination error', error);
         handleParentUnavailable();
     }
 }
@@ -1596,7 +5667,8 @@ function handleEnhancedParentMessage(event) {
     try {
         parentCoordinator.lastMessageOrigin = event.origin;
         
-        if (!isValidOrigin(event.origin) && !parentCoordinator.trustedOrigins.has(event.origin)) {
+        // Use origin trust adapter
+        if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
             return;
         }
         
@@ -1622,6 +5694,9 @@ function handleEnhancedParentMessage(event) {
             case MESSAGE_TYPES.SESSION_UPDATE:
                 handleSecureSessionData(message);
                 break;
+            case MESSAGE_TYPES.SESSION_SYNC:
+                handleSecureSessionData(message);
+                break;
             case 'SESSION_UPDATE':
                 handleSessionUpdate(message.data || message.payload);
                 break;
@@ -1640,18 +5715,63 @@ function handleEnhancedParentMessage(event) {
             case MESSAGE_TYPES.HANDSHAKE_RESPONSE:
                 HandshakeClient.handleResponse(message);
                 break;
+            case MESSAGE_TYPES.PARENT_READY:
+                parentCoordinator.parentReadyReceived = true;
+                parentCoordinator.handshakeState = 'parent_ready_received';
+                StartupGovernor.parentReadyReceived = true;
+                break;
+            case MESSAGE_TYPES.PONG:
+                state.lastHeartbeatReceived = Date.now();
+                state.heartbeatMissed = 0;
+                IframeTransport.handlePong();
+                break;
+            case MESSAGE_TYPES.PAGE_ACTIVATED:
+                parentCoordinator.handshakeState = 'active';
+                break;
         }
     } catch (error) {
-        safeLogError('Status', 'handleEnhancedParentMessage', error);
+        DiagnosticsAgent.error('Parent', 'handleEnhancedParentMessage error', error);
     }
 }
 
 function startSecureHandshake() {
     try {
         clearSecureHandshake();
+        
+        // Send CHILD_READY
+        sendChildReadyMessage();
+        
+        // Request session
         requestSessionFromParent();
+        
     } catch (error) {
-        safeLogError('Status', 'startSecureHandshake', error);
+        DiagnosticsAgent.error('Parent', 'startSecureHandshake error', error);
+    }
+}
+
+function sendChildReadyMessage() {
+    try {
+        if (parentCoordinator.childReadySent) return;
+        
+        const message = {
+            type: MESSAGE_TYPES.CHILD_READY,
+            source: 'status-core',
+            frameId: state.frameId,
+            instanceId: state.instanceId,
+            timestamp: Date.now(),
+            module: 'status',
+            protocolVersion: state.protocolVersion,
+            environment: IframeEnvironment.type
+        };
+        
+        window.parent.postMessage(message, '*');
+        parentCoordinator.childReadySent = true;
+        state.childReadySent = true;
+        
+        DiagnosticsAgent.info('Parent', 'CHILD_READY sent');
+        
+    } catch (error) {
+        DiagnosticsAgent.error('Parent', 'sendChildReadyMessage error', error);
     }
 }
 
@@ -1669,10 +5789,16 @@ function requestSessionFromParent() {
             sequenceId: parentCoordinator.sequenceId,
             timestamp: Date.now(),
             module: 'status',
-            protocolVersion: state.protocolVersion
+            protocolVersion: state.protocolVersion,
+            frameId: state.frameId,
+            instanceId: state.instanceId,
+            capabilities: Array.from(state.capabilities.keys()),
+            environment: IframeEnvironment.type
         };
         
         window.parent.postMessage(message, '*');
+        
+        const timeoutMs = IframeEnvironment.isVPNNetwork ? 10000 : 5000;
         
         parentCoordinator.handshakeTimeout = setTimeout(() => {
             if (!parentCoordinator.sessionValid) {
@@ -1681,14 +5807,14 @@ function requestSessionFromParent() {
                     parentCoordinator.handshakeInProgress = false;
                     setTimeout(requestSessionFromParent, 1000);
                 } else {
-                    log(LOG_LEVEL.WARN, 'Handshake', 'Secure handshake failed');
+                    DiagnosticsAgent.warn('Handshake', 'Secure handshake failed');
                     handleSessionFailed();
                 }
             }
-        }, 5000);
+        }, timeoutMs);
         
     } catch (error) {
-        safeLogError('Status', 'requestSessionFromParent', error);
+        DiagnosticsAgent.error('Parent', 'requestSessionFromParent error', error);
         parentCoordinator.handshakeInProgress = false;
         handleSessionFailed();
     }
@@ -1714,6 +5840,7 @@ function handleSecureSessionData(message) {
         if (updated) {
             parentCoordinator.sessionValid = true;
             parentCoordinator.handshakeComplete = true;
+            parentCoordinator.handshakeState = 'active';
             parentCoordinator.handshakeInProgress = false;
             clearTimeout(parentCoordinator.handshakeTimeout);
             parentCoordinator.sessionData = sessionData;
@@ -1723,7 +5850,8 @@ function handleSecureSessionData(message) {
             sendSecureResponseToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
                 success: true,
                 module: 'status',
-                sequenceId: parentCoordinator.sequenceId
+                sequenceId: parentCoordinator.sequenceId,
+                frameId: state.frameId
             });
             
             startBackgroundInitializationWithSession();
@@ -1733,7 +5861,7 @@ function handleSecureSessionData(message) {
         }
         
     } catch (error) {
-        safeLogError('Status', 'handleSecureSessionData', error);
+        DiagnosticsAgent.error('Parent', 'handleSecureSessionData error', error);
         parentCoordinator.handshakeInProgress = false;
         clearTimeout(parentCoordinator.handshakeTimeout);
     }
@@ -1746,7 +5874,7 @@ function bindUIAfterSession() {
         }
         updateUIBasedOnAuth();
     } catch (error) {
-        safeLogError('Status', 'bindUIAfterSession', error);
+        DiagnosticsAgent.error('Parent', 'bindUIAfterSession error', error);
     }
 }
 
@@ -1756,7 +5884,7 @@ function updateUIBasedOnAuth() {
             detail: { user: currentUser }
         }));
     } catch (error) {
-        safeLogError('Status', 'updateUIBasedOnAuth', error);
+        DiagnosticsAgent.error('Parent', 'updateUIBasedOnAuth error', error);
     }
 }
 
@@ -1770,20 +5898,26 @@ function sendSecureResponseToParent(type, data = {}) {
                 ...data,
                 source: 'status-core',
                 timestamp: Date.now(),
-                sequenceId: parentCoordinator.sequenceId || generateSequenceId()
+                sequenceId: parentCoordinator.sequenceId || generateSequenceId(),
+                frameId: state.frameId
             }
         });
         
         window.parent.postMessage(message, '*');
         
     } catch (error) {
-        safeLogError('Status', 'sendSecureResponseToParent', error);
+        DiagnosticsAgent.error('Parent', 'sendSecureResponseToParent error', error);
     }
 }
 
 function handleSessionFailed() {
     parentCoordinator.handshakeInProgress = false;
     parentCoordinator.handshakeComplete = false;
+    parentCoordinator.handshakeState = 'failed';
+    
+    if (typeof StartupGovernor !== 'undefined') {
+        StartupGovernor.degrade('Session failed');
+    }
     
     if (state.sessionMirror.validated) {
         activateSessionFromMirror();
@@ -1806,7 +5940,7 @@ function clearSecureHandshake() {
         parentCoordinator.sessionRequestSent = false;
         parentCoordinator.handshakeRetries = 0;
     } catch (error) {
-        safeLogError('Status', 'clearSecureHandshake', error);
+        DiagnosticsAgent.error('Parent', 'clearSecureHandshake error', error);
     }
 }
 
@@ -1824,6 +5958,11 @@ function handleSessionData(sessionData) {
         
         parentCoordinator.sessionData = sessionData;
         parentCoordinator.handshakeComplete = true;
+        parentCoordinator.handshakeState = 'active';
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.completeHandshake();
+        }
         
         if (parentCoordinator.handshakeInterval) {
             clearInterval(parentCoordinator.handshakeInterval);
@@ -1832,13 +5971,14 @@ function handleSessionData(sessionData) {
         
         sendToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
             module: 'status',
-            success: true
+            success: true,
+            frameId: state.frameId
         });
         
         startBackgroundInitializationWithSession();
         
     } catch (error) {
-        safeLogError('Status', 'handleSessionData', error);
+        DiagnosticsAgent.error('Parent', 'handleSessionData error', error);
         sendToParent(MESSAGE_TYPES.ERROR, {
             error: 'SESSION_PROCESSING_ERROR',
             message: error.message
@@ -1866,7 +6006,7 @@ function handleSessionUpdate(updateData) {
         updateSessionMirror(updateData, 'session_update');
         
     } catch (error) {
-        safeLogError('Status', 'handleSessionUpdate', error);
+        DiagnosticsAgent.error('Parent', 'handleSessionUpdate error', error);
     }
 }
 
@@ -1875,6 +6015,11 @@ function handleLogout(logoutData) {
         parentCoordinator.sessionData = null;
         parentCoordinator.handshakeComplete = false;
         parentCoordinator.sessionValid = false;
+        parentCoordinator.handshakeState = 'idle';
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.transition('INIT');
+        }
         
         state.sessionMirror = {
             token: null,
@@ -1884,16 +6029,21 @@ function handleLogout(logoutData) {
             timestamp: 0,
             messageId: null,
             validated: false,
-            source: null
+            source: null,
+            refreshToken: null,
+            lastRefresh: null,
+            refreshInProgress: false,
+            capabilities: []
         };
         
-        currentUser = null;
-        userData = null;
+        if (typeof currentUser !== 'undefined') currentUser = null;
+        if (typeof userData !== 'undefined') userData = null;
         
-        SecureStorage.remove(LOCAL_STORAGE_KEYS.USER);
-        SecureStorage.remove(UNIFIED_TOKEN_KEY);
+        SafeStorage.remove(LOCAL_STORAGE_KEYS.USER);
+        SafeStorage.remove(UNIFIED_TOKEN_KEY);
+        SafeStorage.remove('REFRESH_TOKEN');
         
-        isTokenReady = false;
+        if (typeof isTokenReady !== 'undefined') isTokenReady = false;
         state.sessionActive = false;
         state.user = null;
         state.token = null;
@@ -1902,11 +6052,12 @@ function handleLogout(logoutData) {
         sendToParent(MESSAGE_TYPES.CHILD_LOADED, {
             module: 'status',
             loggedOut: true,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            frameId: state.frameId
         });
         
     } catch (error) {
-        safeLogError('Status', 'handleLogout', error);
+        DiagnosticsAgent.error('Parent', 'handleLogout error', error);
     }
 }
 
@@ -1918,29 +6069,42 @@ function handleParentUnavailable() {
     } else {
         enableGuestMode();
     }
+    
+    state.offlineModeEnabled = true;
+    if (typeof isOfflineMode !== 'undefined') isOfflineMode = true;
+    
+    if (typeof StartupGovernor !== 'undefined') {
+        StartupGovernor.degrade('Parent unavailable');
+    }
 }
 
 function startBackgroundInitializationWithSession() {
-    if (isBackgroundInitialized) return;
+    if (typeof isBackgroundInitialized !== 'undefined' && isBackgroundInitialized) return;
     
     try {
         setTimeout(async () => {
             try {
-                await loadFreshDataInBackground();
-                isBackgroundInitialized = true;
+                if (typeof loadFreshDataInBackground !== 'undefined') {
+                    await loadFreshDataInBackground();
+                }
+                
+                if (typeof isBackgroundInitialized !== 'undefined') {
+                    isBackgroundInitialized = true;
+                }
                 
                 if (parentCoordinator.handshakeComplete) {
                     sendToParent(MESSAGE_TYPES.UI_READY, {
                         module: 'status',
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        frameId: state.frameId
                     });
                 }
             } catch (error) {
-                safeLogError('Status', 'startBackgroundInitializationWithSession', error);
+                DiagnosticsAgent.error('Background', 'startBackgroundInitializationWithSession error', error);
             }
         }, 1000);
     } catch (error) {
-        safeLogError('Status', 'startBackgroundInitializationWithSession', error);
+        DiagnosticsAgent.error('Background', 'startBackgroundInitializationWithSession error', error);
     }
 }
 
@@ -1951,7 +6115,7 @@ async function makeParentApiRequest(endpoint, options = {}) {
             
             const responseHandler = (event) => {
                 try {
-                    if (!isValidOrigin(event.origin) && !parentCoordinator.trustedOrigins.has(event.origin)) return;
+                    if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) return;
                     
                     const message = event.data;
                     if (!message || !message.type || !message.payload || message.payload.requestId !== requestId) return;
@@ -1982,16 +6146,19 @@ async function makeParentApiRequest(endpoint, options = {}) {
                         body: options.body,
                         credentials: 'include'
                     },
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    frameId: state.frameId
                 }
             });
             
             window.parent.postMessage(message, '*');
             
+            const timeoutMs = IframeEnvironment.isVPNNetwork ? 60000 : 30000;
+            
             const timer = setTimeout(() => {
                 window.removeEventListener('message', responseHandler);
                 reject(new Error('Request timeout'));
-            }, 30000);
+            }, timeoutMs);
             
             state.timeouts.add(timer);
             
@@ -2008,17 +6175,21 @@ function handleApiResponse(responseData) {
 }
 
 function handleApiError(errorData) {
-    log(LOG_LEVEL.ERROR, 'API', 'API Error', errorData);
+    DiagnosticsAgent.error('API', 'API Error', errorData);
 }
 
 function handleAuthValidated(data) {
     try {
         if (data.success) {
-            isTokenReady = true;
-            triggerTokenReadyCallbacks();
+            if (typeof isTokenReady !== 'undefined') {
+                isTokenReady = true;
+                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
+                    triggerTokenReadyCallbacks();
+                }
+            }
         }
     } catch (error) {
-        safeLogError('Status', 'handleAuthValidated', error);
+        DiagnosticsAgent.error('Auth', 'handleAuthValidated error', error);
     }
 }
 
@@ -2068,14 +6239,14 @@ function waitForTokenReady() {
                     }
                     setTimeout(checkToken, 100);
                 } catch (error) {
-                    safeLogError('Status', 'waitForTokenReady.checkToken', error);
+                    DiagnosticsAgent.error('Token', 'waitForTokenReady.checkToken error', error);
                     resolve(false);
                 }
             };
             
             checkToken();
         } catch (error) {
-            safeLogError('Status', 'waitForTokenReady', error);
+            DiagnosticsAgent.error('Token', 'waitForTokenReady error', error);
             resolve(false);
         }
     });
@@ -2089,7 +6260,7 @@ function onTokenReady(callback) {
             tokenReadyCallbacks.push(callback);
         }
     } catch (error) {
-        safeLogError('Status', 'onTokenReady', error);
+        DiagnosticsAgent.error('Token', 'onTokenReady error', error);
     }
 }
 
@@ -2100,11 +6271,11 @@ function triggerTokenReadyCallbacks() {
             try {
                 callback();
             } catch (error) {
-                safeLogError('Status', 'triggerTokenReadyCallbacks', error);
+                DiagnosticsAgent.error('Token', 'triggerTokenReadyCallbacks callback error', error);
             }
         }
     } catch (error) {
-        safeLogError('Status', 'triggerTokenReadyCallbacks', error);
+        DiagnosticsAgent.error('Token', 'triggerTokenReadyCallbacks error', error);
     }
 }
 
@@ -2128,7 +6299,7 @@ function getUnifiedToken() {
         } catch (error) {}
         
         try {
-            const token = SecureStorage.get(UNIFIED_TOKEN_KEY);
+            const token = SafeStorage.get(UNIFIED_TOKEN_KEY);
             if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
                 if (token.split('.').length === 3) return token;
             }
@@ -2139,7 +6310,7 @@ function getUnifiedToken() {
         
         return null;
     } catch (error) {
-        safeLogError('Status', 'getUnifiedToken', error);
+        DiagnosticsAgent.error('Token', 'getUnifiedToken error', error);
         return null;
     }
 }
@@ -2156,10 +6327,10 @@ function migrateLegacyTokens() {
         
         for (const key of legacyKeys) {
             try {
-                const token = SecureStorage.get(key);
+                const token = SafeStorage.get(key);
                 if (token && typeof token === 'string' && token.length > 10 && token !== 'undefined' && token !== 'null') {
                     if (token.split('.').length === 3) {
-                        SecureStorage.set(UNIFIED_TOKEN_KEY, token);
+                        SafeStorage.set(UNIFIED_TOKEN_KEY, token);
                         return token;
                     }
                 }
@@ -2168,7 +6339,7 @@ function migrateLegacyTokens() {
         
         return null;
     } catch (error) {
-        safeLogError('Status', 'migrateLegacyTokens', error);
+        DiagnosticsAgent.error('Token', 'migrateLegacyTokens error', error);
         return null;
     }
 }
@@ -2180,7 +6351,7 @@ function isAuthenticated() {
         if (state.sessionActive && !state.isGuestMode) return true;
         return getUnifiedToken() !== null;
     } catch (error) {
-        safeLogError('Status', 'isAuthenticated', error);
+        DiagnosticsAgent.error('Auth', 'isAuthenticated error', error);
         return false;
     }
 }
@@ -2193,7 +6364,7 @@ async function queueApiRequest(requestFunction) {
             pendingApiRequests.push({ requestFunction, resolve, reject });
             if (!apiCheckInterval) startTokenReadinessCheck();
         } catch (error) {
-            safeLogError('Status', 'queueApiRequest', error);
+            DiagnosticsAgent.error('API', 'queueApiRequest error', error);
             reject(error);
         }
     });
@@ -2206,12 +6377,12 @@ function processPendingApiRequests() {
             try {
                 requestFunction().then(resolve).catch(reject);
             } catch (error) {
-                safeLogError('Status', 'processPendingApiRequests', error);
+                DiagnosticsAgent.error('API', 'processPendingApiRequests error', error);
                 reject(error);
             }
         }
     } catch (error) {
-        safeLogError('Status', 'processPendingApiRequests', error);
+        DiagnosticsAgent.error('API', 'processPendingApiRequests error', error);
     }
 }
 
@@ -2236,14 +6407,14 @@ function startTokenReadinessCheck() {
                 } else if (checkCount >= maxChecks) {
                     clearInterval(apiCheckInterval);
                     apiCheckInterval = null;
-                    safeLogError('Status', 'startTokenReadinessCheck', new Error('Token readiness check timeout'));
+                    DiagnosticsAgent.error('Token', 'startTokenReadinessCheck timeout');
                 }
             } catch (error) {
-                safeLogError('Status', 'startTokenReadinessCheck.interval', error);
+                DiagnosticsAgent.error('Token', 'startTokenReadinessCheck.interval error', error);
             }
         }, 100);
     } catch (error) {
-        safeLogError('Status', 'startTokenReadinessCheck', error);
+        DiagnosticsAgent.error('Token', 'startTokenReadinessCheck error', error);
     }
 }
 
@@ -2251,7 +6422,7 @@ function startTokenReadinessCheck() {
 // SECURE API CALL WITH FALLBACK
 // =============================================
 const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
-    if (isOfflineMode && options.method && options.method !== 'GET') {
+    if (state.offlineModeEnabled && options.method && options.method !== 'GET') {
         throw new Error('Offline mode');
     }
     
@@ -2279,10 +6450,17 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
             headers['Authorization'] = `Bearer ${token}`;
         }
         
+        const timeoutMs = IframeEnvironment.isVPNNetwork ? 60000 : 30000;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
         const response = await fetch(endpoint, {
             ...options,
-            headers
+            headers,
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
             throw new Error(`HTTP error ${response.status}`);
@@ -2297,8 +6475,12 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
                            error.message?.includes('Session');
         
         if (isAuthError) {
-            isOfflineMode = true;
+            state.offlineModeEnabled = true;
+            if (typeof isOfflineMode !== 'undefined') isOfflineMode = true;
             handleAuthError('Authentication failed. Using offline mode.');
+            
+            // Try to refresh token
+            await refreshToken();
         }
         throw error;
     }
@@ -2510,87 +6692,87 @@ function initializeUIWithCachedData() {
         }
         
     } catch (error) {
-        safeLogError('Status', 'initializeUIWithCachedData', error);
+        DiagnosticsAgent.error('UI', 'initializeUIWithCachedData error', error);
     }
 }
 
 function loadUserFromCache() {
     try {
-        const userData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.USER);
+        const userData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER);
         if (userData && userData !== 'undefined' && userData !== 'null') {
             if (userData && typeof userData === 'object' && userData.id) {
                 currentUser = userData;
             }
         }
     } catch (error) {
-        safeLogError('Status', 'loadUserFromCache', error);
+        DiagnosticsAgent.error('UI', 'loadUserFromCache error', error);
     }
 }
 
 function loadCachedDataInstantly() {
     try {
-        const statusesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
+        const statusesData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
         if (statusesData) {
             try { statuses = statusesData || []; } catch { statuses = []; }
         }
         
-        const myStatusesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
+        const myStatusesData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
         if (myStatusesData) {
             try { myStatuses = myStatusesData || []; } catch { myStatuses = []; }
         }
         
-        const viewedStatusesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
+        const viewedStatusesData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
         if (viewedStatusesData) {
             try { viewedStatuses = new Set(viewedStatusesData || []); } catch { viewedStatuses = new Set(); }
         }
         
-        const mutedUsersData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.MUTED_USERS);
+        const mutedUsersData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MUTED_USERS);
         if (mutedUsersData) {
             try { mutedUsers = new Set(mutedUsersData || []); } catch { mutedUsers = new Set(); }
         }
         
-        const highlightsData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
+        const highlightsData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
         if (highlightsData) {
             try { highlights = highlightsData || []; } catch { highlights = []; }
         }
         
-        const draftsData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.DRAFTS);
+        const draftsData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.DRAFTS);
         if (draftsData) {
             try { drafts = draftsData || []; } catch { drafts = []; }
         }
         
-        const scheduledData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.SCHEDULED);
+        const scheduledData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SCHEDULED);
         if (scheduledData) {
             try { scheduledStatuses = scheduledData || []; } catch { scheduledStatuses = []; }
         }
         
-        const pendingRepliesData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
+        const pendingRepliesData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
         if (pendingRepliesData) {
             try { pendingReplies = pendingRepliesData || []; } catch { pendingReplies = []; }
         }
         
-        const pendingReactionsData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
+        const pendingReactionsData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
         if (pendingReactionsData) {
             try { pendingReactions = pendingReactionsData || []; } catch { pendingReactions = []; }
         }
         
-        const moodData = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.MOOD_DATA);
+        const moodData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MOOD_DATA);
         if (moodData) {
             try { moodChartData = moodData || []; } catch { moodChartData = []; }
         }
         
-        const streakData = SecureStorage.get(LOCAL_STORAGE_KEYS.STREAK);
+        const streakData = SafeStorage.get(LOCAL_STORAGE_KEYS.STREAK);
         if (streakData) {
             try { streakCount = parseInt(streakData) || 0; } catch { streakCount = 0; }
         }
         
-        const lastPostDateData = SecureStorage.get(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
+        const lastPostDateData = SafeStorage.get(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
         if (lastPostDateData) {
             try { lastPostDate = new Date(lastPostDateData); } catch { lastPostDate = null; }
         }
         
     } catch (error) {
-        safeLogError('Status', 'loadCachedDataInstantly', error);
+        DiagnosticsAgent.error('UI', 'loadCachedDataInstantly error', error);
     }
 }
 
@@ -2609,11 +6791,12 @@ async function startBackgroundInitialization() {
                 if (parentCoordinator.handshakeComplete) {
                     sendToParent(MESSAGE_TYPES.UI_READY, {
                         module: 'status',
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        frameId: state.frameId
                     });
                 }
             } catch (error) {
-                safeLogError('Status', 'startBackgroundInitialization.onTokenReady', error);
+                DiagnosticsAgent.error('Background', 'startBackgroundInitialization.onTokenReady error', error);
             }
         });
         
@@ -2625,16 +6808,17 @@ async function startBackgroundInitialization() {
                 if (parentCoordinator.handshakeComplete) {
                     sendToParent(MESSAGE_TYPES.UI_READY, {
                         module: 'status',
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        frameId: state.frameId
                     });
                 }
             } catch (error) {
-                safeLogError('Status', 'startBackgroundInitialization.immediate', error);
+                DiagnosticsAgent.error('Background', 'startBackgroundInitialization.immediate error', error);
             }
         }
         
     } catch (error) {
-        safeLogError('Status', 'startBackgroundInitialization', error);
+        DiagnosticsAgent.error('Background', 'startBackgroundInitialization error', error);
     }
 }
 
@@ -2647,7 +6831,7 @@ async function loadFreshDataInBackground() {
         loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
         await Promise.allSettled(loadPromises);
     } catch (error) {
-        safeLogError('Status', 'loadFreshDataInBackground', error);
+        DiagnosticsAgent.error('Background', 'loadFreshDataInBackground error', error);
     }
 }
 
@@ -2656,7 +6840,7 @@ async function safeApiOperation(operation) {
         if (!isAuthenticated()) throw new Error('Not authenticated');
         return await operation();
     } catch (error) {
-        safeLogError('Status', 'safeApiOperation', error);
+        DiagnosticsAgent.error('API', 'safeApiOperation error', error);
         return null;
     }
 }
@@ -2668,7 +6852,7 @@ async function loadStatusesInBackground() {
             statuses = response.statuses;
             statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
         }
     } catch (error) {
         throw error;
@@ -2680,7 +6864,7 @@ async function loadMyStatusesInBackground() {
         const response = await secureApiCall('/api/statuses/my');
         if (response && response.statuses) {
             myStatuses = response.statuses;
-            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         }
     } catch (error) {
         throw error;
@@ -2692,7 +6876,7 @@ async function loadHighlightsInBackground() {
         const response = await secureApiCall('/api/statuses/highlights');
         if (response && response.highlights) {
             highlights = response.highlights;
-            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
         }
     } catch (error) {
         throw error;
@@ -2705,7 +6889,7 @@ async function loadUserDataInBackground() {
         if (response && response.user) {
             currentUser = response.user;
             userData = response.user;
-            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, response.user);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, response.user);
         }
     } catch (error) {
         throw error;
@@ -2724,13 +6908,14 @@ async function bootstrapApp() {
         setTimeout(() => {
             sendToParent(MESSAGE_TYPES.CHILD_LOADED, {
                 module: 'status',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                frameId: state.frameId
             });
         }, 500);
         
         return true;
     } catch (error) {
-        safeLogError('Status', 'bootstrapApp', error);
+        DiagnosticsAgent.error('Bootstrap', 'bootstrapApp error', error);
         return false;
     }
 }
@@ -2746,17 +6931,23 @@ function handleAuthError(message) {
             sendToParent(MESSAGE_TYPES.NEEDS_AUTH, {
                 module: 'status',
                 error: message,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                frameId: state.frameId
             });
         }
         
         if (statuses.length === 0 && myStatuses.length === 0) {
             // No action needed
         } else {
+            state.offlineModeEnabled = true;
             isOfflineMode = true;
+            
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.degrade('Auth error');
+            }
         }
     } catch (error) {
-        safeLogError('Status', 'handleAuthError', error);
+        DiagnosticsAgent.error('Auth', 'handleAuthError error', error);
     }
 }
 
@@ -2770,7 +6961,12 @@ async function initializeStatusSystem() {
         
     } catch (error) {
         loadCachedDataInstantly();
+        if (!state.offlineModeEnabled) state.offlineModeEnabled = true;
         if (!isOfflineMode) isOfflineMode = true;
+        
+        if (typeof StartupGovernor !== 'undefined') {
+            StartupGovernor.degrade('Data load timeout');
+        }
     }
 }
 
@@ -2784,7 +6980,7 @@ async function loadInitialData() {
                 statuses = statusesResponse.statuses;
                 statuses = filterStatusesByPrivacy(statuses);
                 statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
             }
         }));
         
@@ -2792,7 +6988,7 @@ async function loadInitialData() {
             const myStatusesResponse = await secureApiCall('/api/statuses/my');
             if (myStatusesResponse && myStatusesResponse.statuses) {
                 myStatuses = myStatusesResponse.statuses;
-                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
             }
         }));
         
@@ -2800,7 +6996,7 @@ async function loadInitialData() {
             const highlightsResponse = await secureApiCall('/api/statuses/highlights');
             if (highlightsResponse && highlightsResponse.highlights) {
                 highlights = highlightsResponse.highlights;
-                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
             }
         }));
         
@@ -2809,14 +7005,14 @@ async function loadInitialData() {
             if (userResponse && userResponse.user) {
                 currentUser = userResponse.user;
                 userData = userResponse.user;
-                SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, userResponse.user);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, userResponse.user);
             }
         }));
         
         await Promise.allSettled(loadPromises);
         
     } catch (error) {
-        safeLogError('Status', 'loadInitialData', error);
+        DiagnosticsAgent.error('Init', 'loadInitialData error', error);
         throw error;
     }
 }
@@ -2845,7 +7041,7 @@ function filterStatusesByPrivacy(statuses) {
             }
         });
     } catch (error) {
-        safeLogError('Status', 'filterStatusesByPrivacy', error);
+        DiagnosticsAgent.error('Status', 'filterStatusesByPrivacy error', error);
         return [];
     }
 }
@@ -2863,7 +7059,7 @@ function getStatusPreviewText(status) {
         }
         return 'Status';
     } catch (error) {
-        safeLogError('Status', 'getStatusPreviewText', error);
+        DiagnosticsAgent.error('Status', 'getStatusPreviewText error', error);
         return 'Status';
     }
 }
@@ -2887,7 +7083,7 @@ function filterStatusesByType(type) {
                 return statuses;
         }
     } catch (error) {
-        safeLogError('Status', 'filterStatusesByType', error);
+        DiagnosticsAgent.error('Status', 'filterStatusesByType error', error);
         return [];
     }
 }
@@ -2905,7 +7101,7 @@ function getEmptyStateMessage() {
         }
         return 'Be the first to post a status!';
     } catch (error) {
-        safeLogError('Status', 'getEmptyStateMessage', error);
+        DiagnosticsAgent.error('Status', 'getEmptyStateMessage error', error);
         return 'No statuses available';
     }
 }
@@ -2916,9 +7112,9 @@ function getEmptyStateMessage() {
 const addReactionToStatus = createErrorBoundary(async function(statusId, reaction) {
     if (!statusId || !reaction) throw new Error('Missing required parameters');
     
-    if (isOfflineMode) {
+    if (state.offlineModeEnabled) {
         pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
         return { success: true, offline: true };
     }
     
@@ -2933,7 +7129,7 @@ const addReactionToStatus = createErrorBoundary(async function(statusId, reactio
 const voteOnPoll = createErrorBoundary(async function(statusId, optionId) {
     if (!statusId || !optionId) throw new Error('Missing required parameters');
     
-    if (isOfflineMode) return { success: false, offline: true };
+    if (state.offlineModeEnabled) return { success: false, offline: true };
     
     const response = await secureApiCall(`/api/statuses/${statusId}/vote`, {
         method: 'POST',
@@ -2980,7 +7176,7 @@ const muteUser = createErrorBoundary(async function(userId) {
     
     if (response && response.success) {
         mutedUsers.add(userId);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
     }
     return response;
 }, 'muteUser', { success: false });
@@ -2994,7 +7190,7 @@ const unmuteUser = createErrorBoundary(async function(userId) {
     
     if (response && response.success) {
         mutedUsers.delete(userId);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
     }
     return response;
 }, 'unmuteUser', { success: false });
@@ -3004,21 +7200,21 @@ const postStatus = createErrorBoundary(async function(statusData) {
     
     const sanitizedData = sanitizeStatusData(statusData);
     
-    if (isOfflineMode) {
-        const offlineQueue = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
+    if (state.offlineModeEnabled) {
+        const offlineQueue = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
         sanitizedData.id = 'offline_' + Date.now();
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.offline = true;
         offlineQueue.push(sanitizedData);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
         
         statuses.unshift(sanitizedData);
         myStatuses.unshift(sanitizedData);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         
         lastPostDate = new Date();
-        SecureStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
+        SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
         updateStreakCounter();
         
         return { success: true, status: sanitizedData, offline: true };
@@ -3032,11 +7228,11 @@ const postStatus = createErrorBoundary(async function(statusData) {
     if (response && response.status) {
         statuses.unshift(response.status);
         myStatuses.unshift(response.status);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         
         lastPostDate = new Date();
-        SecureStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
+        SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
         updateStreakCounter();
         
         if (sanitizedData.mood) {
@@ -3046,7 +7242,7 @@ const postStatus = createErrorBoundary(async function(statusData) {
                 date: new Date().toISOString()
             });
             if (moodChartData.length > 30) moodChartData = moodChartData.slice(-30);
-            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.MOOD_DATA, moodChartData);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MOOD_DATA, moodChartData);
         }
     }
     return response;
@@ -3069,7 +7265,7 @@ function sanitizeStatusData(statusData) {
         
         return sanitized;
     } catch (error) {
-        safeLogError('Status', 'sanitizeStatusData', error);
+        DiagnosticsAgent.error('Status', 'sanitizeStatusData error', error);
         return statusData;
     }
 }
@@ -3122,9 +7318,9 @@ function updateStreakCounter() {
             streakCount = 1;
         }
         
-        SecureStorage.set(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
+        SafeStorage.set(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
     } catch (error) {
-        safeLogError('Status', 'updateStreakCounter', error);
+        DiagnosticsAgent.error('Status', 'updateStreakCounter error', error);
     }
 }
 
@@ -3143,7 +7339,7 @@ const scheduleStatus = createErrorBoundary(async function(statusData, scheduleTi
     
     if (response && response.success) {
         scheduledStatuses.push({ ...sanitizedData, scheduledFor: scheduleTime });
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.SCHEDULED, scheduledStatuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SCHEDULED, scheduledStatuses);
     }
     return response;
 }, 'scheduleStatus', { success: false });
@@ -3157,10 +7353,10 @@ function saveDraft(statusData) {
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.isDraft = true;
         drafts.unshift(sanitizedData);
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
         return { success: true };
     } catch (error) {
-        safeLogError('Status', 'saveDraft', error);
+        DiagnosticsAgent.error('Draft', 'saveDraft error', error);
         throw error;
     }
 }
@@ -3196,16 +7392,17 @@ function initializeUserStatusTracking() {
     try {
         isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
         lastOnlineStatus = isOnline;
+        state.isOnline = isOnline;
         
         setupNetworkDetection();
         setupActivityTracking();
-        startHeartbeat();
+        startEnhancedHeartbeat();
         updateUserStatus();
         
         isTrackingInitialized = true;
         
     } catch (error) {
-        safeLogError('Status', 'initializeUserStatusTracking', error);
+        DiagnosticsAgent.error('Status', 'initializeUserStatusTracking error', error);
     }
 }
 
@@ -3218,6 +7415,7 @@ function setupNetworkDetection() {
             if (currentOnline === lastOnlineStatus) return;
             
             lastOnlineStatus = currentOnline;
+            state.isOnline = currentOnline;
             
             if (currentOnline) {
                 handleOnlineStatus();
@@ -3235,7 +7433,7 @@ function setupNetworkDetection() {
         activityEventHandlers.push({ element: window, type: 'online', handler: handleNetworkChange });
         activityEventHandlers.push({ element: window, type: 'offline', handler: handleNetworkChange });
     } catch (error) {
-        safeLogError('Status', 'setupNetworkDetection', error);
+        DiagnosticsAgent.error('Status', 'setupNetworkDetection error', error);
     }
 }
 
@@ -3262,7 +7460,7 @@ function setupActivityTracking() {
             activityEventHandlers.push({ element: document, type: eventType, handler: updateActivity });
         });
     } catch (error) {
-        safeLogError('Status', 'setupActivityTracking', error);
+        DiagnosticsAgent.error('Status', 'setupActivityTracking error', error);
     }
 }
 
@@ -3271,15 +7469,22 @@ function handleOnlineStatus() {
         if (isOnline) return;
         
         isOnline = true;
+        state.isOnline = true;
         
         setTimeout(() => { updateUserStatus(); }, 100);
         
-        if (isOfflineMode) {
+        if (state.offlineModeEnabled) {
+            state.offlineModeEnabled = false;
             isOfflineMode = false;
             setTimeout(() => { syncPendingData(); }, 500);
         }
+        
+        // Attempt recovery
+        if (!parentCoordinator.handshakeComplete && RecoveryManager.canRecover()) {
+            HandshakeClient.execute().catch(() => {});
+        }
     } catch (error) {
-        safeLogError('Status', 'handleOnlineStatus', error);
+        DiagnosticsAgent.error('Status', 'handleOnlineStatus error', error);
     }
 }
 
@@ -3288,12 +7493,20 @@ function handleOfflineStatus() {
         if (!isOnline) return;
         
         isOnline = false;
+        state.isOnline = false;
         
         setTimeout(() => { updateUserStatus(); }, 100);
         
-        if (!isOfflineMode) isOfflineMode = true;
+        if (!state.offlineModeEnabled) {
+            state.offlineModeEnabled = true;
+            isOfflineMode = true;
+            
+            if (typeof StartupGovernor !== 'undefined') {
+                StartupGovernor.degrade('Offline');
+            }
+        }
     } catch (error) {
-        safeLogError('Status', 'handleOfflineStatus', error);
+        DiagnosticsAgent.error('Status', 'handleOfflineStatus error', error);
     }
 }
 
@@ -3303,11 +7516,12 @@ function sendUserActive() {
             sendToParent('USER_ACTIVE', {
                 timestamp: Date.now(),
                 userId: currentUser.id,
-                sequenceId: generateSequenceId()
+                sequenceId: generateSequenceId(),
+                frameId: state.frameId
             }, { silent: true });
         }
     } catch (error) {
-        safeLogError('Status', 'sendUserActive', error);
+        DiagnosticsAgent.error('Status', 'sendUserActive error', error);
     }
 }
 
@@ -3318,11 +7532,12 @@ function sendUserInactive() {
                 timestamp: Date.now(),
                 userId: currentUser.id,
                 lastActive: lastActivityTime,
-                sequenceId: generateSequenceId()
+                sequenceId: generateSequenceId(),
+                frameId: state.frameId
             }, { silent: true });
         }
     } catch (error) {
-        safeLogError('Status', 'sendUserInactive', error);
+        DiagnosticsAgent.error('Status', 'sendUserInactive error', error);
     }
 }
 
@@ -3348,23 +7563,24 @@ async function updateUserStatus() {
                 isOnline: isOnline,
                 timestamp: Date.now(),
                 sequenceId: generateSequenceId(),
-                source: 'status-core'
+                source: 'status-core',
+                frameId: state.frameId
             }, { silent: true });
         }
         
-        if (isOnline && !isOfflineMode) {
+        if (isOnline && !state.offlineModeEnabled) {
             try {
                 await secureApiCall('/api/user/status', {
                     method: 'POST',
                     body: JSON.stringify({ status: status, lastSeen: new Date().toISOString() })
                 });
             } catch (apiError) {
-                safeLogError('Status', 'updateUserStatus.api', apiError);
+                DiagnosticsAgent.error('Status', 'updateUserStatus.api error', apiError);
             }
         }
         
     } catch (error) {
-        safeLogError('Status', 'updateUserStatus', error);
+        DiagnosticsAgent.error('Status', 'updateUserStatus error', error);
     }
 }
 
@@ -3381,13 +7597,13 @@ async function syncPendingData() {
                     !(r.statusId === reaction.statusId && r.reaction === reaction.reaction)
                 );
             } catch (error) {
-                safeLogError('Status', 'syncPendingData.reaction', error);
+                DiagnosticsAgent.error('Sync', 'syncPendingData.reaction error', error);
             }
         }
         
-        SecureStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
         
-        const offlineQueue = SecureStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
+        const offlineQueue = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
         for (const statusData of offlineQueue) {
             try {
                 await secureApiCall('/api/statuses/create', {
@@ -3395,15 +7611,15 @@ async function syncPendingData() {
                     body: JSON.stringify(statusData)
                 });
             } catch (error) {
-                safeLogError('Status', 'syncPendingData.offline', error);
+                DiagnosticsAgent.error('Sync', 'syncPendingData.offline error', error);
             }
         }
         
-        SecureStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+        SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
         await loadFreshDataInBackground();
         
     } catch (error) {
-        safeLogError('Status', 'syncPendingData', error);
+        DiagnosticsAgent.error('Sync', 'syncPendingData error', error);
     }
 }
 
@@ -3418,7 +7634,7 @@ function escapeHtml(text) {
         div.textContent = text;
         return div.innerHTML;
     } catch (error) {
-        safeLogError('Status', 'escapeHtml', error);
+        DiagnosticsAgent.error('Util', 'escapeHtml error', error);
         return text || '';
     }
 }
@@ -3442,7 +7658,7 @@ function formatTimeAgo(date) {
         if (diffDays < 7) return `${diffDays}d ago`;
         return `${Math.floor(diffDays / 7)}w ago`;
     } catch (error) {
-        safeLogError('Status', 'formatTimeAgo', error);
+        DiagnosticsAgent.error('Util', 'formatTimeAgo error', error);
         return 'Unknown';
     }
 }
@@ -3457,7 +7673,8 @@ async function retryOperation(operation, maxRetries = 3) {
             } catch (error) {
                 lastError = error;
                 if (i < maxRetries - 1) {
-                    const delay = Math.min(1000 * Math.pow(2, i), 10000);
+                    const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
+                    const delay = Math.min(baseDelay * Math.pow(2, i), 10000);
                     const jitter = Math.random() * 200;
                     await new Promise(resolve => setTimeout(resolve, delay + jitter));
                 }
@@ -3466,7 +7683,7 @@ async function retryOperation(operation, maxRetries = 3) {
         
         throw lastError;
     } catch (error) {
-        safeLogError('Status', 'retryOperation', error);
+        DiagnosticsAgent.error('Util', 'retryOperation error', error);
         throw error;
     }
 }
@@ -3493,7 +7710,7 @@ function generateSampleMoodData() {
         sampleData.sort((a, b) => a.timestamp - b.timestamp);
         return sampleData;
     } catch (error) {
-        safeLogError('Status', 'generateSampleMoodData', error);
+        DiagnosticsAgent.error('Util', 'generateSampleMoodData error', error);
         return [];
     }
 }
@@ -3515,7 +7732,7 @@ function safeLogError(module, functionName, error, data = null) {
         errorLogCounts[errorKey]++;
         
         if (errorLogCounts[errorKey] <= maxErrorLogs) {
-            log(LOG_LEVEL.WARN, module, `${functionName} error: ${error?.message || error}`);
+            DiagnosticsAgent.warn(module, `${functionName} error: ${error?.message || error}`);
         }
         
         if (functionName.includes('get') || functionName.includes('load')) {
@@ -3666,7 +7883,7 @@ function updateLocalStateWithSession(sessionData) {
     try {
         if (!sessionData) return false;
         
-        log(LOG_LEVEL.INFO, 'Session', 'Updating local state with session data');
+        DiagnosticsAgent.info('Session', 'Updating local state with session data');
         
         // Update currentUser
         if (sessionData.user) {
@@ -3674,13 +7891,19 @@ function updateLocalStateWithSession(sessionData) {
             userData = sessionData.user;
             
             // Cache user
-            SecureStorage.setJSON(LOCAL_STORAGE_KEYS.USER, sessionData.user);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, sessionData.user);
         }
         
         // Update token
         if (sessionData.token) {
-            SecureStorage.set(UNIFIED_TOKEN_KEY, sessionData.token);
+            SafeStorage.set(UNIFIED_TOKEN_KEY, sessionData.token);
             state.token = sessionData.token;
+        }
+        
+        // Update refresh token
+        if (sessionData.refreshToken) {
+            SafeStorage.setJSON('REFRESH_TOKEN', sessionData.refreshToken);
+            state.sessionMirror.refreshToken = sessionData.refreshToken;
         }
         
         // Update permissions
@@ -3688,23 +7911,145 @@ function updateLocalStateWithSession(sessionData) {
             state.permissionsGranted = [...sessionData.permissions];
         }
         
+        // Update capabilities
+        if (sessionData.capabilities && Array.isArray(sessionData.capabilities)) {
+            state.sessionMirror.capabilities = [...sessionData.capabilities];
+        }
+        
+        // Update session ID
+        if (sessionData.sessionId) {
+            state.sessionId = sessionData.sessionId;
+        }
+        
         // Update session mirror
         updateSessionMirror(sessionData, 'local_update');
+        
+        // Also update session client
+        SessionClient.updateSession(sessionData, 'local_update');
         
         // Trigger token ready
         isTokenReady = true;
         triggerTokenReadyCallbacks();
         processPendingApiRequests();
         
-        log(LOG_LEVEL.INFO, 'Session', 'Local state updated from session', {
+        DiagnosticsAgent.info('Session', 'Local state updated from session', {
             user: sessionData.user?.id,
             hasToken: !!sessionData.token
         });
         
         return true;
     } catch (error) {
-        safeLogError('Status', 'updateLocalStateWithSession', error);
+        DiagnosticsAgent.error('Session', 'updateLocalStateWithSession error', error);
         return false;
+    }
+}
+
+// =============================================
+// DIAGNOSTICS AND MONITORING
+// =============================================
+function enableDiagnostics() {
+    state.diagnosticsEnabled = true;
+    window.__IFRAME_DEBUG__ = true;
+    DiagnosticsAgent.enable();
+    DiagnosticsAgent.info('Diagnostics', 'Diagnostics enabled');
+}
+
+function disableDiagnostics() {
+    state.diagnosticsEnabled = false;
+    window.__IFRAME_DEBUG__ = false;
+    DiagnosticsAgent.disable();
+    DiagnosticsAgent.info('Diagnostics', 'Diagnostics disabled');
+}
+
+function getDiagnostics() {
+    return {
+        health: getHealthMetrics(),
+        diagnosticLog: state.diagnosticData,
+        handshake: {
+            state: state.handshakeState,
+            startTime: state.handshakeStartTime,
+            endTime: state.handshakeEndTime,
+            duration: state.handshakeEndTime ? state.handshakeEndTime - state.handshakeStartTime : null,
+            childReadySent: state.childReadySent,
+            parentReadyReceived: state.parentReadyReceived,
+            handshakeAckReceived: state.handshakeAckReceived,
+            sessionSyncReceived: state.sessionSyncReceived,
+            pageActivated: state.pageActivated
+        },
+        session: getSessionMirror(),
+        security: state.securityContext,
+        frame: {
+            id: state.frameId,
+            instanceId: state.instanceId
+        },
+        parent: {
+            detected: state.parentDetected,
+            origin: state.securityContext.parentOrigin,
+            protocol: state.parentProtocolVersion,
+            capabilities: Array.from(state.parentCapabilities)
+        },
+        retry: {
+            queueSize: state.retryQueue.length,
+            pendingAcks: state.pendingAcks.size
+        },
+        offline: {
+            enabled: state.offlineModeEnabled,
+            isOnline: state.isOnline,
+            bufferSize: state.offlineBuffer.length
+        },
+        environment: {
+            type: IframeEnvironment.type,
+            isLocalDev: IframeEnvironment.isLocalDev,
+            isRenderHosted: IframeEnvironment.isRenderHosted,
+            isVPNNetwork: IframeEnvironment.isVPNNetwork,
+            isProduction: IframeEnvironment.isProduction,
+            isSandboxed: IframeEnvironment.isSandboxed,
+            latency: IframeEnvironment.latency,
+            connectionType: IframeEnvironment.connectionType
+        },
+        governor: StartupGovernor.getMetrics(),
+        sessionClient: {
+            sessionValid: SessionClient.sessionValid,
+            sessionExpiry: SessionClient.sessionExpiry,
+            offlineMode: SessionClient.offlineMode
+        },
+        transport: IframeTransport.getStatus(),
+        navigation: NavigationGuard.getState(),
+        diagnostics: DiagnosticsAgent.getReport()
+    };
+}
+
+// =============================================
+// SANDBOX DETECTION
+// =============================================
+function detectSandbox() {
+    try {
+        const sandboxed = !window.parent || window.parent === window || 
+                          (() => { try { return !window.parent.location; } catch { return true; } })();
+        
+        if (sandboxed) {
+            DiagnosticsAgent.info('Sandbox', 'Detected sandboxed environment');
+            
+            // Adjust security for sandbox
+            state.securityContext.signatureRequired = false;
+            state.securityContext.encryptionRequired = false;
+            state.securityContext.replayProtection = false;
+            
+            // Add sandbox to trusted origins
+            try {
+                if (document.referrer) {
+                    const referrerOrigin = new URL(document.referrer).origin;
+                    TRUSTED_ORIGINS.add(referrerOrigin);
+                }
+            } catch (e) {}
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        DiagnosticsAgent.warn('Sandbox', 'Error detecting sandbox', error);
+        return true; // Assume sandboxed on error
     }
 }
 
@@ -3722,10 +8067,15 @@ function cleanup() {
         if (activityThrottleTimer) { clearTimeout(activityThrottleTimer); activityThrottleTimer = null; }
         if (HandshakeClient.timer) { clearTimeout(HandshakeClient.timer); HandshakeClient.timer = null; }
         
+        // Clear retry timers
+        state.retryTimers.forEach((timer) => clearTimeout(timer));
+        state.retryTimers.clear();
+        
         cleanupEventListeners();
         
         tokenReadyCallbacks = [];
         pendingApiRequests = [];
+        state.retryQueue = [];
         
         parentCoordinator.handshakeInProgress = false;
         parentCoordinator.sessionValid = false;
@@ -3776,12 +8126,12 @@ let _ERROR_CACHE_ = new Set();
 function logOnce(level, msg) {
     if (_ERROR_CACHE_.has(msg)) return;
     _ERROR_CACHE_.add(msg);
-    log(level, 'StatusCore', msg);
+    DiagnosticsAgent.log(level, 'StatusCore', msg);
 }
 
 async function safeInit() {
     if (_INITIALIZATION_STARTED_) {
-        logOnce(LOG_LEVEL.WARN, 'Initialization already started');
+        logOnce('warn', 'Initialization already started');
         return;
     }
     
@@ -3790,23 +8140,29 @@ async function safeInit() {
     let tries = 0;
     const maxTries = 5;
     
-    logOnce(LOG_LEVEL.INFO, 'Starting safe initialization');
+    logOnce('info', 'Starting safe initialization');
+    
+    // Detect environment
+    IframeEnvironment.detect();
+    
+    // Detect sandbox
+    detectSandbox();
     
     // Use ParentDetector for reliable detection
     const parentAvailable = await ParentDetector.detect();
     
     if (parentAvailable) {
-        logOnce(LOG_LEVEL.INFO, 'Parent handshake establishing');
+        logOnce('info', 'Parent handshake establishing');
         
-        // Execute handshake
-        const handshakeResult = await HandshakeClient.execute({ maxRetries: 3 }).catch(() => null);
+        // Execute enhanced handshake
+        const handshakeResult = await HandshakeClient.execute({ maxRetries: IframeEnvironment.getConfig().maxRetries }).catch(() => null);
         
         if (handshakeResult && handshakeResult.success) {
             _PARENT_READY_ = true;
             _HANDSHAKE_DONE_ = true;
-            logOnce(LOG_LEVEL.INFO, 'Parent handshake established');
+            logOnce('info', 'Parent handshake established');
         } else {
-            logOnce(LOG_LEVEL.WARN, 'Running in fallback mode - handshake failed');
+            logOnce('warn', 'Running in fallback mode - handshake failed');
             
             // Try to load from mirror
             if (state.sessionMirror.validated) {
@@ -3816,7 +8172,7 @@ async function safeInit() {
             }
         }
     } else {
-        logOnce(LOG_LEVEL.WARN, 'Running in fallback mode - parent not ready');
+        logOnce('warn', 'Running in fallback mode - parent not ready');
         
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
@@ -3826,7 +8182,7 @@ async function safeInit() {
     }
     
     try {
-        logOnce(LOG_LEVEL.INFO, 'Binding UI immediately');
+        logOnce('info', 'Binding UI immediately');
         initializeUIWithCachedData();
         
         setTimeout(async () => {
@@ -3839,7 +8195,7 @@ async function safeInit() {
         }, 50);
         
     } catch (e) {
-        logOnce(LOG_LEVEL.ERROR, `Initialization failed: ${e.message}`);
+        logOnce('error', `Initialization failed: ${e.message}`);
     }
 }
 
@@ -3847,7 +8203,7 @@ function notifyParentReady() {
     if (_HANDSHAKE_DONE_) return;
     
     if (_HANDSHAKE_RETRIES_ >= MAX_HANDSHAKE) {
-        logOnce(LOG_LEVEL.WARN, `Handshake failed after ${MAX_HANDSHAKE} attempts`);
+        logOnce('warn', `Handshake failed after ${MAX_HANDSHAKE} attempts`);
         return;
     }
     
@@ -3859,16 +8215,18 @@ function notifyParentReady() {
                 page: location.pathname,
                 module: 'status-core',
                 timestamp: Date.now(),
-                version: '2.0',
-                protocolVersion: state.protocolVersion
+                version: '5.0',
+                protocolVersion: state.protocolVersion,
+                frameId: state.frameId,
+                environment: IframeEnvironment.type
             });
             
             window.parent.postMessage(message, '*');
             
             _HANDSHAKE_RETRIES_++;
-            logOnce(LOG_LEVEL.INFO, `Handshake attempt ${_HANDSHAKE_RETRIES_}/${MAX_HANDSHAKE}`);
+            logOnce('info', `Handshake attempt ${_HANDSHAKE_RETRIES_}/${MAX_HANDSHAKE}`);
         } catch (error) {
-            logOnce(LOG_LEVEL.ERROR, 'Failed to send handshake to parent');
+            logOnce('error', 'Failed to send handshake to parent');
         }
     }
 }
@@ -4027,11 +8385,39 @@ if (typeof window !== 'undefined') {
             // New exports
             HandshakeClient,
             ParentDetector,
-            SecureStorage,
+            SafeStorage,
             MessageFirewall,
             getSessionMirror,
-            isSessionMirrorValid
+            isSessionMirrorValid,
+            refreshToken,
+            requestParentConfig,
+            enableDiagnostics,
+            disableDiagnostics,
+            getDiagnostics,
+            formatCanonicalMessage,
+            adaptLegacyMessage,
+            detectSandbox,
+            
+            // New enhanced modules
+            IframeEnvironment,
+            IframeAuthority,
+            StartupGovernor,
+            OriginTrustAdapter,
+            MessageBus,
+            IframeTransport,
+            RecoveryManager,
+            SessionClient,
+            CompatibilityBridge,
+            NavigationGuard,
+            DiagnosticsAgent,
+            ReliabilityEngine,
+            IframeHandshakeAuthority
         };
+        
+        // Enable debug mode if URL parameter present
+        if (window.location.search.includes('debug=true')) {
+            enableDiagnostics();
+        }
     } catch (error) {
         safeLogError('Status', 'globalExposure', error);
     }
@@ -4097,7 +8483,7 @@ export {
     LOCAL_STORAGE_KEYS,
     UNIFIED_TOKEN_KEY,
     
-    // Core functions - ALL REQUIRED BY UI
+    // Core functions
     initializeCore,
     startHandshake,
     sendToParent,
@@ -4199,9 +8585,33 @@ export {
     getSelectedDraft,
     setSelectedDraft,
     
-    // New exports for enhanced functionality
+    // Enhanced functionality
     getSessionMirror,
-    isSessionMirrorValid
+    isSessionMirrorValid,
+    refreshToken,
+    requestParentConfig,
+    enableDiagnostics,
+    disableDiagnostics,
+    getDiagnostics,
+    formatCanonicalMessage,
+    adaptLegacyMessage,
+    detectSandbox,
+    
+    // Enhanced modules
+    IframeEnvironment,
+    IframeAuthority,
+    StartupGovernor,
+    OriginTrustAdapter,
+    MessageBus,
+    IframeTransport,
+    RecoveryManager,
+    SessionClient,
+    CompatibilityBridge,
+    NavigationGuard,
+    DiagnosticsAgent,
+    ReliabilityEngine,
+    IframeHandshakeAuthority,
+    SafeStorage
 };
 
 // =============================================
@@ -4213,4 +8623,4 @@ if (typeof window !== 'undefined' && !state.initialized) {
     }, 10);
 }
 
-console.log('[Status] Core system initialized successfully (v2.1 - hardened)');
+console.log('[Status] Core system initialized successfully (v5.0 - enhanced resilience, security, and reliability)');

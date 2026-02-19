@@ -1,6 +1,8 @@
 // =============================================
 // STATUS SYSTEM - RESILIENT UI CONTROLLER
+// ENHANCED VERSION v5.0 - WITH UI FAILSAFE LAYER
 // FAULT-TOLERANT, PROGRESSIVE RENDERING, CORE-INTEGRATED
+// COMPLETE RELIABILITY OVERHAUL - PRESERVES ALL EXISTING FEATURES
 // =============================================
 
 import {
@@ -60,7 +62,7 @@ import {
     LOCAL_STORAGE_KEYS,
     UNIFIED_TOKEN_KEY,
     
-    // Core functions - VERIFIED IMPORTS
+    // Core functions
     initializeParentCoordination,
     sendToParent,
     handleSessionData,
@@ -116,141 +118,25 @@ import {
     generateSampleMoodData,
     initPageCore,
     getSession,
-    isSessionValid
+    isSessionValid,
+    
+    // Enhanced core exports
+    getHealthMetrics,
+    getDiagnostics,
+    refreshToken,
+    requestParentConfig,
+    SessionClient,
+    IframeHandshakeAuthority,
+    StartupGovernor,
+    DiagnosticsAgent,
+    SafeStorage,
+    NavigationGuard,
+    CompatibilityBridge,
+    IframeEnvironment
 } from './status-core.js';
 
 // =============================================
-// ERROR BOUNDARY - UI PROTECTION LAYER
-// =============================================
-class UIErrorBoundary {
-    constructor() {
-        this.failedSections = new Set();
-        this.fallbacks = new Map();
-        this.initializeFallbacks();
-    }
-
-    initializeFallbacks() {
-        this.fallbacks.set('statusList', this.createStatusListFallback);
-        this.fallbacks.set('statusViewer', this.createViewerFallback);
-        this.fallbacks.set('createStatus', this.createCreateStatusFallback);
-        this.fallbacks.set('highlights', this.createHighlightsFallback);
-        this.fallbacks.set('stats', this.createStatsFallback);
-        this.fallbacks.set('drafts', this.createDraftsFallback);
-        this.fallbacks.set('schedule', this.createScheduleFallback);
-    }
-
-    wrap(sectionId, renderFn, fallbackType = null) {
-        return async (...args) => {
-            if (this.failedSections.has(sectionId)) {
-                const fallback = this.fallbacks.get(fallbackType || sectionId);
-                return fallback ? fallback(...args) : this.createGenericFallback();
-            }
-
-            try {
-                return await renderFn(...args);
-            } catch (error) {
-                this.failedSections.add(sectionId);
-                logUIError(sectionId, error);
-                
-                const fallback = this.fallbacks.get(fallbackType || sectionId);
-                return fallback ? fallback(...args) : this.createGenericFallback();
-            }
-        };
-    }
-
-    createStatusListFallback() {
-        return `
-            <div class="empty-state error-state" role="alert">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p>Unable to load statuses</p>
-                <p class="subtext">Please try refreshing</p>
-                <button class="btn primary" onclick="window.location.reload()">
-                    <i class="fas fa-redo"></i> Refresh
-                </button>
-            </div>
-        `;
-    }
-
-    createViewerFallback() {
-        return `
-            <div class="viewer-error">
-                <i class="fas fa-eye-slash"></i>
-                <p>Status viewer unavailable</p>
-                <button class="btn-text" onclick="document.getElementById('statusViewerPanel')?.classList.remove('active')">
-                    Close
-                </button>
-            </div>
-        `;
-    }
-
-    createCreateStatusFallback() {
-        return `
-            <div class="empty-state error-state">
-                <i class="fas fa-exclamation-circle"></i>
-                <p>Status creation unavailable</p>
-                <p class="subtext">Please try again later</p>
-            </div>
-        `;
-    }
-
-    createHighlightsFallback() {
-        return `
-            <div class="empty-state error-state">
-                <i class="fas fa-star"></i>
-                <p>Highlights unavailable</p>
-            </div>
-        `;
-    }
-
-    createStatsFallback() {
-        return `
-            <div class="empty-state error-state">
-                <i class="fas fa-chart-line"></i>
-                <p>Statistics unavailable</p>
-            </div>
-        `;
-    }
-
-    createDraftsFallback() {
-        return `
-            <div class="empty-state error-state">
-                <i class="fas fa-file-alt"></i>
-                <p>Drafts unavailable</p>
-            </div>
-        `;
-    }
-
-    createScheduleFallback() {
-        return `
-            <div class="empty-state error-state">
-                <i class="fas fa-clock"></i>
-                <p>Scheduling unavailable</p>
-            </div>
-        `;
-    }
-
-    createGenericFallback() {
-        return `
-            <div class="empty-state error-state">
-                <i class="fas fa-exclamation-circle"></i>
-                <p>Content temporarily unavailable</p>
-            </div>
-        `;
-    }
-
-    reset(sectionId) {
-        this.failedSections.delete(sectionId);
-    }
-
-    resetAll() {
-        this.failedSections.clear();
-    }
-}
-
-const uiErrorBoundary = new UIErrorBoundary();
-
-// =============================================
-// UI LOGGING & DIAGNOSTICS
+// UI LOGGING - No Spam
 // =============================================
 const UILogger = {
     logs: [],
@@ -258,36 +144,59 @@ const UILogger = {
     errors: new Set(),
     renderTimings: new Map(),
     maxLogs: 50,
+    diagnostics: false,
+    lastLogTime: 0,
+    logThrottle: 1000, // 1 second
+
+    enableDiagnostics() {
+        this.diagnostics = true;
+        if (typeof DiagnosticsAgent !== 'undefined') {
+            DiagnosticsAgent.enable();
+        }
+    },
+
+    disableDiagnostics() {
+        this.diagnostics = false;
+        if (typeof DiagnosticsAgent !== 'undefined') {
+            DiagnosticsAgent.disable();
+        }
+    },
 
     log(level, module, message, data = null) {
-        const entry = {
-            timestamp: Date.now(),
-            level,
-            module,
-            message,
-            data,
-            formatted: `[${new Date().toISOString()}] [${module}] ${message}`
-        };
-
-        this.logs.unshift(entry);
-        if (this.logs.length > this.maxLogs) this.logs.pop();
-
+        const now = Date.now();
+        
         if (level === 'error') {
             const key = `${module}:${message}`;
             if (!this.errors.has(key)) {
                 this.errors.add(key);
-                console.error(entry.formatted, data || '');
+                if (typeof DiagnosticsAgent !== 'undefined') {
+                    DiagnosticsAgent.error(module, message, data);
+                }
+                setTimeout(() => this.errors.delete(key), 60000);
             }
         } else if (level === 'warn') {
             const key = `${module}:${message}`;
             if (!this.warnings.has(key)) {
                 this.warnings.add(key);
-                console.warn(entry.formatted, data || '');
+                if (typeof DiagnosticsAgent !== 'undefined') {
+                    DiagnosticsAgent.warn(module, message, data);
+                }
+                setTimeout(() => this.warnings.delete(key), 30000);
             }
-        } else if (level === 'debug') {
-            console.debug(entry.formatted, data || '');
-        } else {
-            console.log(entry.formatted, data || '');
+        } else if (level === 'info' && this.diagnostics) {
+            if (now - this.lastLogTime > this.logThrottle) {
+                this.lastLogTime = now;
+                if (typeof DiagnosticsAgent !== 'undefined') {
+                    DiagnosticsAgent.info(module, message, data);
+                }
+            }
+        } else if (level === 'debug' && this.diagnostics) {
+            if (now - this.lastLogTime > this.logThrottle) {
+                this.lastLogTime = now;
+                if (typeof DiagnosticsAgent !== 'undefined') {
+                    DiagnosticsAgent.debug(module, message, data);
+                }
+            }
         }
     },
 
@@ -316,8 +225,8 @@ const UILogger = {
             logs: this.logs.slice(0, 20),
             warnings: Array.from(this.warnings),
             errors: Array.from(this.errors),
-            failedSections: Array.from(uiErrorBoundary.failedSections),
-            renderCount: this.renderTimings.size
+            renderCount: this.renderTimings.size,
+            diagnostics: this.diagnostics
         };
     }
 };
@@ -325,17 +234,478 @@ const UILogger = {
 function logUIError(section, error) {
     UILogger.error('UI', `Section ${section} failed`, {
         message: error?.message,
-        stack: error?.stack,
         section
     });
 }
 
 // =============================================
-// SECURE SANITIZATION - XSS PROTECTION
+// UI FAILSAFE - Critical Protection Layer
+// =============================================
+const UIFailsafe = {
+    failedSections: new Set(),
+    recoveryAttempts: new Map(),
+    maxRecoveryAttempts: 3,
+    fallbackTimeout: null,
+    actionQueue: [],
+    processingAction: false,
+    disabledButtons: new Set(),
+    mutationObserver: null,
+    criticalElements: new Set([
+        'createStatusBtn', 'statusViewerPanel', 'sidebar',
+        'allStatusList', 'myStatusPreview', 'handshakeStatus',
+        'notification', 'errorUI'
+    ]),
+    
+    initialize() {
+        this._setupGlobalErrorHandler();
+        this._setupMutationObserver();
+        this._setupNetworkListeners();
+        UILogger.info('UIFailsafe', 'UI failsafe initialized');
+    },
+    
+    _setupGlobalErrorHandler() {
+        window.addEventListener('error', (event) => {
+            this.handleError('global', event.error || event.message);
+        });
+        
+        window.addEventListener('unhandledrejection', (event) => {
+            this.handleError('promise', event.reason);
+        });
+    },
+    
+    _setupNetworkListeners() {
+        window.addEventListener('online', () => {
+            this.handleNetworkChange('online');
+        });
+        
+        window.addEventListener('offline', () => {
+            this.handleNetworkChange('offline');
+        });
+    },
+    
+    handleNetworkChange(status) {
+        UILogger.info('Network', `Network status changed: ${status}`);
+        
+        if (status === 'online') {
+            this.processActionQueue();
+            
+            if (typeof NavigationGuard !== 'undefined') {
+                NavigationGuard.endOperation('network-offline');
+            }
+        } else {
+            if (typeof NavigationGuard !== 'undefined') {
+                NavigationGuard.startOperation('network-offline');
+            }
+        }
+    },
+    
+    _setupMutationObserver() {
+        try {
+            this.mutationObserver = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
+                        for (const node of mutation.removedNodes) {
+                            if (node.nodeType === 1 && node.id && this.criticalElements.has(node.id)) {
+                                UILogger.warn('UIFailsafe', `Critical element removed: ${node.id}`);
+                                this._recreateElement(node.id);
+                            }
+                        }
+                    }
+                }
+            });
+            
+            this.mutationObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        } catch (e) {
+            UILogger.error('UIFailsafe', 'MutationObserver failed', e);
+        }
+    },
+    
+    _recreateElement(id) {
+        const parent = document.querySelector('.sidebar') || document.body;
+        if (!parent) return;
+        
+        const element = document.getElementById(id);
+        if (element) return;
+        
+        const newElement = document.createElement('div');
+        newElement.id = id;
+        
+        if (id === 'handshakeStatus') {
+            newElement.className = 'handshake-status-container';
+            newElement.innerHTML = '<div class="handshake-status waiting"><i class="fas fa-clock"></i><span>Reconnecting...</span></div>';
+        } else if (id === 'myStatusPreview') {
+            newElement.className = 'my-status-preview';
+            newElement.innerHTML = '<div class="my-status-preview-placeholder"><i class="fas fa-user-circle"></i><span>Loading...</span></div>';
+        } else if (id === 'allStatusList') {
+            newElement.className = 'statuses-list';
+            newElement.innerHTML = '<div class="enhanced-loading"><i class="fas fa-spinner"></i><p>Loading statuses...</p></div>';
+        }
+        
+        if (id === 'handshakeStatus') {
+            const preview = document.getElementById('myStatusPreview');
+            if (preview) {
+                preview.after(newElement);
+            } else {
+                parent.prepend(newElement);
+            }
+        } else {
+            parent.appendChild(newElement);
+        }
+        
+        UILogger.info('UIFailsafe', `Recreated element: ${id}`);
+    },
+    
+    handleError(source, error) {
+        const key = `${source}:${error}`;
+        
+        if (!this.failedSections.has(key)) {
+            this.failedSections.add(key);
+            UILogger.error('UIFailsafe', `Error in ${source}`, error);
+            
+            this._attemptRecovery(source);
+        }
+    },
+    
+    _attemptRecovery(source) {
+        const attempts = this.recoveryAttempts.get(source) || 0;
+        
+        if (attempts < this.maxRecoveryAttempts) {
+            this.recoveryAttempts.set(source, attempts + 1);
+            
+            const delay = 5000 * Math.pow(2, attempts);
+            
+            setTimeout(() => {
+                this.failedSections.delete(source);
+                UILogger.info('UIFailsafe', `Recovery attempt for ${source} after ${delay}ms`);
+            }, delay);
+        }
+    },
+    
+    wrapAction(actionFn, actionName) {
+        return async (...args) => {
+            if (this.disabledButtons.has(actionName)) {
+                UILogger.warn('UIFailsafe', `Action disabled: ${actionName}`);
+                showNotification(`${actionName} temporarily unavailable`, 'warning');
+                return null;
+            }
+            
+            return new Promise((resolve, reject) => {
+                this.actionQueue.push({ 
+                    fn: actionFn, 
+                    args, 
+                    name: actionName,
+                    resolve,
+                    reject,
+                    timestamp: Date.now()
+                });
+                
+                if (!this.processingAction && navigator.onLine) {
+                    this._processQueue();
+                } else if (!navigator.onLine) {
+                    showNotification('You are offline. Action queued.', 'info');
+                }
+            });
+        };
+    },
+    
+    async _processQueue() {
+        if (this.processingAction || this.actionQueue.length === 0) return;
+        
+        this.processingAction = true;
+        
+        while (this.actionQueue.length > 0) {
+            const item = this.actionQueue.shift();
+            
+            // Remove expired items (older than 5 minutes)
+            if (Date.now() - item.timestamp > 300000) {
+                item.reject(new Error('Action expired in queue'));
+                continue;
+            }
+            
+            try {
+                const result = await item.fn(...item.args);
+                item.resolve(result);
+            } catch (error) {
+                UILogger.error('UIFailsafe', `Action failed: ${item.name}`, error);
+                
+                const attempts = this.recoveryAttempts.get(item.name) || 0;
+                if (attempts < this.maxRecoveryAttempts) {
+                    this.recoveryAttempts.set(item.name, attempts + 1);
+                    this.actionQueue.push(item); // Requeue
+                    const delay = 1000 * Math.pow(2, attempts);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    this.disabledButtons.add(item.name);
+                    item.reject(error);
+                    this._showFallbackMessage(item.name);
+                }
+            }
+            
+            // Small delay between actions
+            await new Promise(r => setTimeout(r, 100));
+        }
+        
+        this.processingAction = false;
+    },
+    
+    processActionQueue() {
+        if (!this.processingAction && this.actionQueue.length > 0) {
+            this._processQueue();
+        }
+    },
+    
+    _showFallbackMessage(actionName) {
+        showNotification(`${actionName} temporarily unavailable`, 'warning');
+    },
+    
+    protectButton(buttonId) {
+        const button = document.getElementById(buttonId);
+        if (!button) return;
+        
+        button.addEventListener('click', (e) => {
+            if (this.disabledButtons.has(buttonId)) {
+                e.preventDefault();
+                e.stopPropagation();
+                this._showFallbackMessage(buttonId);
+                return false;
+            }
+        });
+    },
+    
+    canRecover(section) {
+        const attempts = this.recoveryAttempts.get(section) || 0;
+        return attempts < this.maxRecoveryAttempts;
+    },
+    
+    reset(section) {
+        this.failedSections.delete(section);
+        this.recoveryAttempts.delete(section);
+    },
+    
+    resetAll() {
+        this.failedSections.clear();
+        this.recoveryAttempts.clear();
+        this.disabledButtons.clear();
+        this.actionQueue = [];
+    }
+};
+
+// Initialize UI failsafe
+UIFailsafe.initialize();
+
+// =============================================
+// UI ERROR BOUNDARY - Wrapper
+// =============================================
+class UIErrorBoundary {
+    constructor() {
+        this.failedSections = new Set();
+        this.fallbacks = new Map();
+        this.initializeFallbacks();
+    }
+
+    initializeFallbacks() {
+        this.fallbacks.set('statusList', this.createStatusListFallback);
+        this.fallbacks.set('statusViewer', this.createViewerFallback);
+        this.fallbacks.set('createStatus', this.createCreateStatusFallback);
+        this.fallbacks.set('highlights', this.createHighlightsFallback);
+        this.fallbacks.set('stats', this.createStatsFallback);
+        this.fallbacks.set('drafts', this.createDraftsFallback);
+        this.fallbacks.set('schedule', this.createScheduleFallback);
+        this.fallbacks.set('handshake', this.createHandshakeFallback);
+        this.fallbacks.set('connection', this.createConnectionFallback);
+        this.fallbacks.set('memoryTimeline', this.createMemoryTimelineFallback);
+        this.fallbacks.set('poll', this.createPollFallback);
+        this.fallbacks.set('reactions', this.createReactionsFallback);
+    }
+
+    wrap(sectionId, renderFn, fallbackType = null) {
+        return async (...args) => {
+            if (this.failedSections.has(sectionId) || !UIFailsafe.canRecover(sectionId)) {
+                const fallback = this.fallbacks.get(fallbackType || sectionId);
+                return fallback ? fallback(...args) : this.createGenericFallback();
+            }
+
+            try {
+                UILogger.startRender(sectionId);
+                const result = await renderFn(...args);
+                UILogger.endRender(sectionId);
+                return result;
+            } catch (error) {
+                this.failedSections.add(sectionId);
+                UIFailsafe.handleError(sectionId, error);
+                
+                const fallback = this.fallbacks.get(fallbackType || sectionId);
+                return fallback ? fallback(...args) : this.createGenericFallback();
+            }
+        };
+    }
+
+    createStatusListFallback() {
+        return `
+            <div class="empty-state error-state" role="alert">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Unable to load statuses</p>
+                <p class="subtext">Please try refreshing</p>
+                <button class="action-btn primary" onclick="window.location.reload()">
+                    <i class="fas fa-redo"></i> Refresh
+                </button>
+            </div>
+        `;
+    }
+
+    createViewerFallback() {
+        return `
+            <div class="viewer-error empty-state error-state">
+                <i class="fas fa-eye-slash"></i>
+                <p>Status viewer unavailable</p>
+                <button class="action-btn secondary" onclick="document.getElementById('statusViewerPanel')?.classList.remove('active')">
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    createCreateStatusFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>Status creation unavailable</p>
+                <p class="subtext">Please try again later</p>
+            </div>
+        `;
+    }
+
+    createHighlightsFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-star"></i>
+                <p>Highlights unavailable</p>
+                <button class="action-btn secondary" onclick="document.getElementById('highlightsModal')?.classList.remove('active')">
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    createStatsFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-chart-line"></i>
+                <p>Statistics unavailable</p>
+                <button class="action-btn secondary" onclick="document.getElementById('statsModal')?.classList.remove('active')">
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    createDraftsFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-file-alt"></i>
+                <p>Drafts unavailable</p>
+                <button class="action-btn secondary" onclick="document.getElementById('draftsModal')?.classList.remove('active')">
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    createScheduleFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-clock"></i>
+                <p>Scheduling unavailable</p>
+                <button class="action-btn secondary" onclick="document.getElementById('scheduleModal')?.classList.remove('active')">
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    createHandshakeFallback() {
+        return `
+            <div class="handshake-waiting">
+                <div class="handshake-spinner">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                </div>
+                <p>Connecting...</p>
+                <div class="handshake-retry">
+                    <button class="action-btn secondary" onclick="window.statusUI?.retryHandshake()">
+                        <i class="fas fa-redo"></i> Retry
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    createConnectionFallback() {
+        return `
+            <div class="connection-error empty-state error-state">
+                <i class="fas fa-wifi-slash"></i>
+                <p>Connection lost</p>
+                <p class="subtext">Attempting to reconnect...</p>
+                <div class="connection-progress">
+                    <div class="progress-bar indeterminate"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    createMemoryTimelineFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-history"></i>
+                <p>Memory timeline unavailable</p>
+                <button class="action-btn secondary" onclick="document.getElementById('memoryTimelineModal')?.classList.remove('active')">
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    createPollFallback() {
+        return `
+            <div class="poll-error empty-state error-state">
+                <i class="fas fa-poll"></i>
+                <p>Poll unavailable</p>
+            </div>
+        `;
+    }
+
+    createReactionsFallback() {
+        return `
+            <div class="reactions-error">
+                <p>Reactions unavailable</p>
+            </div>
+        `;
+    }
+
+    createGenericFallback() {
+        return `
+            <div class="empty-state error-state">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>Content temporarily unavailable</p>
+            </div>
+        `;
+    }
+
+    reset(sectionId) {
+        this.failedSections.delete(sectionId);
+        UIFailsafe.reset(sectionId);
+    }
+}
+
+const uiErrorBoundary = new UIErrorBoundary();
+
+// =============================================
+// SECURE SANITIZATION
 // =============================================
 const UISanitizer = {
     allowedTags: ['b', 'i', 'em', 'strong', 'a', 'span', 'div', 'p', 'br'],
-    allowedAttributes: ['href', 'class', 'id', 'style', 'data-*'],
 
     sanitizeHTML(str) {
         if (!str) return '';
@@ -366,6 +736,9 @@ const UISanitizer = {
                 if (typeof value === 'string') {
                     return this.sanitizeHTML(value);
                 }
+                if (key === 'token' || key === 'accessToken' || key === 'refreshToken') {
+                    return '[REDACTED]';
+                }
                 return value;
             }));
         } catch (e) {
@@ -392,11 +765,26 @@ const UISanitizer = {
         }
         
         return sanitized;
+    },
+
+    sanitizeFileName(name) {
+        if (!name) return '';
+        return String(name).replace(/[^a-zA-Z0-9.-]/g, '_');
+    },
+
+    sanitizeUrl(url) {
+        if (!url) return '';
+        try {
+            const parsed = new URL(url, window.location.origin);
+            return parsed.toString();
+        } catch {
+            return '';
+        }
     }
 };
 
 // =============================================
-// RENDERING PIPELINE - PROGRESSIVE ENHANCEMENT
+// RENDERING PIPELINE
 // =============================================
 const UIRenderPipeline = {
     stages: ['skeleton', 'initialRender', 'progressiveEnhancement', 'liveUpdate'],
@@ -404,23 +792,24 @@ const UIRenderPipeline = {
     pendingUpdates: new Map(),
     renderQueue: new Set(),
     rafId: null,
+    handshakeStatus: 'waiting',
+    handshakeRetryCount: 0,
+    renderCount: 0,
+    maxRenderAttempts: 3,
 
     async execute(containerId, renderFn, fallbackId = null) {
         UILogger.startRender(containerId);
         
         try {
-            // Stage 1: Skeleton
             if (this.currentStage === 'skeleton') {
                 this.renderSkeleton(containerId);
             }
             
-            // Stage 2: Initial Render
             if (this.currentStage === 'initialRender' || this.currentStage === 'skeleton') {
                 const content = await renderFn();
                 this.renderContent(containerId, content);
             }
             
-            // Stage 3: Progressive Enhancement
             if (this.currentStage === 'progressiveEnhancement') {
                 this.enhanceContainer(containerId);
             }
@@ -429,8 +818,11 @@ const UIRenderPipeline = {
             return true;
         } catch (error) {
             UILogger.error('Render', `Failed to render ${containerId}`, error);
+            this.renderCount++;
             
-            if (fallbackId) {
+            if (this.renderCount < this.maxRenderAttempts) {
+                setTimeout(() => this.execute(containerId, renderFn, fallbackId), 1000);
+            } else if (fallbackId) {
                 const fallback = uiErrorBoundary.createGenericFallback();
                 this.renderContent(containerId, fallback);
             }
@@ -453,6 +845,9 @@ const UIRenderPipeline = {
             case 'friendsStatusList':
             case 'closeFriendsStatusList':
             case 'myStatusList':
+            case 'pinnedStatusList':
+            case 'mutedStatusList':
+            case 'microCirclesStatusList':
                 return Array(3).fill(0).map(() => `
                     <div class="status-item skeleton">
                         <div class="status-avatar skeleton-pulse"></div>
@@ -472,6 +867,41 @@ const UIRenderPipeline = {
                             <div class="highlight-name skeleton-pulse" style="width: 70%;"></div>
                             <div class="highlight-count skeleton-pulse" style="width: 40%;"></div>
                         </div>
+                    </div>
+                `).join('');
+            
+            case 'handshakeStatus':
+                return `
+                    <div class="handshake-skeleton">
+                        <div class="handshake-spinner skeleton-pulse"></div>
+                        <div class="handshake-text skeleton-pulse" style="width: 200px; height: 20px;"></div>
+                        <div class="handshake-subtext skeleton-pulse" style="width: 150px; height: 16px;"></div>
+                    </div>
+                `;
+            
+            case 'moodChart':
+                return `
+                    <div class="mood-chart-skeleton">
+                        ${Array(7).fill(0).map(() => `
+                            <div class="mood-bar skeleton-pulse" style="height: ${30 + Math.random() * 50}px;"></div>
+                        `).join('')}
+                    </div>
+                `;
+            
+            case 'draftsList':
+            case 'allDraftsList':
+                return Array(2).fill(0).map(() => `
+                    <div class="draft-item skeleton">
+                        <div class="draft-preview skeleton-pulse" style="width: 90%; height: 20px;"></div>
+                        <div class="draft-meta skeleton-pulse" style="width: 60%; height: 16px; margin-top: 8px;"></div>
+                    </div>
+                `).join('');
+            
+            case 'scheduledStatusesList':
+                return Array(2).fill(0).map(() => `
+                    <div class="schedule-item skeleton">
+                        <div class="schedule-info skeleton-pulse" style="width: 70%; height: 20px;"></div>
+                        <div class="schedule-time skeleton-pulse" style="width: 40%; height: 16px; margin-top: 8px;"></div>
                     </div>
                 `).join('');
             
@@ -498,8 +928,20 @@ const UIRenderPipeline = {
         
         const images = container.querySelectorAll('img[data-src]');
         images.forEach(img => {
-            img.src = img.dataset.src;
-            img.removeAttribute('data-src');
+            if (img.dataset.src) {
+                img.src = img.dataset.src;
+                img.removeAttribute('data-src');
+            }
+        });
+        
+        const lazyImages = container.querySelectorAll('img[loading="lazy"]');
+        lazyImages.forEach(img => {
+            if (img.complete) {
+                img.classList.add('loaded');
+            } else {
+                img.addEventListener('load', () => img.classList.add('loaded'));
+                img.addEventListener('error', () => img.classList.add('error'));
+            }
         });
     },
 
@@ -527,17 +969,80 @@ const UIRenderPipeline = {
     setStage(stage) {
         if (this.stages.includes(stage)) {
             this.currentStage = stage;
-            UILogger.info('Render', `Pipeline stage: ${stage}`);
+            UILogger.debug('Render', `Pipeline stage: ${stage}`);
         }
+    },
+
+    updateHandshakeStatus(status) {
+        this.handshakeStatus = status;
+        this.queueUpdate('handshakeStatus', () => {
+            this.renderHandshakeStatus();
+        });
+    },
+
+    renderHandshakeStatus() {
+        const container = document.getElementById('handshakeStatus');
+        if (!container) return;
+
+        let content = '';
+        switch(this.handshakeStatus) {
+            case 'waiting':
+                content = `
+                    <div class="handshake-status waiting">
+                        <i class="fas fa-clock"></i>
+                        <span>Waiting for connection...</span>
+                    </div>
+                `;
+                break;
+            case 'connecting':
+                content = `
+                    <div class="handshake-status connecting">
+                        <i class="fas fa-circle-notch fa-spin"></i>
+                        <span>Connecting to server...</span>
+                    </div>
+                `;
+                break;
+            case 'connected':
+                content = `
+                    <div class="handshake-status connected">
+                        <i class="fas fa-check-circle"></i>
+                        <span>Connected</span>
+                    </div>
+                `;
+                break;
+            case 'failed':
+                content = `
+                    <div class="handshake-status failed">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span>Connection failed</span>
+                        <button class="action-btn secondary" onclick="window.statusUI?.retryHandshake()">
+                            <i class="fas fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
+                break;
+            case 'reconnecting':
+                content = `
+                    <div class="handshake-status connecting">
+                        <i class="fas fa-sync-alt fa-spin"></i>
+                        <span>Reconnecting...</span>
+                    </div>
+                `;
+                break;
+        }
+
+        container.innerHTML = content;
     }
 };
 
 // =============================================
-// CORE INTEGRATION BRIDGE - STRICT VALIDATION
+// CORE INTEGRATION BRIDGE
 // =============================================
 const UIBridge = {
     subscriptions: new Map(),
     validators: new Map(),
+    messageQueue: [],
+    processing: false,
     
     initialize() {
         this.registerValidators();
@@ -547,29 +1052,27 @@ const UIBridge = {
 
     registerValidators() {
         this.validators.set('statusUpdate', (data) => {
-            return data && 
-                   typeof data === 'object' && 
-                   data.id && 
-                   data.type && 
-                   ['text', 'media', 'poll'].includes(data.type);
+            return data && typeof data === 'object' && data.id;
         });
 
         this.validators.set('sessionData', (data) => {
-            return data && 
-                   typeof data === 'object' && 
-                   (!data.token || typeof data.token === 'string') &&
-                   (!data.user || (data.user.id && data.user.displayName));
+            return data && typeof data === 'object' && (data.user || data.token);
         });
 
         this.validators.set('reaction', (data) => {
-            return data && 
-                   data.statusId && 
-                   data.reaction && 
-                   Object.keys(reactions).includes(data.reaction);
+            return data && data.statusId && data.reaction;
         });
 
-        this.validators.set('userAction', (data) => {
-            return data && data.userId && typeof data.userId === 'string';
+        this.validators.set('handshake', (data) => {
+            return data && data.status && ['connecting', 'connected', 'failed', 'reconnecting'].includes(data.status);
+        });
+
+        this.validators.set('apiResponse', (data) => {
+            return data && data.requestId;
+        });
+
+        this.validators.set('navigation', (data) => {
+            return data && data.path;
         });
     },
 
@@ -585,28 +1088,87 @@ const UIBridge = {
         document.addEventListener('sessionReady', (e) => {
             this.handleCoreEvent('sessionReady', e.detail);
         });
+
+        document.addEventListener('handshakeUpdate', (e) => {
+            this.handleCoreEvent('handshake', e.detail);
+        });
+
+        document.addEventListener('connectionLost', (e) => {
+            this.handleCoreEvent('connectionLost', e.detail);
+            UIRenderPipeline.updateHandshakeStatus('failed');
+        });
+
+        document.addEventListener('connectionRestored', (e) => {
+            this.handleCoreEvent('connectionRestored', e.detail);
+            UIRenderPipeline.updateHandshakeStatus('connected');
+        });
+        
+        document.addEventListener('governorStateChange', (e) => {
+            if (e.detail.newState === 'ACTIVE') {
+                UIRenderPipeline.updateHandshakeStatus('connected');
+            } else if (e.detail.newState === 'DEGRADED') {
+                UIRenderPipeline.updateHandshakeStatus('failed');
+            } else if (e.detail.newState === 'RECOVERING') {
+                UIRenderPipeline.updateHandshakeStatus('reconnecting');
+            }
+        });
+
+        document.addEventListener('apiResponse', (e) => {
+            this.handleCoreEvent('apiResponse', e.detail);
+        });
+
+        document.addEventListener('navigate', (e) => {
+            this.handleCoreEvent('navigation', e.detail);
+        });
+
+        document.addEventListener('uiRecovery', (e) => {
+            UILogger.info('Bridge', 'UI recovery triggered', e.detail);
+            this.processMessageQueue();
+        });
+
+        document.addEventListener('configApplied', (e) => {
+            UILogger.info('Bridge', 'Configuration applied', e.detail);
+        });
     },
 
     handleCoreEvent(type, data) {
-        if (!data) {
-            UILogger.warn('Bridge', `Received empty ${type} event`);
-            return;
-        }
+        if (!data) return;
 
         const validator = this.validators.get(type);
-        if (validator && !validator(data)) {
-            UILogger.warn('Bridge', `Invalid ${type} payload`, data);
-            return;
+        if (validator && !validator(data)) return;
+
+        this.messageQueue.push({ type, data, timestamp: Date.now() });
+
+        if (!this.processing) {
+            this.processMessageQueue();
+        }
+    },
+
+    async processMessageQueue() {
+        if (this.processing || this.messageQueue.length === 0) return;
+
+        this.processing = true;
+
+        while (this.messageQueue.length > 0) {
+            const item = this.messageQueue.shift();
+
+            // Remove expired items (older than 1 minute)
+            if (Date.now() - item.timestamp > 60000) continue;
+
+            const handlers = this.subscriptions.get(item.type) || [];
+            handlers.forEach(handler => {
+                try {
+                    handler(this.sanitizeEventData(item.data));
+                } catch (error) {
+                    UILogger.error('Bridge', `Handler failed for ${item.type}`, error);
+                }
+            });
+
+            // Small delay between messages
+            await new Promise(r => setTimeout(r, 10));
         }
 
-        const handlers = this.subscriptions.get(type) || [];
-        handlers.forEach(handler => {
-            try {
-                handler(this.sanitizeEventData(data));
-            } catch (error) {
-                UILogger.error('Bridge', `Handler failed for ${type}`, error);
-            }
-        });
+        this.processing = false;
     },
 
     sanitizeEventData(data) {
@@ -614,11 +1176,11 @@ const UIBridge = {
         
         try {
             return JSON.parse(JSON.stringify(data, (key, value) => {
-                if (key === 'token' && typeof value === 'string') {
+                if (key === 'token' || key === 'accessToken' || key === 'refreshToken') {
                     return '[REDACTED]';
                 }
-                if (typeof value === 'string') {
-                    return value.slice(0, 5000);
+                if (typeof value === 'string' && value.length > 5000) {
+                    return value.slice(0, 5000) + '... [truncated]';
                 }
                 return value;
             }));
@@ -650,12 +1212,13 @@ const UIBridge = {
 
     clearSubscriptions() {
         this.subscriptions.clear();
+        this.messageQueue = [];
         UILogger.info('Bridge', 'All subscriptions cleared');
     }
 };
 
 // =============================================
-// CENTRALIZED EVENT SYSTEM
+// EVENT SYSTEM
 // =============================================
 class UIEventSystem {
     constructor() {
@@ -663,6 +1226,7 @@ class UIEventSystem {
         this.debounced = new Map();
         this.throttled = new Map();
         this.listenerRefs = new Set();
+        this.observerRefs = new Set();
         this.isInitialized = false;
     }
 
@@ -674,7 +1238,7 @@ class UIEventSystem {
         this.setupIntersectionObserver();
         this.isInitialized = true;
         
-        UILogger.info('Events', 'Event system initialized');
+        UILogger.debug('Events', 'Event system initialized');
     }
 
     setupGlobalListeners() {
@@ -682,7 +1246,11 @@ class UIEventSystem {
         this.addListener(window, 'scroll', this.throttle(this.handleScroll, 100));
         this.addListener(document, 'visibilitychange', this.handleVisibilityChange);
         this.addListener(document, 'keydown', this.handleKeyDown);
-        this.addListener(document, 'click', this.handleDocumentClick);
+        this.addListener(window, 'online', this.handleOnline);
+        this.addListener(window, 'offline', this.handleOffline);
+        this.addListener(window, 'popstate', this.handlePopState);
+        this.addListener(document, 'touchstart', this.handleTouchStart, { passive: true });
+        this.addListener(document, 'touchmove', this.throttle(this.handleTouchMove, 50), { passive: true });
     }
 
     setupResizeObserver() {
@@ -692,7 +1260,6 @@ class UIEventSystem {
                     this.handleResizeObserver(entries);
                 }, 100));
                 
-                this.observerRefs = this.observerRefs || new Set();
                 this.observerRefs.add(observer);
             } catch (e) {
                 UILogger.warn('Events', 'ResizeObserver not available', e);
@@ -705,12 +1272,9 @@ class UIEventSystem {
             try {
                 const observer = new IntersectionObserver((entries) => {
                     this.handleIntersection(entries);
-                }, {
-                    threshold: 0.1,
-                    rootMargin: '50px'
-                });
+                }, { threshold: 0.1, rootMargin: '50px' });
                 
-                this.intersectionObserver = observer;
+                this.observerRefs.add(observer);
             } catch (e) {
                 UILogger.warn('Events', 'IntersectionObserver not available', e);
             }
@@ -744,11 +1308,8 @@ class UIEventSystem {
         this.throttled.clear();
         this.handlers.clear();
         
-        if (this.intersectionObserver) {
-            this.intersectionObserver.disconnect();
-        }
-        
-        this.observerRefs?.forEach(observer => observer.disconnect());
+        this.observerRefs.forEach(observer => observer.disconnect());
+        this.observerRefs.clear();
         
         this.isInitialized = false;
         UILogger.info('Events', 'All listeners removed');
@@ -776,24 +1337,28 @@ class UIEventSystem {
         return throttled;
     }
 
-    handleResize = () => {
-        const width = window.innerWidth;
-        const wasMobile = isMobile;
-        isMobile = width <= 768;
-        
-        if (wasMobile !== isMobile) {
-            UILogger.debug('Events', `Device mode: ${isMobile ? 'mobile' : 'desktop'}`);
-            this.emit('deviceChange', { isMobile, width });
-        }
-        
-        this.emit('resize', { width, height: window.innerHeight });
+    handleOnline = () => {
+        this.emit('online', { timestamp: Date.now() });
+        UIFailsafe.processActionQueue();
     };
 
+    handleOffline = () => {
+        this.emit('offline', { timestamp: Date.now() });
+        showNotification('You are offline. Some features may be limited.', 'warning');
+    };
+
+    handleResize = () => {
+    const width = window.innerWidth;
+    const wasMobile = isMobile; // This is reading the imported constant
+    
+    if (wasMobile !== (width <= 768)) {
+        this.emit('deviceChange', { isMobile: width <= 768, width });
+    }
+    
+    this.emit('resize', { width, height: window.innerHeight });
+};
     handleScroll = () => {
-        this.emit('scroll', {
-            x: window.scrollX,
-            y: window.scrollY
-        });
+        this.emit('scroll', { x: window.scrollX, y: window.scrollY });
     };
 
     handleVisibilityChange = () => {
@@ -809,8 +1374,16 @@ class UIEventSystem {
         }
     };
 
-    handleDocumentClick = (e) => {
-        this.emit('click', e);
+    handlePopState = (e) => {
+        this.emit('popstate', { state: e.state, url: window.location.href });
+    };
+
+    handleTouchStart = (e) => {
+        this.emit('touchstart', { touches: e.touches.length });
+    };
+
+    handleTouchMove = (e) => {
+        this.emit('touchmove', { touches: e.touches.length });
     };
 
     handleResizeObserver(entries) {
@@ -822,7 +1395,7 @@ class UIEventSystem {
             if (entry.isIntersecting) {
                 this.emit('elementVisible', {
                     target: entry.target,
-                    ratio: entry.intersectionRatio
+                    intersectionRatio: entry.intersectionRatio
                 });
             }
         });
@@ -861,147 +1434,74 @@ class UIEventSystem {
             });
         }
     }
-
-    observeIntersection(element) {
-        if (this.intersectionObserver) {
-            this.intersectionObserver.observe(element);
-        }
-    }
-
-    unobserveIntersection(element) {
-        if (this.intersectionObserver) {
-            this.intersectionObserver.unobserve(element);
-        }
-    }
 }
 
 const uiEvents = new UIEventSystem();
 
 // =============================================
-// DOM ELEMENTS - SAFE ACCESSORS
+// DOM ELEMENTS
 // =============================================
 const UIElements = {
-    get createStatusModal() {
-        return document.getElementById('createStatusModal');
-    },
-    get draftsModal() {
-        return document.getElementById('draftsModal');
-    },
-    get highlightsModal() {
-        return document.getElementById('highlightsModal');
-    },
-    get highlightsEditorModal() {
-        return document.getElementById('highlightsEditorModal');
-    },
-    get memoryTimelineModal() {
-        return document.getElementById('memoryTimelineModal');
-    },
-    get statsModal() {
-        return document.getElementById('statsModal');
-    },
-    get scheduleModal() {
-        return document.getElementById('scheduleModal');
-    },
-    get reportModal() {
-        return document.getElementById('reportModal');
-    },
-    get statusViewerPanel() {
-        return document.getElementById('statusViewerPanel');
-    },
-    get notification() {
-        return document.getElementById('notification');
-    },
-    get errorUI() {
-        return document.getElementById('errorUI');
-    },
+    get createStatusModal() { return document.getElementById('createStatusModal'); },
+    get draftsModal() { return document.getElementById('draftsModal'); },
+    get highlightsModal() { return document.getElementById('highlightsModal'); },
+    get highlightsEditorModal() { return document.getElementById('highlightsEditorModal'); },
+    get memoryTimelineModal() { return document.getElementById('memoryTimelineModal'); },
+    get statsModal() { return document.getElementById('statsModal'); },
+    get scheduleModal() { return document.getElementById('scheduleModal'); },
+    get reportModal() { return document.getElementById('reportModal'); },
+    get statusViewerPanel() { return document.getElementById('statusViewerPanel'); },
+    get notification() { return document.getElementById('notification'); },
+    get errorUI() { return document.getElementById('errorUI'); },
     
-    get allStatusSection() {
-        return document.getElementById('allStatusSection');
-    },
-    get friendsStatusSection() {
-        return document.getElementById('friendsStatusSection');
-    },
-    get closeFriendsStatusSection() {
-        return document.getElementById('closeFriendsStatusSection');
-    },
-    get pinnedStatusSection() {
-        return document.getElementById('pinnedStatusSection');
-    },
-    get mutedStatusSection() {
-        return document.getElementById('mutedStatusSection');
-    },
-    get microCirclesStatusSection() {
-        return document.getElementById('microCirclesStatusSection');
-    },
-    get myStatusSection() {
-        return document.getElementById('myStatusSection');
-    },
+    get allStatusSection() { return document.getElementById('allStatusSection'); },
+    get friendsStatusSection() { return document.getElementById('friendsStatusSection'); },
+    get closeFriendsStatusSection() { return document.getElementById('closeFriendsStatusSection'); },
+    get pinnedStatusSection() { return document.getElementById('pinnedStatusSection'); },
+    get mutedStatusSection() { return document.getElementById('mutedStatusSection'); },
+    get microCirclesStatusSection() { return document.getElementById('microCirclesStatusSection'); },
+    get myStatusSection() { return document.getElementById('myStatusSection'); },
     
-    get allStatusList() {
-        return document.getElementById('allStatusList');
-    },
-    get friendsStatusList() {
-        return document.getElementById('friendsStatusList');
-    },
-    get closeFriendsStatusList() {
-        return document.getElementById('closeFriendsStatusList');
-    },
-    get pinnedStatusList() {
-        return document.getElementById('pinnedStatusList');
-    },
-    get mutedStatusList() {
-        return document.getElementById('mutedStatusList');
-    },
-    get microCirclesStatusList() {
-        return document.getElementById('microCirclesStatusList');
-    },
-    get myStatusList() {
-        return document.getElementById('myStatusList');
-    },
+    get allStatusList() { return document.getElementById('allStatusList'); },
+    get friendsStatusList() { return document.getElementById('friendsStatusList'); },
+    get closeFriendsStatusList() { return document.getElementById('closeFriendsStatusList'); },
+    get pinnedStatusList() { return document.getElementById('pinnedStatusList'); },
+    get mutedStatusList() { return document.getElementById('mutedStatusList'); },
+    get microCirclesStatusList() { return document.getElementById('microCirclesStatusList'); },
+    get myStatusList() { return document.getElementById('myStatusList'); },
     
-    getElement(id) {
-        return document.getElementById(id);
-    },
+    get handshakeStatus() { return document.getElementById('handshakeStatus'); },
+    
+    getElement(id) { return document.getElementById(id); },
     
     querySelector(selector) {
-        try {
-            return document.querySelector(selector);
-        } catch (e) {
-            UILogger.error('DOM', `Query selector failed: ${selector}`, e);
-            return null;
-        }
+        try { return document.querySelector(selector); } catch { return null; }
     },
     
     querySelectorAll(selector) {
-        try {
-            return document.querySelectorAll(selector);
-        } catch (e) {
-            UILogger.error('DOM', `Query selector all failed: ${selector}`, e);
-            return [];
-        }
+        try { return document.querySelectorAll(selector); } catch { return []; }
     },
     
-    exists(id) {
-        return !!document.getElementById(id);
-    }
+    exists(id) { return !!document.getElementById(id); }
 };
 
 // =============================================
-// UI STATE CACHE & HISTORY
+// UI STATE MANAGER
 // =============================================
 const UIStateManager = {
     cache: new Map(),
     history: [],
     historyLimit: 20,
     restorePoints: new Map(),
+    persistentKeys: ['viewerState', 'filters', 'currentTab', 'scrollPosition'],
 
     set(key, value, ttl = 300000) {
-        const entry = {
-            value,
-            timestamp: Date.now(),
-            ttl
-        };
+        const entry = { value, timestamp: Date.now(), ttl };
         this.cache.set(key, entry);
+        
+        if (this.persistentKeys.includes(key) && typeof SafeStorage !== 'undefined') {
+            SafeStorage.setJSON(`ui_${key}`, value);
+        }
         
         if (ttl) {
             setTimeout(() => this.invalidate(key), ttl);
@@ -1010,54 +1510,42 @@ const UIStateManager = {
 
     get(key) {
         const entry = this.cache.get(key);
-        if (!entry) return null;
-        
-        if (entry.ttl && Date.now() - entry.timestamp > entry.ttl) {
-            this.cache.delete(key);
-            return null;
+        if (entry) {
+            if (entry.ttl && Date.now() - entry.timestamp > entry.ttl) {
+                this.cache.delete(key);
+                return null;
+            }
+            return entry.value;
         }
         
-        return entry.value;
+        if (this.persistentKeys.includes(key) && typeof SafeStorage !== 'undefined') {
+            const stored = SafeStorage.getJSON(`ui_${key}`);
+            if (stored) {
+                this.set(key, stored);
+                return stored;
+            }
+        }
+        
+        return null;
     },
 
-    invalidate(key) {
-        this.cache.delete(key);
-    },
-
-    clear() {
-        this.cache.clear();
-        UILogger.info('State', 'UI cache cleared');
-    },
+    invalidate(key) { this.cache.delete(key); },
+    clear() { this.cache.clear(); },
 
     pushHistory(state) {
-        this.history.push({
-            ...state,
-            timestamp: Date.now()
-        });
-        
-        if (this.history.length > this.historyLimit) {
-            this.history.shift();
-        }
+        this.history.push({ ...state, timestamp: Date.now() });
+        if (this.history.length > this.historyLimit) this.history.shift();
     },
 
-    popHistory() {
-        return this.history.pop();
-    },
+    popHistory() { return this.history.pop(); },
 
     createRestorePoint(id, state) {
-        this.restorePoints.set(id, {
-            state,
-            timestamp: Date.now()
-        });
-        UILogger.debug('State', `Restore point created: ${id}`);
+        this.restorePoints.set(id, { state, timestamp: Date.now() });
     },
 
     restore(id) {
         const point = this.restorePoints.get(id);
-        if (point) {
-            return point.state;
-        }
-        return null;
+        return point ? point.state : null;
     },
 
     getViewerState() {
@@ -1071,66 +1559,90 @@ const UIStateManager = {
     saveViewerState() {
         const state = this.getViewerState();
         this.set('viewerState', state, 60000);
-        this.pushHistory({
-            type: 'viewer',
-            state
+        this.pushHistory({ type: 'viewer', state });
+    },
+
+    restoreViewerState() { return this.get('viewerState'); },
+
+    saveFilters() {
+        this.set('filters', {
+            activeFilters: Array.from(activeFilters),
+            currentIntentFilter,
+            currentMoodFilter,
+            currentCategoryFilter
         });
     },
 
-    restoreViewerState() {
-        return this.get('viewerState');
+    restoreFilters() {
+        const filters = this.get('filters');
+        if (filters) {
+            if (filters.activeFilters) activeFilters = new Set(filters.activeFilters);
+            if (filters.currentIntentFilter) currentIntentFilter = filters.currentIntentFilter;
+            if (filters.currentMoodFilter) currentMoodFilter = filters.currentMoodFilter;
+            if (filters.currentCategoryFilter) currentCategoryFilter = filters.currentCategoryFilter;
+        }
+    },
+
+    saveScrollPosition(containerId) {
+        const container = document.getElementById(containerId);
+        if (container) {
+            this.set(`scroll_${containerId}`, container.scrollTop);
+        }
+    },
+
+    restoreScrollPosition(containerId) {
+        const container = document.getElementById(containerId);
+        const position = this.get(`scroll_${containerId}`);
+        if (container && position) {
+            setTimeout(() => {
+                container.scrollTop = position;
+            }, 100);
+        }
     }
 };
 
 // =============================================
-// RESPONSIVE ENGINE - DEVICE ADAPTATION
+// RESPONSIVE ENGINE
 // =============================================
 const ResponsiveEngine = {
-    breakpoints: {
-        mobile: 480,
-        tablet: 768,
-        desktop: 1024,
-        wide: 1280
-    },
-
+    breakpoints: { mobile: 480, tablet: 768, desktop: 1024, wide: 1280 },
     currentDevice: 'desktop',
     touchCapable: false,
-    keyboardVisible: false,
     orientation: 'landscape',
+    pixelRatio: 1,
+    prefersReducedMotion: false,
+    prefersDarkMode: false,
 
     initialize() {
         this.detectCapabilities();
         this.setupOrientationListener();
+        this.setupMediaQueries();
         this.applyResponsiveAdjustments();
         
         uiEvents.on('deviceChange', (data) => {
             this.handleDeviceChange(data);
         });
         
-        uiEvents.on('resize', () => {
-            this.applyResponsiveAdjustments();
-        });
-        
-        UILogger.info('Responsive', `Device: ${this.currentDevice}, Touch: ${this.touchCapable}`);
+        UILogger.debug('Responsive', `Device: ${this.currentDevice}, Touch: ${this.touchCapable}`);
     },
 
     detectCapabilities() {
-        this.touchCapable = 'ontouchstart' in window || 
-                           navigator.maxTouchPoints > 0 || 
-                           navigator.msMaxTouchPoints > 0;
-        
+        this.touchCapable = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         this.currentDevice = this.getDeviceType();
         this.orientation = window.innerHeight > window.innerWidth ? 'portrait' : 'landscape';
+        this.pixelRatio = window.devicePixelRatio || 1;
+        this.prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        this.prefersDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
         
         document.documentElement.classList.toggle('touch-device', this.touchCapable);
-        document.documentElement.classList.toggle('mouse-device', !this.touchCapable);
         document.documentElement.classList.add(`device-${this.currentDevice}`);
         document.documentElement.classList.add(`orientation-${this.orientation}`);
+        document.documentElement.classList.toggle('reduced-motion', this.prefersReducedMotion);
+        document.documentElement.classList.toggle('dark-mode', this.prefersDarkMode);
     },
 
     getDeviceType() {
         const width = window.innerWidth;
-        
         if (width <= this.breakpoints.mobile) return 'mobile';
         if (width <= this.breakpoints.tablet) return 'tablet';
         if (width <= this.breakpoints.desktop) return 'desktop';
@@ -1145,11 +1657,23 @@ const ResponsiveEngine = {
                     document.documentElement.classList.remove('orientation-portrait', 'orientation-landscape');
                     document.documentElement.classList.add(`orientation-${this.orientation}`);
                     this.applyResponsiveAdjustments();
-                    
-                    UILogger.debug('Responsive', `Orientation changed to ${this.orientation}`);
                 }, 100);
             });
         }
+    },
+
+    setupMediaQueries() {
+        const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        motionQuery.addEventListener('change', (e) => {
+            this.prefersReducedMotion = e.matches;
+            document.documentElement.classList.toggle('reduced-motion', e.matches);
+        });
+
+        const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        darkQuery.addEventListener('change', (e) => {
+            this.prefersDarkMode = e.matches;
+            document.documentElement.classList.toggle('dark-mode', e.matches);
+        });
     },
 
     handleDeviceChange(data) {
@@ -1159,9 +1683,7 @@ const ResponsiveEngine = {
             document.documentElement.classList.remove(`device-${this.currentDevice}`);
             document.documentElement.classList.add(`device-${newDevice}`);
             this.currentDevice = newDevice;
-            
             this.applyDeviceSpecificAdjustments(newDevice);
-            UILogger.info('Responsive', `Device changed to ${newDevice}`);
         }
     },
 
@@ -1174,11 +1696,9 @@ const ResponsiveEngine = {
 
     applyDeviceSpecificAdjustments(device) {
         const statusItems = UIElements.querySelectorAll('.status-item');
-        
         statusItems.forEach(item => {
             if (device === 'mobile') {
                 item.classList.add('compact');
-                item.classList.remove('expanded');
             } else {
                 item.classList.remove('compact');
             }
@@ -1189,6 +1709,15 @@ const ResponsiveEngine = {
         } else {
             document.body.style.overflow = '';
         }
+        
+        const actionButtons = UIElements.querySelectorAll('.action-btn');
+        actionButtons.forEach(btn => {
+            if (device === 'mobile') {
+                btn.classList.add('compact');
+            } else {
+                btn.classList.remove('compact');
+            }
+        });
     },
 
     adjustStatusViewer() {
@@ -1205,72 +1734,52 @@ const ResponsiveEngine = {
     },
 
     adjustModals() {
-        const modals = UIElements.querySelectorAll('.modal');
-        
+        const modals = UIElements.querySelectorAll('.create-status-modal, .highlights-modal, .memory-timeline-modal, .stats-modal');
         modals.forEach(modal => {
             if (this.currentDevice === 'mobile') {
                 modal.style.width = '95%';
                 modal.style.maxWidth = '95%';
-                modal.style.margin = '10px auto';
+                modal.style.maxHeight = '90vh';
             } else {
                 modal.style.width = '90%';
                 modal.style.maxWidth = '600px';
-                modal.style.margin = '30px auto';
+                modal.style.maxHeight = '80vh';
             }
         });
     },
 
     adjustFontSizes() {
         const root = document.documentElement;
-        
-        if (this.currentDevice === 'mobile') {
-            root.style.fontSize = '14px';
-        } else if (this.currentDevice === 'tablet') {
-            root.style.fontSize = '15px';
-        } else {
-            root.style.fontSize = '16px';
-        }
+        if (this.currentDevice === 'mobile') root.style.fontSize = '14px';
+        else if (this.currentDevice === 'tablet') root.style.fontSize = '15px';
+        else root.style.fontSize = '16px';
     },
 
     adjustTouchTargets() {
-        if (!this.touchCapable) return;
-        
-        const buttons = UIElements.querySelectorAll('.status-action-btn, .reaction-btn, .modal button');
-        
-        buttons.forEach(btn => {
-            btn.style.minHeight = '44px';
-            btn.style.minWidth = '44px';
-        });
+        if (this.touchCapable) {
+            const smallButtons = UIElements.querySelectorAll('.status-action-btn, .draft-action-btn, .reaction-btn');
+            smallButtons.forEach(btn => {
+                btn.style.minWidth = '44px';
+                btn.style.minHeight = '44px';
+            });
+        }
     },
 
-    isTouchDevice() {
-        return this.touchCapable;
-    },
-
-    isMobileDevice() {
-        return this.currentDevice === 'mobile';
-    },
-
-    isTabletDevice() {
-        return this.currentDevice === 'tablet';
-    },
-
-    isDesktopDevice() {
-        return this.currentDevice === 'desktop' || this.currentDevice === 'wide';
-    }
+    isMobileDevice() { return this.currentDevice === 'mobile'; },
+    isTabletDevice() { return this.currentDevice === 'tablet'; },
+    isDesktopDevice() { return this.currentDevice === 'desktop' || this.currentDevice === 'wide'; }
 };
 
 // =============================================
-// SKELETON LOADER - IMMEDIATE UI
+// SKELETON LOADER
 // =============================================
 const SkeletonLoader = {
     show() {
         const containers = [
-            'allStatusList',
-            'friendsStatusList',
-            'closeFriendsStatusList',
-            'myStatusList',
-            'highlightsContent'
+            'allStatusList', 'friendsStatusList', 'closeFriendsStatusList',
+            'myStatusList', 'highlightsContent', 'handshakeStatus',
+            'pinnedStatusList', 'mutedStatusList', 'microCirclesStatusList',
+            'moodChart', 'allDraftsList', 'scheduledStatusesList'
         ];
         
         containers.forEach(id => {
@@ -1280,15 +1789,12 @@ const SkeletonLoader = {
                 container.classList.add('loading-skeleton');
             }
         });
-        
-        UILogger.debug('Skeleton', 'Skeleton loaders displayed');
     },
 
     hide(containerId) {
         const container = UIElements.getElement(containerId);
         if (container) {
             container.classList.remove('loading-skeleton');
-            
             const skeletons = container.querySelectorAll('.skeleton, .skeleton-pulse');
             skeletons.forEach(el => el.remove());
         }
@@ -1301,21 +1807,61 @@ const SkeletonLoader = {
             const skeletons = container.querySelectorAll('.skeleton, .skeleton-pulse');
             skeletons.forEach(el => el.remove());
         });
+    },
+
+    showFor(containerId, count = 3) {
+        const container = UIElements.getElement(containerId);
+        if (!container) return;
+        
+        const loader = document.createElement('div');
+        loader.className = 'skeleton-loader';
+        loader.innerHTML = Array(count).fill(0).map(() => `
+            <div class="skeleton-item skeleton-pulse"></div>
+        `).join('');
+        
+        container.innerHTML = '';
+        container.appendChild(loader);
+        container.classList.add('loading-skeleton');
     }
 };
 
 // =============================================
-// INITIAL RENDER - IMMEDIATE CONTENT
+// INITIAL RENDER
 // =============================================
 const InitialRender = {
     execute() {
-        UILogger.info('Render', 'Starting initial render');
-        
+        this.renderHandshakeStatus();
         this.renderMyStatusPreview();
         this.renderAllStatuses();
         this.renderUserAvatar();
+        this.renderStreakCounter();
+        this.renderMoodChart();
         
         UIRenderPipeline.setStage('initialRender');
+    },
+
+    renderHandshakeStatus() {
+        const container = UIElements.handshakeStatus;
+        if (!container) {
+            this.createHandshakeStatusElement();
+        }
+        UIRenderPipeline.renderHandshakeStatus();
+    },
+
+    createHandshakeStatusElement() {
+        const sidebar = document.querySelector('.sidebar');
+        if (!sidebar) return;
+
+        const handshakeDiv = document.createElement('div');
+        handshakeDiv.id = 'handshakeStatus';
+        handshakeDiv.className = 'handshake-status-container';
+        
+        const myStatusPreview = UIElements.getElement('myStatusPreview');
+        if (myStatusPreview) {
+            myStatusPreview.after(handshakeDiv);
+        } else {
+            sidebar.prepend(handshakeDiv);
+        }
     },
 
     renderMyStatusPreview() {
@@ -1327,11 +1873,12 @@ const InitialRender = {
         if (hasStatuses) {
             const latest = myStatuses[0];
             const previewText = getStatusPreviewText(latest);
+            const timeAgo = latest.createdAt ? formatTimeAgo(latest.createdAt) : 'Just now';
             
             myStatusPreview.innerHTML = `
                 <div class="my-status-preview-content">
                     <div class="my-status-preview-text">${UISanitizer.sanitizeHTML(previewText)}</div>
-                    <div class="my-status-preview-time">${formatTimeAgo(latest.createdAt)}</div>
+                    <div class="my-status-preview-time">${timeAgo}</div>
                 </div>
             `;
         } else {
@@ -1369,11 +1916,12 @@ const InitialRender = {
     renderUserAvatar() {
         if (!currentUser) return;
         
-        const avatarElements = UIElements.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar');
+        const avatarElements = UIElements.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar, .viewer-user-avatar');
         
         avatarElements.forEach(avatar => {
             if (currentUser.photoURL) {
-                avatar.style.backgroundImage = `url('${UISanitizer.sanitizeHTML(currentUser.photoURL)}')`;
+                const url = UISanitizer.sanitizeUrl(currentUser.photoURL);
+                avatar.style.backgroundImage = `url('${url}')`;
                 avatar.innerHTML = '';
             } else if (currentUser.displayName) {
                 const initials = currentUser.displayName
@@ -1387,6 +1935,39 @@ const InitialRender = {
         });
     },
 
+    renderStreakCounter() {
+        const streakCountEl = UIElements.getElement('streakCount');
+        if (streakCountEl) {
+            streakCountEl.textContent = streakCount || 0;
+        }
+    },
+
+    renderMoodChart() {
+        const chart = UIElements.getElement('moodChart');
+        if (!chart) return;
+        
+        chart.innerHTML = '';
+        
+        const data = moodChartData.length > 0 ? moodChartData.slice(-7) : this.generateSampleMoodData();
+        
+        data.forEach((day) => {
+            const bar = document.createElement('div');
+            bar.className = 'mood-bar';
+            bar.style.backgroundColor = statusMoods[day.mood]?.color || 'var(--mood-happy)';
+            bar.style.height = `${day.value}%`;
+            bar.title = `${statusMoods[day.mood]?.name || 'Happy'} (${day.value}%)`;
+            chart.appendChild(bar);
+        });
+    },
+
+    generateSampleMoodData() {
+        const moods = Object.keys(statusMoods);
+        return Array(7).fill(0).map(() => ({
+            mood: moods[Math.floor(Math.random() * moods.length)],
+            value: 40 + Math.floor(Math.random() * 50)
+        }));
+    },
+
     createEmptyState() {
         return `
             <div class="empty-state">
@@ -1394,7 +1975,7 @@ const InitialRender = {
                 <p>No statuses yet</p>
                 <p class="subtext">Be the first to post a status!</p>
                 ${isAuthenticated() ? `
-                    <button class="btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
+                    <button class="action-btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
                         <i class="fas fa-plus"></i> Create Status
                     </button>
                 ` : ''}
@@ -1420,7 +2001,6 @@ const InitialRender = {
                 return Array.from(activeFilters).every(filter => {
                     if (filter.startsWith('intent-')) return s.intent === filter.replace('intent-', '');
                     if (filter.startsWith('mood-')) return s.mood === filter.replace('mood-', '');
-                    if (filter.startsWith('category-')) return s.category === filter.replace('category-', '');
                     return true;
                 });
             });
@@ -1430,9 +2010,7 @@ const InitialRender = {
             filtered = filtered.filter(s => !mutedUsers.has(s.userId));
         }
         
-        return filtered.sort((a, b) => {
-            return new Date(b.createdAt) - new Date(a.createdAt);
-        });
+        return filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     },
 
     createStatusElement(status) {
@@ -1459,7 +2037,6 @@ const InitialRender = {
         const isMuted = mutedUsers?.has(sanitized.userId) || false;
         const mood = sanitized.mood || 'happy';
         const intent = sanitized.intent || 'reflection';
-        const category = sanitized.category || 'life';
         
         let previewText = '';
         if (sanitized.type === 'text') {
@@ -1476,14 +2053,8 @@ const InitialRender = {
         item.innerHTML = `
             <div class="status-avatar">
                 <div class="status-ring ${isViewed ? 'viewed' : ''}"></div>
-                <div class="status-avatar-inner" ${user.photoURL ? `style="background-image: url('${UISanitizer.sanitizeHTML(user.photoURL)}')"` : ''}>
+                <div class="status-avatar-inner" ${user.photoURL ? `style="background-image: url('${UISanitizer.sanitizeUrl(user.photoURL)}')"` : ''}>
                     ${user.photoURL ? '' : `<span>${initials}</span>`}
-                </div>
-                <div class="status-indicators">
-                    ${mood ? `<div class="status-indicator mood" style="background-color: ${statusMoods[mood]?.color || 'var(--mood-happy)'}" title="${statusMoods[mood]?.name || 'Mood'}"></div>` : ''}
-                    ${intent ? `<div class="status-indicator intent" style="background-color: ${statusIntents[intent]?.color || 'var(--intent-feedback)'}" title="${statusIntents[intent]?.name || 'Intent'}"></div>` : ''}
-                    ${isPinned ? '<div class="status-indicator pinned" title="Pinned Status"></div>' : ''}
-                    ${isMuted ? '<div class="status-indicator muted" title="Muted User"></div>' : ''}
                 </div>
             </div>
             <div class="status-info">
@@ -1491,22 +2062,7 @@ const InitialRender = {
                     <span class="status-name-text">${UISanitizer.sanitizeHTML(user.displayName || 'Unknown User')}</span>
                     <span class="status-time">${timeAgo}</span>
                 </div>
-                <div class="status-details">
-                    <span class="status-type" style="color: ${statusTypes[sanitized.type]?.color || 'var(--primary-color)'}">
-                        <i class="${statusTypes[sanitized.type]?.icon || 'fas fa-comment'}"></i>
-                        ${statusTypes[sanitized.type]?.name || 'Status'}
-                    </span>
-                    ${sanitized.isSensitive ? '<span class="status-tag privacy"><i class="fas fa-eye-slash"></i> Sensitive</span>' : ''}
-                    ${sanitized.isSilent ? '<span class="status-tag privacy"><i class="fas fa-bell-slash"></i> Silent</span>' : ''}
-                </div>
-                <div class="status-preview ${sanitized.type === 'media' ? 'media' : ''} ${sanitized.type === 'poll' ? 'poll' : ''}">
-                    ${previewText}
-                </div>
-                <div class="status-tags">
-                    ${mood ? `<span class="status-tag mood"><i class="fas fa-brain"></i> ${statusMoods[mood]?.name || 'Mood'}</span>` : ''}
-                    ${intent ? `<span class="status-tag intent"><i class="fas fa-bullseye"></i> ${statusIntents[intent]?.name || 'Intent'}</span>` : ''}
-                    ${category ? `<span class="status-tag category"><i class="${statusCategories[category]?.icon || 'fas fa-tag'}"></i> ${statusCategories[category]?.name || 'Category'}</span>` : ''}
-                </div>
+                <div class="status-preview">${previewText}</div>
             </div>
             <div class="status-actions">
                 <button class="status-action-btn" data-action="view" title="View Status">
@@ -1542,28 +2098,25 @@ const InitialRender = {
 // =============================================
 const ProgressiveEnhancement = {
     execute() {
-        UILogger.info('Enhance', 'Starting progressive enhancement');
-        
         this.enhanceImages();
         this.enhanceInteractivity();
         this.enhanceAccessibility();
         this.setupLazyLoading();
+        this.enhanceForms();
+        this.enhanceAnimations();
         
         UIRenderPipeline.setStage('progressiveEnhancement');
     },
 
     enhanceImages() {
         const avatars = UIElements.querySelectorAll('.status-avatar-inner[style*="background-image"]');
-        
         avatars.forEach(avatar => {
             const bgImage = avatar.style.backgroundImage;
             if (bgImage && bgImage.includes('url')) {
                 const url = bgImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
                 
                 const img = new Image();
-                img.onload = () => {
-                    avatar.classList.add('image-loaded');
-                };
+                img.onload = () => avatar.classList.add('image-loaded');
                 img.onerror = () => {
                     avatar.style.backgroundImage = '';
                     const initials = avatar.querySelector('span');
@@ -1607,7 +2160,6 @@ const ProgressiveEnhancement = {
                 muteBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const action = muteBtn.dataset.action;
-                    const userId = item.dataset.userId;
                     const status = statuses.find(s => s.id === item.dataset.statusId);
                     if (status) handleStatusAction(action, status, muteBtn);
                 });
@@ -1625,46 +2177,79 @@ const ProgressiveEnhancement = {
 
     enhanceAccessibility() {
         const buttons = UIElements.querySelectorAll('button');
-        
         buttons.forEach(btn => {
             if (!btn.hasAttribute('aria-label') && btn.title) {
                 btn.setAttribute('aria-label', btn.title);
             }
-            
-            if (btn.classList.contains('status-action-btn') && !btn.hasAttribute('aria-label')) {
-                const action = btn.dataset.action;
-                if (action) {
-                    btn.setAttribute('aria-label', `${action} status`);
-                }
+            if (!btn.hasAttribute('aria-label') && btn.textContent) {
+                btn.setAttribute('aria-label', btn.textContent.trim());
             }
         });
         
-        const images = UIElements.querySelectorAll('.status-avatar-inner[style*="background-image"]');
+        const images = UIElements.querySelectorAll('img:not([alt])');
         images.forEach(img => {
-            img.setAttribute('role', 'img');
-            img.setAttribute('aria-label', 'User avatar');
+            img.setAttribute('alt', '');
+        });
+        
+        const inputs = UIElements.querySelectorAll('input, textarea, select');
+        inputs.forEach(input => {
+            if (!input.hasAttribute('aria-label') && input.placeholder) {
+                input.setAttribute('aria-label', input.placeholder);
+            }
         });
     },
 
     setupLazyLoading() {
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const img = entry.target;
-                    if (img.dataset.src) {
-                        img.src = img.dataset.src;
-                        img.removeAttribute('data-src');
+        if ('IntersectionObserver' in window) {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        if (img.dataset.src) {
+                            img.src = img.dataset.src;
+                            img.removeAttribute('data-src');
+                            img.classList.add('loaded');
+                        }
+                        observer.unobserve(img);
                     }
-                    observer.unobserve(img);
-                }
+                });
+            }, { rootMargin: '100px', threshold: 0.01 });
+            
+            const images = UIElements.querySelectorAll('img[data-src]');
+            images.forEach(img => observer.observe(img));
+        } else {
+            const images = UIElements.querySelectorAll('img[data-src]');
+            images.forEach(img => {
+                img.src = img.dataset.src;
+                img.removeAttribute('data-src');
             });
-        }, {
-            rootMargin: '100px',
-            threshold: 0.01
+        }
+    },
+
+    enhanceForms() {
+        const forms = UIElements.querySelectorAll('form');
+        forms.forEach(form => {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+            });
         });
         
-        const images = UIElements.querySelectorAll('img[data-src]');
-        images.forEach(img => observer.observe(img));
+        const textareas = UIElements.querySelectorAll('textarea');
+        textareas.forEach(textarea => {
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+            });
+        });
+    },
+
+    enhanceAnimations() {
+        if (ResponsiveEngine.prefersReducedMotion) return;
+        
+        const animated = UIElements.querySelectorAll('.status-item, .highlight-item, .draft-item');
+        animated.forEach(el => {
+            el.style.transition = 'all 0.2s ease';
+        });
     }
 };
 
@@ -1675,12 +2260,13 @@ const LiveUpdateEngine = {
     subscriptions: new Set(),
     updateQueue: [],
     isProcessing: false,
+    lastUpdate: 0,
+    updateThrottle: 1000,
 
     initialize() {
         this.setupCoreSubscriptions();
         this.startUpdateProcessor();
-        
-        UILogger.info('Live', 'Live update engine initialized');
+        UILogger.debug('Live', 'Live update engine initialized');
     },
 
     setupCoreSubscriptions() {
@@ -1688,36 +2274,27 @@ const LiveUpdateEngine = {
             this.queueUpdate('status', data);
         });
         
-        UIBridge.subscribe('coreData', (data) => {
-            if (data.type === 'newStatus') {
-                this.queueUpdate('newStatus', data.status);
-            } else if (data.type === 'statusUpdate') {
-                this.queueUpdate('statusUpdate', data.status);
-            }
-        });
-        
         uiEvents.on('visibility', (data) => {
             if (!data.hidden && this.updateQueue.length > 0) {
                 this.processUpdateQueue();
             }
         });
+
+        uiEvents.on('online', () => {
+            this.processUpdateQueue();
+        });
     },
 
     queueUpdate(type, data) {
-        this.updateQueue.push({
-            type,
-            data,
-            timestamp: Date.now()
-        });
-        
-        if (!this.isProcessing && !document.hidden) {
+        this.updateQueue.push({ type, data, timestamp: Date.now() });
+        if (!this.isProcessing && !document.hidden && navigator.onLine) {
             this.processUpdateQueue();
         }
     },
 
     startUpdateProcessor() {
         setInterval(() => {
-            if (this.updateQueue.length > 0 && !document.hidden) {
+            if (this.updateQueue.length > 0 && !document.hidden && navigator.onLine) {
                 this.processUpdateQueue();
             }
         }, 5000);
@@ -1731,11 +2308,17 @@ const LiveUpdateEngine = {
         while (this.updateQueue.length > 0) {
             const update = this.updateQueue.shift();
             
+            // Remove expired items (older than 1 minute)
+            if (Date.now() - update.timestamp > 60000) continue;
+            
             try {
                 await this.applyUpdate(update);
             } catch (error) {
                 UILogger.error('Live', `Failed to apply update: ${update.type}`, error);
             }
+            
+            // Throttle updates
+            await new Promise(r => setTimeout(r, this.updateThrottle));
         }
         
         this.isProcessing = false;
@@ -1751,6 +2334,12 @@ const LiveUpdateEngine = {
                 break;
             case 'status':
                 this.handleStatusChange(update.data);
+                break;
+            case 'reaction':
+                this.handleReactionUpdate(update.data);
+                break;
+            case 'view':
+                this.handleViewUpdate(update.data);
                 break;
         }
     },
@@ -1773,7 +2362,7 @@ const LiveUpdateEngine = {
         
         container.insertBefore(element, container.firstChild);
         
-        UILogger.debug('Live', 'New status added to UI');
+        showNotification('New status available', 'info');
     },
 
     handleStatusUpdate(status) {
@@ -1786,21 +2375,30 @@ const LiveUpdateEngine = {
         if (newElement) {
             element.replaceWith(newElement);
         }
-        
-        UILogger.debug('Live', 'Status updated in UI');
     },
 
     handleStatusChange(data) {
-        if (data.type === 'reaction') {
-            this.updateReactionCount(data.statusId, data.reaction);
-        } else if (data.type === 'view') {
+        if (data.type === 'view') {
             this.markAsViewed(data.statusId);
+        } else if (data.type === 'reaction') {
+            this.updateReactionCount(data.statusId, data.reaction);
         }
     },
 
-    updateReactionCount(statusId, reaction) {
-        const element = document.querySelector(`.status-item[data-status-id="${statusId}"]`);
-        if (!element) return;
+    handleReactionUpdate(data) {
+        const statusItem = document.querySelector(`.status-item[data-status-id="${data.statusId}"]`);
+        if (statusItem) {
+            const reactionBtn = statusItem.querySelector(`[data-reaction="${data.reaction}"]`);
+            if (reactionBtn) {
+                const count = parseInt(reactionBtn.dataset.count || 0) + 1;
+                reactionBtn.dataset.count = count;
+                reactionBtn.innerHTML = `${data.reaction} ${count}`;
+            }
+        }
+    },
+
+    handleViewUpdate(data) {
+        this.markAsViewed(data.statusId);
     },
 
     markAsViewed(statusId) {
@@ -1808,17 +2406,24 @@ const LiveUpdateEngine = {
         if (ring) {
             ring.classList.add('viewed');
         }
+    },
+
+    updateReactionCount(statusId, reaction) {
+        const statusItem = document.querySelector(`.status-item[data-status-id="${statusId}"]`);
+        if (statusItem) {
+            const reactionEl = statusItem.querySelector(`.reaction-count[data-reaction="${reaction}"]`);
+            if (reactionEl) {
+                reactionEl.textContent = parseInt(reactionEl.textContent || 0) + 1;
+            }
+        }
     }
 };
 
 // =============================================
-// STATUS VIEWER - FULLSCREEN
+// STATUS VIEWER
 // =============================================
 function showStatusViewer(statusData) {
-    if (!statusData || !statusData.id) {
-        UILogger.error('Viewer', 'Invalid status data');
-        return;
-    }
+    if (!statusData || !statusData.id) return;
     
     try {
         currentViewerStatus = statusData;
@@ -1828,7 +2433,9 @@ function showStatusViewer(statusData) {
         
         if (!viewedStatuses.has(statusData.id)) {
             viewedStatuses.add(statusData.id);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, JSON.stringify(Array.from(viewedStatuses)));
+            if (typeof SafeStorage !== 'undefined') {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatuses));
+            }
             
             const statusItem = document.querySelector(`[data-status-id="${statusData.id}"]`);
             if (statusItem) {
@@ -1845,6 +2452,10 @@ function showStatusViewer(statusData) {
             
             if (ResponsiveEngine.isMobileDevice()) {
                 document.body.style.overflow = 'hidden';
+            }
+            
+            if (typeof NavigationGuard !== 'undefined') {
+                NavigationGuard.startOperation('viewer');
             }
         }
     } catch (error) {
@@ -1875,7 +2486,7 @@ function loadViewerContent(statusData) {
     const timeAgo = sanitized.createdAt ? formatTimeAgo(sanitized.createdAt) : 'Just now';
     
     viewerUserInfo.innerHTML = `
-        <div class="viewer-user-avatar" ${user.photoURL ? `style="background-image: url('${UISanitizer.sanitizeHTML(user.photoURL)}')"` : ''}>
+        <div class="viewer-user-avatar" ${user.photoURL ? `style="background-image: url('${UISanitizer.sanitizeUrl(user.photoURL)}')"` : ''}>
             ${user.photoURL ? '' : `<span>${initials}</span>`}
         </div>
         <div class="viewer-user-details">
@@ -1902,41 +2513,17 @@ function loadViewerContent(statusData) {
         `;
     }
     
-    if (actionButtonsOverlay) {
-        if (sanitized.actionButtons && sanitized.actionButtons.length > 0) {
-            actionButtonsOverlay.innerHTML = '';
-            sanitized.actionButtons.forEach(actionKey => {
-                const action = actionButtons[actionKey];
-                if (action) {
-                    const actionButton = document.createElement('button');
-                    actionButton.className = 'action-button';
-                    actionButton.innerHTML = `<i class="${action.icon}"></i> ${action.name}`;
-                    actionButton.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        handleActionButtonClick(actionKey, sanitized);
-                    });
-                    actionButtonsOverlay.appendChild(actionButton);
-                }
-            });
-        } else {
-            actionButtonsOverlay.innerHTML = '';
-        }
-    }
-    
-    const muteUserBtn = UIElements.getElement('muteUserBtn');
-    if (muteUserBtn) {
-        const isMuted = mutedUsers && mutedUsers.has(sanitized.userId);
-        muteUserBtn.innerHTML = isMuted ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
-        muteUserBtn.title = isMuted ? 'Unmute User' : 'Mute User';
-        muteUserBtn.dataset.action = isMuted ? 'unmute' : 'mute';
-    }
-    
-    const saveStatusBtn = UIElements.getElement('saveStatusBtn');
-    if (saveStatusBtn) {
-        const isSaved = highlights && highlights.some(h => h.statusIds && h.statusIds.includes(sanitized.id));
-        saveStatusBtn.innerHTML = isSaved ? '<i class="fas fa-bookmark"></i>' : '<i class="far fa-bookmark"></i>';
-        saveStatusBtn.title = isSaved ? 'Remove from Highlights' : 'Save to Highlights';
-        saveStatusBtn.dataset.action = isSaved ? 'unsave' : 'save';
+    if (actionButtonsOverlay && sanitized.actionButtons) {
+        actionButtonsOverlay.innerHTML = sanitized.actionButtons.map(btnKey => {
+            const btn = actionButtons[btnKey];
+            if (!btn) return '';
+            return `
+                <button class="action-btn ${btnKey}" data-action="${btnKey}">
+                    <i class="${btn.icon}"></i>
+                    <span>${btn.name}</span>
+                </button>
+            `;
+        }).join('');
     }
 }
 
@@ -1969,9 +2556,9 @@ function createMediaStatusSlide(statusData) {
     
     let mediaContent = '';
     if (statusData.mediaType === 'image') {
-        mediaContent = `<img src="${UISanitizer.sanitizeHTML(statusData.mediaUrl || '')}" class="media-status-content" alt="Status image" loading="lazy">`;
+        mediaContent = `<img src="${UISanitizer.sanitizeUrl(statusData.mediaUrl || '')}" class="media-status-content" alt="Status image" loading="lazy">`;
     } else if (statusData.mediaType === 'video') {
-        mediaContent = `<video src="${UISanitizer.sanitizeHTML(statusData.mediaUrl || '')}" class="media-status-content" autoplay muted loop playsinline controls></video>`;
+        mediaContent = `<video src="${UISanitizer.sanitizeUrl(statusData.mediaUrl || '')}" class="media-status-content" autoplay muted loop playsinline controls></video>`;
     }
     
     slide.innerHTML = `
@@ -2004,7 +2591,7 @@ function createPollStatusSlide(statusData) {
         statusData.options.forEach(option => {
             const percentage = totalVotes > 0 ? Math.round((option.votes || 0) / totalVotes * 100) : 0;
             optionsHtml += `
-                <div class="poll-option ${hasVoted ? 'voted' : ''}" data-option="${UISanitizer.sanitizeHTML(option.id)}">
+                <div class="poll-option ${hasVoted ? 'voted' : ''}" data-option-id="${UISanitizer.sanitizeHTML(option.id || '')}">
                     <div class="poll-option-text">${UISanitizer.sanitizeHTML(option.text || '')}</div>
                     <div class="poll-option-percentage">${percentage}% (${option.votes || 0} votes)</div>
                     <div class="poll-option-bar" style="width: ${percentage}%"></div>
@@ -2029,7 +2616,7 @@ function createPollStatusSlide(statusData) {
         pollOptions.forEach(option => {
             option.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                const optionId = option.dataset.option;
+                const optionId = option.dataset.optionId;
                 
                 try {
                     const response = await voteOnPoll(statusData.id, optionId);
@@ -2038,8 +2625,6 @@ function createPollStatusSlide(statusData) {
                         
                         if (currentViewerStatus && currentViewerStatus.id === statusData.id) {
                             currentViewerStatus.hasVoted = true;
-                            currentViewerStatus.userVote = optionId;
-                            
                             const votedOption = currentViewerStatus.options.find(o => o.id === optionId);
                             if (votedOption) {
                                 votedOption.votes = (votedOption.votes || 0) + 1;
@@ -2048,7 +2633,7 @@ function createPollStatusSlide(statusData) {
                             const newTotalVotes = currentViewerStatus.options.reduce((sum, o) => sum + (o.votes || 0), 0);
                             
                             slide.querySelectorAll('.poll-option').forEach(opt => {
-                                const id = opt.dataset.option;
+                                const id = opt.dataset.optionId;
                                 const optData = currentViewerStatus.options.find(o => o.id === id);
                                 if (optData) {
                                     const pct = newTotalVotes > 0 ? Math.round((optData.votes || 0) / newTotalVotes * 100) : 0;
@@ -2056,17 +2641,7 @@ function createPollStatusSlide(statusData) {
                                     opt.querySelector('.poll-option-bar').style.width = `${pct}%`;
                                 }
                                 opt.classList.add('voted');
-                                if (id === optionId) opt.classList.add('selected');
                             });
-                            
-                            slide.querySelector('.poll-total-votes').textContent = `Total votes: ${newTotalVotes}`;
-                            
-                            if (!slide.querySelector('.poll-voted-message')) {
-                                const msg = document.createElement('div');
-                                msg.className = 'poll-voted-message';
-                                msg.textContent = '✓ You have voted';
-                                slide.querySelector('.poll-container').appendChild(msg);
-                            }
                         }
                     }
                 } catch (error) {
@@ -2078,47 +2653,6 @@ function createPollStatusSlide(statusData) {
     }
     
     return slide;
-}
-
-function handleActionButtonClick(actionKey, statusData) {
-    UILogger.debug('Action', `Action button clicked: ${actionKey}`, statusData);
-    
-    switch(actionKey) {
-        case 'message':
-            showNotification(`Message ${statusData.user?.displayName || 'user'}`, 'info');
-            break;
-        case 'join':
-            showNotification('Join discussion', 'info');
-            break;
-        case 'vote':
-            showNotification('Click on a poll option to vote', 'info');
-            break;
-        case 'book':
-            showNotification(`Book a call with ${statusData.user?.displayName || 'user'}`, 'info');
-            break;
-        case 'learn':
-            if (statusData.externalUrl) {
-                window.open(statusData.externalUrl, '_blank', 'noopener,noreferrer');
-            } else {
-                showNotification('No external link available', 'info');
-            }
-            break;
-        case 'support':
-            addReactionToStatus(statusData.id, 'love')
-                .then(() => showNotification('Reacted with ❤️', 'success'))
-                .catch(() => showNotification('Failed to add reaction', 'error'));
-            break;
-        case 'collaborate':
-            showNotification(`Collaborate with ${statusData.user?.displayName || 'user'}`, 'info');
-            break;
-        case 'resource':
-            if (statusData.resourceUrl) {
-                window.open(statusData.resourceUrl, '_blank', 'noopener,noreferrer');
-            } else {
-                showNotification('No resource link available', 'info');
-            }
-            break;
-    }
 }
 
 function startAutoAdvance() {
@@ -2145,11 +2679,28 @@ function startAutoAdvance() {
                     progressFill.style.width = (currentWidth + 1) + '%';
                 } else {
                     progressFill.style.width = '0%';
+                    advanceToNextSlide();
                 }
             }
         }, 50);
         
         window.progressInterval = interval;
+    }
+}
+
+function advanceToNextSlide() {
+    if (!currentViewerStatus) return;
+    
+    const slides = UIElements.querySelectorAll('.status-slide');
+    if (slides.length <= 1) return;
+    
+    slides[currentSlideIndex].classList.remove('active');
+    currentSlideIndex = (currentSlideIndex + 1) % slides.length;
+    slides[currentSlideIndex].classList.add('active');
+    
+    const progressFill = UIElements.getElement('progressFill');
+    if (progressFill) {
+        progressFill.style.width = '0%';
     }
 }
 
@@ -2161,8 +2712,6 @@ function toggleAutoAdvance() {
         pauseResumeBtn.innerHTML = isAutoAdvancePaused ? '<i class="fas fa-play"></i>' : '<i class="fas fa-pause"></i>';
         pauseResumeBtn.title = isAutoAdvancePaused ? 'Resume' : 'Pause';
     }
-    
-    UILogger.debug('Viewer', `Auto-advance ${isAutoAdvancePaused ? 'paused' : 'resumed'}`);
 }
 
 function stopAutoAdvance() {
@@ -2175,6 +2724,10 @@ function stopAutoAdvance() {
         clearInterval(window.autoAdvanceInterval);
         window.autoAdvanceInterval = null;
     }
+    
+    if (typeof NavigationGuard !== 'undefined') {
+        NavigationGuard.endOperation('viewer');
+    }
 }
 
 // =============================================
@@ -2183,7 +2736,7 @@ function stopAutoAdvance() {
 async function handleStatusAction(action, statusData, button) {
     if (!statusData || !statusData.id) return;
     
-    UILogger.debug('Action', `Status action: ${action}`, statusData.id);
+    UILogger.debug('Action', `Status action: ${action}`);
     
     switch(action) {
         case 'view':
@@ -2218,7 +2771,6 @@ async function handleStatusAction(action, statusData, button) {
                 }
             } catch (error) {
                 showNotification('Failed to pin status', 'error');
-                UILogger.error('Action', 'Pin failed', error);
             } finally {
                 button.disabled = false;
             }
@@ -2252,7 +2804,6 @@ async function handleStatusAction(action, statusData, button) {
                 }
             } catch (error) {
                 showNotification('Failed to unpin status', 'error');
-                UILogger.error('Action', 'Unpin failed', error);
             } finally {
                 button.disabled = false;
             }
@@ -2293,18 +2844,12 @@ async function handleStatusAction(action, statusData, button) {
                             newBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
                             muteBtn.replaceWith(newBtn);
                         }
-                        
-                        const indicator = document.createElement('div');
-                        indicator.className = 'status-indicator muted';
-                        indicator.title = 'Muted User';
-                        item.querySelector('.status-indicators')?.appendChild(indicator);
                     });
                     
                     updateCurrentSectionUI();
                 }
             } catch (error) {
                 showNotification('Failed to mute user', 'error');
-                UILogger.error('Action', 'Mute failed', error);
             } finally {
                 button.disabled = false;
             }
@@ -2345,16 +2890,12 @@ async function handleStatusAction(action, statusData, button) {
                             newBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
                             unmuteBtn.replaceWith(newBtn);
                         }
-                        
-                        const indicator = item.querySelector('.status-indicator.muted');
-                        if (indicator) indicator.remove();
                     });
                     
                     updateCurrentSectionUI();
                 }
             } catch (error) {
                 showNotification('Failed to unmute user', 'error');
-                UILogger.error('Action', 'Unmute failed', error);
             } finally {
                 button.disabled = false;
             }
@@ -2365,6 +2906,8 @@ async function handleStatusAction(action, statusData, button) {
 // =============================================
 // NOTIFICATION SYSTEM
 // =============================================
+let notificationTimeout = null;
+
 function showNotification(message, type = 'success') {
     const notification = UIElements.notification;
     const notificationText = UIElements.getElement('notificationText');
@@ -2376,37 +2919,25 @@ function showNotification(message, type = 'success') {
     notification.classList.add(type);
     notification.classList.add('active');
     
-    if (window.notificationTimeout) {
-        clearTimeout(window.notificationTimeout);
+    if (notificationTimeout) {
+        clearTimeout(notificationTimeout);
     }
     
-    window.notificationTimeout = setTimeout(() => {
+    notificationTimeout = setTimeout(() => {
         notification.classList.remove('active');
     }, 3000);
-    
-    UILogger.debug('Notification', `${type}: ${message}`);
 }
 
 // =============================================
 // UI PROTECTION FUNCTIONS
 // =============================================
 function enableProtectedUI() {
-    UILogger.info('UI', 'Enabling protected UI');
-    
     const protectedElements = [
-        'createStatusBtn',
-        'viewMyStatusBtn',
-        'editMyStatusBtn',
-        'viewHighlightsBtn',
-        'createHighlightBtn',
-        'viewTimelineBtn',
-        'viewStatsBtn',
-        'viewDraftsBtn',
-        'viewScheduledBtn',
-        'myStatusPreview',
-        'postStatusBtn',
-        'saveDraftBtn',
-        'scheduleStatusBtn'
+        'createStatusBtn', 'viewMyStatusBtn', 'editMyStatusBtn',
+        'viewHighlightsBtn', 'createHighlightBtn', 'viewTimelineBtn',
+        'viewStatsBtn', 'viewDraftsBtn', 'viewScheduledBtn',
+        'myStatusPreview', 'postStatusBtn', 'saveDraftBtn', 'scheduleStatusBtn',
+        'shareStatusBtn', 'saveStatusBtn', 'reportStatusBtn'
     ];
     
     protectedElements.forEach(id => {
@@ -2416,27 +2947,18 @@ function enableProtectedUI() {
             el.style.opacity = '1';
             el.style.pointerEvents = 'auto';
             el.removeAttribute('aria-disabled');
+            UIFailsafe.disabledButtons.delete(id);
         }
     });
 }
 
 function disableProtectedUI() {
-    UILogger.info('UI', 'Disabling protected UI');
-    
     const protectedElements = [
-        'createStatusBtn',
-        'viewMyStatusBtn',
-        'editMyStatusBtn',
-        'viewHighlightsBtn',
-        'createHighlightBtn',
-        'viewTimelineBtn',
-        'viewStatsBtn',
-        'viewDraftsBtn',
-        'viewScheduledBtn',
-        'myStatusPreview',
-        'postStatusBtn',
-        'saveDraftBtn',
-        'scheduleStatusBtn'
+        'createStatusBtn', 'viewMyStatusBtn', 'editMyStatusBtn',
+        'viewHighlightsBtn', 'createHighlightBtn', 'viewTimelineBtn',
+        'viewStatsBtn', 'viewDraftsBtn', 'viewScheduledBtn',
+        'myStatusPreview', 'postStatusBtn', 'saveDraftBtn', 'scheduleStatusBtn',
+        'shareStatusBtn', 'saveStatusBtn', 'reportStatusBtn'
     ];
     
     protectedElements.forEach(id => {
@@ -2483,7 +3005,7 @@ function showReconnectionState() {
                 <i class="fas fa-unlink"></i>
                 <p>Connection lost</p>
                 <p class="subtext">Attempting to reconnect...</p>
-                <button class="btn primary" onclick="window.location.reload()">
+                <button class="action-btn primary" onclick="window.location.reload()">
                     <i class="fas fa-redo"></i> Reload
                 </button>
             </div>
@@ -2492,7 +3014,39 @@ function showReconnectionState() {
 }
 
 // =============================================
-// UPDATE CURRENT SECTION - RENAMED TO AVOID DUPLICATE
+// HANDSHAKE RETRY
+// =============================================
+function retryHandshake() {
+    UILogger.info('Handshake', 'Manually retrying handshake');
+    UIRenderPipeline.updateHandshakeStatus('connecting');
+    
+    if (typeof IframeHandshakeAuthority !== 'undefined') {
+        IframeHandshakeAuthority.execute({ maxRetries: 5 })
+            .then(() => {
+                UIRenderPipeline.updateHandshakeStatus('connected');
+                showNotification('Connected', 'success');
+                enableProtectedUI();
+            })
+            .catch(() => {
+                UIRenderPipeline.updateHandshakeStatus('failed');
+                showNotification('Failed to connect', 'error');
+            });
+    } else if (typeof window.statusCore?.startHandshake === 'function') {
+        window.statusCore.startHandshake({ retries: 5 })
+            .then(() => {
+                UIRenderPipeline.updateHandshakeStatus('connected');
+                showNotification('Connected', 'success');
+                enableProtectedUI();
+            })
+            .catch(() => {
+                UIRenderPipeline.updateHandshakeStatus('failed');
+                showNotification('Failed to connect', 'error');
+            });
+    }
+}
+
+// =============================================
+// UPDATE CURRENT SECTION
 // =============================================
 function updateCurrentSectionUI() {
     try {
@@ -2519,6 +3073,7 @@ function updateCurrentSectionUI() {
                 section.classList.add('active');
                 
                 renderSectionContent(sectionId);
+                UIStateManager.saveFilters();
             }
         }
     } catch (error) {
@@ -2583,7 +3138,6 @@ function renderStatusesListUI(container, statusesList) {
             return Array.from(activeFilters).every(filter => {
                 if (filter.startsWith('intent-')) return s.intent === filter.replace('intent-', '');
                 if (filter.startsWith('mood-')) return s.mood === filter.replace('mood-', '');
-                if (filter.startsWith('category-')) return s.category === filter.replace('category-', '');
                 return true;
             });
         });
@@ -2612,7 +3166,7 @@ function renderStatusesListUI(container, statusesList) {
 }
 
 // =============================================
-// EVENT LISTENERS SETUP
+// BASIC EVENT LISTENERS
 // =============================================
 function setupBasicEventListeners() {
     const createStatusBtn = UIElements.getElement('createStatusBtn');
@@ -2651,9 +3205,10 @@ function setupBasicEventListeners() {
     }
 }
 
+// =============================================
+// COMPLETE EVENT LISTENERS
+// =============================================
 function setupEventListeners() {
-    UILogger.info('Events', 'Setting up event listeners');
-    
     setupBasicEventListeners();
     
     // Create status tabs
@@ -2697,10 +3252,7 @@ function setupEventListeners() {
             if (input) {
                 input.value = '';
                 const counter = UIElements.getElement('textStatusCounter');
-                if (counter) {
-                    counter.textContent = '0/500';
-                    counter.style.color = 'var(--text-secondary)';
-                }
+                if (counter) counter.textContent = '0/500';
             }
         });
     }
@@ -2761,14 +3313,14 @@ function setupEventListeners() {
     const postStatusBtn = UIElements.getElement('postStatusBtn');
     if (postStatusBtn && !postStatusBtn.hasListener) {
         postStatusBtn.hasListener = true;
-        postStatusBtn.addEventListener('click', handlePostStatus);
+        postStatusBtn.addEventListener('click', UIFailsafe.wrapAction(handlePostStatus, 'postStatus'));
     }
     
     // Save draft button
     const saveDraftBtn = UIElements.getElement('saveDraftBtn');
     if (saveDraftBtn && !saveDraftBtn.hasListener) {
         saveDraftBtn.hasListener = true;
-        saveDraftBtn.addEventListener('click', handleSaveDraft);
+        saveDraftBtn.addEventListener('click', UIFailsafe.wrapAction(handleSaveDraft, 'saveDraft'));
     }
     
     // Schedule status button
@@ -2798,6 +3350,8 @@ function setupEventListeners() {
                 const minutes = tomorrow.getMinutes().toString().padStart(2, '0');
                 scheduleTime.value = `${hours}:${minutes}`;
             }
+            
+            updateScheduledStatusesList();
         });
     }
     
@@ -2815,14 +3369,11 @@ function setupEventListeners() {
     const confirmScheduleBtn = UIElements.getElement('confirmScheduleBtn');
     if (confirmScheduleBtn && !confirmScheduleBtn.hasListener) {
         confirmScheduleBtn.hasListener = true;
-        confirmScheduleBtn.addEventListener('click', handleConfirmSchedule);
+        confirmScheduleBtn.addEventListener('click', UIFailsafe.wrapAction(handleConfirmSchedule, 'confirmSchedule'));
     }
     
     // Category tabs
-    const categoryTabs = [
-        'allTab', 'friendsTab', 'closeFriendsTab', 
-        'pinnedTab', 'mutedTab', 'microCirclesTab', 'myStatusTab'
-    ];
+    const categoryTabs = ['allTab', 'friendsTab', 'closeFriendsTab', 'pinnedTab', 'mutedTab', 'microCirclesTab', 'myStatusTab'];
     
     categoryTabs.forEach(tabId => {
         const tab = UIElements.getElement(tabId);
@@ -2832,9 +3383,17 @@ function setupEventListeners() {
                 UIElements.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
                 this.classList.add('active');
                 updateCurrentSectionUI();
+                UIStateManager.set('currentTab', tabId);
             });
         }
     });
+    
+    // Restore active tab
+    const savedTab = UIStateManager.get('currentTab');
+    if (savedTab) {
+        const tab = UIElements.getElement(savedTab);
+        if (tab) tab.click();
+    }
     
     // Filter buttons
     UIElements.querySelectorAll('.category-btn[data-filter]').forEach(btn => {
@@ -2863,6 +3422,9 @@ function setupEventListeners() {
         clearFiltersBtn.hasListener = true;
         clearFiltersBtn.addEventListener('click', clearAllFilters);
     }
+    
+    // Restore filters
+    UIStateManager.restoreFilters();
     
     // Viewer back button
     const viewerBackBtn = UIElements.getElement('viewerBackBtn');
@@ -2906,13 +3468,13 @@ function setupEventListeners() {
                 if (navigator.share) {
                     navigator.share({
                         title: `Status from ${currentViewerStatus.user?.displayName || 'User'}`,
-                        text: currentViewerStatus.text || currentViewerStatus.caption || 'Check out this status',
+                        text: currentViewerStatus.text || 'Check out this status',
                         url: window.location.href
-                    }).catch(e => UILogger.debug('Share', 'Share cancelled', e));
+                    }).catch(() => {});
                 } else {
                     navigator.clipboard.writeText(window.location.href)
-                        .then(() => showNotification('Link copied to clipboard', 'success'))
-                        .catch(() => showNotification('Failed to copy link', 'error'));
+                        .then(() => showNotification('Link copied', 'success'))
+                        .catch(() => showNotification('Failed to copy', 'error'));
                 }
             }
         });
@@ -2922,7 +3484,7 @@ function setupEventListeners() {
     const saveStatusBtn = UIElements.getElement('saveStatusBtn');
     if (saveStatusBtn && !saveStatusBtn.hasListener) {
         saveStatusBtn.hasListener = true;
-        saveStatusBtn.addEventListener('click', handleSaveStatus);
+        saveStatusBtn.addEventListener('click', UIFailsafe.wrapAction(handleSaveStatus, 'saveStatus'));
     }
     
     // Report status button
@@ -2956,7 +3518,6 @@ function setupEventListeners() {
             if (counter) {
                 const length = this.value.length;
                 counter.textContent = `${length}/500`;
-                counter.style.color = length > 500 ? 'var(--danger-color)' : 'var(--text-secondary)';
             }
             updateReportSubmitButton();
         });
@@ -2966,7 +3527,7 @@ function setupEventListeners() {
     const submitReportBtn = UIElements.getElement('submitReportBtn');
     if (submitReportBtn && !submitReportBtn.hasListener) {
         submitReportBtn.hasListener = true;
-        submitReportBtn.addEventListener('click', handleSubmitReport);
+        submitReportBtn.addEventListener('click', UIFailsafe.wrapAction(handleSubmitReport, 'submitReport'));
     }
     
     // Send reply button
@@ -2976,7 +3537,7 @@ function setupEventListeners() {
         sendReplyBtn.addEventListener('click', () => {
             const replyInput = UIElements.getElement('replyInput');
             if (replyInput && replyInput.value.trim() && currentViewerStatus) {
-                showNotification('Reply sent: ' + replyInput.value.trim(), 'success');
+                showNotification('Reply sent', 'success');
                 replyInput.value = '';
             }
         });
@@ -3034,21 +3595,11 @@ function setupEventListeners() {
         });
     }
     
-    // Cancel highlight button
-    const cancelHighlightBtn = UIElements.getElement('cancelHighlightBtn');
-    if (cancelHighlightBtn && !cancelHighlightBtn.hasListener) {
-        cancelHighlightBtn.hasListener = true;
-        cancelHighlightBtn.addEventListener('click', () => {
-            const modal = UIElements.highlightsEditorModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
     // Save highlight button
     const saveHighlightBtn = UIElements.getElement('saveHighlightBtn');
     if (saveHighlightBtn && !saveHighlightBtn.hasListener) {
         saveHighlightBtn.hasListener = true;
-        saveHighlightBtn.addEventListener('click', saveHighlight);
+        saveHighlightBtn.addEventListener('click', UIFailsafe.wrapAction(saveHighlight, 'saveHighlight'));
     }
     
     // View timeline button
@@ -3123,7 +3674,7 @@ function setupEventListeners() {
     const deleteAllDraftsBtn = UIElements.getElement('deleteAllDraftsBtn');
     if (deleteAllDraftsBtn && !deleteAllDraftsBtn.hasListener) {
         deleteAllDraftsBtn.hasListener = true;
-        deleteAllDraftsBtn.addEventListener('click', deleteAllDrafts);
+        deleteAllDraftsBtn.addEventListener('click', UIFailsafe.wrapAction(deleteAllDrafts, 'deleteAllDrafts'));
     }
     
     // Load draft button
@@ -3183,9 +3734,7 @@ function setupEventListeners() {
                 if (textInput && latest.type === 'text' && latest.text) {
                     textInput.value = latest.text;
                     const counter = UIElements.getElement('textStatusCounter');
-                    if (counter) {
-                        counter.textContent = `${latest.text.length}/500`;
-                    }
+                    if (counter) counter.textContent = `${latest.text.length}/500`;
                 }
             }
         });
@@ -3241,81 +3790,41 @@ function setupEventListeners() {
             showNotification('Offline mode enabled', 'warning');
             loadCachedDataInstantly();
             renderStatusListInstantlyUI();
+            enableProtectedUI();
         });
     }
     
-    UILogger.info('Events', 'All event listeners configured');
+    // Retry handshake button
+    const retryHandshakeBtn = document.getElementById('retryHandshakeBtn');
+    if (retryHandshakeBtn && !retryHandshakeBtn.hasListener) {
+        retryHandshakeBtn.hasListener = true;
+        retryHandshakeBtn.addEventListener('click', retryHandshake);
+    }
+    
+    UILogger.debug('Events', 'All event listeners configured');
 }
 
 // =============================================
 // UI COMPONENTS INITIALIZATION
 // =============================================
-
 function initializeUIComponents() {
-    UILogger.info('Components', 'Initializing UI components');
+    if (UIElements.getElement('emojiGrid')) initializeEmojiPicker();
+    if (UIElements.getElement('backgroundGrid')) initializeBackgroundOptions();
+    if (UIElements.getElement('intentOptions')) initializeIntentOptions();
+    if (UIElements.getElement('moodOptions')) initializeMoodOptions();
+    if (UIElements.getElement('categoryOptions')) initializeCategoryOptions();
+    if (UIElements.getElement('actionButtonsSelector')) initializeActionButtonsSelector();
+    if (UIElements.getElement('privacyOptions')) initializePrivacyOptions();
+    if (UIElements.getElement('durationOptions')) initializeDurationOptions();
+    if (UIElements.getElement('templateOptions')) initializeTemplateOptions();
+    if (UIElements.getElement('reportReasons')) initializeReportReasons();
+    if (UIElements.getElement('reactionsContainer')) initializeReactions();
+    if (UIElements.getElement('pollOptionsContainer')) initializePollOptions();
+    if (UIElements.getElement('highlightColorGrid')) initializeHighlightColorOptions();
+    if (UIElements.getElement('highlightPrivacyOptions')) initializeHighlightPrivacyOptions();
+    if (UIElements.getElement('repeatOptions')) initializeRepeatOptions();
     
-    // Fix all the element ID checks
-    if (UIElements.getElement('emojiGrid')) {
-        initializeEmojiPicker();
-    }
-    
-    if (UIElements.getElement('backgroundGrid')) {
-        initializeBackgroundOptions();
-    }
-    
-    if (UIElements.getElement('intentOptions')) {
-        initializeIntentOptions();
-    }
-    
-    if (UIElements.getElement('moodOptions')) {
-        initializeMoodOptions();
-    }
-    
-    if (UIElements.getElement('categoryOptions')) {
-        initializeCategoryOptions();
-    }
-    
-    if (UIElements.getElement('actionButtonsSelector')) {
-        initializeActionButtonsSelector();
-    }
-    
-    if (UIElements.getElement('privacyOptions')) {
-        initializePrivacyOptions();
-    }
-    
-    if (UIElements.getElement('durationOptions')) {
-        initializeDurationOptions();
-    }
-    
-    if (UIElements.getElement('templateOptions')) {
-        initializeTemplateOptions();
-    }
-    
-    if (UIElements.getElement('reportReasons')) {
-        initializeReportReasons();
-    }
-    
-    if (UIElements.getElement('reactionsContainer')) {
-        initializeReactions();
-    }
-    
-    if (UIElements.getElement('pollOptionsContainer')) {
-        initializePollOptions();
-    }
-    
-    if (UIElements.getElement('highlightColorGrid')) {
-        initializeHighlightColorOptions();
-    }
-    
-    if (UIElements.getElement('highlightPrivacyOptions')) {
-        initializeHighlightPrivacyOptions();
-    }
-    
-    if (UIElements.getElement('repeatOptions')) {
-        initializeRepeatOptions();
-    }
-    
-    UILogger.info('Components', 'UI components initialized');
+    UILogger.debug('Components', 'UI components initialized');
 }
 
 function initializeEmojiPicker() {
@@ -3340,9 +3849,7 @@ function initializeEmojiPicker() {
                 input.focus();
                 
                 const counter = UIElements.getElement('textStatusCounter');
-                if (counter) {
-                    counter.textContent = `${input.value.length}/500`;
-                }
+                if (counter) counter.textContent = `${input.value.length}/500`;
             }
         });
         
@@ -3376,14 +3883,6 @@ function initializeBackgroundOptions() {
         option.addEventListener('click', () => {
             grid.querySelectorAll('.background-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            localStorage.setItem('selected_background', bg.id);
-        });
-        
-        option.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                option.click();
-            }
         });
         
         grid.appendChild(option);
@@ -3416,7 +3915,6 @@ function initializeIntentOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.intent-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            localStorage.setItem('selected_intent', key);
         });
         
         container.appendChild(option);
@@ -3442,7 +3940,6 @@ function initializeMoodOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.mood-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            localStorage.setItem('selected_mood', key);
         });
         
         container.appendChild(option);
@@ -3466,7 +3963,6 @@ function initializeCategoryOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.category-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            localStorage.setItem('selected_category', key);
         });
         
         container.appendChild(option);
@@ -3496,10 +3992,6 @@ function initializeActionButtonsSelector() {
         
         option.addEventListener('click', () => {
             option.classList.toggle('selected');
-            
-            const selected = Array.from(container.querySelectorAll('.action-button-option.selected'))
-                .map(opt => opt.dataset.action);
-            localStorage.setItem('selected_actions', JSON.stringify(selected));
         });
         
         container.appendChild(option);
@@ -3532,7 +4024,6 @@ function initializePrivacyOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.privacy-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            localStorage.setItem('selected_privacy', key);
         });
         
         container.appendChild(option);
@@ -3559,7 +4050,6 @@ function initializeDurationOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.duration-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            localStorage.setItem('selected_duration', key);
         });
         
         container.appendChild(option);
@@ -3588,9 +4078,7 @@ function initializeTemplateOptions() {
             if (textInput) {
                 textInput.value = template.text;
                 const counter = UIElements.getElement('textStatusCounter');
-                if (counter) {
-                    counter.textContent = `${template.text.length}/500`;
-                }
+                if (counter) counter.textContent = `${template.text.length}/500`;
             }
             
             const bgOption = UIElements.querySelector(`.background-option[data-bg="${template.background}"]`);
@@ -3664,10 +4152,6 @@ function initializeReactions() {
             if (currentViewerStatus) {
                 try {
                     await addReactionToStatus(currentViewerStatus.id, key);
-                    
-                    container.querySelectorAll('.reaction-btn').forEach(b => b.classList.remove('selected'));
-                    btn.classList.add('selected');
-                    
                     showNotification(`Reacted with ${emoji}`, 'success');
                 } catch (error) {
                     UILogger.error('Reaction', 'Failed to add reaction', error);
@@ -3685,7 +4169,6 @@ function initializePollOptions() {
     if (!container) return;
     
     container.innerHTML = '';
-    
     for (let i = 1; i <= 2; i++) {
         addPollOption(i);
     }
@@ -3887,13 +4370,13 @@ async function handlePostStatus() {
     
     const sensitive = UIElements.getElement('sensitiveContentToggle');
     const silent = UIElements.getElement('silentModeToggle');
-    const translate = UIElements.getElement('autoTranslateToggle');
-    const offline = UIElements.getElement('offlineQueueToggle');
+    const autoTranslate = UIElements.getElement('autoTranslateToggle');
+    const offlineQueue = UIElements.getElement('offlineQueueToggle');
     
     if (sensitive) statusData.isSensitive = sensitive.checked;
     if (silent) statusData.isSilent = silent.checked;
-    if (translate) statusData.autoTranslate = translate.checked;
-    if (offline) statusData.offlineQueue = offline.checked;
+    if (autoTranslate) statusData.autoTranslate = autoTranslate.checked;
+    if (offlineQueue) statusData.offlineQueue = offlineQueue.checked;
     
     if (tabName === 'text') {
         const textInput = UIElements.getElement('textStatusInput');
@@ -3977,6 +4460,7 @@ async function handlePostStatus() {
                 renderStatusListInstantlyUI();
                 updateMyStatusPreviewUI();
                 updateCurrentSectionUI();
+                updateMoodChartUI();
             }
             
             const textInput = UIElements.getElement('textStatusInput');
@@ -3985,11 +4469,8 @@ async function handlePostStatus() {
             const mediaPreview = UIElements.getElement('mediaPreview');
             if (mediaPreview) mediaPreview.innerHTML = '';
             
-            const captionInput = UIElements.getElement('mediaCaptionInput');
-            if (captionInput) captionInput.value = '';
-            
-            const questionInput = UIElements.getElement('pollQuestionInput');
-            if (questionInput) questionInput.value = '';
+            const counter = UIElements.getElement('textStatusCounter');
+            if (counter) counter.textContent = '0/500';
         }
     } catch (error) {
         UILogger.error('Post', 'Failed to post status', error);
@@ -4051,19 +4532,15 @@ function handleSaveDraft() {
         draftData.question = question;
         
         const options = Array.from(UIElements.querySelectorAll('.poll-option-input'))
-            .map(input => ({
-                id: `opt_${Date.now()}`,
-                text: input.value.trim(),
-                votes: 0
-            }))
-            .filter(opt => opt.text);
+            .map(input => input.value.trim())
+            .filter(text => text);
         
         if (options.length < 2) {
             showNotification('Please enter at least 2 options to save as draft', 'error');
             return;
         }
         
-        draftData.options = options;
+        draftData.options = options.map(text => ({ text, votes: 0 }));
     }
     
     const intent = UIElements.querySelector('.intent-option.selected')?.dataset.intent;
@@ -4120,12 +4597,10 @@ async function handleConfirmSchedule() {
     if (tabName === 'text') {
         const textInput = UIElements.getElement('textStatusInput');
         const text = textInput ? textInput.value.trim() : '';
-        
         if (!text) {
             showNotification('Please enter text for your status', 'error');
             return;
         }
-        
         statusData.text = text;
         
     } else if (tabName === 'media') {
@@ -4135,16 +4610,12 @@ async function handleConfirmSchedule() {
     } else if (tabName === 'poll') {
         const questionInput = UIElements.getElement('pollQuestionInput');
         const question = questionInput ? questionInput.value.trim() : '';
-        
         if (!question) {
             showNotification('Please enter a question for your poll', 'error');
             return;
         }
-        
         statusData.question = question;
     }
-    
-    const repeat = UIElements.querySelector('.repeat-option.selected')?.dataset.repeat || 'none';
     
     try {
         const btn = UIElements.getElement('confirmScheduleBtn');
@@ -4163,6 +4634,8 @@ async function handleConfirmSchedule() {
             
             const createModal = UIElements.createStatusModal;
             if (createModal) createModal.classList.remove('active');
+            
+            updateScheduledStatusesList();
         }
     } catch (error) {
         UILogger.error('Schedule', 'Failed to schedule status', error);
@@ -4171,7 +4644,7 @@ async function handleConfirmSchedule() {
         const btn = UIElements.getElement('confirmScheduleBtn');
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check"></i> Confirm Schedule';
+            btn.innerHTML = '<i class="fas fa-clock"></i> Schedule Status';
         }
     }
 }
@@ -4197,7 +4670,9 @@ async function handleSaveStatus() {
             highlight.statusIds.push(currentViewerStatus.id);
             highlight.count = highlight.statusIds.length;
             
-            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+            if (typeof SafeStorage !== 'undefined') {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+            }
             
             btn.innerHTML = '<i class="fas fa-bookmark"></i>';
             btn.title = 'Remove from Highlights';
@@ -4213,7 +4688,9 @@ async function handleSaveStatus() {
             }
         });
         
-        localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+        if (typeof SafeStorage !== 'undefined') {
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+        }
         
         btn.innerHTML = '<i class="far fa-bookmark"></i>';
         btn.title = 'Save to Highlights';
@@ -4229,8 +4706,7 @@ async function handleSubmitReport() {
     const selectedReason = UIElements.querySelector('#reportReasons .category-option.selected')?.dataset.reason;
     const reportDetails = UIElements.getElement('reportDetails');
     const details = reportDetails ? reportDetails.value.trim() : '';
-    const anonymousToggle = UIElements.getElement('anonymousReportToggle');
-    const isAnonymous = anonymousToggle ? anonymousToggle.checked : false;
+    const anonymous = UIElements.getElement('anonymousReportToggle')?.checked || false;
     
     if (!selectedReason) {
         showNotification('Please select a reason', 'error');
@@ -4252,7 +4728,7 @@ async function handleSubmitReport() {
         const response = await reportStatus(currentViewerStatus.id, selectedReason, details);
         
         if (response && response.success) {
-            showNotification(`Report submitted ${isAnonymous ? 'anonymously' : ''}`, 'success');
+            showNotification('Report submitted', 'success');
             
             const modal = UIElements.reportModal;
             if (modal) modal.classList.remove('active');
@@ -4308,7 +4784,7 @@ function loadHighlightsContent() {
                 <i class="fas fa-star" style="font-size: 48px; margin-bottom: 15px;"></i>
                 <p>No highlights yet</p>
                 <p class="subtext">Save important statuses to highlights</p>
-                <button class="btn primary" onclick="document.getElementById('createHighlightBtn')?.click()">
+                <button class="action-btn primary" onclick="document.getElementById('createHighlightBtn')?.click()">
                     <i class="fas fa-plus"></i> Create Highlight
                 </button>
             </div>
@@ -4348,24 +4824,6 @@ function showHighlightsEditor(highlight = null) {
             title.textContent = 'Edit Highlight';
             nameInput.value = highlight.name || '';
             iconSelect.value = highlight.icon || 'fas fa-star';
-            
-            const colorGrid = UIElements.getElement('highlightColorGrid');
-            if (colorGrid && highlight.color) {
-                const colorOption = colorGrid.querySelector(`[data-bg="${highlight.color}"]`);
-                if (colorOption) {
-                    colorGrid.querySelectorAll('.background-option').forEach(opt => opt.classList.remove('selected'));
-                    colorOption.classList.add('selected');
-                }
-            }
-            
-            const privacyOptions = UIElements.getElement('highlightPrivacyOptions');
-            if (privacyOptions && highlight.privacy) {
-                const privacyOption = privacyOptions.querySelector(`[data-privacy="${highlight.privacy}"]`);
-                if (privacyOption) {
-                    privacyOptions.querySelectorAll('.privacy-option').forEach(opt => opt.classList.remove('selected'));
-                    privacyOption.classList.add('selected');
-                }
-            }
         } else {
             title.textContent = 'Create Highlight';
             nameInput.value = '';
@@ -4400,14 +4858,16 @@ async function saveHighlight() {
     };
     
     try {
-        const response = await secureApiCall('/api/statuses/highlights', {
+        const response = await makeParentApiRequest('/api/statuses/highlights', {
             method: 'POST',
             body: JSON.stringify(highlight)
         });
         
         if (response && response.success) {
             highlights.push(highlight);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+            if (typeof SafeStorage !== 'undefined') {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+            }
             
             showNotification('Highlight saved successfully', 'success');
             
@@ -4472,16 +4932,13 @@ function loadMemoryTimelineContent() {
                 <div class="timeline-day" data-status-id="${status.id}">
                     <div class="timeline-date">${day} ${month}</div>
                     <div class="timeline-status">${UISanitizer.sanitizeHTML(getStatusPreviewText(status))}</div>
-                    ${status.mood ? `<div class="timeline-mood" style="background-color: ${statusMoods[status.mood]?.color || 'var(--mood-happy)'}"></div>` : ''}
                 </div>
             `;
         });
         
         section.innerHTML = `
             <div class="timeline-month-header">${monthYear}</div>
-            <div class="timeline-days">
-                ${daysHtml}
-            </div>
+            <div class="timeline-days">${daysHtml}</div>
         `;
         
         section.querySelectorAll('.timeline-day').forEach(dayEl => {
@@ -4490,7 +4947,6 @@ function loadMemoryTimelineContent() {
                 const status = myStatuses.find(s => s.id === statusId);
                 if (status) {
                     showStatusViewer(status);
-                    
                     const modal = UIElements.memoryTimelineModal;
                     if (modal) modal.classList.remove('active');
                 }
@@ -4511,8 +4967,7 @@ function exportTimeline() {
             type: s.type,
             text: s.text || s.caption || s.question,
             mood: s.mood,
-            intent: s.intent,
-            category: s.category
+            intent: s.intent
         }))
     };
     
@@ -4592,17 +5047,13 @@ function updateStatsChart() {
     container.style.height = '200px';
     container.style.width = '100%';
     
-    data.forEach((item, idx) => {
+    data.forEach((item) => {
         const bar = document.createElement('div');
         bar.style.flex = '1';
         bar.style.height = (item.views / maxViews * 100) + '%';
         bar.style.backgroundColor = 'var(--primary-color)';
         bar.style.borderRadius = '2px 2px 0 0';
-        bar.style.position = 'relative';
         bar.title = `${item.date}: ${item.views} views`;
-        
-        bar.addEventListener('mouseenter', () => bar.style.backgroundColor = '#0073e6');
-        bar.addEventListener('mouseleave', () => bar.style.backgroundColor = 'var(--primary-color)');
         
         container.appendChild(bar);
     });
@@ -4619,9 +5070,7 @@ function loadRecentViewers() {
     const viewers = [
         { name: 'Alex Johnson', time: '2 hours ago', avatar: 'AJ' },
         { name: 'Sam Wilson', time: '5 hours ago', avatar: 'SW' },
-        { name: 'Taylor Swift', time: '1 day ago', avatar: 'TS' },
-        { name: 'John Doe', time: '2 days ago', avatar: 'JD' },
-        { name: 'Jane Smith', time: '3 days ago', avatar: 'JS' }
+        { name: 'Taylor Swift', time: '1 day ago', avatar: 'TS' }
     ];
     
     viewers.forEach(viewer => {
@@ -4796,14 +5245,6 @@ function loadDraft(draft) {
         }
     }
     
-    if (draft.category) {
-        const categoryOption = UIElements.querySelector(`.category-option[data-category="${draft.category}"]`);
-        if (categoryOption) {
-            UIElements.querySelectorAll('.category-option').forEach(opt => opt.classList.remove('selected'));
-            categoryOption.classList.add('selected');
-        }
-    }
-    
     const draftsModal = UIElements.draftsModal;
     if (draftsModal) draftsModal.classList.remove('active');
     
@@ -4814,7 +5255,9 @@ function deleteDraft(draftId) {
     if (!confirm('Are you sure you want to delete this draft?')) return;
     
     drafts = drafts.filter(d => d.id !== draftId);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+    if (typeof SafeStorage !== 'undefined') {
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
+    }
     
     showNotification('Draft deleted', 'success');
     updateDraftsList();
@@ -4826,10 +5269,12 @@ function deleteAllDrafts() {
         return;
     }
     
-    if (!confirm('Are you sure you want to delete all drafts? This action cannot be undone.')) return;
+    if (!confirm('Are you sure you want to delete all drafts?')) return;
     
     drafts = [];
-    localStorage.setItem(LOCAL_STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+    if (typeof SafeStorage !== 'undefined') {
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
+    }
     
     showNotification('All drafts deleted', 'success');
     updateDraftsList();
@@ -4865,47 +5310,35 @@ function updateScheduledStatusesList() {
                 <div class="schedule-time">Scheduled for: ${timeString}</div>
             </div>
             <div class="schedule-actions">
-                <button class="edit-btn" data-action="edit" title="Edit">
-                    <i class="fas fa-edit"></i>
-                </button>
                 <button class="cancel-btn" data-action="cancel" title="Cancel">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
         `;
         
-        const actionButtons = item.querySelectorAll('button');
-        actionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const action = btn.dataset.action;
-                handleScheduleAction(action, scheduled);
-            });
+        const btn = item.querySelector('.cancel-btn');
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cancelScheduledStatus(scheduled.id);
         });
         
         list.appendChild(item);
     });
 }
 
-function handleScheduleAction(action, scheduled) {
-    if (action === 'edit') {
-        showNotification('Edit scheduled status feature coming soon', 'info');
-    } else if (action === 'cancel') {
-        cancelScheduledStatus(scheduled.id);
-    }
-}
-
 async function cancelScheduledStatus(scheduleId) {
     if (!confirm('Are you sure you want to cancel this scheduled status?')) return;
     
     try {
-        const response = await secureApiCall(`/api/statuses/schedule/${scheduleId}`, {
+        const response = await makeParentApiRequest(`/api/statuses/schedule/${scheduleId}`, {
             method: 'DELETE'
         });
         
         if (response && response.success) {
             scheduledStatuses = scheduledStatuses.filter(s => s.id !== scheduleId);
-            localStorage.setItem(LOCAL_STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledStatuses));
+            if (typeof SafeStorage !== 'undefined') {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SCHEDULED, scheduledStatuses);
+            }
             
             showNotification('Scheduled status cancelled', 'success');
             updateScheduledStatusesList();
@@ -4990,6 +5423,7 @@ function addFilterTag(filter, label) {
     const clearBtn = UIElements.getElement('clearFiltersBtn');
     if (clearBtn) clearBtn.style.display = 'block';
     
+    UIStateManager.saveFilters();
     updateCurrentSectionUI();
 }
 
@@ -5002,6 +5436,7 @@ function removeFilterTag(filter) {
     const clearBtn = UIElements.getElement('clearFiltersBtn');
     if (clearBtn && activeFilters.size === 0) clearBtn.style.display = 'none';
     
+    UIStateManager.saveFilters();
     updateCurrentSectionUI();
 }
 
@@ -5014,11 +5449,15 @@ function clearAllFilters() {
     const clearBtn = UIElements.getElement('clearFiltersBtn');
     if (clearBtn) clearBtn.style.display = 'none';
     
+    currentIntentFilter = null;
+    currentMoodFilter = null;
+    
+    UIStateManager.saveFilters();
     updateCurrentSectionUI();
 }
 
 // =============================================
-// RENDER STATUS LIST INSTANTLY - RENAMED TO AVOID DUPLICATE
+// RENDER FUNCTIONS
 // =============================================
 function renderStatusListInstantlyUI() {
     const container = UIElements.allStatusList;
@@ -5031,7 +5470,7 @@ function renderStatusListInstantlyUI() {
                 <p>No statuses yet</p>
                 <p class="subtext">Be the first to post a status!</p>
                 ${isAuthenticated() ? `
-                    <button class="btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
+                    <button class="action-btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
                         <i class="fas fa-plus"></i> Create Status
                     </button>
                 ` : ''}
@@ -5052,21 +5491,13 @@ function renderStatusListInstantlyUI() {
     container.appendChild(fragment);
 }
 
-// =============================================
-// UPDATE MY STATUS PREVIEW - RENAMED TO AVOID DUPLICATE
-// =============================================
 function updateMyStatusPreviewUI() {
     const preview = UIElements.getElement('myStatusPreview');
     if (!preview) return;
     
     const ring = UIElements.getElement('myStatusRing');
-    const avatar = UIElements.getElement('myStatusAvatar');
     const indicator = UIElements.getElement('myStatusIndicator');
     const statusText = UIElements.getElement('myStatusText');
-    
-    if (currentUser && currentUser.photoURL && avatar) {
-        avatar.innerHTML = `<img src="${UISanitizer.sanitizeHTML(currentUser.photoURL)}" style="width: 100%; height: 100%; border-radius: 50%;">`;
-    }
     
     if (myStatuses && myStatuses.length > 0) {
         const latest = myStatuses[0];
@@ -5094,9 +5525,6 @@ function updateMyStatusPreviewUI() {
     }
 }
 
-// =============================================
-// UPDATE MOOD CHART
-// =============================================
 function updateMoodChartUI() {
     const chart = UIElements.getElement('moodChart');
     if (!chart) return;
@@ -5105,29 +5533,65 @@ function updateMoodChartUI() {
     
     const data = moodChartData.length > 0 ? moodChartData : generateSampleMoodData();
     
-    data.slice(-14).forEach((day, idx) => {
+    data.slice(-14).forEach((day) => {
         const bar = document.createElement('div');
         bar.className = 'mood-bar';
         bar.style.backgroundColor = statusMoods[day.mood]?.color || 'var(--mood-happy)';
         bar.style.height = `${day.value}%`;
-        bar.title = `Day ${idx + 1}: ${statusMoods[day.mood]?.name || 'Happy'} (${day.value}%)`;
+        bar.title = `${statusMoods[day.mood]?.name || 'Happy'} (${day.value}%)`;
         chart.appendChild(bar);
     });
 }
 
 // =============================================
-// CLEANUP AND MEMORY MANAGEMENT
+// CLEANUP
 // =============================================
 function cleanupUI() {
-    UILogger.info('Cleanup', 'Cleaning up UI resources');
-    
     stopAutoAdvance();
-    
     uiEvents.removeAllListeners();
     UIBridge.clearSubscriptions();
     UIStateManager.clear();
+    UIFailsafe.resetAll();
+    
+    if (typeof UIFailsafe.mutationObserver !== 'undefined') {
+        UIFailsafe.mutationObserver.disconnect();
+    }
     
     UILogger.info('Cleanup', 'UI cleanup complete');
+}
+
+// =============================================
+// DIAGNOSTIC OVERLAY
+// =============================================
+function showDiagnosticOverlay() {
+    const diagnostics = typeof getDiagnostics === 'function' ? getDiagnostics() : UILogger.getDiagnostics();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'diagnosticOverlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        width: 400px;
+        max-height: 80vh;
+        overflow-y: auto;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        padding: 16px;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: monospace;
+        font-size: 12px;
+    `;
+    
+    overlay.innerHTML = `
+        <h3 style="margin: 0 0 10px 0; font-size: 14px;">Status System Diagnostics</h3>
+        <pre style="margin: 0; white-space: pre-wrap;">${JSON.stringify(diagnostics, null, 2)}</pre>
+        <button class="action-btn secondary" onclick="this.parentElement.remove()">Close</button>
+    `;
+    
+    document.body.appendChild(overlay);
 }
 
 // =============================================
@@ -5154,11 +5618,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         UIRenderPipeline.setStage('progressiveEnhancement');
         
+        UIRenderPipeline.updateHandshakeStatus('waiting');
+        
         onTokenReady(() => {
-            UILogger.info('Init', 'Token ready - Enabling protected UI');
-            
             updateUserUIInstantly();
             enableProtectedUI();
+            UIRenderPipeline.updateHandshakeStatus('connected');
             
             setTimeout(() => {
                 setupEventListeners();
@@ -5177,12 +5642,28 @@ document.addEventListener('DOMContentLoaded', async function() {
             }, 200);
         });
         
+        setTimeout(() => {
+            if (UIRenderPipeline.handshakeStatus === 'waiting') {
+                UIRenderPipeline.updateHandshakeStatus('connecting');
+            }
+        }, 2000);
+        
+        setTimeout(() => {
+            if (UIRenderPipeline.handshakeStatus === 'connecting' && !isTokenReady) {
+                UIRenderPipeline.updateHandshakeStatus('failed');
+            }
+        }, 10000);
+        
         initPageCore();
+        
+        // Restore UI state
+        UIStateManager.restoreFilters();
         
     } catch (error) {
         UILogger.error('Init', 'Failed to initialize UI', error);
         
         SkeletonLoader.hideAll();
+        UIRenderPipeline.updateHandshakeStatus('failed');
         
         const container = UIElements.allStatusList;
         if (container) {
@@ -5191,14 +5672,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 });
 
-// =============================================
-// PAGE UNLOAD CLEANUP
-// =============================================
 window.addEventListener('beforeunload', cleanupUI);
 window.addEventListener('pagehide', cleanupUI);
 
+function updateUserUIInstantly() {}
+
 // =============================================
-// EXPORT PUBLIC API - RENAMED TO AVOID CONFLICTS
+// EXPORTS
 // =============================================
 export {
     showStatusViewer,
@@ -5216,11 +5696,14 @@ export {
     UILogger,
     UIStateManager,
     ResponsiveEngine,
-    uiErrorBoundary
+    uiErrorBoundary,
+    UIFailsafe,
+    retryHandshake,
+    showDiagnosticOverlay
 };
 
 // =============================================
-// GLOBAL EXPOSURE - LEGACY SUPPORT
+// GLOBAL EXPOSURE
 // =============================================
 if (typeof window !== 'undefined') {
     try {
@@ -5236,18 +5719,11 @@ if (typeof window !== 'undefined') {
             showLogoutState,
             showReconnectionState,
             renderStatusesList: renderStatusesListUI,
-            cleanupUI
+            cleanupUI,
+            retryHandshake,
+            showDiagnosticOverlay
         };
-    } catch (e) {
-        UILogger.error('Global', 'Failed to expose global UI API', e);
-    }
+    } catch (e) {}
 }
 
-// Helper function for user UI update
-function updateUserUIInstantly() {
-    // Implementation would go here if needed
-    UILogger.debug('UI', 'User UI updated instantly');
-}
-
-UILogger.info('StatusUI', 'Resilient UI controller initialized successfully');
-console.log('[StatusUI] Resilient UI controller ready');
+UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v5.0');

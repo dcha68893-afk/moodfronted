@@ -1,10 +1,13 @@
 // calls-ui.js
 // ==================== RESILIENT UI CONTROLLER ====================
-// Version: 3.1.2
+// Version: 3.2.0
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v2.3.2
+// Dependencies: calls-core.js v3.0.0
 // Security: XSS protected, input sanitized, CSP compliant
-// FIXES: Duplicate declarations, scoping issues, proper imports
+// UPDATES: v3.2.0 - Integrated with IframeEnvironment, OriginSecurity, SafeStorage,
+//                    IframeTransport, StartupGovernor, IframeHandshakeAuthority,
+//                    IframeSessionClient, ReliabilityEngine, RecoveryManager,
+//                    MultiModuleCoordinator, UIFailsafe, NavigationGuard
 // ===============================================================
 
 (function() {
@@ -14,23 +17,67 @@
     const CURRENT_MODULE_NAME = 'calls-ui';
     const MODULE_INIT_FLAG = '__CALLS_UI_INIT__';
     
-    // ==================== DUPLICATE LOADER PROTECTION ====================
     if (window[MODULE_INIT_FLAG]) {
         return;
     }
     window[MODULE_INIT_FLAG] = true;
 
-    // ==================== SESSION CACHE LAYER ====================
     window.__CHILD_SESSION__ = window.__CHILD_SESSION__ || {
         token: null,
         userId: null,
         expires: null
     };
 
+    // ==================== DEBUG FLAG ====================
+    window.__IFRAME_DEBUG__ = window.__IFRAME_DEBUG__ || false;
+    const DEBUG = window.__IFRAME_DEBUG__;
+
+    // ==================== ERROR CACHE FOR ONCE LOGGING ====================
+    const _onceErrors = new Map();
+    const _onceTimers = new Map();
+
+    function logOnce(level, message, data) {
+        const key = `${level}:${message}`;
+        if (_onceErrors.has(key)) return;
+        
+        _onceErrors.set(key, Date.now());
+        
+        const timer = setTimeout(() => {
+            _onceErrors.delete(key);
+            _onceTimers.delete(key);
+        }, 60000);
+        _onceTimers.set(key, timer);
+        
+        if (level === 'error') {
+            console.error(`[Calls UI] ${message}`, data || '');
+        } else if (level === 'warn') {
+            console.warn(`[Calls UI] ${message}`, data || '');
+        } else {
+            console.log(`[Calls UI] ${message}`, data || '');
+        }
+    }
+
     // ==================== PARENT CONNECTION WRAPPER ====================
     function sendToParent(type, payload = {}) {
         try {
             if (window.parent && window.parent !== window) {
+                if (window.callsCore && window.callsCore.IframeTransport) {
+                    window.callsCore.IframeTransport.send(type, payload, { requireAck: false })
+                        .catch(() => {});
+                    return true;
+                }
+                
+                if (window.callsCore && window.callsCore.MessageBridge) {
+                    const message = window.callsCore.MessageBridge.createMessage(
+                        type, 
+                        payload, 
+                        { legacy: true }
+                    );
+                    window.parent.postMessage(message, window.callsCore.OriginAdapter ? 
+                        window.callsCore.OriginAdapter.getTargetOrigin() : '*');
+                    return true;
+                }
+                
                 const message = {
                     id: (window.crypto && window.crypto.randomUUID) ? 
                         window.crypto.randomUUID() : 
@@ -49,29 +96,26 @@
                 return true;
             }
         } catch (e) {
-            console.warn("[Child→Parent] Send failed", e);
+            if (DEBUG) {
+                logOnce('warn', 'Send to parent failed', e);
+            }
         }
         return false;
     }
 
-    // ==================== LEGACY COMPATIBILITY BRIDGE ====================
     const legacyAPI = (window.parent && window.parent.API) ? window.parent.API : null;
 
     // ==================== IMPORTS FROM CORE ====================
-    // These will be resolved from the global window.callsCore object
-    // or from module imports if available
-
     let core;
     
-    // Try to get core from global scope
     if (window.callsCore) {
         core = window.callsCore;
     } else {
-        // Fallback - create empty object, will be populated by core
         core = {};
-        console.warn('[Calls UI] Waiting for core to load...');
+        if (DEBUG) {
+            logOnce('warn', 'Waiting for core to load...');
+        }
         
-        // Wait for core to be available
         const checkCore = setInterval(() => {
             if (window.callsCore) {
                 core = window.callsCore;
@@ -81,7 +125,6 @@
         }, 100);
     }
 
-    // Destructure with fallbacks
     const {
         AppState = {},
         iframeId = 'calls-iframe',
@@ -90,7 +133,8 @@
             INIT: 'INIT', PREFLIGHT: 'PREFLIGHT', DEPENDENCY: 'DEPENDENCY',
             PARENT_DETECT: 'PARENT_DETECT', HANDSHAKE: 'HANDSHAKE', SYNC: 'SYNC',
             PERMISSIONS: 'PERMISSIONS', READY: 'READY', ACTIVE: 'ACTIVE',
-            SUSPENDED: 'SUSPENDED', DEGRADED: 'DEGRADED', DESTROYED: 'DESTROYED', DEMO: 'DEMO'
+            SUSPENDED: 'SUSPENDED', DEGRADED: 'DEGRADED', DESTROYED: 'DESTROYED', 
+            DEMO: 'DEMO', RECOVERING: 'RECOVERING'
         },
         session = { isDemoMode: () => true, validateToken: () => false, getStatus: () => ({}) },
         auth = { check: () => false, refresh: () => Promise.resolve(false), logout: () => {} },
@@ -176,7 +220,9 @@
         bootstrapIframe = () => {},
         safeInit = () => Promise.resolve(),
         coreShowNotification = (msg, type) => {
-            console.log(`[Notification] ${type}: ${msg}`);
+            if (DEBUG) {
+                logOnce('info', `[Notification] ${type}: ${msg}`);
+            }
         },
         SecurityCore = {
             sanitizeString: (str) => str || '',
@@ -232,7 +278,7 @@
                     'http://localhost:5500', 'https://localhost:5500',
                     'http://127.0.0.1:5500', 'https://127.0.0.1:5500'
                 ];
-                return trusted.includes(origin) || origin.includes('localhost');
+                return trusted.includes(origin) || origin.includes('localhost') || origin.includes('.onrender.com');
             },
             validate: () => true,
             createMessage: (type, payload) => ({ type, payload, id: Date.now(), timestamp: Date.now() }),
@@ -241,13 +287,22 @@
         RetryManager,
         ErrorBoundary = {
             execute: (fn, context, fallback) => {
-                try { return fn(); } catch (e) { console.error(`UI Error in ${context}:`, e); return fallback; }
+                try { return fn(); } catch (e) { 
+                    if (DEBUG) logOnce('error', `UI Error in ${context}:`, e); 
+                    return fallback; 
+                }
             },
             executeAsync: async (fn, context, fallback) => {
-                try { return await fn(); } catch (e) { console.error(`UI Async Error in ${context}:`, e); return fallback; }
+                try { return await fn(); } catch (e) { 
+                    if (DEBUG) logOnce('error', `UI Async Error in ${context}:`, e); 
+                    return fallback; 
+                }
             },
             wrap: (fn, context) => (...args) => {
-                try { return fn(...args); } catch (e) { console.error(`UI Error in ${context}:`, e); return null; }
+                try { return fn(...args); } catch (e) { 
+                    if (DEBUG) logOnce('error', `UI Error in ${context}:`, e); 
+                    return null; 
+                }
             },
             createBoundary: (name, fallbackFn) => ({
                 execute: (fn) => { try { return fn(); } catch { return fallbackFn ? fallbackFn() : null; } },
@@ -256,29 +311,60 @@
         },
         MessageIdGenerator = {
             generateId: () => Date.now() + '-' + Math.random().toString(36).substring(2, 8)
-        }
+        },
+        // Enhanced core modules from v3.0.0
+        MessageBridge,
+        HandshakeClient,
+        SessionClient,
+        TransportAgent,
+        RecoveryManager,
+        CompatibilityBridge,
+        DiagnosticsAgent,
+        StartupGovernor,
+        EnvironmentDetector,
+        OriginAdapter,
+        MESSAGE_TYPES,
+        // New v3.0.0 modules
+        IframeEnvironment,
+        OriginSecurity,
+        SafeStorage,
+        IframeTransport,
+        IframeHandshakeAuthority,
+        IframeSessionClient,
+        ReliabilityEngine,
+        MultiModuleCoordinator,
+        UIFailsafe,
+        NavigationGuard
     } = core;
 
     // ==================== DEFERRED INITIALIZATION GATES ====================
     let parentReady = false;
     let sessionReady = false;
     let handshakeComplete = false;
+    
     const initGatePromise = new Promise((resolve) => {
         const checkGate = () => {
             if (parentReady && sessionReady) {
                 resolve();
             }
         };
-        // Check every 100ms
         const interval = setInterval(checkGate, 100);
-        // Timeout after 10s
+        
+        let timeoutMs = 10000;
+        if (IframeEnvironment && IframeEnvironment.getTimeouts) {
+            const timeouts = IframeEnvironment.getTimeouts();
+            timeoutMs = timeouts.session * 2 || 10000;
+        }
+        
         setTimeout(() => {
             clearInterval(interval);
-            console.warn('[Calls UI] Init gate timeout, proceeding in fallback mode');
+            if (DEBUG) {
+                logOnce('warn', 'Init gate timeout, proceeding in fallback mode');
+            }
             parentReady = true;
             sessionReady = true;
             resolve();
-        }, 10000);
+        }, timeoutMs);
     });
 
     // ==================== HANDSHAKE RETRY ====================
@@ -290,32 +376,50 @@
                     module: CURRENT_MODULE_NAME
                 });
                 
-                // Wait for response with timeout
+                let timeout = 8000;
+                if (IframeEnvironment && IframeEnvironment.getTimeouts) {
+                    const timeouts = IframeEnvironment.getTimeouts();
+                    timeout = timeouts.handshake || 8000;
+                }
+                
                 const response = await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => reject(new Error('Handshake timeout')), 3000 * Math.pow(2, i));
+                    const timeoutId = setTimeout(() => reject(new Error('Handshake timeout')), timeout * Math.pow(2, i));
                     
                     const handler = (event) => {
-                        if (!event.data || event.data.type !== 'HANDSHAKE_ACK') return;
-                        if (event.data.module !== CURRENT_MODULE_NAME) return;
-                        clearTimeout(timeout);
-                        window.removeEventListener('message', handler);
-                        resolve(event.data);
+                        if (OriginSecurity && !OriginSecurity.validateEvent(event)) return;
+                        if (OriginAdapter && !OriginAdapter.validateEvent(event)) return;
+                        
+                        const data = event.data;
+                        if (!data || typeof data !== 'object') return;
+                        
+                        if (data.type === 'HANDSHAKE_ACK' || data.type === 'ACK') {
+                            clearTimeout(timeoutId);
+                            window.removeEventListener('message', handler);
+                            resolve(data);
+                        }
                     };
                     
                     window.addEventListener('message', handler);
                 });
                 
-                if (response && response.payload && response.payload.success) {
+                if (response && (response.payload?.success || response.success)) {
                     handshakeComplete = true;
+                    parentReady = true;
                     return true;
                 }
             } catch (e) {
-                console.warn(`[Calls UI] Handshake attempt ${i + 1} failed:`, e);
+                if (DEBUG) {
+                    logOnce('warn', `Handshake attempt ${i + 1} failed:`, e);
+                }
             }
             
-            // Exponential backoff
+            let delay = 1000 * Math.pow(2, i);
+            if (IframeEnvironment && IframeEnvironment.isVPNNetwork && IframeEnvironment.isVPNNetwork()) {
+                delay *= 1.5;
+            }
+            
             if (i < maxRetries - 1) {
-                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+                await new Promise(r => setTimeout(r, delay));
             }
         }
         return false;
@@ -334,23 +438,21 @@
 
     // ==================== PARENT MESSAGE LISTENER ====================
     function onParentMessage(event) {
-        // Origin validation
-        try {
-            const trustedOrigins = [
-                window.location.origin,
-                'http://localhost:5500', 'https://localhost:5500',
-                'http://127.0.0.1:5500', 'https://127.0.0.1:5500'
-            ];
-            
-            if (!trustedOrigins.includes(event.origin) && !event.origin.includes('localhost')) {
-                console.warn('[Calls UI] Invalid origin:', event.origin);
-                return;
+        // Validate origin using both adapters for compatibility
+        if (OriginSecurity && !OriginSecurity.validateEvent(event)) {
+            if (DEBUG) {
+                logOnce('warn', 'Invalid origin (OriginSecurity):', event.origin);
             }
-        } catch (e) {
             return;
         }
         
-        // Schema validation
+        if (OriginAdapter && !OriginAdapter.validateEvent(event)) {
+            if (DEBUG) {
+                logOnce('warn', 'Invalid origin (OriginAdapter):', event.origin);
+            }
+            return;
+        }
+        
         const data = event.data;
         if (!data || typeof data !== 'object') return;
         if (!data.type || typeof data.type !== 'string') return;
@@ -359,29 +461,36 @@
             switch (data.type) {
                 case 'PARENT_READY':
                     parentReady = true;
-                    console.log('[Calls UI] Parent ready');
+                    if (DEBUG) logOnce('info', 'Parent ready');
                     sendToParent('CHILD_ACK', { status: 'ready' });
                     break;
                     
                 case 'SESSION_UPDATE':
-                    if (data.payload) {
-                        // Update session cache
-                        if (data.payload.token) {
-                            window.__CHILD_SESSION__.token = data.payload.token;
+                case 'SESSION_SYNC':
+                    if (data.payload || data.data) {
+                        const sessionData = data.payload || data.data;
+                        if (sessionData.token) {
+                            window.__CHILD_SESSION__.token = sessionData.token;
                         }
-                        if (data.payload.userId) {
-                            window.__CHILD_SESSION__.userId = data.payload.userId;
+                        if (sessionData.userId || sessionData.user?.id) {
+                            window.__CHILD_SESSION__.userId = sessionData.userId || sessionData.user?.id;
                         }
-                        if (data.payload.expires) {
-                            window.__CHILD_SESSION__.expires = data.payload.expires;
+                        if (sessionData.expires || sessionData.expiry) {
+                            window.__CHILD_SESSION__.expires = sessionData.expires || sessionData.expiry;
                         }
                         sessionReady = true;
-                        console.log('[Calls UI] Session updated');
+                        if (DEBUG) logOnce('info', 'Session updated');
+                        
+                        sendToParent('SESSION_ACK', { 
+                            success: true,
+                            timestamp: Date.now()
+                        });
                     }
                     break;
                     
                 case 'HANDSHAKE_ACK':
                     handshakeComplete = true;
+                    parentReady = true;
                     if (data.payload && data.payload.session) {
                         window.__CHILD_SESSION__ = {
                             ...window.__CHILD_SESSION__,
@@ -389,35 +498,54 @@
                         };
                         sessionReady = true;
                     }
-                    parentReady = true;
-                    console.log('[Calls UI] Handshake complete');
+                    if (DEBUG) logOnce('info', 'Handshake complete');
+                    break;
+                    
+                case 'SESSION_ACK':
+                    if (DEBUG) logOnce('info', 'Session ACK received');
+                    sessionReady = true;
+                    break;
+                    
+                case 'PING':
+                    sendToParent('PONG', {
+                        requestId: data.payload?.requestId,
+                        timestamp: Date.now()
+                    });
+                    break;
+                    
+                case 'PONG':
+                    break;
+                    
+                case 'PAGE_ACTIVATED':
+                    if (DEBUG) logOnce('info', 'Parent page activated');
+                    break;
+                    
+                case 'NAVIGATE':
+                    if (DEBUG) logOnce('info', 'Parent navigation:', data.payload);
                     break;
                     
                 default:
-                    // Pass through to existing handlers
                     break;
             }
         } catch (error) {
-            console.error('[Calls UI] Error handling parent message:', error);
+            if (DEBUG) {
+                logOnce('error', 'Error handling parent message:', error);
+            }
         }
     }
 
-    // Register listener once
     window.addEventListener('message', onParentMessage, false);
 
     // ==================== UI STATE MANAGEMENT ====================
     const UIState = {
-        // View management
         currentView: 'sidebar',
         viewHistory: [],
         restorePoints: new Map(),
         
-        // Component visibility
         activePanels: new Set(),
         activeModals: new Set(),
         activeOverlays: new Set(),
         
-        // Rendering pipeline
         renderStages: {
             skeleton: false,
             initial: false,
@@ -425,17 +553,14 @@
             live: false
         },
         
-        // Performance tracking
         renderStartTime: 0,
         lastRenderTime: 0,
         renderCount: 0,
         
-        // Cached UI state
         cachedElements: new Map(),
         cachedTemplates: new Map(),
         mutationObserver: null,
         
-        // Responsive breakpoints
         breakpoints: {
             mobile: 480,
             tablet: 768,
@@ -443,51 +568,39 @@
             wide: 1440
         },
         
-        // Input mode detection
         inputMode: 'mouse',
         
-        // Error recovery
         errorRecovery: {
             attempts: new Map(),
             maxAttempts: 3,
             backoffMs: 1000
         },
         
-        // Security flags
         security: {
             sanitizing: false,
             maxSanitizeDepth: 10,
             currentDepth: 0
         },
         
-        // Initialization flag
         initialized: false
     };
 
     // ==================== DOM ELEMENTS CACHE ====================
     const elements = {};
 
-    /**
-     * Safely cache DOM elements with validation
-     * Never throws - always returns cached references or null
-     */
     function cacheElements() {
         return UIErrorBoundary.execute(() => {
             const startTime = performance.now();
             
-            // Preserve existing core elements
             if (coreElements && typeof coreElements === 'object') {
                 Object.assign(elements, coreElements);
             }
             
-            // Cache UI-specific elements with safe selectors
             const selectors = {
-                // Main containers
                 appContainer: '#appContainer',
                 sidebar: '#sidebar',
                 callContainer: '#callContainer',
                 
-                // Buttons & controls
                 newCallBtn: '#newCallBtn',
                 quickVoiceBtn: '#quickVoiceBtn',
                 quickVideoBtn: '#quickVideoBtn',
@@ -497,7 +610,6 @@
                 menuDotsBtn: '#menuDotsBtn',
                 menuDotsDropdown: '#menuDotsDropdown',
                 
-                // Menu items
                 menuParticipants: '#menuParticipants',
                 menuChat: '#menuChat',
                 menuWhiteboard: '#menuWhiteboard',
@@ -505,7 +617,6 @@
                 menuPolls: '#menuPolls',
                 menuRelationship: '#menuRelationship',
                 
-                // Call controls
                 muteBtn: '#muteBtn',
                 videoBtn: '#videoBtn',
                 screenShareBtn: '#screenShareBtn',
@@ -515,7 +626,6 @@
                 focusModeBtn: '#focusModeBtn',
                 endCallBtn: '#endCallBtn',
                 
-                // Call UI elements
                 callWithName: '#callWithName',
                 callStatusText: '#callStatusText',
                 callTypeIcon: '#callTypeIcon',
@@ -526,7 +636,6 @@
                 offlineCallPlaceholder: '#offlineCallPlaceholder',
                 reactionsContainer: '#reactionsContainer',
                 
-                // Modals
                 newCallModal: '#newCallModal',
                 closeNewCallModal: '#closeNewCallModal',
                 incomingCallModal: '#incomingCallModal',
@@ -540,7 +649,6 @@
                 acceptCallBtn: '#acceptCallBtn',
                 acceptVideoCallBtn: '#acceptVideoCallBtn',
                 
-                // Settings
                 settingsPanel: '#settingsPanel',
                 resetSettingsBtn: '#resetSettingsBtn',
                 emotionalContextToggle: '#emotionalContextToggle',
@@ -552,7 +660,6 @@
                 focusModeToggle: '#focusModeToggle',
                 liveReactionsToggle: '#liveReactionsToggle',
                 
-                // New call modal
                 contactSearch: '#contactSearch',
                 groupContactSearch: '#groupContactSearch',
                 contactsList: '#contactsList',
@@ -564,14 +671,12 @@
                 instantGroupOption: '#instantGroupOption',
                 scheduledGroupOption: '#scheduledGroupOption',
                 
-                // Call links
                 copyLinkBtn: '#copyLinkBtn',
                 shareLinkBtn: '#shareLinkBtn',
                 generateVoiceLinkBtn: '#generateVoiceLinkBtn',
                 generateVideoLinkBtn: '#generateVideoLinkBtn',
                 callLinkInput: '#callLinkInput',
                 
-                // Payment
                 mpesaOption: '#mpesaOption',
                 cancelPaymentBtn: '#cancelPaymentBtn',
                 processPaymentBtn: '#processPaymentBtn',
@@ -582,7 +687,6 @@
                 phoneNumber: '#phoneNumber',
                 paymentAmount: '#paymentAmount',
                 
-                // Mood & intention
                 cancelMoodBtn: '#cancelMoodBtn',
                 setMoodBtn: '#setMoodBtn',
                 cancelIntentionBtn: '#cancelIntentionBtn',
@@ -590,7 +694,6 @@
                 moodSelectionModal: '#moodSelectionModal',
                 intentionSelectionModal: '#intentionSelectionModal',
                 
-                // Notes & summary
                 skipNotesBtn: '#skipNotesBtn',
                 saveNotesBtn: '#saveNotesBtn',
                 summaryDoneBtn: '#summaryDoneBtn',
@@ -606,23 +709,19 @@
                 summaryIntention: '#summaryIntention',
                 summaryParticipants: '#summaryParticipants',
                 
-                // URL param overlay
                 urlParamCancelBtn: '#urlParamCancelBtn',
                 urlParamJoinBtn: '#urlParamJoinBtn',
                 urlParamOverlay: '#urlParamOverlay',
                 urlParamCallId: '#urlParamCallId',
                 
-                // Call history sections
                 allCallsSection: '#allCallsSection',
                 missedCallsSection: '#missedCallsSection',
                 groupCallsSection: '#groupCallsSection',
                 allCallsList: '#allCallsList',
                 
-                // PIP
                 pipCloseBtn: '#pipCloseBtn',
                 pipContainer: '#pipContainer',
                 
-                // Status indicators
                 syncIndicator: '#syncIndicator',
                 apiStatusIndicator: '#apiStatusIndicator',
                 apiStatusText: '#apiStatusText',
@@ -630,7 +729,6 @@
                 notificationArea: '#notificationArea'
             };
             
-            // Safely query each selector
             Object.entries(selectors).forEach(([key, selector]) => {
                 try {
                     const element = document.querySelector(selector);
@@ -639,11 +737,12 @@
                         UIState.cachedElements.set(key, element);
                     }
                 } catch (error) {
-                    UILogger.warn(`Failed to cache element: ${key}`, { selector, error: error.message });
+                    if (DEBUG) {
+                        logOnce('warn', `Failed to cache element: ${key}`, { selector, error: error.message });
+                    }
                 }
             });
             
-            // Cache dynamic element groups
             try {
                 elements.categoryBtns = document.querySelectorAll('.category-btn');
                 elements.newCallTabs = document.querySelectorAll('.new-call-tab');
@@ -652,7 +751,6 @@
                 elements.reactionBtns = document.querySelectorAll('.reaction-btn');
                 elements.paymentOptions = document.querySelectorAll('.payment-option');
                 
-                // Lazy getters for dynamic collections
                 Object.defineProperty(elements, 'contactCheckboxes', {
                     get: function() { 
                         try {
@@ -683,11 +781,12 @@
                     }
                 });
             } catch (error) {
-                UILogger.error('Failed to cache dynamic element groups', error);
+                if (DEBUG) {
+                    logOnce('error', 'Failed to cache dynamic element groups', error);
+                }
             }
             
             UIState.lastRenderTime = performance.now() - startTime;
-            UILogger.performance('cacheElements', UIState.lastRenderTime);
             
             return Object.keys(elements).length;
         }, 'cacheElements', 0);
@@ -702,7 +801,7 @@
             interaction: [],
             error: []
         },
-        _debugMode: true,
+        _debugMode: DEBUG,
         
         _hash: function(msg) {
             let hash = 0;
@@ -749,14 +848,14 @@
         info: function(msg, data = null) {
             this._store('info', msg, data);
             if (this._debugMode) {
-                console.info(`[Calls UI] ${msg}`, data || '');
+                logOnce('info', msg, data);
             }
         },
         
         warn: function(msg, data = null) {
             this._store('warn', msg, data);
             if (this._debugMode) {
-                console.warn(`[Calls UI] ⚠️ ${msg}`, data || '');
+                logOnce('warn', msg, data);
             }
         },
         
@@ -772,7 +871,7 @@
             this._errors.set(hash, now);
             this._store('error', msg, { error: error?.message || error, context });
             
-            console.error(`[Calls UI] 🔴 ${msg}`, error || '', context ? `Context: ${context}` : '');
+            logOnce('error', msg, { error: error?.message, context });
             
             setTimeout(() => this._errors.delete(hash), 60000);
         },
@@ -782,7 +881,7 @@
             if (!this._errors.has(hash)) {
                 this._errors.set(hash, Date.now());
                 this._store('once', msg, data);
-                console.info(`[Calls UI] 📌 ${msg}`, data || '');
+                logOnce('info', msg, data);
                 setTimeout(() => this._errors.delete(hash), 5000);
             }
         },
@@ -792,7 +891,7 @@
             if (this._metrics.render.length > 50) this._metrics.render.shift();
             
             if (this._debugMode && duration > 100) {
-                console.warn(`[Calls UI] ⏱️ Slow operation: ${operation} took ${duration.toFixed(2)}ms`);
+                logOnce('warn', `Slow operation: ${operation} took ${duration.toFixed(2)}ms`);
             }
         },
         
@@ -817,37 +916,26 @@
 
     // ==================== UI ERROR BOUNDARY ====================
     const UIErrorBoundary = {
-        /**
-         * Synchronous execution with fallback
-         */
         execute: function(fn, context, fallback = null) {
             try {
                 return fn();
             } catch (error) {
                 UILogger.error(`UI Error in ${context}`, error);
-                UIDiagnostics.logError(context, error);
                 this.showFallbackUI(context);
                 return fallback;
             }
         },
         
-        /**
-         * Asynchronous execution with fallback
-         */
         executeAsync: async function(fn, context, fallback = null) {
             try {
                 return await fn();
             } catch (error) {
                 UILogger.error(`Async UI Error in ${context}`, error);
-                UIDiagnostics.logError(context, error);
                 this.showFallbackUI(context);
                 return fallback;
             }
         },
         
-        /**
-         * Create a feature-specific error boundary
-         */
         createBoundary: function(featureName, fallbackFn) {
             return {
                 execute: (fn) => {
@@ -855,7 +943,6 @@
                         return fn();
                     } catch (error) {
                         UILogger.error(`Feature ${featureName} failed`, error);
-                        UIDiagnostics.logError(featureName, error);
                         this.showFeatureFallback(featureName);
                         return fallbackFn ? fallbackFn() : null;
                     }
@@ -865,7 +952,6 @@
                         return await fn();
                     } catch (error) {
                         UILogger.error(`Feature ${featureName} async failed`, error);
-                        UIDiagnostics.logError(featureName, error);
                         this.showFeatureFallback(featureName);
                         return fallbackFn ? fallbackFn() : null;
                     }
@@ -873,9 +959,6 @@
             };
         },
         
-        /**
-         * Show fallback UI for a component
-         */
         showFallbackUI: function(context) {
             if (!elements.appContainer) return;
             
@@ -903,9 +986,6 @@
             }, 5000);
         },
         
-        /**
-         * Show feature-specific fallback
-         */
         showFeatureFallback: function(featureName) {
             UILogger.once(`Feature ${featureName} unavailable`, { feature: featureName });
             
@@ -939,7 +1019,6 @@
             
             if (this.errors.length > 20) this.errors.shift();
             
-            // Report to core logger
             if (coreLogger && coreLogger.error) {
                 coreLogger.error(`UI:${context}`, error);
             }
@@ -961,7 +1040,14 @@
                     inputMode: UIState.inputMode,
                     breakpoint: this.getCurrentBreakpoint()
                 },
-                performance: UILogger.getMetrics()
+                performance: UILogger.getMetrics(),
+                handshake: {
+                    parentReady,
+                    sessionReady,
+                    handshakeComplete
+                },
+                environment: IframeEnvironment ? IframeEnvironment.getFullReport() : 
+                             (EnvironmentDetector ? EnvironmentDetector.getFullReport() : null)
             };
         },
         
@@ -995,27 +1081,28 @@
         
         allowedProtocols: new Set(['http:', 'https:', 'data:', 'blob:', 'mailto:', 'tel:']),
         
-        // Flag to prevent recursion during patching
         _patching: false,
         _isSanitizing: false,
         
         initialize: function() {
-            // Only patch once
             if (this._patching) return;
             this._patching = true;
             
             try {
                 this.patchDOMMethods();
-                UILogger.info('Security sanitizer initialized');
+                if (DEBUG) {
+                    logOnce('info', 'Security sanitizer initialized');
+                }
             } catch (error) {
-                UILogger.error('Failed to initialize security sanitizer', error);
+                if (DEBUG) {
+                    logOnce('error', 'Failed to initialize security sanitizer', error);
+                }
             } finally {
                 this._patching = false;
             }
         },
         
         patchDOMMethods: function() {
-            // Store original methods
             let originalInnerHTML = null;
             let originalInsertAdjacentHTML = null;
             
@@ -1023,17 +1110,17 @@
                 originalInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
                 originalInsertAdjacentHTML = Element.prototype.insertAdjacentHTML;
             } catch (e) {
-                UILogger.warn('Failed to get original DOM methods', e);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to get original DOM methods', e);
+                }
                 return;
             }
             
-            // Override innerHTML setter with recursion protection
             try {
                 if (originalInnerHTML) {
                     const self = this;
                     Object.defineProperty(Element.prototype, 'innerHTML', {
                         set: function(value) {
-                            // Skip if this is a sanitized element or if we're already sanitizing
                             if (this.hasAttribute('data-sanitized') || self._isSanitizing) {
                                 return originalInnerHTML.set.call(this, value);
                             }
@@ -1041,7 +1128,6 @@
                             self._isSanitizing = true;
                             try {
                                 if (typeof value === 'string') {
-                                    // Use sanitizeString for innerHTML to avoid DOM recursion
                                     value = self.sanitizeString(value);
                                 }
                                 const result = originalInnerHTML.set.call(this, value);
@@ -1057,10 +1143,11 @@
                     });
                 }
             } catch (e) {
-                UILogger.warn('Failed to patch innerHTML', e);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to patch innerHTML', e);
+                }
             }
             
-            // Override insertAdjacentHTML with recursion protection
             try {
                 if (originalInsertAdjacentHTML) {
                     const self = this;
@@ -1083,7 +1170,9 @@
                     };
                 }
             } catch (e) {
-                UILogger.warn('Failed to patch insertAdjacentHTML', e);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to patch insertAdjacentHTML', e);
+                }
             }
         },
         
@@ -1095,7 +1184,6 @@
         sanitizeString: function(str) {
             if (!str || typeof str !== 'string') return str || '';
             
-            // Encode HTML special characters
             let sanitized = str
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
@@ -1190,7 +1278,6 @@
         sanitizeURL: function(url) {
             if (!url || typeof url !== 'string') return '';
             
-            // Only allow safe protocols
             const safeProtocols = ['http:', 'https:', 'mailto:', 'tel:'];
             try {
                 const urlObj = new URL(url, window.location.origin);
@@ -1198,62 +1285,66 @@
                     return url;
                 }
             } catch (e) {
-                // Invalid URL - sanitize
                 return this.sanitizeString(url);
             }
             return '#';
         },
         
-        // Safe JSON parser
         safeJSONParse: function(json, fallback = null) {
             try {
                 return JSON.parse(json);
             } catch (e) {
-                UILogger.warn('Failed to parse JSON', e);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to parse JSON', e);
+                }
                 return fallback;
             }
         },
         
-        // Safe localStorage getter
         safeLocalStorageGet: function(key, fallback = null) {
             try {
                 const value = localStorage.getItem(key);
                 return value !== null ? value : fallback;
             } catch (e) {
-                UILogger.warn(`Failed to read from localStorage: ${key}`, e);
+                if (DEBUG) {
+                    logOnce('warn', `Failed to read from localStorage: ${key}`, e);
+                }
                 return fallback;
             }
         },
         
-        // Safe localStorage setter
         safeLocalStorageSet: function(key, value) {
             try {
                 localStorage.setItem(key, String(value));
                 return true;
             } catch (e) {
-                UILogger.warn(`Failed to write to localStorage: ${key}`, e);
+                if (DEBUG) {
+                    logOnce('warn', `Failed to write to localStorage: ${key}`, e);
+                }
                 return false;
             }
         },
         
-        // Safe sessionStorage getter
         safeSessionStorageGet: function(key, fallback = null) {
             try {
                 const value = sessionStorage.getItem(key);
                 return value !== null ? value : fallback;
             } catch (e) {
-                UILogger.warn(`Failed to read from sessionStorage: ${key}`, e);
+                if (DEBUG) {
+                    logOnce('warn', `Failed to read from sessionStorage: ${key}`, e);
+                }
                 return fallback;
             }
         },
         
-        // Safe sessionStorage setter
         safeSessionStorageSet: function(key, value) {
             try {
                 sessionStorage.setItem(key, String(value));
                 return true;
             } catch (e) {
-                UILogger.warn(`Failed to write to sessionStorage: ${key}`, e);
+                if (DEBUG) {
+                    logOnce('warn', `Failed to write to sessionStorage: ${key}`, e);
+                }
                 return false;
             }
         }
@@ -1261,15 +1352,13 @@
 
     // ==================== RENDERING PIPELINE ====================
     const RenderingPipeline = {
-        /**
-         * Stage 1: Skeleton UI - Never blank
-         */
         skeleton: function() {
             return UIErrorBoundary.execute(() => {
-                UILogger.info('Rendering skeleton UI');
+                if (DEBUG) {
+                    logOnce('info', 'Rendering skeleton UI');
+                }
                 UIState.renderStartTime = performance.now();
                 
-                // Ensure app container exists
                 let container = elements.appContainer || document.getElementById('appContainer');
                 if (!container) {
                     container = document.createElement('div');
@@ -1280,21 +1369,17 @@
                     UIState.cachedElements.set('appContainer', container);
                 }
                 
-                // Hide loading indicators
                 const loadingEls = document.querySelectorAll('.loading-indicator, .initializing-overlay, .core-loading-message');
                 loadingEls.forEach(el => {
                     if (el) el.style.display = 'none';
                 });
                 
-                // Ensure basic visibility
                 container.style.visibility = 'visible';
                 container.style.opacity = '1';
                 container.style.display = 'block';
                 
-                // Apply skeleton class for loading state
                 container.classList.add('ui-skeleton');
                 
-                // Render skeleton sidebar if needed
                 this.renderSkeletonSidebar(container);
                 
                 UIState.renderStages.skeleton = true;
@@ -1306,9 +1391,6 @@
             }, 'skeleton', false);
         },
         
-        /**
-         * Render skeleton sidebar to prevent blank area
-         */
         renderSkeletonSidebar: function(container) {
             let sidebar = elements.sidebar || document.getElementById('sidebar');
             if (!sidebar) {
@@ -1329,55 +1411,46 @@
                 UIState.cachedElements.set('sidebar', sidebar);
             }
             
-            // Ensure sidebar is visible
             sidebar.style.display = 'flex';
             
             return sidebar;
         },
         
-        /**
-         * Stage 2: Initial Render - Static UI with cached data
-         */
         initialRender: function() {
             return UIErrorBoundary.executeAsync(async () => {
-                UILogger.info('Performing initial render');
+                if (DEBUG) {
+                    logOnce('info', 'Performing initial render');
+                }
                 const startTime = performance.now();
                 
-                // Wait for core elements to be cached
                 await this.waitForCoreReady();
                 
-                // Load cached settings first
                 if (typeof loadSettings === 'function') {
                     loadSettings();
                 }
                 
-                // Apply settings to UI
                 if (typeof applySettingsToUI === 'function') {
                     applySettingsToUI();
                 }
                 
-                // Render cached call history
                 if (typeof coreRenderCallHistory === 'function') {
                     coreRenderCallHistory();
                 }
                 
-                // Render cached contacts if available
                 this.renderCachedContacts();
                 
-                // Apply premium UI state
                 if (typeof updatePremiumUI === 'function') {
                     updatePremiumUI();
                 }
                 
-                // Update sync indicator
                 this.updateSyncIndicator();
                 
-                // Check URL parameters
                 if (typeof checkUrlParameters === 'function') {
                     checkUrlParameters();
                 }
                 
-                // Remove skeleton class
+                this.showHandshakeStatus();
+                
                 if (elements.appContainer) {
                     elements.appContainer.classList.remove('ui-skeleton');
                 }
@@ -1390,9 +1463,24 @@
             }, 'initialRender', false);
         },
         
-        /**
-         * Wait for core readiness
-         */
+        showHandshakeStatus: function() {
+            if (!elements.syncIndicator) return;
+            
+            if (!parentReady) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
+                elements.syncIndicator.className = 'sync-indicator connecting';
+            } else if (!sessionReady) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt"></i><span>Syncing...</span>';
+                elements.syncIndicator.className = 'sync-indicator syncing';
+            } else if (session && session.isDemoMode && session.isDemoMode()) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
+                elements.syncIndicator.className = 'sync-indicator demo';
+            } else {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-check-circle"></i><span>Ready</span>';
+                elements.syncIndicator.className = 'sync-indicator synced';
+            }
+        },
+        
         waitForCoreReady: function() {
             return new Promise((resolve) => {
                 if (typeof coreCacheElements === 'function') {
@@ -1425,27 +1513,33 @@
             });
         },
         
-        /**
-         * Render cached contacts from localStorage
-         */
         renderCachedContacts: function() {
             try {
-                const cachedContacts = SecuritySanitizer.safeLocalStorageGet('cachedContacts');
+                let cachedContacts = null;
+                
+                if (SafeStorage && typeof SafeStorage.get === 'function') {
+                    cachedContacts = SafeStorage.get('cachedContacts');
+                } else {
+                    cachedContacts = SecuritySanitizer.safeLocalStorageGet('cachedContacts');
+                }
+                
                 if (cachedContacts && elements.contactsList) {
-                    const contacts = SecuritySanitizer.safeJSONParse(cachedContacts, []);
+                    const contacts = typeof cachedContacts === 'string' ? 
+                        SecuritySanitizer.safeJSONParse(cachedContacts, []) : cachedContacts;
                     if (Array.isArray(contacts) && contacts.length > 0) {
                         this.renderContactsList(contacts);
-                        UILogger.info('Rendered cached contacts', { count: contacts.length });
+                        if (DEBUG) {
+                            logOnce('info', 'Rendered cached contacts', { count: contacts.length });
+                        }
                     }
                 }
             } catch (error) {
-                UILogger.warn('Failed to render cached contacts', error);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to render cached contacts', error);
+                }
             }
         },
         
-        /**
-         * Render contacts list
-         */
         renderContactsList: function(contacts) {
             if (!elements.contactsList) return;
             
@@ -1490,7 +1584,6 @@
                     elements.contactsLoading.style.display = 'none';
                 }
                 
-                // Re-attach event listeners
                 EventSystem.debounce('attachContactEvents', () => {
                     this.attachContactEvents();
                 }, 100);
@@ -1501,9 +1594,6 @@
             }
         },
         
-        /**
-         * Attach events to contact items
-         */
         attachContactEvents: function() {
             document.querySelectorAll('.contact-item').forEach(item => {
                 item.removeEventListener('click', this.handleContactClick);
@@ -1511,9 +1601,6 @@
             });
         },
         
-        /**
-         * Handle contact click for selection
-         */
         handleContactClick: function(e) {
             if (e.target.closest('.contact-checkbox')) return;
             
@@ -1529,40 +1616,34 @@
             }
         },
         
-        /**
-         * Stage 3: Progressive Enhancement - Interactive features
-         */
         progressiveEnhancement: function() {
             return UIErrorBoundary.executeAsync(async () => {
-                UILogger.info('Applying progressive enhancement');
+                if (DEBUG) {
+                    logOnce('info', 'Applying progressive enhancement');
+                }
                 const startTime = performance.now();
                 
-                // Setup event listeners
                 EventSystem.initialize();
                 
-                // Setup responsive detection
-                ResponsiveEngine.initialize();
+                if (window.ResponsiveEngine) {
+                    ResponsiveEngine.initialize();
+                }
                 
-                // Setup security sanitizers
                 SecuritySanitizer.initialize();
                 
-                // Make draggable elements draggable
                 if (elements.pipContainer && typeof makeDraggable === 'function') {
                     makeDraggable(elements.pipContainer);
                 }
                 
-                // Initialize offline detection
                 if (typeof initializeOfflineDetection === 'function') {
                     initializeOfflineDetection();
                 }
                 
-                // Initialize whiteboard if canvas exists
                 const whiteboardCanvas = document.querySelector('.whiteboard-canvas');
                 if (whiteboardCanvas && typeof initializeWhiteboard === 'function') {
                     initializeWhiteboard(whiteboardCanvas);
                 }
                 
-                // Attach reaction button events
                 this.attachReactionEvents();
                 
                 UIState.renderStages.enhanced = true;
@@ -1573,9 +1654,6 @@
             }, 'progressiveEnhancement', false);
         },
         
-        /**
-         * Attach reaction button events
-         */
         attachReactionEvents: function() {
             document.querySelectorAll('.reaction-btn').forEach(btn => {
                 btn.removeEventListener('click', UIEventHandlers.sendReaction);
@@ -1583,17 +1661,14 @@
             });
         },
         
-        /**
-         * Stage 4: Live Update - Real-time data
-         */
         liveUpdate: function() {
             return UIErrorBoundary.executeAsync(async () => {
-                UILogger.info('Starting live updates');
+                if (DEBUG) {
+                    logOnce('info', 'Starting live updates');
+                }
                 
-                // Subscribe to core events
                 CoreIntegration.subscribeToCore();
                 
-                // Start live data polling if needed
                 this.startLiveDataSync();
                 
                 UIState.renderStages.live = true;
@@ -1602,34 +1677,48 @@
             }, 'liveUpdate', false);
         },
         
-        /**
-         * Start live data synchronization
-         */
         startLiveDataSync: function() {
-            // Sync call history every 30 seconds if authenticated
-            if (AppState && (AppState.isAuthenticated || (session && typeof session.isDemoMode === 'function' && session.isDemoMode()))) {
+            if (AppState && (AppState.isAuthenticated || (session && session.isDemoMode && session.isDemoMode()))) {
+                let interval = 30000;
+                if (IframeEnvironment && IframeEnvironment.isVPNNetwork && IframeEnvironment.isVPNNetwork()) {
+                    interval = 60000;
+                } else if (EnvironmentDetector && EnvironmentDetector.isVPNNetwork && EnvironmentDetector.isVPNNetwork()) {
+                    interval = 60000;
+                }
+                
                 const syncInterval = setInterval(() => {
                     if (window.callAPI && typeof window.callAPI.performBackgroundSync === 'function') {
                         window.callAPI.performBackgroundSync().catch(() => {});
                     }
-                }, 30000);
+                }, interval);
                 
                 UIState.cachedElements.set('liveSyncInterval', syncInterval);
             }
         },
         
-        /**
-         * Update sync indicator based on state
-         */
         updateSyncIndicator: function() {
             if (!elements.syncIndicator) return;
             
             try {
-                const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+                const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+                
+                let startupState = null;
+                if (StartupGovernor && typeof StartupGovernor.getState === 'function') {
+                    startupState = StartupGovernor.getState();
+                }
                 
                 if (!AppState?.isOnline) {
                     elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
                     elements.syncIndicator.className = 'sync-indicator offline';
+                } else if (!parentReady) {
+                    elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
+                    elements.syncIndicator.className = 'sync-indicator connecting';
+                } else if (!sessionReady) {
+                    elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt"></i><span>Syncing...</span>';
+                    elements.syncIndicator.className = 'sync-indicator syncing';
+                } else if (startupState === 'RECOVERING') {
+                    elements.syncIndicator.innerHTML = '<i class="fas fa-ambulance"></i><span>Recovering...</span>';
+                    elements.syncIndicator.className = 'sync-indicator connecting';
                 } else if (isDemo) {
                     elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
                     elements.syncIndicator.className = 'sync-indicator demo';
@@ -1641,39 +1730,34 @@
                     elements.syncIndicator.className = 'sync-indicator synced';
                 }
             } catch (error) {
-                UILogger.warn('Failed to update sync indicator', error);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to update sync indicator', error);
+                }
             }
         },
         
-        /**
-         * Sanitize HTML strings to prevent XSS
-         */
         sanitizeHTML: function(str) {
             return SecuritySanitizer.sanitizeString(str);
         },
         
-        /**
-         * Execute full rendering pipeline
-         */
         execute: async function() {
-            UILogger.info('Executing full rendering pipeline');
+            if (DEBUG) {
+                logOnce('info', 'Executing full rendering pipeline');
+            }
             
-            // Stage 1: Skeleton - Never blank
             this.skeleton();
             
-            // Small delay to ensure DOM is ready
             await new Promise(resolve => setTimeout(resolve, 50));
             
-            // Stage 2: Initial render with cached data
             await this.initialRender();
             
-            // Stage 3: Progressive enhancement
             await this.progressiveEnhancement();
             
-            // Stage 4: Live updates
             await this.liveUpdate();
             
-            UILogger.info('Rendering pipeline complete', UIState.renderStages);
+            if (DEBUG) {
+                logOnce('info', 'Rendering pipeline complete', UIState.renderStages);
+            }
             
             return {
                 success: true,
@@ -1688,31 +1772,91 @@
         _subscriptions: new Set(),
         _validationCache: new Map(),
         
-        /**
-         * Subscribe to core events with validation
-         */
         subscribeToCore: function() {
-            UILogger.info('Subscribing to core events');
+            if (DEBUG) {
+                logOnce('info', 'Subscribing to core events');
+            }
             
-            // Subscribe to state changes
             if (window.iframeCore && typeof window.iframeCore.onStateChange === 'function') {
                 const unsubscribe = window.iframeCore.onStateChange(this.handleStateChange.bind(this));
                 if (unsubscribe) this._subscriptions.add({ type: 'state', unsubscribe });
             }
             
-            // Subscribe to parent messages
             this.setupParentMessageHandler();
             
-            // Observe AppState changes
             this.observeAppState();
+            
+            this.setupHandshakeListener();
+            
+            if (RecoveryManager && typeof RecoveryManager.addListener === 'function') {
+                RecoveryManager.addListener(this.handleRecovery.bind(this));
+            }
+            
+            if (IframeHandshakeAuthority && typeof IframeHandshakeAuthority.addListener === 'function') {
+                IframeHandshakeAuthority.addListener(this.handleHandshakeEvent.bind(this));
+            }
+            
+            if (IframeSessionClient && typeof IframeSessionClient.addListener === 'function') {
+                IframeSessionClient.addListener(this.handleSessionEvent.bind(this));
+            }
         },
         
-        /**
-         * Handle core state changes
-         */
+        handleHandshakeEvent: function(event, data) {
+            if (event === 'handshake_ack') {
+                handshakeComplete = true;
+                parentReady = true;
+                RenderingPipeline.updateSyncIndicator();
+            } else if (event === 'parent_ready') {
+                parentReady = true;
+                RenderingPipeline.updateSyncIndicator();
+            }
+        },
+        
+        handleSessionEvent: function(event, data) {
+            if (event === 'update' || event === 'token') {
+                sessionReady = true;
+                RenderingPipeline.updateSyncIndicator();
+            } else if (event === 'expired' || event === 'clear') {
+                sessionReady = false;
+                RenderingPipeline.updateSyncIndicator();
+            }
+        },
+        
+        setupHandshakeListener: function() {
+            const handler = (event) => {
+                if (OriginSecurity && !OriginSecurity.validateEvent(event)) return;
+                if (OriginAdapter && !OriginAdapter.validateEvent(event)) return;
+                
+                const data = event.data;
+                if (!data || typeof data !== 'object') return;
+                
+                switch (data.type) {
+                    case 'PARENT_READY':
+                        parentReady = true;
+                        RenderingPipeline.updateSyncIndicator();
+                        break;
+                    case 'SESSION_UPDATE':
+                    case 'SESSION_SYNC':
+                        sessionReady = true;
+                        RenderingPipeline.updateSyncIndicator();
+                        break;
+                    case 'HANDSHAKE_ACK':
+                        handshakeComplete = true;
+                        parentReady = true;
+                        RenderingPipeline.updateSyncIndicator();
+                        break;
+                }
+            };
+            
+            window.addEventListener('message', handler);
+            this._subscriptions.add({ type: 'handshake', handler });
+        },
+        
         handleStateChange: function(newState, oldState) {
             try {
-                UILogger.info(`Core state changed: ${oldState} → ${newState}`);
+                if (DEBUG) {
+                    logOnce('info', `Core state changed: ${oldState} → ${newState}`);
+                }
                 
                 switch (newState) {
                     case 'ACTIVE':
@@ -1725,6 +1869,9 @@
                     case 'DEMO':
                         this.handleDegradedMode();
                         break;
+                    case 'RECOVERING':
+                        this.handleRecoveringMode();
+                        break;
                 }
                 
                 RenderingPipeline.updateSyncIndicator();
@@ -1734,9 +1881,36 @@
             }
         },
         
-        /**
-         * Setup parent message handler with validation
-         */
+        handleRecovery: function(event, data) {
+            if (event === 'start') {
+                if (DEBUG) {
+                    logOnce('info', 'Recovery started', data);
+                }
+                this.showRecoveryNotification();
+            } else if (event === 'success') {
+                if (DEBUG) {
+                    logOnce('info', 'Recovery successful');
+                }
+                showNotification('Connection restored', 'success');
+            } else if (event === 'failed') {
+                if (DEBUG) {
+                    logOnce('warn', 'Recovery failed', data);
+                }
+                showNotification('Connection issues detected', 'warning');
+            }
+        },
+        
+        showRecoveryNotification: function() {
+            showNotification('Attempting to reconnect...', 'info');
+        },
+        
+        handleRecoveringMode: function() {
+            if (DEBUG) {
+                logOnce('info', 'Entering recovery mode');
+            }
+            showNotification('Reconnecting...', 'info');
+        },
+        
         setupParentMessageHandler: function() {
             const handler = (event) => {
                 if (!this.validateParentMessage(event)) return;
@@ -1762,6 +1936,16 @@
                     case 'PING':
                         this.sendPong(data.payload?.requestId);
                         break;
+                    case 'PAGE_ACTIVATED':
+                        if (DEBUG) {
+                            logOnce('info', 'Parent page activated');
+                        }
+                        break;
+                    case 'NAVIGATE':
+                        if (DEBUG) {
+                            logOnce('info', 'Parent navigation:', data.payload);
+                        }
+                        break;
                 }
             };
             
@@ -1769,19 +1953,14 @@
             UIState.cachedElements.set('parentMessageHandler', handler);
         },
         
-        /**
-         * Validate parent message
-         */
         validateParentMessage: function(event) {
             if (!event || !event.data) return false;
             
-            const trustedOrigins = [
-                window.location.origin,
-                ...(window.trustedOrigins ? Array.from(window.trustedOrigins) : [])
-            ];
+            if (OriginSecurity && !OriginSecurity.validateEvent(event)) {
+                return false;
+            }
             
-            if (!trustedOrigins.includes(event.origin) && !event.origin.includes('localhost')) {
-                UILogger.once('Invalid message origin', { origin: event.origin });
+            if (OriginAdapter && !OriginAdapter.validateEvent(event)) {
                 return false;
             }
             
@@ -1791,25 +1970,24 @@
             }
             
             if (data.timestamp && (data.timestamp < Date.now() - 300000 || data.timestamp > Date.now() + 60000)) {
-                UILogger.once('Invalid message timestamp', { type: data.type, timestamp: data.timestamp });
                 return false;
             }
             
             return true;
         },
         
-        /**
-         * Handle session update from parent
-         */
         handleSessionUpdate: function(data) {
             if (!this.validatePayload(data, ['user', 'token', 'authenticated'])) {
-                UILogger.warn('Invalid session update payload');
+                if (DEBUG) {
+                    logOnce('warn', 'Invalid session update payload');
+                }
                 return;
             }
             
-            UILogger.info('Received session update');
+            if (DEBUG) {
+                logOnce('info', 'Received session update');
+            }
             
-            // Update session cache
             if (data.token) {
                 window.__CHILD_SESSION__.token = data.token;
                 sessionReady = true;
@@ -1832,15 +2010,13 @@
             if (data.token && session && typeof session.setToken === 'function') {
                 session.setToken(data.token, data.expiry);
             }
+            
+            RenderingPipeline.updateSyncIndicator();
         },
         
-        /**
-         * Handle token update
-         */
         handleTokenUpdate: function(data) {
             if (!this.validatePayload(data, ['token'])) return;
             
-            // Update session cache
             window.__CHILD_SESSION__.token = data.token;
             if (data.expiry) {
                 window.__CHILD_SESSION__.expires = data.expiry;
@@ -1850,11 +2026,10 @@
             if (session && typeof session.setToken === 'function') {
                 session.setToken(data.token, data.expiry);
             }
+            
+            RenderingPipeline.updateSyncIndicator();
         },
         
-        /**
-         * Handle contacts update
-         */
         handleContactsUpdate: function(data) {
             if (!this.validatePayload(data, ['contacts']) || !Array.isArray(data.contacts)) return;
             
@@ -1867,9 +2042,6 @@
             }
         },
         
-        /**
-         * Handle call history update
-         */
         handleCallHistoryUpdate: function(data) {
             if (!this.validatePayload(data, ['history']) || !Array.isArray(data.history)) return;
             
@@ -1882,9 +2054,6 @@
             }
         },
         
-        /**
-         * Send PONG response
-         */
         sendPong: function(requestId) {
             if (!requestId) return;
             
@@ -1895,9 +2064,6 @@
             });
         },
         
-        /**
-         * Validate payload has required fields
-         */
         validatePayload: function(payload, requiredFields) {
             if (!payload || typeof payload !== 'object') return false;
             
@@ -1906,14 +2072,11 @@
             );
         },
         
-        /**
-         * Update UI with user data
-         */
         updateUserUI: function(user) {
             if (!user) return;
             
             try {
-                const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+                const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
                 
                 document.querySelectorAll('.user-name, .username').forEach(el => {
                     if (el.textContent.includes('User') || el.textContent.includes('Loading') || !currentUser) {
@@ -1933,14 +2096,11 @@
             }
         },
         
-        /**
-         * Update API status indicator
-         */
         updateApiStatus: function(user) {
             if (!elements.apiStatusIndicator || !elements.apiStatusText) return;
             
             try {
-                const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+                const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
                 
                 if (isDemo) {
                     elements.apiStatusIndicator.className = 'api-status-indicator demo';
@@ -1966,11 +2126,10 @@
             }
         },
         
-        /**
-         * Pause UI updates when suspended
-         */
         pauseUIUpdates: function() {
-            UILogger.info('Pausing UI updates');
+            if (DEBUG) {
+                logOnce('info', 'Pausing UI updates');
+            }
             
             const syncInterval = UIState.cachedElements.get('liveSyncInterval');
             if (syncInterval) {
@@ -1979,13 +2138,12 @@
             }
         },
         
-        /**
-         * Handle degraded/demo mode
-         */
         handleDegradedMode: function() {
-            UILogger.info('Handling degraded mode');
+            if (DEBUG) {
+                logOnce('info', 'Handling degraded mode');
+            }
             
-            const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
             if (isDemo) {
                 document.querySelectorAll('button, input, select').forEach(el => {
@@ -2001,9 +2159,6 @@
             }
         },
         
-        /**
-         * Observe AppState for changes
-         */
         observeAppState: function() {
             if (!window.AppState) return;
             
@@ -2040,15 +2195,16 @@
             try {
                 window.AppState = new Proxy(window.AppState, handler);
             } catch (error) {
-                UILogger.warn('Failed to observe AppState', error);
+                if (DEBUG) {
+                    logOnce('warn', 'Failed to observe AppState', error);
+                }
             }
         },
         
-        /**
-         * Handle authentication change
-         */
         handleAuthChange: function(isAuthenticated) {
-            UILogger.info(`Authentication changed: ${isAuthenticated}`);
+            if (DEBUG) {
+                logOnce('info', `Authentication changed: ${isAuthenticated}`);
+            }
             
             const protectedButtons = [
                 elements.newCallBtn,
@@ -2057,7 +2213,7 @@
                 elements.quickGroupBtn
             ];
             
-            const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
             protectedButtons.forEach(btn => {
                 if (btn) {
@@ -2068,11 +2224,10 @@
             RenderingPipeline.updateSyncIndicator();
         },
         
-        /**
-         * Handle connectivity change
-         */
         handleConnectivityChange: function(isOnline) {
-            UILogger.info(`Connectivity changed: ${isOnline ? 'online' : 'offline'}`);
+            if (DEBUG) {
+                logOnce('info', `Connectivity changed: ${isOnline ? 'online' : 'offline'}`);
+            }
             
             if (isOnline) {
                 if (typeof handleOnline === 'function') handleOnline();
@@ -2081,22 +2236,18 @@
             }
         },
         
-        /**
-         * Handle call state change
-         */
         handleCallStateChange: function(isInCall) {
             if (isInCall && elements.callDuration) {
                 elements.callDuration.textContent = '00:00';
             }
         },
         
-        /**
-         * Clean up subscriptions
-         */
         cleanup: function() {
             this._subscriptions.forEach(sub => {
                 if (sub.unsubscribe && typeof sub.unsubscribe === 'function') {
                     try { sub.unsubscribe(); } catch (e) {}
+                } else if (sub.handler && sub.type) {
+                    window.removeEventListener('message', sub.handler);
                 }
             });
             this._subscriptions.clear();
@@ -2124,10 +2275,12 @@
             this.applyResponsiveLayout();
             
             window.addEventListener('resize', this.debouncedResize.bind(this));
-            UILogger.info('Responsive engine initialized', { 
-                breakpoint: this._currentBreakpoint,
-                orientation: this._orientation
-            });
+            if (DEBUG) {
+                logOnce('info', 'Responsive engine initialized', { 
+                    breakpoint: this._currentBreakpoint,
+                    orientation: this._orientation
+                });
+            }
         },
         
         detectBreakpoint: function() {
@@ -2225,7 +2378,9 @@
             this.detectBreakpoint();
             
             if (oldBreakpoint !== this._currentBreakpoint) {
-                UILogger.info(`Breakpoint changed: ${oldBreakpoint} → ${this._currentBreakpoint}`);
+                if (DEBUG) {
+                    logOnce('info', `Breakpoint changed: ${oldBreakpoint} → ${this._currentBreakpoint}`);
+                }
                 this.applyResponsiveLayout();
                 
                 this._listeners.forEach(listener => {
@@ -2241,7 +2396,9 @@
             this.detectOrientation();
             
             if (oldOrientation !== this._orientation) {
-                UILogger.info(`Orientation changed: ${oldOrientation} → ${this._orientation}`);
+                if (DEBUG) {
+                    logOnce('info', `Orientation changed: ${oldOrientation} → ${this._orientation}`);
+                }
                 this.applyResponsiveLayout();
             }
         },
@@ -2379,7 +2536,9 @@
         initialize: function() {
             this.setupGlobalListeners();
             this.setupUIEventListeners();
-            UILogger.info('Event system initialized');
+            if (DEBUG) {
+                logOnce('info', 'Event system initialized');
+            }
         },
         
         setupGlobalListeners: function() {
@@ -2789,13 +2948,14 @@
             this._throttled.clear();
             this._once.clear();
             
-            UILogger.info('Event system cleaned up');
+            if (DEBUG) {
+                logOnce('info', 'Event system cleaned up');
+            }
         }
     };
 
     // ==================== UI EVENT HANDLERS ====================
     const UIEventHandlers = {
-        // Menu dots
         toggleMenuDots: function(e) {
             e?.stopPropagation();
             if (elements.menuDotsDropdown) {
@@ -2810,9 +2970,8 @@
             }
         },
         
-        // New call modal
         openNewCallModal: function() {
-            const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
             if (parentCoordinator && !parentCoordinator.sessionValidated && !isDemo) {
                 showNotification('Please wait for authentication', 'warning');
@@ -2865,7 +3024,6 @@
             }
         },
         
-        // Contact search
         searchContacts: function() {
             const query = elements.contactSearch?.value.toLowerCase() || '';
             
@@ -2890,7 +3048,6 @@
             });
         },
         
-        // Group call options
         selectGroupOption: function(e) {
             const option = e.currentTarget;
             
@@ -2907,7 +3064,6 @@
             }
         },
         
-        // Call start
         startVoiceCall: function() {
             this.startCallGeneric('voice');
         },
@@ -2943,7 +3099,7 @@
         },
         
         startCallGeneric: function(type) {
-            const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
             if (parentCoordinator && !parentCoordinator.sessionValidated && !isDemo) {
                 showNotification('Please wait for authentication', 'warning');
@@ -2994,9 +3150,11 @@
                 return;
             }
             
-            UILogger.info(`Starting ${type} call with ${participants.length} participants`);
+            if (DEBUG) {
+                logOnce('info', `Starting ${type} call with ${participants.length} participants`);
+            }
             
-            const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
             if (window.callCore && typeof window.callCore.startCall === 'function' && !isDemo) {
                 window.callCore.startCall({
@@ -3024,7 +3182,7 @@
         },
         
         simulateCall: function(type, participants) {
-            requestMediaPermissions(type)
+            requestMediaPermissionsFn(type)
                 .then(stream => {
                     if (AppState) {
                         AppState.localStream = stream;
@@ -3134,7 +3292,6 @@
             }
         },
         
-        // Call controls
         toggleMute: function() {
             if (!AppState?.localStream || !elements.muteBtn) return;
             
@@ -3324,11 +3481,12 @@
                 }, 500);
                 
                 showNotification('Call ended', 'info');
-                UILogger.info('Call ended', { duration: callDuration });
+                if (DEBUG) {
+                    logOnce('info', 'Call ended', { duration: callDuration });
+                }
             }
         },
         
-        // Mood & intention
         openMoodSelectionModal: function() {
             if (elements.moodSelectionModal) {
                 elements.moodSelectionModal.classList.add('active');
@@ -3362,7 +3520,11 @@
                 AppState.currentMood = newMood;
                 
                 try {
-                    localStorage.setItem('currentMood', newMood);
+                    if (SafeStorage && typeof SafeStorage.set === 'function') {
+                        SafeStorage.set('currentMood', newMood);
+                    } else {
+                        localStorage.setItem('currentMood', newMood);
+                    }
                 } catch (e) {}
                 
                 if (typeof updateMoodIndicator === 'function') {
@@ -3411,7 +3573,11 @@
                 AppState.currentIntention = newIntention;
                 
                 try {
-                    localStorage.setItem('currentIntention', newIntention);
+                    if (SafeStorage && typeof SafeStorage.set === 'function') {
+                        SafeStorage.set('currentIntention', newIntention);
+                    } else {
+                        localStorage.setItem('currentIntention', newIntention);
+                    }
                 } catch (e) {}
                 
                 if (typeof updateIntentionIndicator === 'function') {
@@ -3427,7 +3593,6 @@
             }
         },
         
-        // Focus mode
         toggleFocusMode: function() {
             if (AppState?.currentFocusMode) {
                 this.disableFocusMode();
@@ -3455,7 +3620,6 @@
             }
         },
         
-        // Notes
         showPrivateNotesModal: function() {
             if (!elements.privateNotesModal || !AppState?.callParticipants?.length) {
                 this.showCallSummary();
@@ -3510,13 +3674,25 @@
         
         savePrivateNotesToStorage: function(contactId, notes) {
             try {
-                const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
+                let allNotes = {};
+                
+                if (SafeStorage && typeof SafeStorage.get === 'function') {
+                    allNotes = SafeStorage.get('privateCallNotes') || {};
+                } else {
+                    allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
+                }
+                
                 allNotes[contactId] = {
                     notes: notes,
                     timestamp: new Date().toISOString(),
                     callId: AppState?.activeCallId
                 };
-                localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
+                
+                if (SafeStorage && typeof SafeStorage.set === 'function') {
+                    SafeStorage.set('privateCallNotes', allNotes);
+                } else {
+                    localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
+                }
             } catch (error) {
                 UILogger.error('Error saving private notes', error);
             }
@@ -3524,8 +3700,13 @@
         
         getPrivateNotes: function(contactId) {
             try {
-                const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
-                return allNotes[contactId] ? allNotes[contactId].notes : null;
+                if (SafeStorage && typeof SafeStorage.get === 'function') {
+                    const allNotes = SafeStorage.get('privateCallNotes') || {};
+                    return allNotes[contactId] ? allNotes[contactId].notes : null;
+                } else {
+                    const allNotes = JSON.parse(localStorage.getItem('privateCallNotes') || '{}');
+                    return allNotes[contactId] ? allNotes[contactId].notes : null;
+                }
             } catch (error) {
                 UILogger.error('Error loading private notes', error);
                 return null;
@@ -3584,7 +3765,6 @@
             }
         },
         
-        // Incoming call
         declineIncomingCall: function() {
             if (elements.incomingCallModal.dataset.timer) {
                 clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
@@ -3623,7 +3803,7 @@
                 name: callerName
             };
             
-            requestMediaPermissions(callType)
+            requestMediaPermissionsFn(callType)
                 .then(stream => {
                     if (AppState) {
                         AppState.localStream = stream;
@@ -3644,7 +3824,6 @@
                 });
         },
         
-        // Call links
         generateVoiceCallLink: function() {
             this.generateCallLink('voice');
         },
@@ -3707,7 +3886,6 @@
             UIEventHandlers.closeNewCallModal();
         },
         
-        // Call history categories
         switchCallCategory: function(category) {
             if (AppState) AppState.currentCategory = category;
             
@@ -3747,7 +3925,6 @@
             });
         },
         
-        // Settings
         toggleSettingsPanel: function() {
             if (elements.settingsPanel) {
                 elements.settingsPanel.classList.toggle('active');
@@ -3765,7 +3942,6 @@
             }
         },
         
-        // Payment
         openPaymentModal: function() {
             if (elements.paymentModal) {
                 elements.paymentModal.classList.add('active');
@@ -3820,7 +3996,6 @@
             }
         },
         
-        // Reactions
         sendReaction: function(e) {
             if (!AppState?.isInCall) {
                 showNotification('Join a call to send reactions', 'info');
@@ -3858,11 +4033,11 @@
             }, 3000);
         },
         
-        // Logout
         handleLogout: function() {
-            UILogger.info('Logout triggered');
+            if (DEBUG) {
+                logOnce('info', 'Logout triggered');
+            }
             
-            // Clear session cache
             window.__CHILD_SESSION__.token = null;
             window.__CHILD_SESSION__.userId = null;
             window.__CHILD_SESSION__.expires = null;
@@ -3881,7 +4056,7 @@
                 elements.quickGroupBtn
             ];
             
-            const isDemo = session && typeof session.isDemoMode === 'function' ? session.isDemoMode() : false;
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
             protectedButtons.forEach(btn => {
                 if (btn && !isDemo) {
@@ -4474,8 +4649,7 @@
         }
     }
 
-    // ==================== MEDIA PERMISSIONS ====================
-    function requestMediaPermissions(type) {
+    function requestMediaPermissionsFn(type) {
         const constraints = {
             audio: true,
             video: type === 'video'
@@ -4500,7 +4674,6 @@
             });
     }
 
-    // ==================== VIEW HISTORY MANAGEMENT ====================
     const ViewHistory = {
         push: function(view, data = {}) {
             UIState.viewHistory.push({
@@ -4531,7 +4704,9 @@
                 timestamp: Date.now()
             });
             
-            UILogger.info(`Created restore point: ${key}`);
+            if (DEBUG) {
+                logOnce('info', `Created restore point: ${key}`);
+            }
         },
         
         restore: function(key) {
@@ -4547,32 +4722,46 @@
             
             UIState.currentView = point.view;
             
-            UILogger.info(`Restored from point: ${key}`);
+            if (DEBUG) {
+                logOnce('info', `Restored from point: ${key}`);
+            }
             return true;
         }
     };
 
-    // ==================== UI INITIALIZATION ====================
     async function initializeUISystem() {
         if (UIState.initialized) {
-            UILogger.info('UI system already initialized');
+            if (DEBUG) {
+                logOnce('info', 'UI system already initialized');
+            }
             return { success: true, stages: UIState.renderStages };
         }
         
-        UILogger.info('Initializing UI system');
+        if (DEBUG) {
+            logOnce('info', 'Initializing UI system');
+        }
         
-        // Start handshake with retry (non-blocking)
-        performHandshakeWithRetry().then(success => {
+        let maxRetries = 5;
+        if (IframeEnvironment && typeof IframeEnvironment.getMaxRetries === 'function') {
+            maxRetries = IframeEnvironment.getMaxRetries();
+        } else if (EnvironmentDetector && typeof EnvironmentDetector.getMaxRetries === 'function') {
+            maxRetries = EnvironmentDetector.getMaxRetries();
+        }
+        
+        performHandshakeWithRetry(maxRetries).then(success => {
             if (success) {
-                UILogger.info('Handshake completed successfully');
+                if (DEBUG) {
+                    logOnce('info', 'Handshake completed successfully');
+                }
             } else {
-                UILogger.warn('Handshake failed, entering fallback mode');
+                if (DEBUG) {
+                    logOnce('warn', 'Handshake failed, entering fallback mode');
+                }
                 parentReady = true;
                 sessionReady = true;
             }
         });
         
-        // Wait for parent and session ready (with timeout)
         await initGatePromise;
         
         cacheElements();
@@ -4582,11 +4771,22 @@
         UIState.renderStages.initial = true;
         UIState.initialized = true;
         
-        UILogger.info('UI initialization complete', {
-            renderStages: UIState.renderStages,
-            renderCount: UIState.renderCount,
-            elementsCached: UIState.cachedElements.size
-        });
+        if (DiagnosticsAgent && typeof DiagnosticsAgent.snapshot === 'function') {
+            DiagnosticsAgent.snapshot('ui_ready');
+        }
+        
+        if (DEBUG) {
+            logOnce('info', 'UI initialization complete', {
+                renderStages: UIState.renderStages,
+                renderCount: UIState.renderCount,
+                elementsCached: UIState.cachedElements.size,
+                handshake: {
+                    parentReady,
+                    sessionReady,
+                    handshakeComplete
+                }
+            });
+        }
         
         return {
             success: true,
@@ -4596,7 +4796,6 @@
     }
 
     // ==================== EXPORTS ====================
-    // Panel handlers
     const PanelHandlers = UIPanelHandlers;
     const openParticipantsPanel = UIPanelHandlers.openParticipantsPanel.bind(UIPanelHandlers);
     const openChatPanel = UIPanelHandlers.openChatPanel.bind(UIPanelHandlers);
@@ -4611,7 +4810,6 @@
     const createPollsPanel = UIPanelHandlers.createPollsPanel.bind(UIPanelHandlers);
     const createRelationshipPanel = UIPanelHandlers.createRelationshipPanel.bind(UIPanelHandlers);
 
-    // Event handlers
     const EventHandlers = UIEventHandlers;
     const toggleMenuDots = UIEventHandlers.toggleMenuDots.bind(UIEventHandlers);
     const closeMenuDots = UIEventHandlers.closeMenuDots.bind(UIEventHandlers);
@@ -4659,10 +4857,8 @@
     const sendReaction = UIEventHandlers.sendReaction.bind(UIEventHandlers);
     const handleLogout = UIEventHandlers.handleLogout.bind(UIEventHandlers);
 
-    // Media permissions
-    const requestMediaPermissionsFn = requestMediaPermissions;
+    const requestMediaPermissionsFnExport = requestMediaPermissionsFn;
 
-    // Systems
     const EventSystemExport = EventSystem;
     const RenderingPipelineExport = RenderingPipeline;
     const CoreIntegrationExport = CoreIntegration;
@@ -4670,16 +4866,13 @@
     const SecuritySanitizerExport = SecuritySanitizer;
     const ViewHistoryExport = ViewHistory;
 
-    // UI State
     const UIStateExport = UIState;
     const UIDiagnosticsExport = UIDiagnostics;
     const UILoggerExport = UILogger;
     const UIErrorBoundaryExport = UIErrorBoundary;
 
-    // Elements
     const elementsExport = elements;
 
-    // Make everything available globally
     window.callsUI = {
         initializeUISystem,
         cacheElements,
@@ -4742,7 +4935,7 @@
         closePremiumLimitModal,
         sendReaction,
         handleLogout,
-        requestMediaPermissionsFn,
+        requestMediaPermissionsFn: requestMediaPermissionsFnExport,
         EventSystem: EventSystemExport,
         RenderingPipeline: RenderingPipelineExport,
         CoreIntegration: CoreIntegrationExport,
@@ -4755,27 +4948,31 @@
         UIErrorBoundary: UIErrorBoundaryExport,
         elements: elementsExport,
         showNotification,
-        // Export session cache for debugging
         getSessionCache: () => window.__CHILD_SESSION__,
-        // Export handshake status
         getHandshakeStatus: () => ({
             parentReady,
             sessionReady,
             handshakeComplete
-        })
+        }),
+        getDiagnostics: () => UIDiagnostics.getReport(),
+        getEnvironment: () => IframeEnvironment ? IframeEnvironment.getFullReport() : 
+                             (EnvironmentDetector ? EnvironmentDetector.getFullReport() : null)
     };
 
-    // ==================== AUTO-INITIALIZE ====================
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             initializeUISystem().catch(error => {
-                UILogger.error('Auto-initialization failed', error);
+                if (DEBUG) {
+                    logOnce('error', 'Auto-initialization failed', error);
+                }
                 RenderingPipeline.skeleton();
             });
         });
     } else {
         initializeUISystem().catch(error => {
-            UILogger.error('Auto-initialization failed', error);
+            if (DEBUG) {
+                logOnce('error', 'Auto-initialization failed', error);
+            }
             RenderingPipeline.skeleton();
         });
     }
