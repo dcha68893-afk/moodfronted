@@ -1,8 +1,9 @@
 // =============================================
-// SETTINGS UI - COMPLETE IMPLEMENTATION v6.0.0
+// SETTINGS UI - COMPLETE IMPLEMENTATION v6.1.0 (FIXED)
 // ENHANCED PARENT COMMUNICATION | FULL SECTION SUPPORT
 // INTEGRATED WITH CORE HARDENING | UI FAILSAFE
-// SILENT BACKGROUND OPERATIONS | NO VISUAL NOISE
+// SILENT BACKGROUND OPERATIONS | MOBILE OPTIMIZED
+// API GATEWAY INTEGRATION | SECTION-BASED NAVIGATION
 // =============================================
 
 import {
@@ -105,7 +106,14 @@ import {
     IframeHandshakeAuthority,
     RecoveryManager,
     NavigationGuard,
-    UIFailsafe
+    UIFailsafe,
+    
+    // API Core and secure wrapper
+    secureApiCall,
+    ApiCore,
+    safeGet,
+    safeArray,
+    safeObject
 } from './settings-core.js';
 
 // =============================================
@@ -127,6 +135,9 @@ let maxUIErrors = 10;
 let uiRecoveryTimer = null;
 let lastUIAction = 0;
 let uiThrottleEnabled = false;
+let isMobileView = window.innerWidth <= 768;
+let menuVisible = true;
+let currentMobileSection = null;
 
 // Silent mode - don't show console noise in production
 const SILENT_MODE = !window.__IFRAME_DEBUG__;
@@ -153,7 +164,6 @@ const UIErrorBoundary = {
             } catch (error) {
                 UIErrorBoundary.capture(error, context, args);
                 
-                // Silent recovery - no user visible message
                 if (UIErrorBoundary._errors.length > 5) {
                     attemptUIRecovery();
                 }
@@ -180,12 +190,10 @@ const UIErrorBoundary = {
         
         uiErrorCount++;
         
-        // Only log if debug mode
         if (!SILENT_MODE) {
             console.error(`[UI Error][${context}]`, error, args);
         }
         
-        // Log to diagnostics silently
         if (DiagnosticsAgent) {
             DiagnosticsAgent.error(error, `ui_${context}`);
         }
@@ -202,6 +210,108 @@ const UIErrorBoundary = {
 };
 
 // =============================================
+// MOBILE RESPONSIVE HANDLING (FIXED)
+// =============================================
+function checkMobileView() {
+    isMobileView = window.innerWidth <= 768;
+    
+    const sidebar = document.querySelector('.settings-sidebar');
+    const content = document.querySelector('.settings-content');
+    
+    if (!sidebar || !content) return;
+    
+    if (isMobileView) {
+        if (currentMobileSection) {
+            sidebar.style.display = 'none';
+            content.style.display = 'flex';
+            content.style.width = '100%';
+        } else {
+            sidebar.style.display = 'flex';
+            content.style.display = 'none';
+        }
+    } else {
+        sidebar.style.display = 'flex';
+        content.style.display = 'flex';
+        sidebar.style.width = '280px';
+        content.style.width = 'calc(100% - 280px)';
+    }
+}
+
+function showMobileMenu() {
+    if (!isMobileView) return;
+    
+    const sidebar = document.querySelector('.settings-sidebar');
+    const content = document.querySelector('.settings-content');
+    
+    if (sidebar && content) {
+        sidebar.style.display = 'flex';
+        content.style.display = 'none';
+        currentMobileSection = null;
+        
+        // Push state for back button handling
+        history.pushState({ mobileMenu: true }, null, window.location.href);
+    }
+}
+
+function showMobileSection(sectionId) {
+    if (!isMobileView) return;
+    
+    const sidebar = document.querySelector('.settings-sidebar');
+    const content = document.querySelector('.settings-content');
+    
+    if (sidebar && content) {
+        sidebar.style.display = 'none';
+        content.style.display = 'flex';
+        currentMobileSection = sectionId;
+        
+        // Push state for back button handling
+        history.pushState({ mobileSection: sectionId }, null, window.location.href);
+    }
+}
+
+// =============================================
+// ANDROID BACK BUTTON HANDLER (NEW)
+// =============================================
+function setupAndroidBackButton() {
+    // Handle Android hardware back button / browser back
+    window.addEventListener('popstate', function(event) {
+        if (isMobileView) {
+            if (currentMobileSection) {
+                // If we're in a section, go back to menu
+                event.preventDefault();
+                showMobileMenu();
+            } else {
+                // If we're in menu, close settings
+                if (unsavedChanges) {
+                    if (confirm('You have unsaved changes. Leave anyway?')) {
+                        sendMessageToParent({
+                            type: PARENT_MESSAGE_TYPES.CHILD_CLOSING,
+                            childId: 'settings',
+                            unsavedChanges: true,
+                            timestamp: Date.now()
+                        }).catch(() => {});
+                    } else {
+                        // Prevent navigation and push state back
+                        history.pushState({ mobileMenu: true }, null, window.location.href);
+                    }
+                } else {
+                    sendMessageToParent({
+                        type: PARENT_MESSAGE_TYPES.CHILD_CLOSING,
+                        childId: 'settings',
+                        timestamp: Date.now()
+                    }).catch(() => {});
+                }
+            }
+        }
+    });
+
+    // Initialize history state
+    if (isMobileView) {
+        history.replaceState({ mobileMenu: true }, null, window.location.href);
+    }
+}
+
+// =============================================
 // UI INITIALIZATION - SILENT BACKGROUND
 // =============================================
 
@@ -211,16 +321,17 @@ export async function initializeUI() {
     const wrappedInit = UIErrorBoundary.wrap(async function() {
         debugLog('[SettingsUI] Initializing UI components');
         
-        // Check sandbox mode silently
-        const sandboxInfo = IframeEnvironment ? IframeEnvironment.getInfo() : { features: { isSandboxed: false } };
+        checkMobileView();
         
-        // Wait for core silently
+        window.addEventListener('resize', () => {
+            checkMobileView();
+        });
+        
         const coreReady = await waitForCore(8000);
         if (!coreReady) {
             debugLog('[SettingsUI] Core not ready, showing loading state silently');
             showLoadingState();
             
-            // Set up retry silently
             setTimeout(() => {
                 if (!uiInitialized) {
                     initializeUI();
@@ -229,42 +340,33 @@ export async function initializeUI() {
             return;
         }
         
-        // Build menu structure
         buildSettingsMenu();
         
-        // Setup all event listeners silently
         setupEventListeners();
         
-        // Update user status display silently
+        setupAndroidBackButton(); // Add Android back button support
+        
         updateUserStatus();
         
-        // Initialize color picker silently
         initializeColorPicker();
         
-        // Load initial section silently
         if (currentSection) {
             await loadSection(currentSection);
         }
         
-        // Update user name preview
         updateUserPreview();
         
-        // Setup visibility tracking silently
         setupUIVisibilityTracking();
         
-        // Register with core for updates silently
         registerForCoreUpdates();
         
-        // Setup keyboard shortcuts silently
         setupKeyboardShortcuts();
         
-        // Setup network-aware UI adjustments silently
         setupNetworkAwareUI();
         
         uiInitialized = true;
         uiReady = true;
         
-        // Dispatch UI ready event silently
         dispatchUIReady();
         
         debugLog('[SettingsUI] UI initialization complete');
@@ -295,10 +397,9 @@ function waitForCore(timeout = 5000) {
 
 // Show loading state (minimal, no console noise)
 function showLoadingState() {
-    const contentContainer = document.getElementById('settingsContent');
+    const contentContainer = document.getElementById('settingsContentBody');
     if (!contentContainer) return;
     
-    // Only show loading if content is empty
     if (contentContainer.children.length === 0 || 
         contentContainer.innerHTML.includes('Initializing')) {
         contentContainer.innerHTML = `
@@ -313,10 +414,9 @@ function showLoadingState() {
 
 // Show fallback UI (minimal, no console noise)
 function showFallbackUI() {
-    const contentContainer = document.getElementById('settingsContent');
+    const contentContainer = document.getElementById('settingsContentBody');
     if (!contentContainer) return;
     
-    // Only show if we're actually in fallback mode
     if (UIFailsafe && UIFailsafe.isInFallback()) {
         contentContainer.innerHTML = `
             <div class="settings-section">
@@ -326,7 +426,7 @@ function showFallbackUI() {
                 <div class="section-body">
                     <div style="text-align: center; padding: 20px;">
                         <p>Working in limited mode</p>
-                        <button class="action-btn primary" id="retryConnectionBtn" style="display: none;">Retry</button>
+                        <button class="action-btn primary" id="retryConnectionBtn" style="display: inline-flex;">Retry</button>
                     </div>
                 </div>
             </div>
@@ -336,6 +436,7 @@ function showFallbackUI() {
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
                 if (UIFailsafe) UIFailsafe.exitFallbackMode();
+                window.location.reload();
             });
         }
     }
@@ -345,14 +446,12 @@ function showFallbackUI() {
 function setupUIVisibilityTracking() {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            // Page became visible - refresh UI if needed silently
             if (currentSection && !sectionLoadInProgress) {
                 setTimeout(() => {
                     loadSection(currentSection);
                 }, 100);
             }
             
-            // Update status silently
             updateUserStatus();
         }
     });
@@ -372,7 +471,6 @@ function registerForCoreUpdates() {
     });
     
     window.addEventListener('tokenReady', () => {
-        // Silent update
         updateUserStatus();
         if (currentSection) {
             loadSection(currentSection);
@@ -380,19 +478,16 @@ function registerForCoreUpdates() {
     });
     
     window.addEventListener('tokenLost', () => {
-        // Silent update
         updateUserStatus();
         if (UIFailsafe) UIFailsafe.enterFallbackMode();
     });
     
-    // Listen for governor state changes silently
     if (StartupGovernor && StartupGovernor.onTransition) {
         StartupGovernor.onTransition((oldState, newState) => {
             updateConnectionState(newState);
         });
     }
     
-    // Listen for session updates silently
     if (SessionClient && SessionClient.on) {
         SessionClient.on('session_updated', () => {
             updateUserPreview();
@@ -480,7 +575,6 @@ function setupNetworkAwareUI() {
     
     const updateForNetwork = () => {
         const quality = connectionQuality || 'unknown';
-        const statusIndicator = document.getElementById('userStatusIndicator');
         
         if (quality === 'poor' || quality === 'degraded') {
             document.body.classList.add('slow-connection');
@@ -489,7 +583,6 @@ function setupNetworkAwareUI() {
         }
     };
     
-    // Listen for network changes silently
     if (ReliabilityEngine.on) {
         ReliabilityEngine.on('degraded', updateForNetwork);
     }
@@ -500,12 +593,10 @@ function setupNetworkAwareUI() {
 // =============================================
 function setupKeyboardShortcuts() {
     const wrappedHandler = UIErrorBoundary.wrap(function(e) {
-        // Don't trigger if in input/textarea
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
             return;
         }
         
-        // Ctrl/Cmd + S to save
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
             e.preventDefault();
             if (unsavedChanges) {
@@ -513,13 +604,11 @@ function setupKeyboardShortcuts() {
             }
         }
         
-        // Escape to close modal
         if (e.key === 'Escape' && activeModals.size > 0) {
             const lastModal = Array.from(activeModals).pop();
             closeModal(lastModal);
         }
         
-        // Ctrl/Cmd + F to focus search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
             const searchInput = document.getElementById('settingsSearch');
@@ -528,18 +617,23 @@ function setupKeyboardShortcuts() {
             }
         }
         
+        if (isMobileView && e.key === 'Escape' && currentMobileSection) {
+            showMobileMenu();
+        }
+        
     }, 'keyboardShortcut');
     
     document.addEventListener('keydown', wrappedHandler);
 }
 
 // =============================================
-// BUILD SETTINGS MENU - ENHANCED
+// BUILD SETTINGS MENU - ENHANCED (FIXED CLICK HANDLER)
 // =============================================
 export function buildSettingsMenu() {
     const menuContainer = document.getElementById('settingsMenu');
     if (!menuContainer) return;
     
+    // Clear existing menu
     menuContainer.innerHTML = '';
     
     SETTINGS_MENU.forEach(item => {
@@ -553,7 +647,6 @@ export function buildSettingsMenu() {
             menuItem.style.color = 'var(--danger-color)';
         }
         
-        // Check authentication requirement
         const hasAuth = checkAuthenticationState();
         if (item.requiresAuth && !hasAuth) {
             menuItem.style.opacity = '0.5';
@@ -571,26 +664,74 @@ export function buildSettingsMenu() {
             ${item.badge ? `<div class="menu-badge">${item.badge}</div>` : ''}
         `;
         
-        menuItem.addEventListener('click', (e) => {
+        // FIXED: Proper click handler with error handling
+        menuItem.addEventListener('click', async (e) => {
             e.preventDefault();
+            e.stopPropagation();
             
-            if (item.requiresAuth && !hasAuth) {
-                return;
+            try {
+                if (item.requiresAuth && !hasAuth) {
+                    // Show notification instead of silent fail
+                    const notification = document.getElementById('notification');
+                    const notificationText = document.getElementById('notificationText');
+                    if (notification && notificationText) {
+                        notificationText.textContent = 'Please sign in to access this section';
+                        notification.className = 'notification warning active';
+                        setTimeout(() => notification.classList.remove('active'), 3000);
+                    }
+                    return;
+                }
+                
+                // Update active states
+                document.querySelectorAll('.menu-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                menuItem.classList.add('active');
+                
+                // Load the section
+                await loadSection(item.id);
+                
+                // Handle mobile view
+                if (isMobileView) {
+                    showMobileSection(item.id);
+                }
+                
+            } catch (error) {
+                console.error('Error loading section:', error);
+                // Show error notification
+                const notification = document.getElementById('notification');
+                const notificationText = document.getElementById('notificationText');
+                if (notification && notificationText) {
+                    notificationText.textContent = 'Error loading section';
+                    notification.className = 'notification error active';
+                    setTimeout(() => notification.classList.remove('active'), 3000);
+                }
             }
-            
-            loadSection(item.id);
-            
-            document.querySelectorAll('.menu-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            menuItem.classList.add('active');
         });
         
         menuContainer.appendChild(menuItem);
     });
     
-    // Add connection status indicator silently
     addConnectionStatusIndicator();
+    
+    if (isMobileView) {
+        const backToMenuBtn = document.createElement('div');
+        backToMenuBtn.className = 'menu-item';
+        backToMenuBtn.style.marginTop = '10px';
+        backToMenuBtn.style.borderTop = '1px solid var(--border-color)';
+        backToMenuBtn.style.paddingTop = '15px';
+        backToMenuBtn.innerHTML = `
+            <div class="menu-icon">
+                <i class="fas fa-arrow-left"></i>
+            </div>
+            <div class="menu-text">Back to Settings</div>
+        `;
+        backToMenuBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            showMobileMenu();
+        });
+        menuContainer.appendChild(backToMenuBtn);
+    }
 }
 
 // Add connection status indicator to menu
@@ -640,7 +781,7 @@ function addConnectionStatusIndicator() {
 }
 
 // =============================================
-// LOAD SECTION - ENHANCED WITH ERROR HANDLING
+// LOAD SECTION - ENHANCED WITH ERROR HANDLING (FIXED)
 // =============================================
 export async function loadSection(sectionId) {
     if (sectionLoadInProgress) {
@@ -663,7 +804,7 @@ export async function loadSection(sectionId) {
         updateSectionTitle(sectionId);
         updateSaveButton();
         
-        const contentContainer = document.getElementById('settingsContent');
+        const contentContainer = document.getElementById('settingsContentBody');
         if (!contentContainer) {
             sectionLoadInProgress = false;
             return;
@@ -671,17 +812,14 @@ export async function loadSection(sectionId) {
         
         contentContainer.scrollTop = 0;
         
-        // Show minimal loading
         contentContainer.innerHTML = `
             <div class="settings-section" style="text-align: center; padding: 30px;">
                 <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
             </div>
         `;
         
-        // Small delay to show loading
         await new Promise(resolve => setTimeout(resolve, 50));
         
-        // Load the actual section
         const loadFunctions = {
             'profile': loadProfileSection,
             'security': loadSecuritySection,
@@ -702,12 +840,28 @@ export async function loadSection(sectionId) {
         
         const loadFn = loadFunctions[sectionId];
         if (loadFn) {
-            await UIErrorBoundary.wrap(loadFn, `loadSection_${sectionId}`)(contentContainer);
+            try {
+                await loadFn(contentContainer);
+            } catch (sectionError) {
+                console.error(`Error loading section ${sectionId}:`, sectionError);
+                contentContainer.innerHTML = `
+                    <div class="settings-section">
+                        <div class="section-header">
+                            <h3><i class="fas fa-exclamation-triangle section-icon" style="color: var(--danger-color);"></i> Error Loading Section</h3>
+                        </div>
+                        <div class="section-body">
+                            <p>There was an error loading this section. Please try again.</p>
+                            <button class="action-btn primary" onclick="location.reload()">
+                                <i class="fas fa-redo"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
         } else {
             contentContainer.innerHTML = '<p>Section not found</p>';
         }
         
-        // Process queued section loads
         if (uiRenderQueue.length > 0) {
             const nextSection = uiRenderQueue.shift();
             if (nextSection !== sectionId) {
@@ -718,7 +872,7 @@ export async function loadSection(sectionId) {
     } catch (error) {
         debugLog(`[SettingsUI] Error loading section ${sectionId}:`, error);
         
-        const contentContainer = document.getElementById('settingsContent');
+        const contentContainer = document.getElementById('settingsContentBody');
         if (contentContainer) {
             contentContainer.innerHTML = `
                 <div class="settings-section">
@@ -726,7 +880,10 @@ export async function loadSection(sectionId) {
                         <h3><i class="fas fa-exclamation-triangle section-icon" style="color: var(--danger-color);"></i> Error</h3>
                     </div>
                     <div class="section-body">
-                        <p style="color: var(--danger-color);">${escapeHtml(error.message)}</p>
+                        <p style="color: var(--danger-color);">${escapeHtml(error.message || 'Unknown error')}</p>
+                        <button class="action-btn primary" onclick="window.location.reload()">
+                            <i class="fas fa-redo"></i> Refresh
+                        </button>
                     </div>
                 </div>
             `;
@@ -804,7 +961,6 @@ export function updateSaveButton() {
 // SETUP EVENT LISTENERS - ENHANCED
 // =============================================
 export function setupEventListeners() {
-    // Back to app button
     const backToAppBtn = document.getElementById('backToAppBtn');
     if (backToAppBtn) {
         backToAppBtn.addEventListener('click', () => {
@@ -827,7 +983,6 @@ export function setupEventListeners() {
         });
     }
     
-    // Save button
     const saveSectionBtn = document.getElementById('saveSectionBtn');
     if (saveSectionBtn) {
         saveSectionBtn.addEventListener('click', async () => {
@@ -841,8 +996,12 @@ export function setupEventListeners() {
                 
                 await saveSettings();
                 
+                // Show success notification
+                showNotification('Settings saved successfully', 'success');
+                
             } catch (error) {
                 debugLog('Error saving settings:', error);
+                showNotification('Error saving settings', 'error');
             } finally {
                 saveSectionBtn.disabled = false;
                 updateSaveButton();
@@ -850,7 +1009,6 @@ export function setupEventListeners() {
         });
     }
     
-    // Reset button
     const resetSectionBtn = document.getElementById('resetSectionBtn');
     if (resetSectionBtn) {
         resetSectionBtn.addEventListener('click', () => {
@@ -860,11 +1018,11 @@ export function setupEventListeners() {
             
             if (confirm('Reset all settings in this section to default?')) {
                 resetCurrentSection();
+                showNotification('Settings reset to default', 'success');
             }
         });
     }
     
-    // Search input
     const settingsSearch = document.getElementById('settingsSearch');
     if (settingsSearch) {
         settingsSearch.addEventListener('input', function(e) {
@@ -888,12 +1046,10 @@ export function setupEventListeners() {
         });
     }
     
-    // Modal listeners
     setupModalListeners();
     setupPhotoModalListeners();
     setupPasswordModalListeners();
     
-    // Session management
     const terminateAllSessionsBtn = document.getElementById('terminateAllSessionsBtn');
     if (terminateAllSessionsBtn) {
         terminateAllSessionsBtn.addEventListener('click', () => {
@@ -907,7 +1063,6 @@ export function setupEventListeners() {
         });
     }
     
-    // Before unload
     window.addEventListener('beforeunload', (e) => {
         if (unsavedChanges) {
             e.preventDefault();
@@ -915,7 +1070,6 @@ export function setupEventListeners() {
         }
     });
     
-    // Handle online/offline silently
     window.addEventListener('online', () => {
         if (currentSection) {
             loadSection(currentSection);
@@ -965,7 +1119,6 @@ export function setupModalListeners() {
         }
     });
     
-    // Close on overlay click
     const modals = ['changePhotoModal', 'changePasswordModal', 'sessionsModal', 'blockedUsersModal', 'confirmationModal'];
     modals.forEach(modalId => {
         const modal = document.getElementById(modalId);
@@ -1141,7 +1294,6 @@ export function updateAccentColor(color) {
     const darkerColor = shadeColor(color, -20);
     document.documentElement.style.setProperty('--primary-dark', darkerColor);
     
-    // Update meta theme color
     let metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (!metaThemeColor) {
         metaThemeColor = document.createElement('meta');
@@ -1200,7 +1352,7 @@ export function shadeColor(color, percent) {
 export function searchSettings(query) {
     const normalizedQuery = query.toLowerCase().trim();
     
-    const contentContainer = document.getElementById('settingsContent');
+    const contentContainer = document.getElementById('settingsContentBody');
     if (!contentContainer) return;
     
     if (!normalizedQuery) {
@@ -1246,7 +1398,7 @@ export function searchSettings(query) {
         html += '<div class="section-body">';
         
         results.forEach(result => {
-            html += `<div class="setting-item" data-section="${result.section}" data-key="${result.key}">`;
+            html += `<div class="setting-item" data-section="${result.section}" data-key="${result.key}" style="cursor: pointer;">`;
             html += `<div class="setting-info">`;
             html += `<div class="setting-label">${result.key.replace(/([A-Z])/g, ' $1').trim()}</div>`;
             html += `<div class="setting-description">Section: ${escapeHtml(result.sectionName)}</div>`;
@@ -1273,9 +1425,12 @@ export function searchSettings(query) {
                 const section = item.dataset.section;
                 if (section) {
                     loadSection(section);
+                    
+                    if (isMobileView) {
+                        showMobileSection(section);
+                    }
                 }
             });
-            item.style.cursor = 'pointer';
         });
         
     } else {
@@ -1284,7 +1439,7 @@ export function searchSettings(query) {
                 <div class="section-header">
                     <h3><i class="fas fa-search section-icon"></i> Search Results</h3>
                     <div class="section-description">
-                        No settings found
+                        No settings found matching "${escapeHtml(query)}"
                     </div>
                 </div>
             </div>
@@ -1303,7 +1458,6 @@ export function showNotification(message, type = 'success', duration = 3000) {
         return;
     }
     
-    // Clear any existing timeout
     if (notification._timeout) {
         clearTimeout(notification._timeout);
     }
@@ -1360,6 +1514,7 @@ export function showConfirmation(title, message, confirmCallback, cancelCallback
 export async function saveSettings() {
     try {
         if (!validateCurrentSection()) {
+            showNotification('Please fix validation errors', 'error');
             return false;
         }
         
@@ -1392,12 +1547,15 @@ function validateCurrentSection() {
     switch(currentSection) {
         case 'profile':
             if (section.displayName && section.displayName.length > 50) {
+                showNotification('Display name too long (max 50 chars)', 'error');
                 return false;
             }
             if (section.bio && section.bio.length > 150) {
+                showNotification('Bio too long (max 150 chars)', 'error');
                 return false;
             }
             if (section.username && !/^@?[a-zA-Z0-9_]+$/.test(section.username)) {
+                showNotification('Username can only contain letters, numbers, and underscores', 'error');
                 return false;
             }
             break;
@@ -1475,6 +1633,7 @@ export function escapeHtml(text) {
 export function takePhoto() {
     debugLog('Photo capture requested');
     
+    // Simulate photo capture
     setTimeout(() => {
         pendingPhotoData = 'data:image/jpeg;base64,/9j/4AAQSkZJRg...';
         updatePhotoPreview(pendingPhotoData);
@@ -1530,6 +1689,7 @@ export function removePhoto() {
         updateSaveButton();
         
         closeModal('changePhotoModal');
+        showNotification('Photo removed', 'success');
     }
 }
 
@@ -1553,6 +1713,7 @@ export function savePhoto() {
         pendingPhotoData = null;
         
         closeModal('changePhotoModal');
+        showNotification('Photo saved', 'success');
     }
 }
 
@@ -1591,6 +1752,7 @@ export async function changePassword() {
         });
         
         closeModal('changePasswordModal');
+        showNotification('Password changed successfully', 'success');
         
         currentPassword.value = '';
         newPassword.value = '';
@@ -1639,6 +1801,7 @@ export function editMoodColor(mood) {
             unsavedChanges = true;
             updateSaveButton();
             loadSection('mood');
+            showNotification('Mood color updated', 'success');
         }
         colorPicker.hide();
         if (originalSaveHandler) {
@@ -1659,6 +1822,7 @@ function editMoodColorFallback(mood) {
         unsavedChanges = true;
         updateSaveButton();
         loadSection('mood');
+        showNotification('Mood color updated', 'success');
     });
     
     input.click();
@@ -1720,6 +1884,7 @@ export function loadProfileSection(container) {
                         <textarea class="setting-textarea" id="bioInput" 
                                   placeholder="About you..." 
                                   ${!hasAuth ? 'disabled' : ''}>${escapeHtml(settings.bio || '')}</textarea>
+                        <div class="input-hint"><span id="bioCounter">${(settings.bio || '').length}</span>/150</div>
                     </div>
                 </div>
                 
@@ -1781,7 +1946,7 @@ function setupProfileEventListeners() {
         });
     }
     
-    const inputs = ['displayNameInput', 'usernameInput', 'bioInput', 'emailInput'];
+    const inputs = ['displayNameInput', 'usernameInput', 'emailInput'];
     inputs.forEach(id => {
         const element = document.getElementById(id);
         if (element && !element.disabled) {
@@ -1791,8 +1956,6 @@ function setupProfileEventListeners() {
                     userSettings.profile.displayName = element.value;
                 } else if (property === 'username') {
                     userSettings.profile.username = element.value;
-                } else if (property === 'bio') {
-                    userSettings.profile.bio = element.value;
                 } else if (property === 'email') {
                     userSettings.profile.email = element.value;
                 }
@@ -1801,6 +1964,23 @@ function setupProfileEventListeners() {
             });
         }
     });
+    
+    const bioInput = document.getElementById('bioInput');
+    const bioCounter = document.getElementById('bioCounter');
+    if (bioInput && bioCounter && !bioInput.disabled) {
+        bioInput.addEventListener('input', () => {
+            const length = bioInput.value.length;
+            bioCounter.textContent = length;
+            if (length > 150) {
+                bioCounter.style.color = 'var(--danger-color)';
+            } else {
+                bioCounter.style.color = 'var(--primary-color)';
+            }
+            userSettings.profile.bio = bioInput.value;
+            unsavedChanges = true;
+            updateSaveButton();
+        });
+    }
     
     const selects = ['profileVisibilitySelect'];
     selects.forEach(id => {
@@ -2907,6 +3087,22 @@ export function loadMoodSection(container) {
                         <div class="mood-color-preview" style="background-color: ${settings.moodColors.focused};"></div>
                         <div class="mood-color-label">Focused</div>
                     </div>
+                    <div class="mood-color-item ${settings.currentMood === 'relaxed' ? 'active' : ''}" data-mood="relaxed">
+                        <div class="mood-color-preview" style="background-color: ${settings.moodColors.relaxed};"></div>
+                        <div class="mood-color-label">Relaxed</div>
+                    </div>
+                    <div class="mood-color-item ${settings.currentMood === 'stressed' ? 'active' : ''}" data-mood="stressed">
+                        <div class="mood-color-preview" style="background-color: ${settings.moodColors.stressed};"></div>
+                        <div class="mood-color-label">Stressed</div>
+                    </div>
+                    <div class="mood-color-item ${settings.currentMood === 'tired' ? 'active' : ''}" data-mood="tired">
+                        <div class="mood-color-preview" style="background-color: ${settings.moodColors.tired};"></div>
+                        <div class="mood-color-label">Tired</div>
+                    </div>
+                    <div class="mood-color-item ${settings.currentMood === 'excited' ? 'active' : ''}" data-mood="excited">
+                        <div class="mood-color-preview" style="background-color: ${settings.moodColors.excited};"></div>
+                        <div class="mood-color-label">Excited</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3099,6 +3295,7 @@ function setupBackupEventListeners() {
                 updateSaveButton();
                 backupNowBtn.disabled = false;
                 backupNowBtn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Backup';
+                showNotification('Backup created successfully', 'success');
             }, 1000);
         });
     }
@@ -3175,6 +3372,8 @@ function setupDangerEventListeners() {
             linkElement.setAttribute('href', dataUri);
             linkElement.setAttribute('download', exportFileDefaultName);
             linkElement.click();
+            
+            showNotification('Data exported successfully', 'success');
         });
     }
     
@@ -3182,12 +3381,13 @@ function setupDangerEventListeners() {
     if (deleteAccountBtn) {
         deleteAccountBtn.addEventListener('click', () => {
             if (confirm('Are you absolutely sure? This cannot be undone.')) {
-                if (confirm('Type DELETE to confirm')) {
+                if (prompt('Type DELETE to confirm') === 'DELETE') {
                     sendMessageToParent({
                         type: PARENT_MESSAGE_TYPES.LOGOUT,
                         childId: 'settings',
                         timestamp: Date.now()
                     }).catch(() => {});
+                    showNotification('Account deletion requested', 'warning');
                 }
             }
         });
@@ -3211,7 +3411,7 @@ export function showActiveSessions() {
             <div class="session-icon"><i class="fas fa-laptop"></i></div>
             <div class="session-info">
                 <div class="session-name">Current Session</div>
-                <div class="session-details">This device</div>
+                <div class="session-details">This device • Active now</div>
             </div>
             <div class="session-actions">
                 <span style="color: var(--success-color);">Active</span>
@@ -3221,11 +3421,13 @@ export function showActiveSessions() {
     
     if (activeSessions && activeSessions.length > 0) {
         activeSessions.forEach(session => {
+            const lastActive = session.lastActive ? new Date(session.lastActive).toLocaleString() : 'Unknown';
             sessionsList.innerHTML += `
                 <div class="session-item">
                     <div class="session-icon"><i class="fas fa-mobile-alt"></i></div>
                     <div class="session-info">
-                        <div class="session-name">${session.deviceName || 'Unknown'}</div>
+                        <div class="session-name">${escapeHtml(session.deviceName || 'Unknown Device')}</div>
+                        <div class="session-details">Last active: ${lastActive}</div>
                     </div>
                     <div class="session-actions">
                         <button class="terminate-btn" data-session-id="${session.id}">Terminate</button>
@@ -3233,6 +3435,13 @@ export function showActiveSessions() {
                 </div>
             `;
         });
+    } else {
+        sessionsList.innerHTML += `
+            <div class="empty-state">
+                <i class="fas fa-check-circle"></i>
+                <p>No other active sessions</p>
+            </div>
+        `;
     }
     
     openModal('sessionsModal');
@@ -3242,9 +3451,11 @@ export function showActiveSessions() {
             const sessionId = this.dataset.sessionId;
             try {
                 await terminateSession(sessionId);
+                showNotification('Session terminated', 'success');
                 showActiveSessions();
             } catch (error) {
                 debugLog('Error terminating session:', error);
+                showNotification('Error terminating session', 'error');
             }
         });
     });
@@ -3262,14 +3473,20 @@ export function showBlockedUsers() {
     blockedUsersList.innerHTML = '';
     
     if (!blockedUsers || blockedUsers.length === 0) {
-        blockedUsersList.innerHTML = '<p style="text-align: center; padding: 20px;">No blocked users</p>';
+        blockedUsersList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-user-check"></i>
+                <p>No blocked users</p>
+            </div>
+        `;
     } else {
         blockedUsers.forEach(user => {
             blockedUsersList.innerHTML += `
                 <div class="blocked-user-item">
                     <div class="blocked-user-icon"><i class="fas fa-user-slash"></i></div>
                     <div class="blocked-user-info">
-                        <div class="blocked-user-name">${user.name || 'Unknown'}</div>
+                        <div class="blocked-user-name">${escapeHtml(user.name || 'Unknown')}</div>
+                        <div class="blocked-user-details">Blocked: ${user.blockedDate ? new Date(user.blockedDate).toLocaleDateString() : 'Unknown'}</div>
                     </div>
                     <div class="blocked-user-actions">
                         <button class="unblock-btn" data-user-id="${user.id}">Unblock</button>
@@ -3286,9 +3503,11 @@ export function showBlockedUsers() {
             const userId = this.dataset.userId;
             try {
                 await unblockUser(userId);
+                showNotification('User unblocked', 'success');
                 showBlockedUsers();
             } catch (error) {
                 debugLog('Error unblocking user:', error);
+                showNotification('Error unblocking user', 'error');
             }
         });
     });
@@ -3300,7 +3519,11 @@ function getAuthRequiredHTML(section, title) {
         <div class="settings-section">
             <div class="section-header">
                 <h3><i class="fas fa-lock section-icon"></i> ${title}</h3>
-                <div class="section-description">Sign in required</div>
+                <div class="section-description">Please sign in to access these settings</div>
+            </div>
+            <div class="section-body" style="text-align: center; padding: 30px;">
+                <i class="fas fa-user-lock" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
+                <p>Sign in required to view and modify these settings</p>
             </div>
         </div>
     `;
@@ -3342,7 +3565,9 @@ window.__UI_DEBUG__ = {
         uiReady,
         currentSection,
         unsavedChanges,
-        uiErrorCount
+        uiErrorCount,
+        isMobileView,
+        currentMobileSection
     }),
     reloadSection: () => {
         if (currentSection) loadSection(currentSection);
@@ -3372,5 +3597,10 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 // =============================================
-// END OF FILE - COMPLETE UI IMPLEMENTATION
+// EXPORT ALL PUBLIC FUNCTIONS
+// =============================================
+
+
+// =============================================
+// END OF FILE - COMPLETE UI IMPLEMENTATION (FIXED)
 // =============================================

@@ -2,7 +2,7 @@
 // GROUPS UI FUNCTIONS - RESILIENT UI CONTROLLER
 // COMPLETE PRODUCTION-READY IMPLEMENTATION
 // HIGHLY SECURE - XSS PROTECTED, CSP COMPLIANT
-// VERSION: 3.2.0 - ADDED ERROR BOUNDARIES, SECURITY LAYERS, RESILIENCE
+// VERSION: 3.3.0 - ADDED API CORE INTEGRATION, ENHANCED SECURITY
 // ENHANCED: Silent loading, No overlay UI, Preserved all functionality
 // =============================================
 
@@ -615,7 +615,6 @@ export function logUIDiagnostic(level, component, data = null) {
     
     if (level === 'error' && !_UI_ERRORS.has(key)) {
         _UI_ERRORS.add(key);
-        // Only store, no console unless debug enabled
         DIAGNOSTICS.log('error', `${safeComponent}`, data);
     } else if (level === 'warn' && !_UI_WARNINGS.has(key)) {
         _UI_WARNINGS.add(key);
@@ -1038,7 +1037,6 @@ export function hideAllLoadingOverlays() {
             el.classList.remove('visible');
             el.classList.remove('active');
             
-            // Remove if overlay is modal/blocking
             if (el.classList.contains('modal') || 
                 el.classList.contains('fullscreen') ||
                 el.style.position === 'fixed') {
@@ -1047,7 +1045,6 @@ export function hideAllLoadingOverlays() {
         });
     });
     
-    // Also hide any blocking elements with high z-index
     const possibleBlockers = document.querySelectorAll('[style*="z-index: 1000"], [style*="z-index: 9999"], [style*="position: fixed"]');
     possibleBlockers.forEach(el => {
         if (el.id.includes('overlay') || 

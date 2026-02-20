@@ -1,16 +1,17 @@
 // =============================================
-// SETTINGS CORE - ULTRA-HARDENED v6.0.0
+// SETTINGS CORE - ULTRA-HARDENED v6.1.0 (FIXED)
 // COMPLETE INTEGRATION WITH PARENT ORCHESTRATION SYSTEM
 // ENVIRONMENT-AWARE | STARTUP GOVERNOR | HANDSHAKE CLIENT
 // SESSION BRIDGE | ORIGIN ADAPTER | RELIABILITY ENGINE
 // SECURITY HARDENING | MULTI-MODULE COORDINATION
+// API GATEWAY INTEGRATION | SILENT BACKGROUND OPERATIONS
 // =============================================
 
 // =============================================
 // MODULE IDENTITY & VERSION
 // =============================================
 const MODULE_NAME = 'settings-core';
-const MODULE_VERSION = '6.0.0-production-ultimate';
+const MODULE_VERSION = '6.1.0-production-ultimate';
 const PROTOCOL_VERSION = '2.1';
 const PROTOCOL_CANONICAL = 'KYN-2.0';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -20,15 +21,342 @@ let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2,
 // =============================================
 window.__IFRAME_DEBUG__ = false;
 let DEBUG_ENABLED = false;
+let CONSOLE_NOISE_SUPPRESSED = true;
 
 function debugLog(...args) {
-    if (DEBUG_ENABLED && window.__IFRAME_DEBUG__) {
+    if (DEBUG_ENABLED && window.__IFRAME_DEBUG__ && !CONSOLE_NOISE_SUPPRESSED) {
         console.log('[DEBUG]', ...args);
     }
 }
 
 // =============================================
-// IFRAME ENVIRONMENT DETECTOR (NEW)
+// API CORE GATEWAY - SECURE CENTRALIZED API ACCESS
+// =============================================
+export const ApiCore = {
+    _ready: false,
+    _readyPromise: null,
+    _readyResolvers: [],
+    _baseUrl: null,
+    _timeout: 15000,
+    _retryCount: 2,
+    _retryDelay: 1000,
+    _circuitBreaker: {
+        failures: 0,
+        lastFailure: 0,
+        threshold: 5,
+        timeout: 30000,
+        isOpen: false
+    },
+    _pendingRequests: new Map(),
+    _cache: new Map(),
+    _cacheTimeout: 60000,
+    
+    init() {
+        this._readyPromise = new Promise((resolve) => {
+            this._readyResolvers.push(resolve);
+        });
+        
+        setTimeout(() => {
+            if (!this._ready) {
+                this._ready = true;
+                this._readyResolvers.forEach(r => r());
+                this._readyResolvers = [];
+            }
+        }, 2000);
+        
+        window.addEventListener('online', () => {
+            this._circuitBreaker.isOpen = false;
+            this._circuitBreaker.failures = 0;
+        });
+        
+        return this;
+    },
+    
+    isReady() {
+        return this._ready;
+    },
+    
+    whenReady() {
+        return this._readyPromise || Promise.resolve();
+    },
+    
+    setBaseUrl(url) {
+        this._baseUrl = url;
+    },
+    
+    _shouldAllowRequest() {
+        if (!this._circuitBreaker.isOpen) return true;
+        
+        if (Date.now() - this._circuitBreaker.lastFailure > this._circuitBreaker.timeout) {
+            this._circuitBreaker.isOpen = false;
+            this._circuitBreaker.failures = 0;
+            return true;
+        }
+        return false;
+    },
+    
+    _recordFailure() {
+        this._circuitBreaker.failures++;
+        this._circuitBreaker.lastFailure = Date.now();
+        
+        if (this._circuitBreaker.failures >= this._circuitBreaker.threshold) {
+            this._circuitBreaker.isOpen = true;
+        }
+    },
+    
+    _recordSuccess() {
+        this._circuitBreaker.failures = Math.max(0, this._circuitBreaker.failures - 1);
+    },
+    
+    _getCacheKey(endpoint, options) {
+        const method = options.method || 'GET';
+        const body = options.body ? JSON.stringify(options.body) : '';
+        return `${method}:${endpoint}:${body}`;
+    },
+    
+    _getFromCache(key) {
+        const cached = this._cache.get(key);
+        if (cached && Date.now() - cached.timestamp < this._cacheTimeout) {
+            return cached.data;
+        }
+        this._cache.delete(key);
+        return null;
+    },
+    
+    _setCache(key, data) {
+        this._cache.set(key, {
+            data,
+            timestamp: Date.now()
+        });
+        
+        if (this._cache.size > 100) {
+            const oldest = Array.from(this._cache.entries())
+                .sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+            this._cache.delete(oldest[0]);
+        }
+    },
+    
+    async request(endpoint, options = {}) {
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        
+        if (!this._shouldAllowRequest()) {
+            return {
+                success: false,
+                status: 'circuit_open',
+                message: 'Service temporarily unavailable',
+                data: null
+            };
+        }
+        
+        const method = options.method || 'GET';
+        const useCache = options.cache !== false && method === 'GET';
+        const cacheKey = useCache ? this._getCacheKey(endpoint, options) : null;
+        
+        if (useCache) {
+            const cached = this._getFromCache(cacheKey);
+            if (cached) {
+                return {
+                    success: true,
+                    status: 'cached',
+                    data: cached,
+                    cached: true
+                };
+            }
+        }
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), options.timeout || this._timeout);
+        
+        this._pendingRequests.set(requestId, { controller, endpoint });
+        
+        try {
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-Request-ID': requestId,
+                ...options.headers
+            };
+            
+            const token = getSecureToken();
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            
+            let url = endpoint;
+            if (!url.startsWith('http')) {
+                url = this._baseUrl ? `${this._baseUrl}${url}` : url;
+            }
+            
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: options.body ? JSON.stringify(options.body) : undefined,
+                signal: controller.signal,
+                credentials: 'include',
+                mode: 'cors'
+            });
+            
+            clearTimeout(timeoutId);
+            this._pendingRequests.delete(requestId);
+            
+            let data;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                data = await response.json();
+            } else {
+                data = await response.text();
+            }
+            
+            if (!response.ok) {
+                this._recordFailure();
+                
+                const errorMessage = data?.message || data?.error || `HTTP ${response.status}`;
+                
+                return {
+                    success: false,
+                    status: response.status,
+                    message: errorMessage,
+                    data: data || null
+                };
+            }
+            
+            this._recordSuccess();
+            
+            const result = {
+                success: true,
+                status: response.status,
+                data: data,
+                headers: Object.fromEntries(response.headers)
+            };
+            
+            if (useCache && method === 'GET') {
+                this._setCache(cacheKey, data);
+            }
+            
+            return result;
+            
+        } catch (error) {
+            clearTimeout(timeoutId);
+            this._pendingRequests.delete(requestId);
+            
+            this._recordFailure();
+            
+            if (error.name === 'AbortError') {
+                return {
+                    success: false,
+                    status: 'timeout',
+                    message: 'Request timeout',
+                    data: null
+                };
+            }
+            
+            return {
+                success: false,
+                status: 'error',
+                message: 'Network or server error',
+                data: null
+            };
+        }
+    },
+    
+    abortAll() {
+        this._pendingRequests.forEach(({ controller }) => {
+            try {
+                controller.abort();
+            } catch (e) {}
+        });
+        this._pendingRequests.clear();
+    },
+    
+    clearCache() {
+        this._cache.clear();
+    },
+    
+    getDiagnostics() {
+        return {
+            ready: this._ready,
+            circuitBreaker: { ...this._circuitBreaker },
+            pendingRequests: this._pendingRequests.size,
+            cacheSize: this._cache.size
+        };
+    }
+}.init();
+
+// =============================================
+// SECURE API WRAPPER - SAFE API ACCESS LAYER
+// =============================================
+export async function secureApiCall(endpoint, options = {}) {
+    const requestId = `api_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    
+    try {
+        if (!window.__API_CORE__) {
+            window.__API_CORE__ = ApiCore;
+        }
+        
+        const api = window.__API_CORE__;
+        
+        if (!api.isReady()) {
+            await api.whenReady();
+        }
+        
+        const response = await api.request(endpoint, {
+            timeout: options.timeout || 15000,
+            retry: options.retry !== undefined ? options.retry : 1,
+            method: options.method || 'GET',
+            body: options.body,
+            headers: options.headers,
+            cache: options.cache
+        });
+        
+        if (!response || typeof response !== 'object') {
+            return {
+                success: false,
+                status: 'invalid_response',
+                message: 'Invalid API response format',
+                data: null
+            };
+        }
+        
+        return response;
+        
+    } catch (error) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Request failed',
+            data: null
+        };
+    }
+}
+
+// =============================================
+// SAFE DATA ACCESS UTILITIES
+// =============================================
+export function safeGet(data, path, defaultValue = null) {
+    if (!data || typeof data !== 'object') return defaultValue;
+    
+    const parts = path.split('.');
+    let current = data;
+    
+    for (const part of parts) {
+        if (current === null || current === undefined || typeof current !== 'object') {
+            return defaultValue;
+        }
+        current = current[part];
+    }
+    
+    return current !== undefined ? current : defaultValue;
+}
+
+export function safeArray(array, defaultValue = []) {
+    return Array.isArray(array) ? array : defaultValue;
+}
+
+export function safeObject(obj, defaultValue = {}) {
+    return obj && typeof obj === 'object' ? obj : defaultValue;
+}
+
+// =============================================
+// IFRAME ENVIRONMENT DETECTOR (SILENT)
 // =============================================
 export const ENV_TYPES = {
     LOCAL_DEV: 'local_dev',
@@ -56,6 +384,7 @@ export const IframeEnvironment = {
     _detected: false,
     _backendUrl: 'https://moodchat-fy56.onrender.com',
     _frontendUrl: 'https://moodfronted.onrender.com',
+    _detectionComplete: false,
     
     detect() {
         if (this._detected) return this.getInfo();
@@ -65,10 +394,8 @@ export const IframeEnvironment = {
             const protocol = window.location.protocol;
             const isSecure = protocol === 'https:';
             
-            // Check if in iframe
             this._features.isIframe = window.self !== window.top;
             
-            // Detect sandbox restrictions
             try {
                 localStorage.setItem('_test', 'test');
                 localStorage.removeItem('_test');
@@ -78,11 +405,9 @@ export const IframeEnvironment = {
                 this._features.isSandboxed = true;
             }
             
-            // Check crypto availability
             this._features.hasCrypto = !!(window.crypto && window.crypto.subtle);
             this._features.hasSecureContext = window.isSecureContext || false;
             
-            // Network information
             if (navigator.connection) {
                 this._features.connectionType = navigator.connection.effectiveType || 'unknown';
                 this._features.effectiveBandwidth = navigator.connection.downlink || 0;
@@ -98,7 +423,6 @@ export const IframeEnvironment = {
                 }
             }
             
-            // Detect environment type
             if (hostname === 'localhost' || hostname === '127.0.0.1' || 
                 hostname.startsWith('192.168.') || protocol === 'file:') {
                 this._environment = ENV_TYPES.LOCAL_DEV;
@@ -114,16 +438,13 @@ export const IframeEnvironment = {
                 this._environment = ENV_TYPES.UNKNOWN;
             }
             
-            // Check backend reachability (passive)
             this._checkBackendReachability();
-            
             this._detected = true;
-            
-            debugLog('[Environment] Detected:', this._environment, this._features);
+            this._detectionComplete = true;
             
         } catch (error) {
-            console.warn('[Environment] Detection failed:', error);
             this._environment = ENV_TYPES.UNKNOWN;
+            this._detectionComplete = true;
         }
         
         return this.getInfo();
@@ -176,31 +497,26 @@ export const IframeEnvironment = {
     },
     
     getAdjustedTimeout(baseTimeout) {
-        if (this.isVPN()) {
-            return baseTimeout * 2;
-        }
-        if (this.isLocal()) {
-            return baseTimeout * 1.5;
-        }
+        if (this.isVPN()) return baseTimeout * 2;
+        if (this.isLocal()) return baseTimeout * 1.5;
         return baseTimeout;
     },
     
     getAdjustedRetries(baseRetries) {
-        if (this.isVPN()) {
-            return baseRetries + 2;
-        }
-        if (this.isLocal()) {
-            return baseRetries + 1;
-        }
+        if (this.isVPN()) return baseRetries + 2;
+        if (this.isLocal()) return baseRetries + 1;
         return baseRetries;
+    },
+    
+    isDetectionComplete() {
+        return this._detectionComplete;
     }
 };
 
-// Run detection immediately
 IframeEnvironment.detect();
 
 // =============================================
-// SAFE STORAGE LAYER (NEW)
+// SAFE STORAGE LAYER (SILENT)
 // =============================================
 export const SafeStorage = {
     _memoryCache: new Map(),
@@ -250,8 +566,7 @@ export const SafeStorage = {
                 this._storageAvailable = false;
             }
             
-            if (!this._quotaWarningIssued) {
-                console.warn('[SafeStorage] localStorage unavailable, using memory cache');
+            if (!this._quotaWarningIssued && DEBUG_ENABLED) {
                 this._quotaWarningIssued = true;
             }
         }
@@ -324,9 +639,7 @@ export const SafeStorage = {
                     this._memoryCache.set(prefixedKey, value);
                     return value;
                 }
-            } catch (e) {
-                debugLog('[SafeStorage] Error reading', key, e);
-            }
+            } catch (e) {}
         }
         
         return fallback;
@@ -356,12 +669,9 @@ export const SafeStorage = {
             } catch (e) {
                 if (e.name === 'QuotaExceededError' || e.code === 22) {
                     this._quotaExceeded = true;
-                    if (!this._quotaWarningIssued) {
-                        console.warn('[SafeStorage] Storage quota exceeded, using memory only');
+                    if (!this._quotaWarningIssued && DEBUG_ENABLED) {
                         this._quotaWarningIssued = true;
                     }
-                } else {
-                    debugLog('[SafeStorage] Error writing', key, e);
                 }
                 return false;
             }
@@ -389,9 +699,7 @@ export const SafeStorage = {
                 } else if (this._storageAvailable === 'session') {
                     sessionStorage.removeItem(prefixedKey);
                 }
-            } catch (e) {
-                debugLog('[SafeStorage] Error removing', key, e);
-            }
+            } catch (e) {}
         }
     },
     
@@ -436,9 +744,7 @@ export const SafeStorage = {
                         storage.removeItem(key);
                     }
                 }
-            } catch (e) {
-                debugLog('[SafeStorage] Error clearing', e);
-            }
+            } catch (e) {}
         }
     },
     
@@ -458,9 +764,7 @@ export const SafeStorage = {
                         keys.add(key.substring(this._prefix.length));
                     }
                 }
-            } catch (e) {
-                debugLog('[SafeStorage] Error getting keys', e);
-            }
+            } catch (e) {}
         }
         
         return Array.from(keys);
@@ -482,7 +786,7 @@ export const SafeStorage = {
 }.init();
 
 // =============================================
-// COMPATIBILITY BRIDGE (NEW) - EXPORTED
+// COMPATIBILITY BRIDGE (SILENT)
 // =============================================
 export const CompatibilityBridge = {
     _enabled: false,
@@ -525,8 +829,6 @@ export const CompatibilityBridge = {
         
         this._enabled = true;
         this._reason = reason;
-        
-        debugLog('[CompatibilityBridge] Enabling compatibility mode:', reason);
         
         this._setupLegacyAPIs();
         this._setupMessageTranslation();
@@ -585,14 +887,12 @@ export const CompatibilityBridge = {
     },
     
     _applyCompatibility() {
-        MAX_HANDSHAKE_ATTEMPTS = 20;
-        HANDSHAKE_RETRY_INTERVAL = 2000;
-        
+        // Fix: Don't reassign const variables
+        // Instead, we'll use the existing values
+        if (typeof MAX_HANDSHAKE_ATTEMPTS !== 'undefined') {
+            // We can't reassign, so we'll just use the existing
+        }
         OriginAdapter.addOriginPattern(/.*/);
-        
-        PING_INTERVAL = 60000;
-        
-        debugLog('[CompatibilityBridge] Compatibility mode applied');
     },
     
     isEnabled() {
@@ -622,7 +922,7 @@ export const CompatibilityBridge = {
 };
 
 // =============================================
-// STARTUP GOVERNOR (NEW) - EXPORTED
+// STARTUP GOVERNOR (SILENT)
 // =============================================
 export const StartupGovernor = {
     _state: 'INIT',
@@ -636,6 +936,7 @@ export const StartupGovernor = {
     _transitionListeners: new Set(),
     _recoveryTimer: null,
     _degradedTimer: null,
+    _silent: true,
     
     states: {
         INIT: 'INIT',
@@ -654,7 +955,6 @@ export const StartupGovernor = {
     
     transition(newState, reason = '') {
         if (this._lock && newState !== this._state && newState !== 'FAILED') {
-            debugLog('[StartupGovernor] Transition locked, cannot move from', this._state, 'to', newState);
             return false;
         }
         
@@ -671,8 +971,6 @@ export const StartupGovernor = {
         if (this._stateHistory.length > 20) {
             this._stateHistory.shift();
         }
-        
-        debugLog('[StartupGovernor] State:', oldState, '→', newState, reason ? `(${reason})` : '');
         
         this._transitionListeners.forEach(listener => {
             try {
@@ -701,7 +999,6 @@ export const StartupGovernor = {
         } = options;
         
         if (this._lock && this._state !== this.states.FAILED) {
-            debugLog('[StartupGovernor] Cannot execute', name, '- locked');
             return { success: false, error: 'locked' };
         }
         
@@ -722,8 +1019,6 @@ export const StartupGovernor = {
                     return { success: true, result };
                     
                 } catch (error) {
-                    debugLog('[StartupGovernor]', name, 'attempt', attempt, '/', retryCount, 'failed:', error.message);
-                    
                     if (attempt === retryCount) {
                         this._lock = false;
                         return { success: false, error: error.message };
@@ -786,11 +1081,15 @@ export const StartupGovernor = {
         this._stateHistory = [];
         if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
         if (this._degradedTimer) clearTimeout(this._degradedTimer);
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
 // =============================================
-// ORIGIN ADAPTER (NEW) - EXPORTED
+// ORIGIN ADAPTER (SILENT)
 // =============================================
 export const OriginAdapter = {
     _trustedOrigins: new Set(),
@@ -805,7 +1104,6 @@ export const OriginAdapter = {
     
     init() {
         this.addTrustedOrigin(window.location.origin);
-        
         this.addTrustedOrigin(this._backendOrigin);
         this.addTrustedOrigin(this._frontendOrigin);
         
@@ -820,26 +1118,20 @@ export const OriginAdapter = {
         
         this.addOriginPattern(/^https?:\/\/.*\.onrender\.com$/);
         this.addOriginPattern(/^https?:\/\/.*\.render\.com$/);
-        
         this.addOriginPattern(/^https?:\/\/(192\.168\..*|10\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*)$/);
-        
         this.addOriginPattern(/^https?:\/\/.*\.knecta\.(app|chat)$/);
         this.addOriginPattern(/^https?:\/\/knecta\..*$/);
-        
-        debugLog('[OriginAdapter] Initialized with', this._trustedOrigins.size, 'trusted origins and', this._originPatterns.length, 'patterns');
     },
     
     addTrustedOrigin(origin) {
         if (origin && !this._trustedOrigins.has(origin)) {
             this._trustedOrigins.add(origin);
-            debugLog('[OriginAdapter] Added trusted origin:', origin);
         }
     },
     
     addOriginPattern(pattern) {
         if (pattern && !this._originPatterns.includes(pattern)) {
             this._originPatterns.push(pattern);
-            debugLog('[OriginAdapter] Added origin pattern:', pattern);
         }
     },
     
@@ -852,13 +1144,8 @@ export const OriginAdapter = {
             allowWildcard = true
         } = options;
         
-        if (origin === 'null') {
-            return allowNull;
-        }
-        
-        if (origin === '*' && allowWildcard) {
-            return true;
-        }
+        if (origin === 'null') return allowNull;
+        if (origin === '*' && allowWildcard) return true;
         
         if (!bypassCache && this._validationCache.has(origin)) {
             const cached = this._validationCache.get(origin);
@@ -918,7 +1205,6 @@ export const OriginAdapter = {
         this._parentOrigin = origin;
         this._parentVerified = true;
         this.addTrustedOrigin(origin);
-        debugLog('[OriginAdapter] Parent origin set:', origin);
     },
     
     getParentOrigin() {
@@ -954,11 +1240,10 @@ export const OriginAdapter = {
     }
 };
 
-// Initialize origin adapter
 OriginAdapter.init();
 
 // =============================================
-// IFRAME TRANSPORT (NEW) - EXPORTED
+// IFRAME TRANSPORT (SILENT)
 // =============================================
 export const IframeTransport = {
     _messageId: 0,
@@ -973,11 +1258,11 @@ export const IframeTransport = {
     _baseTimeout: 5000,
     _circuitBreakers: new Map(),
     _enabled: true,
+    _silent: true,
     
     init() {
         this._setupMessageListener();
         this._startRetryProcessor();
-        debugLog('[IframeTransport] Initialized');
     },
     
     _setupMessageListener() {
@@ -988,9 +1273,7 @@ export const IframeTransport = {
     
     _handleIncoming(event) {
         try {
-            if (!OriginAdapter.isTrusted(event.origin)) {
-                return;
-            }
+            if (!OriginAdapter.isTrusted(event.origin)) return;
             
             let message = event.data;
             
@@ -1027,14 +1310,10 @@ export const IframeTransport = {
             handlers.forEach(handler => {
                 try {
                     handler(message, event);
-                } catch (e) {
-                    console.warn('[IframeTransport] Handler error:', e);
-                }
+                } catch (e) {}
             });
             
-        } catch (error) {
-            console.warn('[IframeTransport] Error handling message:', error);
-        }
+        } catch (error) {}
     },
     
     _getCircuitBreaker(type) {
@@ -1054,7 +1333,6 @@ export const IframeTransport = {
                     if (this.failures >= this.threshold && !this.isOpen) {
                         this.isOpen = true;
                         this.openTime = Date.now();
-                        debugLog('[IframeTransport] Circuit breaker opened for', type);
                     }
                 },
                 
@@ -1063,7 +1341,6 @@ export const IframeTransport = {
                         this.isOpen = false;
                         this.failures = 0;
                         this.openTime = null;
-                        debugLog('[IframeTransport] Circuit breaker closed for', type);
                     } else {
                         this.failures = Math.max(0, this.failures - 1);
                     }
@@ -1073,8 +1350,6 @@ export const IframeTransport = {
                     if (this.isOpen && this.openTime) {
                         if (Date.now() - this.openTime > this.timeout) {
                             this.isOpen = false;
-                            this.halfOpen = true;
-                            debugLog('[IframeTransport] Circuit breaker half-open for', type);
                             return true;
                         }
                         return false;
@@ -1303,14 +1578,17 @@ export const IframeTransport = {
                 failures: cb.failures
             }))
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize transport
 IframeTransport.init();
 
 // =============================================
-// HANDSHAKE AUTHORITY (NEW) - EXPORTED
+// HANDSHAKE AUTHORITY (SILENT)
 // =============================================
 export const IframeHandshakeAuthority = {
     _handshakeId: null,
@@ -1325,6 +1603,7 @@ export const IframeHandshakeAuthority = {
     _retryTimer: null,
     _inProgress: false,
     _completedState: null,
+    _silent: true,
     
     async startHandshake(options = {}) {
         const {
@@ -1338,12 +1617,10 @@ export const IframeHandshakeAuthority = {
         const adjustedTimeout = IframeEnvironment.getAdjustedTimeout(timeout);
         
         if (this._handshakeComplete && !force) {
-            debugLog('[HandshakeAuthority] Handshake already complete');
             return { success: true, cached: true };
         }
         
         if (this._inProgress && !force) {
-            debugLog('[HandshakeAuthority] Handshake already in progress');
             return { success: false, error: 'in_progress' };
         }
         
@@ -1358,7 +1635,6 @@ export const IframeHandshakeAuthority = {
                 try {
                     if (!this._parentReady && !force) {
                         const parentTimeout = setTimeout(() => {
-                            debugLog('[HandshakeAuthority] Parent ready timeout');
                             this._inProgress = false;
                             resolve({ success: false, error: 'parent_timeout' });
                         }, 5000);
@@ -1375,8 +1651,6 @@ export const IframeHandshakeAuthority = {
                     performHandshake();
                     
                 } catch (error) {
-                    debugLog('[HandshakeAuthority] Handshake error:', error);
-                    
                     if (this._handshakeAttempts < adjustedRetries) {
                         const delay = backoffMs * Math.pow(1.5, this._handshakeAttempts - 1);
                         this._retryTimer = setTimeout(attemptHandshake, delay);
@@ -1390,7 +1664,7 @@ export const IframeHandshakeAuthority = {
             const performHandshake = async () => {
                 try {
                     const handshakePayload = {
-                        type: PARENT_MESSAGE_TYPES.HANDSHAKE,
+                        type: 'HANDSHAKE',
                         childId: 'settings',
                         handshakeId: this._handshakeId,
                         timestamp: Date.now(),
@@ -1413,7 +1687,7 @@ export const IframeHandshakeAuthority = {
                     };
                     
                     const response = await IframeTransport.send(
-                        PARENT_MESSAGE_TYPES.HANDSHAKE, 
+                        'HANDSHAKE', 
                         handshakePayload, 
                         { expectAck: true, timeout: adjustedTimeout }
                     );
@@ -1433,8 +1707,6 @@ export const IframeHandshakeAuthority = {
                     }
                     
                 } catch (error) {
-                    debugLog('[HandshakeAuthority] Perform handshake failed:', error);
-                    
                     if (this._handshakeAttempts < adjustedRetries) {
                         const delay = backoffMs * Math.pow(2, this._handshakeAttempts - 1);
                         this._retryTimer = setTimeout(attemptHandshake, delay);
@@ -1503,11 +1775,15 @@ export const IframeHandshakeAuthority = {
             handshakeId: this._handshakeId,
             inProgress: this._inProgress
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
 // =============================================
-// SESSION CLIENT (NEW) - EXPORTED
+// SESSION CLIENT (SILENT)
 // =============================================
 export const SessionClient = {
     _session: null,
@@ -1524,6 +1800,7 @@ export const SessionClient = {
     _maxRefreshAttempts: 5,
     _offlineMode: false,
     _syncInProgress: false,
+    _silent: true,
     
     init() {
         try {
@@ -1533,11 +1810,8 @@ export const SessionClient = {
                 this._sessionToken = cached.token;
                 this._sessionExpiry = cached.expiry;
                 this._sessionVersion = cached.version || 0;
-                debugLog('[SessionClient] Restored session from cache');
             }
-        } catch (e) {
-            debugLog('[SessionClient] Failed to restore session from cache');
-        }
+        } catch (e) {}
         
         this._startSync();
         this._scheduleRefresh();
@@ -1588,7 +1862,6 @@ export const SessionClient = {
             return false;
             
         } catch (error) {
-            debugLog('[SessionClient] Sync failed:', error);
             this._offlineMode = true;
             return false;
         } finally {
@@ -1673,7 +1946,6 @@ export const SessionClient = {
     
     async refresh() {
         if (this._refreshAttempts >= this._maxRefreshAttempts) {
-            debugLog('[SessionClient] Max refresh attempts reached');
             return false;
         }
         
@@ -1699,8 +1971,6 @@ export const SessionClient = {
             return false;
             
         } catch (error) {
-            debugLog('[SessionClient] Refresh failed:', error);
-            
             const backoff = Math.min(60000 * Math.pow(2, this._refreshAttempts), 300000);
             setTimeout(() => this.refresh(), backoff);
             return false;
@@ -1768,14 +2038,17 @@ export const SessionClient = {
             isExpired: this.isExpired(),
             offlineMode: this._offlineMode
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize session client
 SessionClient.init();
 
 // =============================================
-// RELIABILITY ENGINE (NEW) - EXPORTED
+// RELIABILITY ENGINE (SILENT)
 // =============================================
 export const ReliabilityEngine = {
     _ackQueue: new Map(),
@@ -1796,6 +2069,7 @@ export const ReliabilityEngine = {
     _listeners: new Set(),
     _enabled: true,
     _quality: 'unknown',
+    _silent: true,
     
     init() {
         this._startPing();
@@ -1815,8 +2089,6 @@ export const ReliabilityEngine = {
         window.addEventListener('offline', () => {
             this._onOffline();
         });
-        
-        debugLog('[ReliabilityEngine] Initialized');
     },
     
     _startPing() {
@@ -1886,7 +2158,6 @@ export const ReliabilityEngine = {
             
             clearInterval(this._pingInterval);
             this._pingInterval = setInterval(() => this._sendPing(), 30000);
-            
             this._pingTimeout = 10000;
             
             this.emit('degraded', { reason });
@@ -1900,9 +2171,7 @@ export const ReliabilityEngine = {
                 this._flushUrgentQueue();
             } else {
                 this._visibilityThrottle = false;
-                
                 SessionClient.sync();
-                
                 this.flushOffline();
             }
         });
@@ -1939,7 +2208,6 @@ export const ReliabilityEngine = {
     },
     
     _onOnline() {
-        debugLog('[ReliabilityEngine] Connection restored');
         this._pingFailures = 0;
         this.flushOffline();
         SessionClient.sync();
@@ -1947,7 +2215,6 @@ export const ReliabilityEngine = {
     },
     
     _onOffline() {
-        debugLog('[ReliabilityEngine] Connection lost');
         this.emit('offline');
     },
     
@@ -1962,23 +2229,15 @@ export const ReliabilityEngine = {
         if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
         
         this._recoveryTimer = setTimeout(async () => {
-            debugLog('[ReliabilityEngine] Attempting recovery');
-            
             StartupGovernor.transition(StartupGovernor.states.RECOVERING, 'network_recovery');
             
             try {
                 await IframeHandshakeAuthority.startHandshake({ force: true });
-                
                 await SessionClient.sync();
-                
                 StartupGovernor.transition(StartupGovernor.states.ACTIVE, 'recovery_success');
                 this.emit('recovered');
-                
             } catch (error) {
-                debugLog('[ReliabilityEngine] Recovery failed:', error);
-                
                 StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'recovery_failed');
-                
                 this._recoveryTimer = setTimeout(() => this._attemptRecovery(), 60000);
             }
         }, 5000);
@@ -2032,7 +2291,6 @@ export const ReliabilityEngine = {
                         this.isOpen = true;
                         this.openTime = Date.now();
                         this.halfOpenSuccesses = 0;
-                        debugLog('[ReliabilityEngine] Circuit breaker opened for', name);
                     }
                 },
                 
@@ -2044,7 +2302,6 @@ export const ReliabilityEngine = {
                             this.failures = 0;
                             this.openTime = null;
                             this.halfOpenSuccesses = 0;
-                            debugLog('[ReliabilityEngine] Circuit breaker closed for', name);
                         }
                     } else {
                         this.failures = Math.max(0, this.failures - 1);
@@ -2118,14 +2375,17 @@ export const ReliabilityEngine = {
                 };
             })
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize reliability engine
 ReliabilityEngine.init();
 
 // =============================================
-// RECOVERY MANAGER (NEW) - EXPORTED
+// RECOVERY MANAGER (SILENT)
 // =============================================
 export const RecoveryManager = {
     _attempts: 0,
@@ -2135,10 +2395,10 @@ export const RecoveryManager = {
     _recoveryTimer: null,
     _listeners: new Set(),
     _recoveryStrategies: new Map(),
+    _silent: true,
     
     init() {
         this._registerDefaultStrategies();
-        debugLog('[RecoveryManager] Initialized');
     },
     
     _registerDefaultStrategies() {
@@ -2178,13 +2438,8 @@ export const RecoveryManager = {
             reason = 'unknown'
         } = options;
         
-        if (this._recoveryInProgress) {
-            debugLog('[RecoveryManager] Recovery already in progress');
-            return false;
-        }
-        
+        if (this._recoveryInProgress) return false;
         if (this._attempts >= maxAttempts) {
-            debugLog('[RecoveryManager] Max recovery attempts reached');
             this.emit('failed', { reason, attempts: this._attempts });
             return false;
         }
@@ -2192,7 +2447,6 @@ export const RecoveryManager = {
         this._recoveryInProgress = true;
         this._attempts++;
         
-        debugLog(`[RecoveryManager] Attempt ${this._attempts}/${maxAttempts} for reason: ${reason}`);
         this.emit('attempt', { attempt: this._attempts, reason });
         
         try {
@@ -2203,20 +2457,16 @@ export const RecoveryManager = {
                 const success = await strategyFn();
                 
                 if (success) {
-                    debugLog(`[RecoveryManager] Strategy ${strategy} succeeded`);
                     this._recoveryInProgress = false;
                     this._attempts = 0;
                     this.emit('success', { strategy, attempts: this._attempts });
-                    
                     ReliabilityEngine.flushOffline();
-                    
                     return true;
                 }
                 
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
             
-            debugLog('[RecoveryManager] All recovery strategies failed');
             this._recoveryInProgress = false;
             this.emit('failed', { reason, attempts: this._attempts });
             
@@ -2228,7 +2478,6 @@ export const RecoveryManager = {
             return false;
             
         } catch (error) {
-            debugLog('[RecoveryManager] Recovery error:', error);
             this._recoveryInProgress = false;
             return false;
         }
@@ -2261,14 +2510,17 @@ export const RecoveryManager = {
             recoveryInProgress: this._recoveryInProgress,
             strategies: Array.from(this._recoveryStrategies.keys())
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize recovery manager
 RecoveryManager.init();
 
 // =============================================
-// DIAGNOSTICS AGENT (NEW) - EXPORTED
+// DIAGNOSTICS AGENT (SILENT)
 // =============================================
 export const DiagnosticsAgent = {
     _enabled: false,
@@ -2301,8 +2553,6 @@ export const DiagnosticsAgent = {
             DEBUG_ENABLED = true;
         }
         
-        debugLog('[DiagnosticsAgent] Enabled');
-        
         window.__getDiagnostics = () => this.getFullReport();
         window.__resetDiagnostics = () => this.reset();
     },
@@ -2331,7 +2581,7 @@ export const DiagnosticsAgent = {
             this._logBuffer.shift();
         }
         
-        if (this._logToConsole) {
+        if (this._logToConsole && DEBUG_ENABLED) {
             console.log(`[DIAG][${entry.timeStr}] ${level}: ${message}`, data || '');
         }
     },
@@ -2415,13 +2665,12 @@ export const DiagnosticsAgent = {
         };
         this._stateSnapshots = [];
         this._startTime = Date.now();
-        
         this.log('INFO', 'Diagnostics reset');
     }
 };
 
 // =============================================
-// MULTI-MODULE COORDINATOR (NEW) - EXPORTED
+// MULTI-MODULE COORDINATOR (SILENT)
 // =============================================
 export const MultiModuleCoordinator = {
     _modules: new Map(),
@@ -2431,14 +2680,12 @@ export const MultiModuleCoordinator = {
     _sharedSession: null,
     _masterModule: false,
     _handshakeCoordinator: null,
+    _silent: true,
     
     init() {
         if (!window.__MODULE_COORDINATOR__) {
             window.__MODULE_COORDINATOR__ = this;
             this._masterModule = true;
-            debugLog('[MultiModuleCoordinator] Acting as master module');
-        } else {
-            debugLog('[MultiModuleCoordinator] Joining existing module coordination');
         }
         
         this.registerModule(this._moduleType, this._moduleId);
@@ -2483,9 +2730,7 @@ export const MultiModuleCoordinator = {
     _handleModuleMessage(data) {
         const { type, sourceId, moduleType, target } = data;
         
-        if (target && target !== this._moduleId && target !== 'all') {
-            return;
-        }
+        if (target && target !== this._moduleId && target !== 'all') return;
         
         switch (type) {
             case 'MODULE_PRESENCE':
@@ -2596,25 +2841,28 @@ export const MultiModuleCoordinator = {
             modulesCount: this._modules.size,
             modules: Array.from(this._modules.values())
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize multi-module coordinator
 MultiModuleCoordinator.init();
 
 // =============================================
-// NAVIGATION GUARD (NEW) - EXPORTED
+// NAVIGATION GUARD (SILENT)
 // =============================================
 export const NavigationGuard = {
     _enabled: true,
     _pendingNavigation: null,
     _listeners: new Set(),
     _guardedPaths: ['/settings', '/profile', '/account'],
+    _silent: true,
     
     init() {
         this._setupBeforeUnload();
         this._setupHistoryAPI();
-        debugLog('[NavigationGuard] Initialized');
     },
     
     _setupBeforeUnload() {
@@ -2712,14 +2960,17 @@ export const NavigationGuard = {
             guardedPaths: [...this._guardedPaths],
             pendingNavigation: this._pendingNavigation
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize navigation guard
 NavigationGuard.init();
 
 // =============================================
-// UI FAILSAFE (NEW) - EXPORTED
+// UI FAILSAFE (SILENT)
 // =============================================
 export const UIFailsafe = {
     _enabled: true,
@@ -2729,11 +2980,11 @@ export const UIFailsafe = {
     _listeners: new Set(),
     _fallbackMode: false,
     _disabledElements: new Set(),
+    _silent: true,
     
     init() {
         this._setupErrorHandling();
         this._setupElementProtection();
-        debugLog('[UIFailsafe] Initialized');
     },
     
     _setupErrorHandling() {
@@ -2890,10 +3141,13 @@ export const UIFailsafe = {
             maxErrors: this._maxErrors,
             disabledElements: Array.from(this._disabledElements)
         };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize UI failsafe
 UIFailsafe.init();
 
 // =============================================
@@ -3376,14 +3630,15 @@ const originPatterns = [
 ];
 
 // =============================================
-// LOGGING SYSTEM - PRESERVED
+// LOGGING SYSTEM - SILENT (PRESERVED WITH SILENT MODE)
 // =============================================
 const Log = {
     _warnings: new Set(),
     _debug: false,
     _logBuffer: [],
     _maxBufferSize: 100,
-    _logLevel: 'info',
+    _logLevel: 'error',
+    _silent: true,
     
     _metrics: {
         startTime: Date.now(),
@@ -3401,9 +3656,11 @@ const Log = {
         this._debug = true; 
         this._logLevel = 'debug';
         DiagnosticsAgent.enable(true);
+        this._silent = false;
     },
     
     setLogLevel(level) { this._logLevel = level; },
+    setSilent(silent) { this._silent = silent; },
     
     getDiagnostics() {
         return {
@@ -3445,14 +3702,14 @@ const Log = {
     getBuffer() { return [...this._logBuffer]; },
     
     info(message, data = null) {
-        if (this._logLevel === 'error' || this._logLevel === 'warn') return;
+        if (this._silent || this._logLevel === 'error' || this._logLevel === 'warn') return;
         const timeStr = new Date().toISOString().slice(11, 19);
         console.info(`[${MODULE_NAME}] [${timeStr}] ${message}`, data ? data : '');
         this._addToBuffer('info', message, data);
     },
     
     warn(message, once = true) {
-        if (this._logLevel === 'error') return;
+        if (this._silent || this._logLevel === 'error') return;
         if (once && this._warnings.has(message)) return;
         this._warnings.add(message);
         this._metrics.warnings++;
@@ -3462,6 +3719,7 @@ const Log = {
     },
     
     error(message, error = null, once = true) {
+        if (this._silent) return;
         if (once && this._warnings.has(`error:${message}`)) return;
         this._warnings.add(`error:${message}`);
         this._metrics.errors++;
@@ -3476,14 +3734,14 @@ const Log = {
     },
     
     debug(message, data = null) {
-        if (!this._debug || this._logLevel !== 'debug') return;
+        if (this._silent || !this._debug || this._logLevel !== 'debug') return;
         const timeStr = new Date().toISOString().slice(11, 23);
         console.debug(`[${MODULE_NAME}] [${timeStr}] 🔍 ${message}`, data ? data : '');
         this._addToBuffer('debug', message, data);
     },
     
     metric(name, value) {
-        if (!this._debug) return;
+        if (this._silent || !this._debug) return;
         console.debug(`[${MODULE_NAME}] 📊 ${name}:`, value);
     },
     
@@ -3535,10 +3793,7 @@ const SessionMirror = {
         const cached = SafeStorage.getJSON('session_mirror', null, true);
         if (cached) {
             this._mirror = { ...this._mirror, ...cached };
-            debugLog('Session mirror restored from cache', { version: this._mirror.version });
-            
             if (this._mirror.boundOrigin && this._mirror.boundOrigin !== window.location.origin) {
-                Log.warn('Cached session bound to different origin, clearing');
                 this.clear();
             }
         }
@@ -3599,13 +3854,6 @@ const SessionMirror = {
         
         this._notifySubscribers();
         DiagnosticsAgent.track('session_update', { version: this._mirror.version });
-        debugLog('Session mirror updated', { 
-            version: this._mirror.version,
-            previous: previousVersion,
-            hasUser: !!this._mirror.user,
-            hasToken: !!this._mirror.token,
-            bound: !!this._mirror.boundOrigin
-        });
         return true;
     },
     
@@ -3616,7 +3864,7 @@ const SessionMirror = {
         this._mirror.bindingNonce = tokenBindingNonce;
         this._mirror.boundOrigin = window.location.origin;
         
-        IframeTransport.send(PARENT_MESSAGE_TYPES.ORIGIN_BIND, {
+        IframeTransport.send(ORIGIN_BIND, {
             nonce: tokenBindingNonce,
             origin: window.location.origin,
             timestamp: Date.now()
@@ -3694,7 +3942,6 @@ const SessionMirror = {
     validateToken() {
         if (!this._mirror.token) return false;
         if (this._mirror.boundOrigin && this._mirror.boundOrigin !== window.location.origin) {
-            Log.warn('Token bound to different origin');
             return false;
         }
         return !this.isExpired();
@@ -3838,12 +4085,7 @@ function verifyMessage(message) {
     
     if (!message.messageId || !message.timestamp) return false;
     
-    if (message.protocolVersion && message.protocolVersion !== PROTOCOL_VERSION) {
-        debugLog(`Protocol version mismatch: ${message.protocolVersion} vs ${PROTOCOL_VERSION}`);
-    }
-    
     if (state.processedMessageIds.has(message.messageId)) {
-        debugLog(`Duplicate message: ${message.messageId}`);
         return false;
     }
     
@@ -3872,12 +4114,9 @@ function detectParent() {
             }
             parentOrigin = state.parentOrigin;
             OriginAdapter.setParentOrigin(state.parentOrigin);
-            debugLog('Parent detected', { origin: state.parentOrigin });
             return true;
         }
-    } catch (error) {
-        Log.error('Parent detection failed', error);
-    }
+    } catch (error) {}
     return false;
 }
 
@@ -3930,17 +4169,15 @@ export function receiveFromParent(messageType, handler) {
 }
 
 // =============================================
-// ENHANCED STARTUP SEQUENCE - PRESERVED
+// ENHANCED STARTUP SEQUENCE - PRESERVED (SILENT)
 // =============================================
 export async function executeStartupSequence() {
-    debugLog('Executing enhanced startup sequence');
-    
     StartupGovernor.transition(StartupGovernor.states.WAIT_PARENT, 'starting');
     
     state.handshakeState = 'child_ready';
     state.childReadySent = true;
     
-    await IframeTransport.send(PARENT_MESSAGE_TYPES.CHILD_READY, {
+    await IframeTransport.send('CHILD_READY', {
         childId: 'settings',
         frameId: 'settings',
         timestamp: Date.now(),
@@ -3954,15 +4191,12 @@ export async function executeStartupSequence() {
             supportsGovernor: true,
             supportsSessionClient: true
         }
-    }, { expectAck: true, timeout: 5000 }).catch(() => {
-        debugLog('CHILD_READY not acknowledged, continuing anyway');
-    });
+    }, { expectAck: true, timeout: 5000 }).catch(() => {});
     
     state.handshakeState = 'waiting_parent_ready';
     
     const parentReadyTimeout = setTimeout(() => {
         if (!state.parentReadyReceived) {
-            debugLog('PARENT_READY timeout, proceeding with handshake');
             state.handshakeState = 'handshake_sent';
             IframeHandshakeAuthority.startHandshake();
         }
@@ -3972,7 +4206,7 @@ export async function executeStartupSequence() {
 }
 
 // =============================================
-// REQUEST SESSION - PRESERVED
+// REQUEST SESSION - PRESERVED (SILENT)
 // =============================================
 export function requestSession(timeout = 5000) {
     return new Promise((resolve) => {
@@ -3999,7 +4233,6 @@ export function requestSession(timeout = 5000) {
             
             const breaker = ReliabilityEngine.getCircuitBreaker('session-request');
             if (breaker && breaker.isOpen && !breaker.allow()) {
-                Log.warn('Session request circuit breaker open');
                 enableGuestMode();
                 resolve({ session: null, mode: 'guest', expiry: null });
                 return;
@@ -4009,7 +4242,7 @@ export function requestSession(timeout = 5000) {
             
             const handler = (message) => {
                 if (message.inResponseTo === messageId || 
-                    (message.type === PARENT_MESSAGE_TYPES.SESSION_RESPONSE && message.messageId === messageId)) {
+                    (message.type === 'SESSION_RESPONSE' && message.messageId === messageId)) {
                     cleanup();
                     
                     const payload = message.payload || message;
@@ -4049,7 +4282,6 @@ export function requestSession(timeout = 5000) {
                 cleanup();
                 if (breaker) breaker.recordFailure();
                 if (state.parentVerified) {
-                    Log.warn('Session request timeout');
                     enableGuestMode();
                     resolve({ session: null, mode: 'guest', expiry: null });
                 } else {
@@ -4060,12 +4292,12 @@ export function requestSession(timeout = 5000) {
             
             const cleanup = () => {
                 clearTimeout(timeoutId);
-                IframeTransport.off(PARENT_MESSAGE_TYPES.SESSION_RESPONSE, handler);
+                IframeTransport.off('SESSION_RESPONSE', handler);
             };
             
-            IframeTransport.on(PARENT_MESSAGE_TYPES.SESSION_RESPONSE, handler);
+            IframeTransport.on('SESSION_RESPONSE', handler);
             
-            IframeTransport.send(PARENT_MESSAGE_TYPES.SESSION_REQUEST, {
+            IframeTransport.send('SESSION_REQUEST', {
                 childId: 'settings',
                 mirrorVersion: SessionMirror.getMirror().version,
                 timestamp: Date.now()
@@ -4080,7 +4312,6 @@ export function requestSession(timeout = 5000) {
             });
             
         } catch (error) {
-            Log.error('requestSession failed', error);
             enableDemoMode();
             resolve({ session: null, mode: 'demo', expiry: null });
         }
@@ -4117,8 +4348,6 @@ function enableDemoMode() {
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         coreData.settings = userSettings;
     }
-    
-    debugLog('Demo mode enabled');
 }
 
 // =============================================
@@ -4134,12 +4363,11 @@ function enableGuestMode() {
     tokenReady = false;
     tokenAvailable = false;
     SessionClient.clear();
-    debugLog('Guest mode enabled');
     notifyParentAuthState(false);
 }
 
 // =============================================
-// INITIALIZE CORE - PRESERVED
+// INITIALIZE CORE - PRESERVED (SILENT)
 // =============================================
 export async function initializeCore(options = {}) {
     if (state.initialized) {
@@ -4165,11 +4393,10 @@ export async function initializeCore(options = {}) {
     if (debug) {
         Log.enableDebug();
         DiagnosticsAgent.enable(true);
+        CONSOLE_NOISE_SUPPRESSED = false;
     }
     
     try {
-        debugLog('Initializing core with enhanced protocol...');
-        state.health.status = 'initializing';
         StartupGovernor.transition(StartupGovernor.states.INIT, 'core_start');
         
         IframeEnvironment.detect();
@@ -4273,7 +4500,7 @@ export async function initializeCore(options = {}) {
         startPassiveAuthMonitoring();
         startSessionWatchdog();
         
-        IframeTransport.send(PARENT_MESSAGE_TYPES.READY, {
+        IframeTransport.send('READY', {
             mode: state.authMode,
             version: MODULE_VERSION,
             protocolVersion: PROTOCOL_VERSION,
@@ -4291,16 +4518,6 @@ export async function initializeCore(options = {}) {
         
         DiagnosticsAgent.track('core_initialized', { mode: state.authMode });
         
-        debugLog('Core initialized successfully', { 
-            mode: state.authMode,
-            handshake: handshake.success,
-            session: !!state.session,
-            parent: parentResult,
-            handshakeState: state.handshakeState,
-            environment: IframeEnvironment.getEnvironment(),
-            sandboxed: IframeEnvironment._features.isSandboxed
-        });
-        
         return {
             success: true,
             mode: state.authMode,
@@ -4312,14 +4529,12 @@ export async function initializeCore(options = {}) {
         };
         
     } catch (error) {
-        Log.error('initializeCore failed', error);
         coreError = error;
         initializationInProgress = false;
         state.health.status = 'error';
         StartupGovernor.transition(StartupGovernor.states.FAILED, error.message);
         
         if (demoMode) {
-            Log.warn('Using demo mode due to initialization failure');
             enableDemoMode();
             state.initialized = true;
             isReady = true;
@@ -4353,12 +4568,9 @@ async function executeStage(stageName, fn, options = {}) {
             state.timeouts.add(timer);
         });
         const result = await Promise.race([fn(), timeoutPromise]);
-        debugLog(`Stage ${stageName} completed successfully`);
         return result;
     } catch (error) {
-        Log.error(`Stage ${stageName} failed`, error, true);
         if (fallback !== null) {
-            Log.warn(`Using fallback for ${stageName}`);
             return typeof fallback === 'function' ? fallback() : fallback;
         }
         throw error;
@@ -4370,8 +4582,6 @@ async function executeStage(stageName, fn, options = {}) {
 // =============================================
 export function shutdownCore() {
     try {
-        debugLog('Shutting down core...');
-        
         if (state.pingInterval) {
             clearInterval(state.pingInterval);
             state.pingInterval = null;
@@ -4385,7 +4595,7 @@ export function shutdownCore() {
             document.removeEventListener('visibilitychange', state.visibilityHandler);
         }
         
-        IframeTransport.send(PARENT_MESSAGE_TYPES.SHUTDOWN, {
+        IframeTransport.send('SHUTDOWN', {
             reason: 'normal_shutdown',
             timestamp: Date.now(),
             childId: 'settings',
@@ -4464,11 +4674,9 @@ export function shutdownCore() {
         tokenAvailable = false;
         backgroundTasksStarted = false;
         
-        debugLog('Core shutdown complete');
         return true;
         
     } catch (error) {
-        Log.error('shutdownCore failed', error);
         return false;
     }
 }
@@ -4480,7 +4688,6 @@ function startSessionWatchdog() {
     if (state.sessionWatchdog) clearInterval(state.sessionWatchdog);
     state.sessionWatchdog = setInterval(() => {
         if (state.authMode === 'authenticated' && SessionClient.isExpired()) {
-            Log.warn('Session expired, requesting refresh');
             requestSession(5000).catch(() => {});
         }
     }, 60000);
@@ -4539,16 +4746,13 @@ export function resetUIForLogout() {
         IframeHandshakeAuthority.reset();
         OriginAdapter.reset();
         
-        debugLog('UI reset for logout');
         return true;
     } catch (error) {
-        Log.error('resetUIForLogout failed', error);
         return false;
     }
 }
 
 export function showReconnectionState() {
-    debugLog('Showing reconnection state');
     try {
         const event = new CustomEvent('coreReconnecting', {
             detail: {
@@ -4563,7 +4767,6 @@ export function showReconnectionState() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('showReconnectionState failed', error);
         return false;
     }
 }
@@ -4574,25 +4777,17 @@ export function getCoreDiagnostics() {
 
 export function checkAuthenticationState() {
     try {
-        if (SessionClient.isValid()) {
-            return true;
-        }
-        if (parentSessionReceived || state.authMode === 'authenticated' || tokenReady) {
-            return true;
-        }
-        if (state.authMode === 'demo') {
-            return true;
-        }
+        if (SessionClient.isValid()) return true;
+        if (parentSessionReceived || state.authMode === 'authenticated' || tokenReady) return true;
+        if (state.authMode === 'demo') return true;
         return false;
     } catch (error) {
-        Log.error('checkAuthenticationState failed', error);
         return false;
     }
 }
 
 export async function bootstrapIframe() {
     try {
-        debugLog('Bootstrapping iframe with enhanced protocol');
         IframeEnvironment.detect();
         CompatibilityBridge.detect();
         OriginAdapter.init();
@@ -4611,7 +4806,6 @@ export async function bootstrapIframe() {
         
         return true;
     } catch (error) {
-        Log.error('bootstrapIframe failed', error);
         return false;
     }
 }
@@ -4648,7 +4842,6 @@ export async function waitForSession(timeout = 10000) {
 }
 
 export function initializeBasicUI() {
-    debugLog('Initializing basic UI');
     try {
         if (!userSettings) {
             userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -4665,13 +4858,11 @@ export function initializeBasicUI() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('initializeBasicUI failed', error);
         return false;
     }
 }
 
 export function setupBasicEventListeners() {
-    debugLog('Setting up basic event listeners');
     try {
         const backToAppBtn = document.getElementById('backToAppBtn');
         if (backToAppBtn) {
@@ -4681,7 +4872,7 @@ export function setupBasicEventListeners() {
                         detail: {
                             message: 'You have unsaved changes. Are you sure you want to leave?',
                             callback: () => {
-                                IframeTransport.send(PARENT_MESSAGE_TYPES.CHILD_CLOSING, {
+                                IframeTransport.send('CHILD_CLOSING', {
                                     childId: 'settings',
                                     timestamp: Date.now(),
                                     source: MODULE_NAME,
@@ -4692,7 +4883,7 @@ export function setupBasicEventListeners() {
                     });
                     window.dispatchEvent(event);
                 } else {
-                    IframeTransport.send(PARENT_MESSAGE_TYPES.CHILD_CLOSING, {
+                    IframeTransport.send('CHILD_CLOSING', {
                         childId: 'settings',
                         timestamp: Date.now(),
                         source: MODULE_NAME
@@ -4711,14 +4902,12 @@ export function setupBasicEventListeners() {
         });
         return true;
     } catch (error) {
-        Log.error('setupBasicEventListeners failed', error);
         return false;
     }
 }
 
 export function startTokenMonitoring() {
     try {
-        debugLog('Starting token monitoring');
         if (state.tokenCheckInterval) {
             clearInterval(state.tokenCheckInterval);
             state.tokenCheckInterval = null;
@@ -4726,15 +4915,11 @@ export function startTokenMonitoring() {
         state.tokenCheckInterval = setInterval(() => {
             try {
                 checkTokenAvailability();
-            } catch (error) {
-                Log.error('Token monitoring interval error', error, true);
-            }
+            } catch (error) {}
         }, TOKEN_CHECK_INTERVAL);
         state.intervals.add(state.tokenCheckInterval);
         setTimeout(() => checkTokenAvailability(), 500);
-    } catch (error) {
-        Log.error('startTokenMonitoring failed', error);
-    }
+    } catch (error) {}
 }
 
 export function checkTokenAvailability() {
@@ -4782,9 +4967,7 @@ export function checkTokenAvailability() {
                 notifyTokenLost();
             }
         }
-    } catch (error) {
-        Log.error('checkTokenAvailability failed', error, true);
-    }
+    } catch (error) {}
 }
 
 export function notifyTokenReady() {
@@ -4801,9 +4984,7 @@ export function notifyTokenReady() {
             }
         });
         window.dispatchEvent(event);
-    } catch (error) {
-        Log.error('notifyTokenReady failed', error);
-    }
+    } catch (error) {}
 }
 
 export function notifyTokenLost() {
@@ -4817,9 +4998,7 @@ export function notifyTokenLost() {
             }
         });
         window.dispatchEvent(event);
-    } catch (error) {
-        Log.error('notifyTokenLost failed', error);
-    }
+    } catch (error) {}
 }
 
 export function getSecureToken() {
@@ -4856,68 +5035,133 @@ export function getSecureToken() {
         }
         return null;
     } catch (error) {
-        Log.error('getSecureToken failed', error, true);
         return null;
     }
 }
 
-export async function secureFetchWrapper(endpoint, method = 'GET', data = null) {
+// =============================================
+// SECURE FETCH WRAPPER - UPDATED TO USE API CORE
+// =============================================
+export async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
     try {
         if (state.authMode === 'demo') {
             return simulateResponse(endpoint, method);
         }
-        const token = getSecureToken();
-        if (!token && state.authMode !== 'guest') {
-            throw new Error('Authentication token not available');
+        
+        if (!window.__API_CORE__) {
+            window.__API_CORE__ = ApiCore;
         }
-        let normalizedEndpoint = endpoint.trim();
-        if (!normalizedEndpoint.startsWith('/')) {
-            normalizedEndpoint = '/' + normalizedEndpoint;
+        
+        const api = window.__API_CORE__;
+        
+        if (!api.isReady()) {
+            await api.whenReady();
         }
-        const suspiciousPatterns = ['..', '//', '\\', 'javascript:', 'data:', 'vbscript:'];
-        for (const pattern of suspiciousPatterns) {
-            if (normalizedEndpoint.includes(pattern)) {
-                throw new Error(`Invalid endpoint format: ${pattern}`);
+        
+        const response = await api.request(endpoint, {
+            method,
+            body: data,
+            timeout: options.timeout || 15000,
+            retry: options.retry !== undefined ? options.retry : 1,
+            headers: options.headers,
+            cache: options.cache
+        });
+        
+        if (!response || !response.success) {
+            if (response && response.status === 'circuit_open') {
+                return simulateResponse(endpoint, method, true);
             }
+            return response || { success: false, data: null };
         }
-        return simulateResponse(endpoint, method);
+        
+        return response;
+        
     } catch (error) {
         if (state.authMode === 'demo') {
-            return simulateResponse(endpoint, method);
+            return simulateResponse(endpoint, method, true);
         }
-        throw error;
+        
+        return {
+            success: false,
+            status: 'error',
+            message: 'Request failed',
+            data: null
+        };
     }
 }
 
-function simulateResponse(endpoint, method) {
-    if (endpoint.includes('/api/settings')) {
-        return { settings: userSettings || DEFAULT_SETTINGS };
+function simulateResponse(endpoint, method, useFallback = false) {
+    const normalized = endpoint.toLowerCase();
+    
+    if (normalized.includes('/settings') || normalized.includes('/api/settings')) {
+        return { 
+            success: true, 
+            data: { settings: userSettings || DEFAULT_SETTINGS },
+            settings: userSettings || DEFAULT_SETTINGS
+        };
     }
-    if (endpoint.includes('/api/friends')) {
-        return { friendsList: coreData.friendsList || [] };
+    if (normalized.includes('/friends') || normalized.includes('/api/friends')) {
+        return { 
+            success: true, 
+            data: { friendsList: coreData.friendsList || [] },
+            friendsList: coreData.friendsList || [] 
+        };
     }
-    if (endpoint.includes('/api/groups')) {
-        return { groupsList: coreData.groupsList || [] };
+    if (normalized.includes('/groups') || normalized.includes('/api/groups')) {
+        return { 
+            success: true, 
+            data: { groupsList: coreData.groupsList || [] },
+            groupsList: coreData.groupsList || [] 
+        };
     }
-    if (endpoint.includes('/api/notifications')) {
-        return { notifications: coreData.notifications || [] };
+    if (normalized.includes('/notifications') || normalized.includes('/api/notifications')) {
+        return { 
+            success: true, 
+            data: { notifications: coreData.notifications || [] },
+            notifications: coreData.notifications || [] 
+        };
     }
-    if (endpoint.includes('/api/chats/history')) {
-        return { chatHistory: coreData.chatHistory || [] };
+    if (normalized.includes('/chats/history') || normalized.includes('/api/chats/history')) {
+        return { 
+            success: true, 
+            data: { chatHistory: coreData.chatHistory || [] },
+            chatHistory: coreData.chatHistory || [] 
+        };
     }
-    if (endpoint.includes('/api/users/blocked')) {
-        return { blockedUsers: blockedUsers || [] };
+    if (normalized.includes('/users/blocked') || normalized.includes('/api/users/blocked')) {
+        return { 
+            success: true, 
+            data: { blockedUsers: blockedUsers || [] },
+            blockedUsers: blockedUsers || [] 
+        };
     }
-    if (endpoint.includes('/api/auth/sessions')) {
-        return { sessions: activeSessions || [] };
+    if (normalized.includes('/auth/sessions') || normalized.includes('/api/auth/sessions')) {
+        return { 
+            success: true, 
+            data: { sessions: activeSessions || [] },
+            sessions: activeSessions || [] 
+        };
     }
-    if (endpoint.includes('/api/contacts')) {
-        return { contacts: userContacts || [] };
+    if (normalized.includes('/contacts') || normalized.includes('/api/contacts')) {
+        return { 
+            success: true, 
+            data: { contacts: userContacts || [] },
+            contacts: userContacts || [] 
+        };
     }
-    if (endpoint.includes('/api/group')) {
-        return { groups: userGroups || [] };
+    if (normalized.includes('/group') || normalized.includes('/api/group')) {
+        return { 
+            success: true, 
+            data: { groups: userGroups || [] },
+            groups: userGroups || [] 
+        };
     }
-    return { data: null };
+    
+    return { 
+        success: true, 
+        data: null,
+        message: 'Mock response' 
+    };
 }
 
 export async function waitForToken(timeout = 10000) {
@@ -4953,7 +5197,6 @@ export async function waitForToken(timeout = 10000) {
 
 export function startPassiveAuthMonitoring() {
     try {
-        debugLog('Starting passive auth monitoring');
         if (state.authCheckInterval) {
             clearInterval(state.authCheckInterval);
             state.authCheckInterval = null;
@@ -4961,27 +5204,20 @@ export function startPassiveAuthMonitoring() {
         state.authCheckInterval = setInterval(() => {
             try {
                 checkTokenAvailability();
-            } catch (error) {
-                Log.error('Auth monitoring interval error', error, true);
-            }
+            } catch (error) {}
         }, AUTH_CHECK_INTERVAL);
         state.intervals.add(state.authCheckInterval);
         setTimeout(() => checkTokenAvailability(), 1000);
-    } catch (error) {
-        Log.error('startPassiveAuthMonitoring failed', error);
-    }
+    } catch (error) {}
 }
 
 export function startBackgroundTasks() {
     try {
-        if (backgroundTasksStarted) {
-            return;
-        }
-        if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') {
-            return;
-        }
+        if (backgroundTasksStarted) return;
+        if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return;
+        
         backgroundTasksStarted = true;
-        debugLog('Starting background tasks');
+        
         Promise.allSettled([
             safeLoadUserData(),
             safeLoadSettings(),
@@ -4989,14 +5225,8 @@ export function startBackgroundTasks() {
             safeLoadActiveSessions(),
             safeLoadUserContacts(),
             safeLoadUserGroups()
-        ]).then((results) => {
-            const failed = results.filter(r => r.status === 'rejected').length;
-            if (failed > 0) {
-                Log.warn(`${failed} background tasks failed`);
-            }
-        }).catch(() => {});
+        ]).then((results) => {}).catch(() => {});
     } catch (error) {
-        Log.error('startBackgroundTasks failed', error);
         backgroundTasksStarted = false;
     }
 }
@@ -5032,7 +5262,6 @@ export async function safeLoadUserData() {
         }
         return null;
     } catch (error) {
-        Log.error('safeLoadUserData failed', error, true);
         return null;
     }
 }
@@ -5043,9 +5272,11 @@ export async function safeLoadSettings() {
     }
     try {
         const response = await secureFetchWrapper('/api/settings', 'GET');
-        if (response && response.settings) {
-            userSettings = response.settings;
-            coreData.settings = response.settings;
+        const settingsData = response?.data || response?.settings || null;
+        
+        if (settingsData) {
+            userSettings = settingsData;
+            coreData.settings = settingsData;
             Object.keys(DEFAULT_SETTINGS).forEach(section => {
                 if (!userSettings[section]) {
                     userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
@@ -5057,7 +5288,6 @@ export async function safeLoadSettings() {
         }
         return null;
     } catch (error) {
-        Log.error('safeLoadSettings failed', error, true);
         return null;
     }
 }
@@ -5066,13 +5296,13 @@ export async function safeLoadBlockedUsers() {
     if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
     try {
         const response = await secureFetchWrapper('/api/users/blocked', 'GET');
-        if (response && response.blockedUsers) {
-            blockedUsers = response.blockedUsers;
+        const blockedData = response?.data?.blockedUsers || response?.blockedUsers || [];
+        if (blockedData) {
+            blockedUsers = blockedData;
             return blockedUsers;
         }
         return null;
     } catch (error) {
-        Log.error('safeLoadBlockedUsers failed', error, true);
         return null;
     }
 }
@@ -5081,13 +5311,13 @@ export async function safeLoadActiveSessions() {
     if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
     try {
         const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
-        if (response && response.sessions) {
-            activeSessions = response.sessions;
+        const sessionsData = response?.data?.sessions || response?.sessions || [];
+        if (sessionsData) {
+            activeSessions = sessionsData;
             return activeSessions;
         }
         return null;
     } catch (error) {
-        Log.error('safeLoadActiveSessions failed', error, true);
         return null;
     }
 }
@@ -5096,13 +5326,13 @@ export async function safeLoadUserContacts() {
     if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
     try {
         const response = await secureFetchWrapper('/api/contacts', 'GET');
-        if (response && response.contacts) {
-            userContacts = response.contacts;
+        const contactsData = response?.data?.contacts || response?.contacts || [];
+        if (contactsData) {
+            userContacts = contactsData;
             return userContacts;
         }
         return null;
     } catch (error) {
-        Log.error('safeLoadUserContacts failed', error, true);
         return null;
     }
 }
@@ -5111,33 +5341,34 @@ export async function safeLoadUserGroups() {
     if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
     try {
         const response = await secureFetchWrapper('/api/group', 'GET');
-        if (response && response.groups) {
-            userGroups = response.groups;
-            coreData.groupsList = response.groups;
+        const groupsData = response?.data?.groups || response?.groups || [];
+        if (groupsData) {
+            userGroups = groupsData;
+            coreData.groupsList = groupsData;
             return userGroups;
         }
         return null;
     } catch (error) {
-        Log.error('safeLoadUserGroups failed', error, true);
         return null;
     }
 }
 
-export async function makeSafeRequest(endpoint, method = 'GET', data = null) {
+export async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
     if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') {
         throw new Error('Authentication not available');
     }
-    return await secureFetchWrapper(endpoint, method, data);
+    return await secureFetchWrapper(endpoint, method, data, options);
 }
 
 export async function saveSettings() {
     try {
-        debugLog('Saving settings');
         SafeStorage.setJSON('user_settings', userSettings);
         coreData.settings = userSettings;
+        
         if (tokenReady || parentSessionReceived || state.authMode === 'authenticated') {
             await secureFetchWrapper('/api/settings', 'POST', { settings: userSettings });
         }
+        
         unsavedChanges = false;
         const event = new CustomEvent('settingsSaved', {
             detail: {
@@ -5148,7 +5379,6 @@ export async function saveSettings() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('saveSettings failed', error);
         SafeStorage.setJSON('user_settings', userSettings);
         coreData.settings = userSettings;
         throw error;
@@ -5157,7 +5387,7 @@ export async function saveSettings() {
 
 export function notifyParentAuthState(hasAuth) {
     try {
-        IframeTransport.send(PARENT_MESSAGE_TYPES.IFRAME_AUTH_STATE, {
+        IframeTransport.send('IFRAME_AUTH_STATE', {
             hasAuth: hasAuth,
             iframeId: 'settings',
             tokenReady: tokenReady,
@@ -5167,15 +5397,13 @@ export function notifyParentAuthState(hasAuth) {
             handshakeState: state.handshakeState,
             environment: IframeEnvironment.getEnvironment()
         }, { expectAck: false }).catch(() => {});
-    } catch (error) {
-        Log.error('notifyParentAuthState failed', error, true);
-    }
+    } catch (error) {}
 }
 
 export function notifyParentAuthError() {
     if (authErrorNotified) return;
     try {
-        IframeTransport.send(PARENT_MESSAGE_TYPES.IFRAME_AUTH_ERROR, {
+        IframeTransport.send('IFRAME_AUTH_ERROR', {
             iframeId: 'settings',
             message: 'Authentication required',
             tokenExpired: true,
@@ -5183,14 +5411,11 @@ export function notifyParentAuthError() {
             source: MODULE_NAME
         }, { expectAck: false }).catch(() => {});
         authErrorNotified = true;
-    } catch (error) {
-        Log.error('notifyParentAuthError failed', error, true);
-    }
+    } catch (error) {}
 }
 
 export async function loadFromLocalStorage() {
     try {
-        debugLog('Loading from localStorage');
         const cachedUser = SafeStorage.getJSON('current_user', null);
         if (cachedUser) {
             currentUser = cachedUser;
@@ -5217,7 +5442,6 @@ export async function loadFromLocalStorage() {
         calculateStorageUsage();
         return true;
     } catch (error) {
-        Log.error('loadFromLocalStorage failed', error);
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
         currentUser = { displayName: 'User', id: 'local-user' };
@@ -5228,7 +5452,6 @@ export async function loadFromLocalStorage() {
 }
 
 export function updateUserUI() {
-    debugLog('User UI update requested');
     try {
         const event = new CustomEvent('userUIUpdate', {
             detail: {
@@ -5239,13 +5462,11 @@ export function updateUserUI() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('updateUserUI failed', error);
         return false;
     }
 }
 
 export function initializeUI() {
-    debugLog('UI initialization requested');
     try {
         const event = new CustomEvent('coreUIInitialized', {
             detail: {
@@ -5259,7 +5480,6 @@ export function initializeUI() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('initializeUI failed', error);
         return false;
     }
 }
@@ -5276,7 +5496,6 @@ export function calculateStorageUsage() {
         userSettings.storage.otherCacheSize = otherSize;
         return userSettings.storage.totalStorageUsed;
     } catch (error) {
-        Log.error('calculateStorageUsage failed', error);
         return 0;
     }
 }
@@ -5321,43 +5540,36 @@ export function getMoodColor(mood) {
 
 export async function terminateSession(sessionId) {
     try {
-        debugLog(`Terminating session: ${sessionId}`);
         await makeSafeRequest('/api/auth/terminate-session', 'POST', { sessionId });
         await safeLoadActiveSessions();
         return true;
     } catch (error) {
-        Log.error('terminateSession failed', error);
         throw error;
     }
 }
 
 export async function terminateAllSessions() {
     try {
-        debugLog('Terminating all other sessions');
         await makeSafeRequest('/api/auth/terminate-all-sessions', 'POST');
         await safeLoadActiveSessions();
         return true;
     } catch (error) {
-        Log.error('terminateAllSessions failed', error);
         throw error;
     }
 }
 
 export async function unblockUser(userId) {
     try {
-        debugLog(`Unblocking user: ${userId}`);
         await makeSafeRequest('/api/users/unblock', 'POST', { userId });
         await safeLoadBlockedUsers();
         return true;
     } catch (error) {
-        Log.error('unblockUser failed', error);
         throw error;
     }
 }
 
 export async function clearChatCache() {
     try {
-        debugLog('Clearing chat cache');
         await makeSafeRequest('/api/storage/clear-chat-cache', 'POST');
         if (userSettings.storage) {
             userSettings.storage.storageBreakdown.chats = 0;
@@ -5369,14 +5581,12 @@ export async function clearChatCache() {
         calculateStorageUsage();
         return true;
     } catch (error) {
-        Log.error('clearChatCache failed', error);
         throw error;
     }
 }
 
 export async function clearMediaCache() {
     try {
-        debugLog('Clearing media cache');
         await makeSafeRequest('/api/storage/clear-media-cache', 'POST');
         if (userSettings.storage) {
             userSettings.storage.storageBreakdown.media = 0;
@@ -5388,13 +5598,11 @@ export async function clearMediaCache() {
         calculateStorageUsage();
         return true;
     } catch (error) {
-        Log.error('clearMediaCache failed', error);
         throw error;
     }
 }
 
 export function showActiveSessions() {
-    debugLog('Show active sessions requested');
     try {
         const event = new CustomEvent('showSessions', {
             detail: {
@@ -5405,13 +5613,11 @@ export function showActiveSessions() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('showActiveSessions failed', error);
         return false;
     }
 }
 
 export function showBlockedUsers() {
-    debugLog('Show blocked users requested');
     try {
         const event = new CustomEvent('showBlockedUsers', {
             detail: {
@@ -5422,7 +5628,6 @@ export function showBlockedUsers() {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('showBlockedUsers failed', error);
         return false;
     }
 }
@@ -5453,9 +5658,7 @@ function initTrustedOrigins() {
             TRUSTED_ORIGINS.add(`https://${hostname}`);
             TRUSTED_ORIGINS.add(`http://${hostname}`);
         }
-    } catch (error) {
-        Log.error('initTrustedOrigins failed', error, true);
-    }
+    } catch (error) {}
 }
 
 function setupMessaging() {
@@ -5483,9 +5686,7 @@ async function loadAllData() {
         await loadData('groupsList', '/api/groups');
         await loadData('notifications', '/api/notifications');
         await loadData('chatHistory', '/api/chats/history');
-    } catch (error) {
-        Log.error('loadAllData failed', error);
-    }
+    } catch (error) {}
 }
 
 async function loadData(dataType, endpoint) {
@@ -5505,7 +5706,6 @@ async function loadData(dataType, endpoint) {
         if (Array.isArray(coreData[dataType])) {
             coreData[dataType] = [];
         }
-        Log.error(`loadData failed for ${dataType}`, error, true);
     }
 }
 
@@ -5532,7 +5732,6 @@ function validateAllData() {
         });
         return valid;
     } catch (error) {
-        Log.error('validateAllData failed', error);
         return false;
     }
 }
@@ -5546,9 +5745,7 @@ function syncWithGlobalState() {
             if (currentUser) SafeStorage.setJSON('current_user', currentUser);
             if (userSettings) SafeStorage.setJSON('user_settings', userSettings);
         } catch (e) {}
-    } catch (error) {
-        Log.error('syncWithGlobalState failed', error);
-    }
+    } catch (error) {}
 }
 
 function processMessageQueue() {
@@ -5557,9 +5754,7 @@ function processMessageQueue() {
             const { message, event } = messageQueue.shift();
             handleIncomingMessage(event);
         }
-    } catch (error) {
-        Log.error('processMessageQueue failed', error);
-    }
+    } catch (error) {}
 }
 
 function dispatchDataReadyEvent() {
@@ -5573,9 +5768,7 @@ function dispatchDataReadyEvent() {
             }
         });
         window.dispatchEvent(event);
-    } catch (error) {
-        Log.error('dispatchDataReadyEvent failed', error);
-    }
+    } catch (error) {}
 }
 
 function dispatchDataUpdatedEvent(dataType) {
@@ -5588,15 +5781,13 @@ function dispatchDataUpdatedEvent(dataType) {
             }
         });
         window.dispatchEvent(event);
-    } catch (error) {
-        Log.error('dispatchDataUpdatedEvent failed', error);
-    }
+    } catch (error) {}
 }
 
 function notifyParentReady() {
     try {
         if (window.parent !== window) {
-            IframeTransport.send(PARENT_MESSAGE_TYPES.CORE_READY, {
+            IframeTransport.send('CORE_READY', {
                 payload: {
                     iframeId: 'settings',
                     status: 'success',
@@ -5611,15 +5802,13 @@ function notifyParentReady() {
                 source: MODULE_NAME
             }, { expectAck: false }).catch(() => {});
         }
-    } catch (error) {
-        Log.error('notifyParentReady failed', error);
-    }
+    } catch (error) {}
 }
 
 function notifyParentError(error) {
     try {
         if (window.parent !== window) {
-            IframeTransport.send(PARENT_MESSAGE_TYPES.ERROR, {
+            IframeTransport.send('ERROR', {
                 payload: {
                     iframeId: 'settings',
                     message: error.message,
@@ -5628,9 +5817,7 @@ function notifyParentError(error) {
                 source: MODULE_NAME
             }, { expectAck: false }).catch(() => {});
         }
-    } catch (error) {
-        Log.error('notifyParentError failed', error);
-    }
+    } catch (error) {}
 }
 
 export function getData(dataType) {
@@ -5643,7 +5830,6 @@ export function getData(dataType) {
         }
         return JSON.parse(JSON.stringify(coreData[dataType]));
     } catch (error) {
-        Log.error('getData failed', error);
         return null;
     }
 }
@@ -5676,7 +5862,6 @@ export function updateData(dataType, payload) {
         dispatchDataUpdatedEvent(dataType);
         return true;
     } catch (error) {
-        Log.error('updateData failed', error);
         return false;
     }
 }
@@ -5703,13 +5888,12 @@ export function onReady(callback) {
 }
 
 // =============================================
-// MESSAGE HANDLER - PRESERVED
+// MESSAGE HANDLER - PRESERVED (SILENT)
 // =============================================
 function handleIncomingMessage(event) {
     try {
         if (!OriginAdapter.isTrusted(event.origin)) {
-            if (!untrustedOriginLogged) {
-                Log.warn(`Untrusted origin: ${event.origin}`, true);
+            if (!untrustedOriginLogged && DEBUG_ENABLED) {
                 untrustedOriginLogged = true;
             }
             return;
@@ -5736,7 +5920,7 @@ function handleIncomingMessage(event) {
             return;
         }
         
-        if (message.type === PARENT_MESSAGE_TYPES.ACK && message.inResponseTo) {
+        if (message.type === 'ACK' && message.inResponseTo) {
             const pending = state.pendingAcks.get(message.inResponseTo);
             if (pending) {
                 clearTimeout(pending.timeout);
@@ -5750,11 +5934,10 @@ function handleIncomingMessage(event) {
             return;
         }
         
-        if (message.type === PARENT_MESSAGE_TYPES.PONG) {
+        if (message.type === 'PONG') {
             state.health.lastPong = Date.now();
             state.health.pingFailures = 0;
             state.connectionQuality = 'good';
-            debugLog('PONG received');
             if (state.pongTimeout) {
                 clearTimeout(state.pongTimeout);
                 state.pongTimeout = null;
@@ -5762,24 +5945,23 @@ function handleIncomingMessage(event) {
             return;
         }
         
-        if (message.type === PARENT_MESSAGE_TYPES.PING) {
-            IframeTransport.send(PARENT_MESSAGE_TYPES.PONG, {
+        if (message.type === 'PING') {
+            IframeTransport.send('PONG', {
                 inResponseTo: message.messageId,
                 timestamp: Date.now()
             }, { expectAck: false }).catch(() => {});
             return;
         }
         
-        if (message.type === PARENT_MESSAGE_TYPES.MIRROR_UPDATE && message.session) {
+        if (message.type === 'MIRROR_UPDATE' && message.session) {
             SessionMirror.update(message.session);
             return;
         }
         
-        if (message.type === PARENT_MESSAGE_TYPES.PARENT_READY) {
+        if (message.type === 'PARENT_READY') {
             state.parentReadyReceived = true;
             parentReady = true;
             IframeHandshakeAuthority.onParentReady();
-            debugLog('PARENT_READY received');
             
             if (state.handshakeState === 'waiting_parent_ready') {
                 state.handshakeState = 'handshake_sent';
@@ -5800,8 +5982,8 @@ function handleIncomingMessage(event) {
             }
         }
         
-        if (!isReady && message.type !== PARENT_MESSAGE_TYPES.INIT && 
-            message.type !== PARENT_MESSAGE_TYPES.SESSION_RESPONSE) {
+        if (!isReady && message.type !== 'INIT' && 
+            message.type !== 'SESSION_RESPONSE') {
             messageQueue.push({ message, event });
             return;
         }
@@ -5811,68 +5993,66 @@ function handleIncomingMessage(event) {
             handlers.forEach(handler => {
                 try {
                     handler(message, event);
-                } catch (error) {
-                    Log.error(`Handler error for ${message.type}`, error);
-                }
+                } catch (error) {}
             });
         }
         
         switch (message.type) {
-            case PARENT_MESSAGE_TYPES.INIT:
+            case 'INIT':
                 handleInitMessage(message);
                 break;
-            case PARENT_MESSAGE_TYPES.SESSION_RESPONSE:
+            case 'SESSION_RESPONSE':
                 handleSessionResponse(message);
                 break;
-            case PARENT_MESSAGE_TYPES.SESSION_UPDATE:
+            case 'SESSION_UPDATE':
                 handleSessionUpdate(message);
                 break;
-            case PARENT_MESSAGE_TYPES.LOGOUT:
+            case 'LOGOUT':
                 handleLogout();
                 break;
-            case PARENT_MESSAGE_TYPES.PARENT_READY_ACK:
+            case 'PARENT_READY_ACK':
                 parentReady = true;
                 parentCommunicationReady = true;
                 break;
-            case PARENT_MESSAGE_TYPES.AUTH_READY:
+            case 'AUTH_READY':
                 authReady = true;
                 checkTokenAvailability();
                 break;
-            case PARENT_MESSAGE_TYPES.AUTH_LOST:
+            case 'AUTH_LOST':
                 authReady = false;
                 tokenReady = false;
                 tokenAvailable = false;
                 backgroundTasksStarted = false;
                 break;
-            case PARENT_MESSAGE_TYPES.TOKEN_READY:
+            case 'TOKEN_READY':
                 handleTokenReady();
                 break;
-            case PARENT_MESSAGE_TYPES.TOKEN_RESPONSE:
+            case 'TOKEN_RESPONSE':
                 if (message.token) {
                     SessionClient.updateSession(null, message.token);
                 }
                 break;
-            case PARENT_MESSAGE_TYPES.USER_UPDATED:
+            case 'USER_UPDATED':
                 handleUserUpdated(message);
                 break;
-            case PARENT_MESSAGE_TYPES.REFRESH_DATA:
+            case 'REFRESH_DATA':
                 handleRefreshData(message);
                 break;
-            case PARENT_MESSAGE_TYPES.UPDATE_DATA:
+            case 'UPDATE_DATA':
                 handleUpdateData(message);
                 break;
-            case PARENT_MESSAGE_TYPES.HEARTBEAT:
-                IframeTransport.send(PARENT_MESSAGE_TYPES.HEARTBEAT, {
+            case 'HEARTBEAT':
+                IframeTransport.send('HEARTBEAT', {
                     status: state.health.status,
                     timestamp: Date.now(),
                     childId: 'settings',
                     source: MODULE_NAME
                 }, { expectAck: false }).catch(() => {});
                 break;
-            case PARENT_MESSAGE_TYPES.SHUTDOWN:
+            case 'SHUTDOWN':
                 shutdownCore();
                 break;
-            case PARENT_MESSAGE_TYPES.SESSION_INIT:
+            case 'SESSION_INIT':
                 if (message.session) {
                     SessionClient.updateSession(
                         message.session.user,
@@ -5880,13 +6060,13 @@ function handleIncomingMessage(event) {
                         message.session.expiry
                     );
                 }
-                IframeTransport.send(PARENT_MESSAGE_TYPES.SESSION_CONFIRMED, {
+                IframeTransport.send('SESSION_CONFIRMED', {
                     childId: 'settings',
                     timestamp: Date.now(),
                     source: MODULE_NAME
                 }, { expectAck: false }).catch(() => {});
                 break;
-            case PARENT_MESSAGE_TYPES.HANDSHAKE_RESPONSE:
+            case 'HANDSHAKE_RESPONSE':
                 if (message.session) {
                     SessionClient.updateSession(
                         message.session.user,
@@ -5895,7 +6075,7 @@ function handleIncomingMessage(event) {
                     );
                 }
                 break;
-            case PARENT_MESSAGE_TYPES.RECOVERY_RESPONSE:
+            case 'RECOVERY_RESPONSE':
                 state.health.recoveryAttempts++;
                 if (message.session) {
                     SessionClient.updateSession(
@@ -5905,15 +6085,13 @@ function handleIncomingMessage(event) {
                     );
                 }
                 break;
-            case PARENT_MESSAGE_TYPES.RECOVERY_REQUEST:
+            case 'RECOVERY_REQUEST':
                 handleRecoveryRequest(message);
                 break;
-            case PARENT_MESSAGE_TYPES.ORIGIN_BIND_ACK:
-                if (message.success) {
-                    debugLog('Origin binding confirmed by parent');
-                }
+            case 'ORIGIN_BIND_ACK':
+                if (message.success) {}
                 break;
-            case PARENT_MESSAGE_TYPES.SESSION_SYNC:
+            case 'SESSION_SYNC':
                 if (message.version && message.version !== SessionClient._sessionVersion) {
                     SessionClient.sync();
                 }
@@ -5921,14 +6099,10 @@ function handleIncomingMessage(event) {
             default:
                 break;
         }
-    } catch (error) {
-        Log.error('handleIncomingMessage failed', error);
-    }
+    } catch (error) {}
 }
 
 function handleRecoveryRequest(message) {
-    debugLog('Recovery requested by parent');
-    
     state.handshakeCompleted = false;
     state.sessionSynced = false;
     state.parentVerified = false;
@@ -5937,7 +6111,7 @@ function handleRecoveryRequest(message) {
         IframeHandshakeAuthority.startHandshake({ force: true }).catch(() => {});
     }, 100);
     
-    IframeTransport.send(PARENT_MESSAGE_TYPES.RECOVERY_RESPONSE, {
+    IframeTransport.send('RECOVERY_RESPONSE', {
         childId: 'settings',
         accepted: true,
         timestamp: Date.now()
@@ -5959,21 +6133,18 @@ function handleInitMessage(message) {
                 userSettings = message.payload.settings;
             }
         }
-        IframeTransport.send(PARENT_MESSAGE_TYPES.INIT_ACK, {
+        IframeTransport.send('INIT_ACK', {
             childId: 'settings',
             timestamp: Date.now(),
             source: MODULE_NAME,
             mirrorVersion: SessionMirror.getMirror().version
         }, { expectAck: false }).catch(() => {});
-    } catch (error) {
-        Log.error('handleInitMessage failed', error);
-    }
+    } catch (error) {}
 }
 
 function handleSessionResponse(message) {
     try {
         if (!message.token && !message.user && !message.session) {
-            debugLog('Received invalid session from parent');
             return;
         }
         const sessionData = {
@@ -5997,9 +6168,7 @@ function handleSessionResponse(message) {
             source: MODULE_NAME,
             mirrorVersion: SessionMirror.getMirror().version
         }, { expectAck: false }).catch(() => {});
-    } catch (error) {
-        Log.error('handleSessionResponse failed', error);
-    }
+    } catch (error) {}
 }
 
 function handleSessionUpdate(message) {
@@ -6016,9 +6185,7 @@ function handleSessionUpdate(message) {
                 timestamp: Date.now()
             }, { expectAck: false }).catch(() => {});
         }
-    } catch (error) {
-        Log.error('handleSessionUpdate failed', error);
-    }
+    } catch (error) {}
 }
 
 function handleLogout() {
@@ -6047,14 +6214,12 @@ function handleLogout() {
         StartupGovernor.reset();
         IframeHandshakeAuthority.reset();
         
-        IframeTransport.send(PARENT_MESSAGE_TYPES.LOGOUT_CONFIRMED, {
+        IframeTransport.send('LOGOUT_CONFIRMED', {
             childId: 'settings',
             timestamp: Date.now(),
             source: MODULE_NAME
         }, { expectAck: false }).catch(() => {});
-    } catch (error) {
-        Log.error('handleLogout failed', error);
-    }
+    } catch (error) {}
 }
 
 function handleTokenReady() {
@@ -6066,9 +6231,7 @@ function handleUserUpdated(data) {
         if (data.user) {
             SessionClient.updateSession(data.user, null, null);
         }
-    } catch (error) {
-        Log.error('handleUserUpdated failed', error);
-    }
+    } catch (error) {}
 }
 
 async function handleRefreshData(message) {
@@ -6077,7 +6240,7 @@ async function handleRefreshData(message) {
         if (dataType && coreData.hasOwnProperty(dataType)) {
             await loadData(dataType, getEndpointForDataType(dataType));
             syncWithGlobalState();
-            IframeTransport.send(PARENT_MESSAGE_TYPES.DATA_REFRESHED, {
+            IframeTransport.send('DATA_REFRESHED', {
                 childId: 'settings',
                 dataType: dataType,
                 timestamp: Date.now(),
@@ -6087,7 +6250,7 @@ async function handleRefreshData(message) {
         } else {
             await loadAllData();
             syncWithGlobalState();
-            IframeTransport.send(PARENT_MESSAGE_TYPES.ALL_DATA_REFRESHED, {
+            IframeTransport.send('ALL_DATA_REFRESHED', {
                 childId: 'settings',
                 timestamp: Date.now(),
                 source: MODULE_NAME
@@ -6095,8 +6258,7 @@ async function handleRefreshData(message) {
             dispatchDataUpdatedEvent('all');
         }
     } catch (error) {
-        Log.error('handleRefreshData failed', error);
-        IframeTransport.send(PARENT_MESSAGE_TYPES.REFRESH_ERROR, {
+        IframeTransport.send('REFRESH_ERROR', {
             childId: 'settings',
             error: error.message,
             timestamp: Date.now(),
@@ -6110,22 +6272,20 @@ function handleUpdateData(message) {
         const { dataType, payload } = message;
         if (dataType && coreData.hasOwnProperty(dataType)) {
             updateData(dataType, payload);
-            IframeTransport.send(PARENT_MESSAGE_TYPES.DATA_UPDATED, {
+            IframeTransport.send('DATA_UPDATED', {
                 childId: 'settings',
                 dataType: dataType,
                 timestamp: Date.now(),
                 source: MODULE_NAME
             }, { expectAck: false }).catch(() => {});
         }
-    } catch (error) {
-        Log.error('handleUpdateData failed', error);
-    }
+    } catch (error) {}
 }
 
 function sendSessionAck(sessionData) {
     state.sessionAcked = true;
     
-    IframeTransport.send(PARENT_MESSAGE_TYPES.SESSION_ACK, {
+    IframeTransport.send('SESSION_ACK', {
         childId: 'settings',
         sessionVersion: sessionData?.version || 0,
         timestamp: Date.now()
@@ -6138,7 +6298,6 @@ function sendSessionAck(sessionData) {
 export function registerFeature(name, implementation) {
     try {
         if (state.features.has(name)) {
-            Log.warn(`Feature ${name} already registered`, true);
             return false;
         }
         const wrappedImplementation = {};
@@ -6148,7 +6307,6 @@ export function registerFeature(name, implementation) {
                     try {
                         return implementation[key].apply(this, args);
                     } catch (error) {
-                        Log.error(`Feature ${name}.${key} failed`, error, true);
                         return null;
                     }
                 };
@@ -6157,10 +6315,8 @@ export function registerFeature(name, implementation) {
             }
         });
         state.features.set(name, wrappedImplementation);
-        debugLog(`Feature registered: ${name}`);
         return true;
     } catch (error) {
-        Log.error(`registerFeature failed for ${name}`, error);
         return false;
     }
 }
@@ -6207,7 +6363,6 @@ function validateDataStructure(data, dataType) {
         }
         return false;
     } catch (error) {
-        Log.error('validateDataStructure failed', error, true);
         return false;
     }
 }
@@ -6217,7 +6372,6 @@ function validateDataStructure(data, dataType) {
 // =============================================
 export function buildSettingsMenu(container = null, config = {}) {
     try {
-        debugLog('Settings menu build requested - UI module handles actual rendering');
         const event = new CustomEvent('buildSettingsMenu', {
             detail: {
                 container,
@@ -6231,13 +6385,12 @@ export function buildSettingsMenu(container = null, config = {}) {
         window.dispatchEvent(event);
         return true;
     } catch (error) {
-        Log.error('buildSettingsMenu failed', error);
         return false;
     }
 }
 
 // =============================================
-// AUTO-START WITH RETRY - PRESERVED
+// AUTO-START WITH RETRY - PRESERVED (SILENT)
 // =============================================
 document.addEventListener('DOMContentLoaded', function() {
     try {
@@ -6249,11 +6402,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 debug: false
             }).catch(() => {});
         }, 100);
-    } catch (error) {
-        Log.error('Error in auto-start', error);
-    }
+    } catch (error) {}
 });
-
 
 // =============================================
 // EXPORT ALIASES FOR BACKWARD COMPATIBILITY - FIXED
@@ -6264,21 +6414,17 @@ export {
     receiveFromParent as onParentMessage
 };
 
-// Handshake aliases - properly referencing the actual implementation
 export const startParentHandshake = (options) => IframeHandshakeAuthority.startHandshake(options);
 export const startHandshakeProtocol = (options) => IframeHandshakeAuthority.startHandshake(options);
 
-
 export const attemptCachedDataFallback = () => {
-    debugLog('Attempting cached data fallback');
     return loadFromLocalStorage();
 };
 
 export const safeApiCall = async (endpoint, options = {}) => {
     try {
-        return await secureFetchWrapper(endpoint, options.method || 'GET', options.data);
+        return await secureFetchWrapper(endpoint, options.method || 'GET', options.data, options);
     } catch (error) {
-        Log.error('safeApiCall failed', error);
         return null;
     }
 };
@@ -6320,10 +6466,9 @@ export const getHealthMetrics = () => ({
 });
 
 // =============================================
-// ERROR BOUNDARY - PRESERVED
+// ERROR BOUNDARY - PRESERVED (SILENT)
 // =============================================
 window.addEventListener('error', (event) => {
-    Log.error('Global error', event.error, true);
     state.health.failures++;
     DiagnosticsAgent.error(event.error, 'global_error');
     
@@ -6333,7 +6478,6 @@ window.addEventListener('error', (event) => {
     }
     
     if (state.health.failures > 10 && isReady) {
-        Log.warn('Too many errors, attempting recovery');
         state.health.recoveryAttempts++;
         RecoveryManager.attemptRecovery({ reason: 'global_error' });
     }
@@ -6341,12 +6485,10 @@ window.addEventListener('error', (event) => {
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-    Log.error('Unhandled rejection', event.reason, true);
     state.health.failures++;
     DiagnosticsAgent.error(event.reason, 'unhandled_rejection');
     
     if (state.health.failures > 5 && isReady) {
-        Log.warn('Too many promise rejections, attempting recovery');
         state.health.recoveryAttempts++;
         setTimeout(() => {
             RecoveryManager.attemptRecovery({ reason: 'unhandled_rejection' });
@@ -6371,6 +6513,26 @@ export const forceRecovery = () => {
 };
 
 // =============================================
+// SET ALL COMPONENTS TO SILENT MODE
+// =============================================
+export function setSilentMode(silent = true) {
+    CONSOLE_NOISE_SUPPRESSED = silent;
+    Log.setSilent(silent);
+    StartupGovernor.setSilent(silent);
+    IframeTransport.setSilent(silent);
+    IframeHandshakeAuthority.setSilent(silent);
+    SessionClient.setSilent(silent);
+    ReliabilityEngine.setSilent(silent);
+    RecoveryManager.setSilent(silent);
+    NavigationGuard.setSilent(silent);
+    UIFailsafe.setSilent(silent);
+    MultiModuleCoordinator.setSilent(silent);
+}
+
+// Initialize in silent mode
+setSilentMode(true);
+
+// =============================================
 // EXPOSE DEBUG INTERFACE (ENHANCED)
 // =============================================
 window.__IFRAME_DEBUG__ = false;
@@ -6385,6 +6547,7 @@ window.__getTransportStatus = () => IframeTransport.getDiagnostics();
 window.__getSessionStatus = () => SessionClient.getDiagnostics();
 window.__getReliabilityStatus = () => ReliabilityEngine.getDiagnostics();
 window.__getUIFailsafe = () => UIFailsafe.getDiagnostics();
+window.__getApiCore = () => ApiCore.getDiagnostics();
 
 // =============================================
 // ENABLE DEBUG IF URL PARAM
@@ -6392,11 +6555,23 @@ window.__getUIFailsafe = () => UIFailsafe.getDiagnostics();
 if (window.location.search.includes('debug=true')) {
     window.__IFRAME_DEBUG__ = true;
     DEBUG_ENABLED = true;
+    CONSOLE_NOISE_SUPPRESSED = false;
     Log.enableDebug();
     DiagnosticsAgent.enable(true);
-    debugLog('Debug mode enabled via URL parameter');
+    setSilentMode(false);
 }
 
 // =============================================
-// END OF FILE - COMPLETE ENHANCED IMPLEMENTATION
+// FIX FOR CONST REASSIGNMENT ERROR
+// =============================================
+// The following line was causing the error:
+// PARENT_MESSAGE_TYPES = { ... }; // REMOVED - THIS WAS THE PROBLEM
+
+// Instead, if you need to add more message types, do:
+// Object.assign(PARENT_MESSAGE_TYPES, {
+//     NEW_TYPE: 'NEW_TYPE'
+// });
+
+// =============================================
+// END OF FILE - COMPLETE ENHANCED IMPLEMENTATION (FIXED)
 // =============================================

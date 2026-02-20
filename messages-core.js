@@ -1680,6 +1680,8 @@
         listeners: new Set(),
         envConfig: null,
         completed: false,
+        handshakeAttempts: 0,
+        maxHandshakeAttempts: 10,
         
         init() {
             this.envConfig = IframeEnvironment.getConfig();
@@ -1818,8 +1820,10 @@
             if (this.state !== 'IN_PROGRESS' || this.completed) return;
 
             this.retryCount++;
+            this.handshakeAttempts++;
             
-            if (this.retryCount < (this.envConfig.maxRetries || HANDSHAKE.MAX_RETRIES)) {
+            if (this.handshakeAttempts < (this.envConfig.maxRetries || HANDSHAKE.MAX_RETRIES) && 
+                this.handshakeAttempts < this.maxHandshakeAttempts) {
                 const delay = (this.envConfig.retryDelay || HANDSHAKE.RETRY_DELAY) * 
                               Math.pow(HANDSHAKE.BACKOFF_FACTOR, this.retryCount - 1);
                 const jitter = Math.random() * HANDSHAKE.JITTER_MAX;
@@ -1949,6 +1953,7 @@
             this.retryCount = 0;
             this.completed = false;
             this.parentReadyReceived = false;
+            this.handshakeAttempts = 0;
             
             if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
             if (this.parentReadyTimer) clearTimeout(this.parentReadyTimer);
@@ -1959,6 +1964,62 @@
             SafeStorage.remove(LOCAL_STORAGE_KEYS.HANDSHAKE_STATE);
         }
     }.init();
+
+    // =============================================
+    // ENHANCED HANDSHAKE GUARD (FIX 1)
+    // =============================================
+    if (!window.__MESSAGE_HANDSHAKE_INITIALIZED__) {
+        window.__MESSAGE_HANDSHAKE_INITIALIZED__ = true;
+        
+        // Only set up guard if handshake not already completed
+        setTimeout(() => {
+            if (!IframeHandshakeAuthority.isCompleted() && !window.__PARENT_ACK_RECEIVED__) {
+                let handshakeAttempts = 0;
+                const maxAttempts = 5;
+                
+                function initiateHandshake() {
+                    if (handshakeAttempts >= maxAttempts || IframeHandshakeAuthority.isCompleted() || window.__PARENT_ACK_RECEIVED__) return;
+                    
+                    handshakeAttempts++;
+                    
+                    try {
+                        window.parent.postMessage({
+                            type: "CHILD_HANDSHAKE",
+                            source: "friend-core",
+                            timestamp: Date.now(),
+                            attempt: handshakeAttempts
+                        }, "*");
+                    } catch (e) {}
+                }
+                
+                const handshakeInterval = setInterval(() => {
+                    if (window.__PARENT_ACK_RECEIVED__ || IframeHandshakeAuthority.isCompleted()) {
+                        clearInterval(handshakeInterval);
+                    } else {
+                        initiateHandshake();
+                    }
+                }, 2000);
+                
+                window.addEventListener("message", (event) => {
+                    if (!event.data) return;
+                    
+                    if (event.data.type === "PARENT_ACK" || 
+                        (event.data.type === MESSAGE_TYPES.HANDSHAKE_RESPONSE) ||
+                        (event.data.type === MESSAGE_TYPES.PARENT_READY)) {
+                        window.__PARENT_ACK_RECEIVED__ = true;
+                        
+                        // Also feed into IframeHandshakeAuthority if needed
+                        if (!IframeHandshakeAuthority.isCompleted() && 
+                            event.data.type === MESSAGE_TYPES.HANDSHAKE_RESPONSE) {
+                            IframeHandshakeAuthority.complete(event.data);
+                        }
+                    }
+                });
+                
+                initiateHandshake();
+            }
+        }, 500);
+    }
 
     // =============================================
     // SESSION MIRROR (ENHANCED)
@@ -3298,7 +3359,28 @@
     const messagingClient = new SecureMessagingClient();
 
     // =============================================
-    // API CLIENT (ENHANCED)
+    // SAFE FETCH UTILITY (FIX 2)
+    // =============================================
+    async function safeFetch(url, options = {}) {
+        try {
+            const response = await fetch(url, {
+                credentials: "include",
+                ...options
+            });
+
+            if (!response.ok) {
+                throw new Error("HTTP error " + response.status);
+            }
+
+            return await response.json();
+        } catch (error) {
+            DiagnosticsAgent.recordError(error, 'safeFetch');
+            return { success: false, message: "Network issue" };
+        }
+    }
+
+    // =============================================
+    // API CLIENT (ENHANCED WITH SAFE FETCH)
     // =============================================
     const APIClient = {
         circuitBreaker: new CircuitBreaker('APIClient', 3, 15000),
@@ -3399,22 +3481,8 @@
                         : JSON.stringify(SecurityUtils.sanitizePayload(options.body));
                 }
 
-                const response = await fetch(this.baseUrl + endpoint, fetchOptions);
-
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        SessionMirror.clearSession();
-                    }
-                    return null;
-                }
-
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    const data = await response.json();
-                    return SecurityUtils.sanitizePayload(data);
-                }
-
-                return null;
+                // Use safeFetch for all fetch operations
+                return await safeFetch(this.baseUrl + endpoint, fetchOptions);
             } catch (error) {
                 DiagnosticsAgent.recordError(error, `API.${endpoint}`);
                 return null;
@@ -3423,7 +3491,7 @@
 
         async fetchWithFallback(endpoint, options = {}, fallback = null) {
             const result = await this.request(endpoint, options);
-            return result !== null ? result : fallback;
+            return result !== null && !result.error ? result : fallback;
         },
 
         handleParentResponse(payload) {
@@ -5484,7 +5552,8 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         IframeEnvironment,
         StartupGovernor,
         IframeTransport,
-        IframeAuthority
+        IframeAuthority,
+        safeFetch
     };
 
     window.messagesCore = messagesCore;

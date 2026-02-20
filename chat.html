@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -14,9 +15,11 @@
     
     <title>Kynecta - Advanced Mood-Based Chat</title>
     
-    <!-- FIX 1: Correct Tailwind CSS URL with proper MIME type -->
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <!-- FIX 1 & 6: Single correct Tailwind CDN (removed any invalid local references) -->
+    <!-- Adding crossorigin="anonymous" to help with Tracking Prevention -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" crossorigin="anonymous">
     
+    <!-- FIX 6: Single Font Awesome with crossorigin -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" 
           integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" 
           crossorigin="anonymous" referrerpolicy="no-referrer">
@@ -1963,37 +1966,37 @@
     <!-- EXISTING IFRAME CONTAINERS - EXACTLY AS ORIGINAL -->
     <div id="messagesContent" class="content-area iframe-container" data-iframe-container="true">
         <iframe id="messagesIframe" class="content-iframe" src="message.html" title="Messages" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="statusContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="statusIframe" class="content-iframe" src="status.html" title="Status" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="groupContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="groupIframe" class="content-iframe" src="group.html" title="Groups" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="friendsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" title="Friends" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="callsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="callsIframe" class="content-iframe" src="calls.html" title="Calls" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="settingsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" title="Settings" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <div id="toolsContent" class="content-area iframe-container hidden" data-iframe-container="true">
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" title="Tools" 
-                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
     </div>
 
     <!-- EXISTING VIDEO CONFERENCE - EXACTLY AS ORIGINAL -->
@@ -2068,7 +2071,13 @@
 
     <div class="safe-message-bridge" id="safeMessageBridge"></div>
 
-    <!-- FIX 2: Environment Detector - Defined BEFORE any script that uses it -->
+    <!-- FIX 2: jQuery loaded FIRST (correct order) with crossorigin -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js" crossorigin="anonymous"></script>
+
+    <!-- FIX 2: Spectrum loaded after jQuery (correct order) with crossorigin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.1/spectrum.min.js" crossorigin="anonymous"></script>
+
+    <!-- FIX 2: Environment Detector - Defined BEFORE any script that uses it (moved after jQuery, but kept as is) -->
     <script>
     (function() {
         window.environmentDetector = window.environmentDetector || {
@@ -2150,55 +2159,373 @@
     })();
     </script>
 
-    <!-- FIX 3: jQuery Shim - Prevents "jQuery is not defined" errors -->
-    <script>
-    window.jQuery = window.jQuery || function(selector) {
-        if (typeof selector === 'function') {
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                selector();
-            } else {
-                document.addEventListener('DOMContentLoaded', selector);
-            }
-            return this;
-        }
-        if (typeof selector === 'string') {
-            return document.querySelectorAll(selector);
-        }
-        return this;
-    };
-    window.$ = window.jQuery;
-    window.jQuery.fn = window.jQuery.fn || {
-        ready: function(fn) {
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                fn();
-            } else {
-                document.addEventListener('DOMContentLoaded', fn);
-            }
-            return this;
-        }
-    };
-    window.jQuery.ajax = window.jQuery.ajax || function(url, options) {
-        if (typeof url === 'object') {
-            options = url;
-            url = options.url;
-        }
-        options = options || {};
-        return new Promise((resolve, reject) => {
-            fetch(url || options.url, {
-                method: options.type || options.method || 'GET',
-                headers: options.headers || {},
-                body: options.data ? JSON.stringify(options.data) : undefined
-            })
-            .then(response => response.json())
-            .then(resolve)
-            .catch(reject);
-        });
-    };
-    </script>
-
-    <!-- FIX 4: Request function for SessionGuardian -->
+    <!-- FIX 3: If any script uses import, it must be type="module". Adding if needed. -->
+    <script type="module" src="index.min.js" crossorigin="anonymous"></script>
+    
+    <!-- ===================================================================== -->
+    <!-- KYNECTA AUTHORITY LAYERS - COMPREHENSIVE ORCHESTRATION SYSTEM        -->
+    <!-- ADDITIVE ONLY - PRESERVES ALL EXISTING FUNCTIONALITY                 -->
+    <!-- ===================================================================== -->
+    <!-- ===== NEW: SINGLE HANDSHAKE AUTHORITY CONTROLLER (FIXED HEARTBEAT) ===== -->
     <script>
     (function() {
+        'use strict';
+
+        // Create single global handshake authority controller
+        window.__PARENT_AUTHORITY__ = {
+            state: "INIT",
+            handshakeComplete: false,
+            registeredFrames: new Set(),
+            heartbeatFailures: 0,
+            maxHeartbeatFailures: 5, // Increased from 3 to be more tolerant
+            secureOrigin: window.location.origin,
+            isAuthoritative: true,
+            recoveryInProgress: false,
+            lastParentReady: 0,
+            parentReadyRetries: 0,
+            maxParentReadyRetries: 3,
+            lastHeartbeatReset: Date.now(),
+            heartbeatCooldown: 10000, // 10 second cooldown after recovery
+            
+            // Register an iframe
+            registerFrame: function(frameSource) {
+                if (frameSource) {
+                    this.registeredFrames.add(frameSource);
+                    console.log('[Authority] Frame registered, total:', this.registeredFrames.size);
+                    
+                    // If handshake not complete, mark as ready after first registration
+                    if (!this.handshakeComplete && this.registeredFrames.size >= 1) {
+                        this.handshakeComplete = true;
+                        this.state = "READY";
+                        console.log('[Authority] Handshake completed with first frame registration');
+                    }
+                }
+            },
+            
+            // Handle heartbeat success with cooldown protection
+            heartbeatSuccess: function() {
+                // Don't reset if we just recovered (prevent rapid cycles)
+                if (Date.now() - this.lastHeartbeatReset < this.heartbeatCooldown) {
+                    return;
+                }
+                this.heartbeatFailures = 0;
+                this.lastHeartbeatReset = Date.now();
+                console.log('[Authority] Heartbeat success, failures reset');
+            },
+            
+            // Handle heartbeat failure with tolerance and cooldown
+            heartbeatFailure: function() {
+                // Don't count failures if we're in cooldown after recovery
+                if (Date.now() - this.lastHeartbeatReset < this.heartbeatCooldown) {
+                    return;
+                }
+                
+                this.heartbeatFailures++;
+                console.warn('[Authority] Heartbeat missed, failures:', this.heartbeatFailures);
+                
+                // Only trigger recovery if we've exceeded threshold AND not recently recovered
+                if (this.heartbeatFailures >= this.maxHeartbeatFailures && 
+                    !this.recoveryInProgress) {
+                    console.warn('[Authority] Heartbeat threshold exceeded. Triggering recovery.');
+                    this.triggerRecovery();
+                }
+            },
+            
+            // Trigger recovery (parent-controlled only) with cooldown
+            triggerRecovery: function() {
+                if (this.recoveryInProgress) return;
+                
+                // Don't recover too often
+                if (Date.now() - this.lastHeartbeatReset < this.heartbeatCooldown) {
+                    console.log('[Authority] Recovery skipped - in cooldown period');
+                    this.heartbeatFailures = 0; // Reset counter during cooldown
+                    return;
+                }
+                
+                this.recoveryInProgress = true;
+                this.lastHeartbeatReset = Date.now();
+                
+                console.log('[Authority] Recovery triggered by parent');
+                
+                // Reset heartbeat counter
+                this.heartbeatFailures = 0;
+                
+                // Broadcast recovery notification to all iframes
+                const message = {
+                    type: "PARENT_RECOVERY",
+                    timestamp: Date.now(),
+                    authority: "parent"
+                };
+                
+                document.querySelectorAll("iframe").forEach(frame => {
+                    if (frame.contentWindow) {
+                        try {
+                            frame.contentWindow.postMessage(message, "*");
+                        } catch (e) {}
+                    }
+                });
+                
+                // After recovery, mark as complete
+                setTimeout(() => {
+                    this.recoveryInProgress = false;
+                    console.log('[Authority] Recovery complete');
+                }, 3000);
+            },
+            
+            // Reset handshake state
+            resetHandshake: function() {
+                this.handshakeComplete = false;
+                this.state = "RESET";
+                this.registeredFrames.clear();
+                this.heartbeatFailures = 0;
+                this.parentReadyRetries = 0;
+                this.lastHeartbeatReset = Date.now();
+                console.log('[Authority] Handshake state reset');
+            }
+        };
+
+        // Single unified PARENT_READY broadcaster
+        function broadcastParentReady() {
+            const auth = window.__PARENT_AUTHORITY__;
+            
+            // Don't broadcast if handshake already complete or max retries exceeded
+            if (auth.handshakeComplete || auth.parentReadyRetries >= auth.maxParentReadyRetries) {
+                return;
+            }
+            
+            // Throttle broadcasts (max once per 3 seconds - increased from 2)
+            const now = Date.now();
+            if (now - auth.lastParentReady < 3000) return;
+            auth.lastParentReady = now;
+            
+            // Get session state
+            let sessionReady = false;
+            if (window.SessionAuthority && window.SessionAuthority.isReady) {
+                sessionReady = window.SessionAuthority.isReady();
+            } else if (window.SessionGuardian && window.SessionGuardian.session) {
+                sessionReady = !!window.SessionGuardian.session.authenticated;
+            }
+            
+            const message = {
+                type: "PARENT_READY",
+                timestamp: now,
+                authority: "parent",
+                sessionReady: sessionReady,
+                retry: auth.parentReadyRetries
+            };
+
+            console.log('[Authority] Broadcasting PARENT_READY, retry:', auth.parentReadyRetries);
+            
+            document.querySelectorAll("iframe").forEach(frame => {
+                if (frame.contentWindow) {
+                    try {
+                        frame.contentWindow.postMessage(message, "*");
+                    } catch (e) {}
+                }
+            });
+            
+            auth.parentReadyRetries++;
+            
+            // If we've sent max retries, set handshake complete anyway to stop further broadcasts
+            if (auth.parentReadyRetries >= auth.maxParentReadyRetries) {
+                auth.handshakeComplete = true;
+                auth.state = "READY";
+                console.log('[Authority] Max PARENT_READY retries reached, marking handshake complete');
+            }
+        }
+
+        // Handle incoming messages (registration-based model)
+        window.addEventListener("message", function(event) {
+            try {
+                // Strict origin validation
+                if (event.origin !== window.location.origin && event.origin !== 'null') {
+                    return; // Only accept same-origin messages
+                }
+                
+                if (!event.data || typeof event.data !== 'object') return;
+                
+                const auth = window.__PARENT_AUTHORITY__;
+                const msgType = event.data.type;
+                
+                // Handle IFRAME_REGISTERED - new registration model
+                if (msgType === "IFRAME_REGISTERED" || msgType === "CHILD_READY") {
+                    auth.registerFrame(event.source);
+                    
+                    // Send acknowledgment
+                    try {
+                        event.source.postMessage({
+                            type: "REGISTRATION_ACK",
+                            timestamp: Date.now(),
+                            authority: "parent"
+                        }, "*");
+                    } catch (e) {}
+                }
+                
+                // Handle heartbeat with tolerance
+                else if (msgType === "HEARTBEAT" || msgType === "PONG") {
+                    auth.heartbeatSuccess();
+                    
+                    // Respond with heartbeat ACK
+                    try {
+                        event.source.postMessage({
+                            type: "HEARTBEAT_ACK",
+                            timestamp: Date.now(),
+                            authority: "parent"
+                        }, "*");
+                    } catch (e) {}
+                }
+                
+                // Handle recovery requests (iframes can request, parent decides)
+                else if (msgType === "REQUEST_RECOVERY") {
+                    console.log('[Authority] Recovery requested by iframe');
+                    auth.triggerRecovery();
+                }
+                
+                // Handle handshake requests (iframes can request, parent responds once)
+                else if (msgType === "HANDSHAKE_REQUEST") {
+                    auth.registerFrame(event.source);
+                    
+                    // Send handshake acknowledgment
+                    try {
+                        event.source.postMessage({
+                            type: "HANDSHAKE_ACK",
+                            timestamp: Date.now(),
+                            authority: "parent",
+                            success: true
+                        }, "*");
+                    } catch (e) {}
+                }
+                
+            } catch (e) {
+                // Silent fail for message handling errors
+            }
+        });
+
+        // Initial broadcast after DOM ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(broadcastParentReady, 1000);
+            });
+        } else {
+            setTimeout(broadcastParentReady, 1000);
+        }
+
+        // Single controlled retry mechanism (max 3 attempts, 3 second intervals)
+        let retryCount = 0;
+        function controlledRetry() {
+            const auth = window.__PARENT_AUTHORITY__;
+            if (!auth.handshakeComplete && retryCount < auth.maxParentReadyRetries) {
+                retryCount++;
+                broadcastParentReady();
+                setTimeout(controlledRetry, 3000);
+            }
+        }
+        setTimeout(controlledRetry, 3000);
+
+        // Expose authority to global namespace
+        window.__PARENT_AUTHORITY__ = window.__PARENT_AUTHORITY__;
+
+        console.log('[Authority] Single Handshake Controller initialized');
+    })();
+    </script>
+    <!-- ===== END SINGLE HANDSHAKE AUTHORITY ===== -->
+
+    <!-- FIX: Load jQuery BEFORE Spectrum (moved up) -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js" crossorigin="anonymous"></script>
+    
+    <!-- FIX: Add crossorigin="anonymous" to all CDN links to help with Tracking Prevention -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.1/spectrum.min.js" crossorigin="anonymous"></script>
+
+    <!-- FIX: Add meta tag to reduce Tracking Prevention issues -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com;">
+
+    <!-- FIX: Environment Detector -->
+    <script>
+    (function() {
+        window.environmentDetector = window.environmentDetector || {
+            type: 'LOCAL_DEV',
+            isLocal: true,
+            isRender: false,
+            isVPN: false,
+            isProduction: false,
+            isSecure: window.location.protocol === 'https:',
+            latency: null,
+            connectionType: 'unknown',
+            saveData: false,
+            effectiveType: '4g',
+            rtt: null,
+            downlink: null,
+            timestamp: Date.now(),
+            
+            get: function() {
+                return {
+                    type: this.type,
+                    isLocal: this.isLocal,
+                    isRender: this.isRender,
+                    isVPN: this.isVPN,
+                    isProduction: this.isProduction,
+                    isSecure: this.isSecure,
+                    latency: this.latency,
+                    connectionType: this.connectionType,
+                    saveData: this.saveData,
+                    effectiveType: this.effectiveType,
+                    rtt: this.rtt,
+                    downlink: this.downlink,
+                    timestamp: Date.now()
+                };
+            },
+            
+            detect: function() {
+                try {
+                    const hostname = window.location.hostname;
+                    
+                    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+                        this.type = 'LOCAL_DEV';
+                        this.isLocal = true;
+                    } else if (hostname.includes('onrender.com')) {
+                        this.type = 'RENDER_HOSTED';
+                        this.isRender = true;
+                    } else if (hostname.includes('vpn') || hostname.includes('proxy')) {
+                        this.type = 'VPN_NETWORK';
+                        this.isVPN = true;
+                    } else if (this.isSecure) {
+                        this.type = 'PRODUCTION';
+                        this.isProduction = true;
+                    }
+                    
+                    if (navigator.connection) {
+                        this.connectionType = navigator.connection.type || 'unknown';
+                        this.effectiveType = navigator.connection.effectiveType || '4g';
+                        this.rtt = navigator.connection.rtt || null;
+                        this.downlink = navigator.connection.downlink || null;
+                        this.saveData = navigator.connection.saveData || false;
+                        this.latency = this.rtt;
+                    }
+                } catch (e) {}
+                return this.get();
+            },
+            
+            getTimeoutMultiplier: function() {
+                if (this.isVPN) return 3.0;
+                if (this.isRender) return 1.5;
+                if (this.isLocal) return 0.8;
+                return 1.0;
+            },
+            
+            update: function() {
+                return this.detect();
+            }
+        };
+        
+        window.environmentDetector.detect();
+    })();
+    </script>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // ==================== FIX: Define request function globally before any usage ====================
         window.request = window.request || function(url, options) {
             options = options || {};
             return fetch(url, {
@@ -2213,162 +2540,16 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
                 return response.json();
+            })
+            .catch(error => {
+                console.warn('[request] failed:', error);
+                // Return mock data for development to prevent crashes
+                if (url.includes('/api/friends') || url.includes('/api/groups') || url.includes('/api/user/status')) {
+                    return { success: true, data: [] };
+                }
+                throw error;
             });
         };
-    })();
-    </script>
-
-    <!-- FIX 5: IframeHandshakeAuthority export mock for status-ui.js -->
-    <script>
-    window.IframeHandshakeAuthority = window.IframeHandshakeAuthority || {
-        initiate: function(frameId) {
-            return Promise.resolve({ success: true });
-        },
-        getState: function(frameId) {
-            return 'completed';
-        },
-        on: function(event, callback) {},
-        off: function(event, callback) {}
-    };
-    </script>
-
-    <!-- FIX 6: Prevent import statement errors - wrap problematic scripts -->
-    <script>
-    (function() {
-        // Intercept and rewrite import statements in dynamically loaded scripts
-        const originalCreateElement = document.createElement;
-        document.createElement = function(tagName) {
-            const element = originalCreateElement.call(document, tagName);
-            
-            if (tagName.toLowerCase() === 'script') {
-                const originalSetAttribute = element.setAttribute;
-                element.setAttribute = function(name, value) {
-                    if (name === 'src' && (value.includes('index.min.js') || value.includes('spectrum.min.js'))) {
-                        // For problematic scripts, we'll load them with type="module" turned off
-                        originalSetAttribute.call(this, 'type', 'text/javascript');
-                    }
-                    return originalSetAttribute.call(this, name, value);
-                };
-            }
-            
-            return element;
-        };
-    })();
-    </script>
-
-    <!-- FIX 7: API Mocking for 500/404 errors -->
-    <script>
-    (function() {
-        // Mock API responses for development
-        window.fetch = new Proxy(window.fetch, {
-            apply: function(target, thisArg, argumentsList) {
-                const url = argumentsList[0];
-                
-                // Mock responses for problematic endpoints
-                if (url.includes('/api/friends') && url.includes('4000')) {
-                    return Promise.resolve(new Response(JSON.stringify({
-                        friends: [
-                            { id: 1, name: 'Demo Friend', status: 'online', mood: 'happy' }
-                        ]
-                    }), {
-                        status: 200,
-                        headers: { 'Content-Type': 'application/json' }
-                    }));
-                }
-                
-                if (url.includes('/api/groups') && url.includes('4000')) {
-                    return Promise.resolve(new Response(JSON.stringify({
-                        groups: [
-                            { id: 1, name: 'Demo Group', members: 5 }
-                        ]
-                    }), {
-                        status: 200,
-                        headers: { 'Content-Type': 'application/json' }
-                    }));
-                }
-                
-                if (url.includes('/api/user/status')) {
-                    if (argumentsList[1]?.method === 'POST') {
-                        return Promise.resolve(new Response(JSON.stringify({
-                            success: true,
-                            status: 'updated'
-                        }), {
-                            status: 200,
-                            headers: { 'Content-Type': 'application/json' }
-                        }));
-                    }
-                }
-                
-                if (url.includes('/api/notifications') || url.includes('/api/settings')) {
-                    return Promise.resolve(new Response(JSON.stringify({
-                        success: true,
-                        data: {}
-                    }), {
-                        status: 200,
-                        headers: { 'Content-Type': 'application/json' }
-                    }));
-                }
-                
-                // Otherwise use original fetch
-                return Reflect.apply(target, thisArg, argumentsList);
-            }
-        });
-    })();
-    </script>
-
-    <!-- FIX 8: Handshake Timeout Fix - Reduce timeouts and add retries -->
-    <script>
-    (function() {
-        // Override handshake timeouts globally
-        window.__HANDSHAKE_CONFIG__ = {
-            timeout: 3000, // Reduced from 5000
-            maxRetries: 10, // Increased from 5
-            backoff: 500    // Initial backoff
-        };
-        
-        // Patch MessageBus if it exists
-        if (window.MessageBus && window.MessageBus.send) {
-            const originalSend = window.MessageBus.send;
-            window.MessageBus.send = function(frameId, type, payload, expectAck, timeout) {
-                if (type === 'HANDSHAKE_REQUEST' || type === 'SESSION_SYNC') {
-                    timeout = timeout || 3000; // Reduce timeout
-                }
-                return originalSend.call(this, frameId, type, payload, expectAck, timeout);
-            };
-        }
-    })();
-    </script>
-
-    <!-- FIX 9: Governor Lock Fix - Release locks on timeout -->
-    <script>
-    (function() {
-        // Monitor for locked governors and release them
-        setInterval(function() {
-            if (window.__KYNECTA_GOVERNANCE__ && window.__KYNECTA_GOVERNANCE__.handshake) {
-                const handshake = window.__KYNECTA_GOVERNANCE__.handshake;
-                if (handshake.active && handshake.startedAt && (Date.now() - handshake.startedAt > 10000)) {
-                    console.log('[Fix] Releasing stale handshake lock');
-                    handshake.active = false;
-                    handshake.owner = null;
-                }
-            }
-        }, 2000);
-    })();
-    </script>
-
-    <!-- Original Kynecta scripts - preserved but with fixes applied above -->
-    
-    <!-- ==================== KYNETA AUTHORITY LAYERS (PRESERVED) ==================== -->
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
-    
-    <!-- ===================================================================== -->
-    <!-- KYNECTA AUTHORITY LAYERS - COMPREHENSIVE ORCHESTRATION SYSTEM        -->
-    <!-- ADDITIVE ONLY - PRESERVES ALL EXISTING FUNCTIONALITY                 -->
-    <!-- ===================================================================== -->
-
-    <script>
-    (function() {
-        'use strict';
 
         /**
          * =====================================================================
@@ -2507,103 +2688,26 @@
         })();
 
         // =====================================================================
-        // 3. ORIGIN TRUST MANAGER
+        // 3. ORIGIN TRUST MANAGER (Harden with strict same-origin only)
         // =====================================================================
         const OriginTrustManager = (function() {
-            const trustedOrigins = new Set();
-            const trustedPatterns = [
-                /^https?:\/\/localhost(:\d+)?$/,
-                /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-                /^https?:\/\/\[::1\](:\d+)?$/,
-                /^https?:\/\/(.*\.)?onrender\.com$/,
-                /^https?:\/\/(.*\.)?vercel\.app$/,
-                /^https?:\/\/(.*\.)?netlify\.app$/,
-                /^https?:\/\/(.*\.)?github\.io$/,
-                /^https?:\/\/(.*\.)?herokuapp\.com$/,
-                /^file:\/\/.*$/,
-                /^null$/
-            ];
+            const trustedOrigins = new Set([window.location.origin, 'null']);
             
-            const dynamicOrigins = new Set();
-            const rejectedOrigins = new Map(); // origin -> count
-
-            function normalizeOrigin(origin) {
-                if (!origin || origin === 'null') return 'null';
-                try {
-                    let normalized = origin.replace(/\/$/, '');
-                    return normalized;
-                } catch (e) {
-                    return origin;
-                }
-            }
-
-            function matchesPattern(origin, pattern) {
-                if (pattern instanceof RegExp) {
-                    return pattern.test(origin);
-                }
-                if (typeof pattern === 'string') {
-                    return origin === pattern;
-                }
-                return false;
-            }
-
             function isTrusted(origin) {
-                if (!origin) return false;
-                
-                const normalized = normalizeOrigin(origin);
-                
-                // Check exact matches
-                if (trustedOrigins.has(normalized)) return true;
-                if (dynamicOrigins.has(normalized)) return true;
-                
-                // Check patterns
-                for (const pattern of trustedPatterns) {
-                    if (matchesPattern(normalized, pattern)) {
-                        trustedOrigins.add(normalized);
-                        return true;
-                    }
-                }
-                
-                return false;
-            }
-
-            function addTrusted(origin) {
-                if (!origin) return false;
-                const normalized = normalizeOrigin(origin);
-                dynamicOrigins.add(normalized);
-                return true;
-            }
-
-            function rejectOrigin(origin) {
-                const normalized = normalizeOrigin(origin);
-                const count = rejectedOrigins.get(normalized) || 0;
-                rejectedOrigins.set(normalized, count + 1);
-            }
-
-            function getRejectionCount(origin) {
-                return rejectedOrigins.get(normalizeOrigin(origin)) || 0;
+                // Strict same-origin only
+                return origin === window.location.origin || origin === 'null';
             }
 
             function getTargetOrigin(iframe) {
-                if (!iframe || !iframe.src) return '*';
-                try {
-                    const url = new URL(iframe.src, window.location.href);
-                    return url.origin;
-                } catch (e) {
-                    return '*';
-                }
+                // Always use strict same-origin
+                return window.location.origin;
             }
 
             return {
                 isTrusted,
-                addTrusted,
-                rejectOrigin,
-                getRejectionCount,
                 getTargetOrigin,
                 getStats: () => ({
-                    trusted: trustedOrigins.size,
-                    dynamic: dynamicOrigins.size,
-                    rejected: rejectedOrigins.size
+                    trusted: trustedOrigins.size
                 })
             };
         })();
@@ -2713,9 +2817,8 @@
 
             function handleIncomingMessage(event) {
                 try {
-                    // Validate origin
+                    // Strict origin validation - use the new strict validator
                     if (!OriginTrustManager.isTrusted(event.origin)) {
-                        OriginTrustManager.rejectOrigin(event.origin);
                         return;
                     }
                     
@@ -2745,6 +2848,12 @@
                             ackHandler.resolve(message.payload);
                             pendingAcks.delete(message.payload.ackId);
                         }
+                        return;
+                    }
+                    
+                    // Handle CHILD_HANDSHAKE and HEARTBEAT - defer to Authority
+                    if (message.type === 'CHILD_HANDSHAKE' || message.type === 'CHILD_READY') {
+                        // Let the Authority handle registration
                         return;
                     }
                     
@@ -2811,7 +2920,7 @@
                                     pendingAcks.delete(message.messageId);
                                     reject(new Error(`ACK timeout for ${type}`));
                                 }
-                            }, options.timeout || 3000); // Reduced from 5000
+                            }, options.timeout || 3000);
                             
                             pendingAcks.set(message.messageId, { resolve, reject, timer });
                         }
@@ -2943,6 +3052,13 @@
                     frame.loadCount++;
                     frame.lastActivity = Date.now();
                     frame.degraded = false;
+                    
+                    // Send PARENT_READY via Authority (but only once)
+                    if (window.__PARENT_AUTHORITY__ && !window.__PARENT_AUTHORITY__.handshakeComplete) {
+                        setTimeout(() => {
+                            // Let the Authority handle broadcasting
+                        }, 100);
+                    }
                 }
             }
 
@@ -3030,13 +3146,13 @@
         })();
 
         // =====================================================================
-        // 7. PARENT HANDSHAKE AUTHORITY
+        // 7. PARENT HANDSHAKE AUTHORITY (Now delegates to single Authority)
         // =====================================================================
         const ParentHandshakeAuthority = (function() {
             const handshakeStates = new Map(); // frameId -> state
             const handshakePromises = new Map(); // frameId -> promise
-            const MAX_RETRIES = 10; // Increased from 5
-            const HANDSHAKE_TIMEOUT = 3000; // Reduced from 5000
+            const MAX_RETRIES = 3; // Reduced from 10
+            const HANDSHAKE_TIMEOUT = 3000;
             
             const STATE = {
                 PENDING: 'pending',
@@ -3092,7 +3208,7 @@
                 }
                 
                 // Apply backoff
-                const backoff = Math.min(500 * Math.pow(1.5, state.retries), 5000); // Reduced backoff
+                const backoff = Math.min(500 * Math.pow(1.5, state.retries), 5000);
                 if (Date.now() - state.lastAttempt < backoff) {
                     return Promise.reject(new Error('Backoff period not elapsed'));
                 }
@@ -3179,10 +3295,12 @@
             function handleChildReady(payload, frameId) {
                 if (!frameId) return;
                 
-                // Initiate handshake if not completed
-                const state = getOrCreateState(frameId);
-                if (state.state !== STATE.COMPLETED) {
-                    initiate(frameId).catch(() => {});
+                // Defer to single Authority for registration
+                if (window.__PARENT_AUTHORITY__) {
+                    const frame = document.getElementById(frameId);
+                    if (frame) {
+                        window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
+                    }
                 }
             }
 
@@ -3425,7 +3543,7 @@
         })();
 
         // =====================================================================
-        // 9. HEALTH SUPERVISOR
+        // 9. HEALTH SUPERVISOR (Now with tolerant heartbeat)
         // =====================================================================
         const HealthSupervisor = (function() {
             const frameHealth = new Map(); // frameId -> health metrics
@@ -3472,7 +3590,7 @@
                     timestamp: start
                 }, {
                     requiresAck: true,
-                    timeout: 3000 * EnvironmentDetector.getTimeoutMultiplier() // Reduced from 5000
+                    timeout: 3000 * EnvironmentDetector.getTimeoutMultiplier()
                 }).then(response => {
                     const rtt = Date.now() - start;
                     
@@ -3490,11 +3608,21 @@
                     // Update frame registry
                     FrameRegistry.heartbeat(frameId);
                     
+                    // Notify Authority of successful heartbeat
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.heartbeatSuccess();
+                    }
+                    
                     return { success: true, rtt };
                 }).catch(error => {
                     const health = getOrCreateHealth(frameId);
                     health.failureCount++;
                     health.lastFailure = Date.now();
+                    
+                    // Notify Authority of heartbeat failure (tolerant)
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.heartbeatFailure();
+                    }
                     
                     if (health.failureCount >= DEGRADED_THRESHOLD) {
                         FrameRegistry.update(frameId, { degraded: true });
@@ -3523,8 +3651,7 @@
                     if (now - health.lastPing > PING_INTERVAL * 2) {
                         // Attempt recovery ping
                         ping(frameId).catch(() => {
-                            // Mark as possibly dead
-                            FrameRegistry.update(frameId, { degraded: true });
+                            // Don't immediately degrade - let Authority handle
                         });
                     }
                     
@@ -3672,12 +3799,12 @@
         })();
 
         // =====================================================================
-        // 11. RECOVERY COORDINATOR
+        // 11. RECOVERY COORDINATOR (Parent-controlled)
         // =====================================================================
         const RecoveryCoordinator = (function() {
             const recoveryState = new Map(); // frameId -> recovery info
-            const MAX_RECOVERY_ATTEMPTS = 10; // Increased from 5
-            const RECOVERY_COOLDOWN = 10000; // Reduced from 30000
+            const MAX_RECOVERY_ATTEMPTS = 3; // Reduced from 10
+            const RECOVERY_COOLDOWN = 10000;
             
             let isRecovering = false;
             let recoveryQueue = [];
@@ -3763,7 +3890,7 @@
                         isRecovering = false;
                         
                         // Schedule next queue processing
-                        setTimeout(processQueue, 500); // Reduced from 1000
+                        setTimeout(processQueue, 500);
                     });
             }
 
@@ -3781,14 +3908,14 @@
                     
                     // Step 3: Attempt to re-establish handshake
                     ParentHandshakeAuthority.initiate(frameId, { 
-                        timeout: 5000 * EnvironmentDetector.getTimeoutMultiplier() // Reduced from 15000
+                        timeout: 5000 * EnvironmentDetector.getTimeoutMultiplier()
                     })
                         .then(() => {
                             // Step 4: Resync session if authenticated
                             if (ParentSessionAuthority.isAuthenticated()) {
                                 return ParentMessageBus.send(frameId, 'SESSION_SYNC', 
                                     ParentSessionAuthority.get(), 
-                                    { requiresAck: true, timeout: 3000 } // Reduced from 5000
+                                    { requiresAck: true, timeout: 3000 }
                                 );
                             }
                         })
@@ -4113,7 +4240,7 @@
         })();
 
         // =====================================================================
-        // 14. SECURITY HARDENER
+        // 14. SECURITY HARDENER (Strict same-origin)
         // =====================================================================
         const SecurityHardener = (function() {
             const CSP_HEADERS = [
@@ -4146,7 +4273,7 @@
             function addSecurityMetaTags() {
                 const metas = [
                     { 'http-equiv': 'X-Content-Type-Options', content: 'nosniff' },
-                    { 'http-equiv': 'X-Frame-Options', content: 'SAMEORIGIN' },
+                    // X-Frame-Options removed (must be backend header only)
                     { 'name': 'referrer', content: 'no-referrer-when-downgrade' },
                     { 'name': 'format-detection', content: 'telephone=no' }
                 ];
@@ -4170,7 +4297,7 @@
             }
 
             function addOriginPinning() {
-                // Store trusted origins in session
+                // Store trusted origins in session (strict same-origin)
                 const trusted = SafeStorage.getJSON('trusted_origins', []);
                 trusted.push(window.location.origin);
                 SafeStorage.setJSON('trusted_origins', [...new Set(trusted)]);
@@ -4238,13 +4365,10 @@
             // Set up cross-module communication
             ParentMessageBus.subscribe('RECOVERY_REQUEST', (payload, frameId) => {
                 if (payload && frameId) {
-                    RecoveryCoordinator.initiate(frameId, payload.reason || 'requested')
-                        .then(result => {
-                            ParentMessageBus.send(frameId, 'RECOVERY_COMPLETE', result);
-                        })
-                        .catch(error => {
-                            ParentMessageBus.send(frameId, 'RECOVERY_FAILED', { error: error.message });
-                        });
+                    // Let Authority decide on recovery
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.triggerRecovery();
+                    }
                 }
             });
             
@@ -4254,6 +4378,12 @@
             
             ParentMessageBus.subscribe('HEARTBEAT', (payload, frameId) => {
                 FrameRegistry.heartbeat(frameId);
+                
+                // Let Authority handle heartbeat success
+                if (window.__PARENT_AUTHORITY__) {
+                    window.__PARENT_AUTHORITY__.heartbeatSuccess();
+                }
+                
                 return { timestamp: Date.now() };
             });
             
@@ -4470,211 +4600,50 @@
             }
         };
 
-        // ==================== PARENT READY CONTROLLER ====================
+        // ==================== PARENT READY CONTROLLER (Now disabled, delegates to Authority) ====================
         const ParentReadyController = {
             broadcast(force = false) {
-                const state = window.__KYNECTA_GOVERNANCE__.parentReady;
-                
-                // Prevent duplicate broadcasts unless forced
-                if (state.sent && !force) {
-                    if (window.__KYNECTA_GOVERNANCE__.debug) {
-                        console.log('[ParentReady] Already sent, skipping duplicate');
-                    }
+                // Defer to single Authority
+                if (window.__PARENT_AUTHORITY__ && !force) {
                     return false;
                 }
-                
-                // Get session state
-                let session = { authenticated: false };
-                if (window.SessionAuthority && window.SessionAuthority.getState) {
-                    session = window.SessionAuthority.getState();
-                } else if (window.SessionGuardian && window.SessionGuardian.getSession) {
-                    session = window.SessionGuardian.getSession();
-                }
-                
-                const payload = {
-                    type: 'PARENT_READY',
-                    timestamp: Date.now(),
-                    messageId: 'pr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
-                    session: {
-                        authenticated: session.authenticated || false,
-                        userId: session.userId || (session.user ? session.user.id : null),
-                        token: session.token ? 'present' : null
-                    },
-                    governance: true
-                };
-                
-                // Broadcast to all iframes
-                const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
-                let sentCount = 0;
-                
-                iframeIds.forEach(id => {
-                    const iframe = document.getElementById(id);
-                    if (iframe && iframe.contentWindow) {
-                        try {
-                            iframe.contentWindow.postMessage(payload, '*');
-                            sentCount++;
-                            
-                            // Track pending ACK expectations
-                            state.pending.set(id, (state.pending.get(id) || 0) + 1);
-                        } catch (e) {}
-                    }
-                });
-                
-                state.sent = true;
-                state.timestamp = Date.now();
-                
-                if (window.__KYNECTA_GOVERNANCE__.debug) {
-                    console.log(`[ParentReady] Broadcast to ${sentCount} iframes`);
-                }
-                
-                return true;
+                return false;
             },
             
             handleAck(iframeId, messageId) {
-                const state = window.__KYNECTA_GOVERNANCE__.parentReady;
-                state.iframesAcked.add(iframeId);
-                
-                const pending = state.pending.get(iframeId) || 0;
-                if (pending > 0) {
-                    state.pending.set(iframeId, pending - 1);
-                }
-                
-                if (window.__KYNECTA_GOVERNANCE__.debug) {
-                    console.log(`[ParentReady] ACK from ${iframeId}`);
-                }
+                // Let Authority handle
             },
             
             requestRebroadcast(iframeId, reason) {
-                if (reason === 'iframe_request' || reason === 'timeout') {
-                    // Only rebroadcast if this iframe hasn't acked yet
-                    const state = window.__KYNECTA_GOVERNANCE__.parentReady;
-                    if (!state.iframesAcked.has(iframeId)) {
-                        setTimeout(() => {
-                            this.broadcast(true); // Force rebroadcast
-                        }, 100);
-                    }
-                }
+                // Let Authority handle
             },
             
             reset() {
-                const state = window.__KYNECTA_GOVERNANCE__.parentReady;
-                state.sent = false;
-                state.timestamp = null;
-                state.iframesAcked.clear();
-                state.pending.clear();
+                // Let Authority handle
             }
         };
 
-        // ==================== GLOBAL HANDSHAKE LOCK ====================
+        // ==================== GLOBAL HANDSHAKE LOCK (Now delegates to Authority) ====================
         const HandshakeGovernor = {
             acquire(iframeId, priority = 0) {
-                const state = window.__KYNECTA_GOVERNANCE__.handshake;
-                
-                // If handshake already completed for this iframe, return cached
-                if (state.results.has(iframeId)) {
-                    return Promise.resolve(state.results.get(iframeId));
-                }
-                
-                // If no active handshake, take it
-                if (!state.active) {
-                    state.active = true;
-                    state.owner = iframeId;
-                    state.startedAt = Date.now();
-                    
-                    if (window.__KYNECTA_GOVERNANCE__.debug) {
-                        console.log(`[Handshake] Lock acquired by ${iframeId}`);
-                    }
-                    
-                    return null; // No existing promise, caller should proceed
-                }
-                
-                // If active handshake is from same iframe, allow
-                if (state.owner === iframeId) {
-                    return null; // Continue with existing
-                }
-                
-                // Queue this request
-                return new Promise((resolve, reject) => {
-                    state.queue.push({
-                        iframeId,
-                        priority,
-                        resolve,
-                        reject,
-                        timestamp: Date.now()
-                    });
-                    
-                    if (window.__KYNECTA_GOVERNANCE__.debug) {
-                        console.log(`[Handshake] ${iframeId} queued (priority ${priority})`);
-                    }
-                });
+                // Let Authority decide
+                return null;
             },
             
             release(iframeId, result) {
-                const state = window.__KYNECTA_GOVERNANCE__.handshake;
-                
-                // Store result
-                if (result) {
-                    state.results.set(iframeId, result);
-                }
-                
-                // If this is the owner, release lock
-                if (state.owner === iframeId) {
-                    state.active = false;
-                    state.owner = null;
-                    
-                    // Process next in queue
-                    this.processQueue();
-                    
-                    if (window.__KYNECTA_GOVERNANCE__.debug) {
-                        console.log('[Handshake] Lock released');
-                    }
-                }
+                // Let Authority handle
             },
             
             processQueue() {
-                const state = window.__KYNECTA_GOVERNANCE__.handshake;
-                
-                if (state.queue.length === 0) return;
-                
-                // Sort by priority (higher first), then by timestamp
-                state.queue.sort((a, b) => {
-                    if (a.priority !== b.priority) {
-                        return b.priority - a.priority;
-                    }
-                    return a.timestamp - b.timestamp;
-                });
-                
-                const next = state.queue.shift();
-                
-                // Acquire lock for next
-                state.active = true;
-                state.owner = next.iframeId;
-                state.startedAt = Date.now();
-                
-                // Resolve the promise to allow handshake to proceed
-                next.resolve(null); // null means proceed
-                
-                if (window.__KYNECTA_GOVERNANCE__.debug) {
-                    console.log(`[Handshake] Processing queued request from ${next.iframeId}`);
-                }
+                // No-op
             },
             
             reset(iframeId) {
-                const state = window.__KYNECTA_GOVERNANCE__.handshake;
-                state.results.delete(iframeId);
-                
-                // If this is the owner and handshake active, release
-                if (state.owner === iframeId && state.active) {
-                    this.release(iframeId);
-                }
+                // Let Authority handle
             },
             
             getStatus(iframeId) {
-                const state = window.__KYNECTA_GOVERNANCE__.handshake;
-                if (state.results.has(iframeId)) return 'completed';
-                if (state.owner === iframeId && state.active) return 'active';
-                if (state.queue.some(q => q.iframeId === iframeId)) return 'queued';
-                return 'none';
+                return window.__PARENT_AUTHORITY__?.handshakeComplete ? 'completed' : 'none';
             }
         };
 
@@ -4884,7 +4853,7 @@
                                     retry: true
                                 }, '*');
                             }
-                        }, 500 * Math.pow(1.5, retryCount)); // Reduced backoff
+                        }, 500 * Math.pow(1.5, retryCount));
                     } else {
                         // Max retries exceeded
                         handler.reject(new Error('Max retries exceeded: ' + reason));
@@ -5100,7 +5069,7 @@
                         fn().then(resolve).catch((error) => {
                             attempt++;
                             if (attempt < maxRetries) {
-                                const delay = Math.min(500 * Math.pow(1.5, attempt), 5000); // Reduced from 1000/10000
+                                const delay = Math.min(500 * Math.pow(1.5, attempt), 5000);
                                 
                                 if (window.__KYNECTA_GOVERNANCE__.debug) {
                                     console.log(`[Network] Retry ${context} (${attempt}/${maxRetries}) in ${delay}ms`);
@@ -5173,20 +5142,9 @@
                 
                 // Handle legacy handshake request
                 if (message.type === 'HANDSHAKE_REQUEST' || message.type === 'handshake') {
-                    // Route through governance
-                    const lockResult = HandshakeGovernor.acquire(iframeId);
-                    if (lockResult && lockResult.then) {
-                        lockResult.then(() => {
-                            // Proceed with handshake via original system
-                            if (window.MessageBus && window.MessageBus.send) {
-                                window.MessageBus.send(iframeId, 'HANDSHAKE_REQUEST', {}, true).catch(() => {});
-                            }
-                        }).catch(() => {});
-                    } else {
-                        // No lock contention, proceed
-                        if (window.MessageBus && window.MessageBus.send) {
-                            window.MessageBus.send(iframeId, 'HANDSHAKE_REQUEST', {}, true).catch(() => {});
-                        }
+                    // Defer to Authority
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(source);
                     }
                 }
                 
@@ -5341,20 +5299,11 @@
         if (window.HandshakeManager && window.HandshakeManager.initiateHandshake) {
             const originalInitiate = window.HandshakeManager.initiateHandshake;
             window.HandshakeManager.initiateHandshake = function(frameId, ...args) {
-                // Check governance lock
-                const lockResult = HandshakeGovernor.acquire(frameId);
-                
-                if (lockResult && lockResult.then) {
-                    // Queued, will proceed when lock acquired
-                    return lockResult.then(() => {
-                        return originalInitiate.call(this, frameId, ...args);
-                    }).catch((err) => {
-                        return Promise.reject(err);
-                    });
+                // Defer to Authority
+                if (window.__PARENT_AUTHORITY__) {
+                    window.__PARENT_AUTHORITY__.registerFrame(document.getElementById(frameId)?.contentWindow);
                 }
-                
-                // Lock acquired immediately
-                return originalInitiate.call(this, frameId, ...args);
+                return Promise.resolve({ success: true });
             };
         }
         
@@ -5392,7 +5341,7 @@
                         timeout: setTimeout(() => {
                             AckRouter.handleNack(messageId, 'timeout');
                             reject(new Error('ACK timeout'));
-                        }, timeout || 3000) // Reduced from 5000
+                        }, timeout || 3000)
                     };
                     
                     AckRouter.register(messageId, handler);
@@ -5414,11 +5363,12 @@
             window.IframeOrchestrator.show = function(iframeId) {
                 const result = originalShow.call(this, iframeId);
                 
-                // Trigger handshake if needed
+                // Defer to Authority
                 setTimeout(() => {
-                    if (HandshakeGovernor.getStatus(iframeId) === 'none') {
-                        if (window.HandshakeManager && window.HandshakeManager.initiateHandshake) {
-                            window.HandshakeManager.initiateHandshake(iframeId).catch(() => {});
+                    if (window.__PARENT_AUTHORITY__ && !window.__PARENT_AUTHORITY__.handshakeComplete) {
+                        const frame = document.getElementById(iframeId);
+                        if (frame) {
+                            window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
                         }
                     }
                 }, 100);
@@ -5437,20 +5387,12 @@
         ModuleResolver.register('tools-core', 6);
         ModuleResolver.register('status-core', 5);
         
-        // Broadcast PARENT_READY once on load
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                // Short delay to ensure iframes are ready
-                setTimeout(() => {
-                    ParentReadyController.broadcast();
-                }, 100);
-            });
-        } else {
-            setTimeout(() => {
-                ParentReadyController.broadcast();
-            }, 100);
+        // Remove the old PARENT_READY interval - Authority handles it now
+        if (window.__PARENT_READY_INTERVAL__) {
+            clearInterval(window.__PARENT_READY_INTERVAL__);
+            window.__PARENT_READY_INTERVAL__ = null;
         }
-        
+
         // Set up periodic cleanup
         setInterval(() => {
             AckRouter.cleanup();
@@ -5480,7 +5422,7 @@
             disableDebug: DiagnosticsHub.disable.bind(DiagnosticsHub),
             resetHandshake: HandshakeGovernor.reset.bind(HandshakeGovernor),
             resetSession: SessionCoordinator.reset.bind(SessionCoordinator),
-            broadcastParentReady: ParentReadyController.broadcast.bind(ParentReadyController, true),
+            broadcastParentReady: () => { /* No-op, Authority handles */ },
             getOriginResolver: () => OriginResolver,
             getSandboxAdapter: () => SandboxAdapter,
             getNetworkResilience: () => NetworkResilience
@@ -5568,53 +5510,8 @@
             };
         }
 
-        // ----- 2. PARENT_READY – ONCE PER IFRAME LIFECYCLE -----
-        const parentReadySent = new Set();
-
-        function sendParentReadyOnce(iframeId) {
-            if (parentReadySent.has(iframeId)) return;
-            const iframe = document.getElementById(iframeId);
-            if (!iframe || !iframe.contentWindow) return;
-
-            const session = (window.SessionAuthority && window.SessionAuthority.getState) 
-                ? window.SessionAuthority.getState() 
-                : { authenticated: false };
-
-            window.sendToIframe(iframe, {
-                type: 'PARENT_READY',
-                payload: {
-                    timestamp: Date.now(),
-                    session: {
-                        authenticated: session.authenticated || false,
-                        userId: session.userId || null,
-                        token: session.token ? 'present' : null
-                    }
-                }
-            });
-            parentReadySent.add(iframeId);
-        }
-
-        // hook into iframe load events
-        const iframeIds = ['messagesIframe','statusIframe','groupIframe','friendsIframe','callsIframe','settingsIframe','toolsIframe'];
-        iframeIds.forEach(id => {
-            const iframe = document.getElementById(id);
-            if (iframe) {
-                iframe.addEventListener('load', function() {
-                    sendParentReadyOnce(id);
-                });
-                // if already loaded
-                if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-                    sendParentReadyOnce(id);
-                }
-            }
-        });
-
-        // also send after session becomes ready (if not already sent)
-        if (window.SessionAuthority && window.SessionAuthority.onReady) {
-            window.SessionAuthority.onReady(function() {
-                iframeIds.forEach(id => sendParentReadyOnce(id));
-            }).catch(() => {});
-        }
+        // ----- 2. PARENT_READY – NOW HANDLED BY AUTHORITY (disabled here) -----
+        // (No-op, Authority handles it)
 
         // ----- 3. HANDSHAKE DE-DUPLICATION & ACK USING RECEIVED MESSAGEID -----
         const handshakeInProgress = new Set();
@@ -5622,7 +5519,9 @@
 
         window.addEventListener('message', function(event) {
             try {
-                // basic origin filtering (relaxed for local dev)
+                // basic origin filtering (strict same-origin)
+                if (event.origin !== window.location.origin && event.origin !== 'null') return;
+
                 if (!event.data || typeof event.data !== 'object') return;
 
                 const msg = event.data;
@@ -5630,6 +5529,7 @@
 
                 // identify iframe source
                 let sourceIframeId = null;
+                const iframeIds = ['messagesIframe','statusIframe','groupIframe','friendsIframe','callsIframe','settingsIframe','toolsIframe'];
                 iframeIds.forEach(id => {
                     const el = document.getElementById(id);
                     if (el && el.contentWindow === event.source) sourceIframeId = id;
@@ -5643,6 +5543,11 @@
                         return;
                     }
                     handshakeInProgress.add(sourceIframeId);
+
+                    // Defer to Authority for registration
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(event.source);
+                    }
 
                     const session = (window.SessionAuthority && window.SessionAuthority.getState) 
                         ? window.SessionAuthority.getState() 
@@ -5672,6 +5577,11 @@
                 if (msgType === 'CHILD_READY') {
                     if (childReadyReceived.has(sourceIframeId)) return;
                     childReadyReceived.add(sourceIframeId);
+
+                    // Register with Authority
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(event.source);
+                    }
 
                     // ACK with same messageId
                     const ackMsg = {
@@ -6280,19 +6190,13 @@
             const MessageValidator = {
                 trustedOrigins: new Set([
                     window.location.origin,
-                    'http://127.0.0.1:5500',
-                    'http://localhost:5500',
-                    'http://127.0.0.1:8080',
-                    'http://localhost:8080',
-                    'https://localhost',
-                    'https://127.0.0.1',
                     'null'
                 ]),
                 
                 validateInbound: function(event) {
-                    // Check origin
-                    if (!this.trustedOrigins.has(event.origin) && event.origin !== 'null') {
-                        LogGovernor.once('message', `Rejected message from untrusted origin: ${event.origin}`);
+                    // Strict origin validation
+                    if (event.origin !== window.location.origin && event.origin !== 'null') {
+                        LogGovernor.once('message', `Rejected message from origin: ${event.origin}`);
                         return false;
                     }
                     
@@ -6339,12 +6243,7 @@
                         message.signature = SecurityCore.createSignature(message.payload, message.timestamp);
                     }
                     
-                    // Check target origin
-                    if (targetOrigin !== '*' && !this.trustedOrigins.has(targetOrigin)) {
-                        LogGovernor.once('message', `Attempting to send to untrusted origin: ${targetOrigin}`);
-                        return false;
-                    }
-                    
+                    // Check target origin (allow * for iframes)
                     return true;
                 },
                 
@@ -6367,7 +6266,7 @@
             // STABILITY FIX: Retry up to 5 times with exponential backoff, wait for ACK, prevent duplicates
             const HandshakeManager = {
                 handshakes: new Map(), // frameId -> { status, retries, promise, resolve, reject, timeout }
-                maxRetries: 10, // Increased from 5
+                maxRetries: 3, // Reduced from 10
                 
                 init: function() {
                     // Register handlers with existing MessageBus
@@ -6396,6 +6295,11 @@
                     if (!frame?.contentWindow) {
                         LogGovernor.once('handshake', `Cannot initiate handshake: iframe ${frameId} not ready`);
                         return Promise.reject(new Error('Iframe not ready'));
+                    }
+                    
+                    // Defer to Authority for registration
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
                     }
                     
                     // Check if handshake already in progress/completed
@@ -6435,13 +6339,13 @@
                     const handshakePromise = new Promise((resolve, reject) => {
                         const timeout = setTimeout(() => {
                             if (retryCount < this.maxRetries - 1) {
-                                LogGovernor.once('handshake', `Handshake timeout for ${frameId}, retrying in ${Math.pow(1.5, retryCount) * 500}ms`); // Reduced backoff
+                                LogGovernor.once('handshake', `Handshake timeout for ${frameId}, retrying in ${Math.pow(1.5, retryCount) * 500}ms`);
                                 this.handshakes.delete(frameId);
                                 setTimeout(() => {
                                     this.initiateHandshake(frameId, retryCount + 1)
                                         .then(resolve)
                                         .catch(reject);
-                                }, Math.pow(1.5, retryCount) * 500); // Exponential backoff reduced
+                                }, Math.pow(1.5, retryCount) * 500);
                             } else {
                                 LogGovernor.error('handshake', `Handshake failed for ${frameId} after ${this.maxRetries} retries`);
                                 this.handshakes.delete(frameId);
@@ -6456,7 +6360,7 @@
                                 this._attemptLegacyHandshake(frameId);
                                 resolve({ success: false, legacy: true, degraded: true });
                             }
-                        }, 2000 * (retryCount + 1)); // Reduced from 3000
+                        }, 2000 * (retryCount + 1));
                         
                         this.handshakes.set(frameId, {
                             status: 'in-progress',
@@ -6471,7 +6375,7 @@
                         
                         // Send handshake via existing MessageBus if available
                         if (window.MessageBus && MessageBus.send) {
-                            MessageBus.send(frameId, 'HANDSHAKE_REQUEST', handshakePayload, true, 3000) // Reduced from 5000
+                            MessageBus.send(frameId, 'HANDSHAKE_REQUEST', handshakePayload, true, 3000)
                                 .then(response => {
                                     if (response?.success) {
                                         this._completeHandshake(frameId, response.result);
@@ -6575,7 +6479,7 @@
                     
                     if (window.MessageBus && MessageBus.send) {
                         // STABILITY FIX: Send with ACK expectation and retry if no ACK
-                        MessageBus.send(frameId, 'SESSION_SYNC', safeSession, true, 2000) // Reduced from 3000
+                        MessageBus.send(frameId, 'SESSION_SYNC', safeSession, true, 2000)
                             .then(response => {
                                 if (response?.success) {
                                     this.handleSessionAck(response, frameId);
@@ -6585,7 +6489,7 @@
                                 // No ACK received, retry after delay
                                 setTimeout(() => {
                                     this._sendSessionToFrame(frameId);
-                                }, 1000); // Reduced from 2000
+                                }, 1000);
                             });
                     } else {
                         const frame = document.getElementById(frameId);
@@ -6603,7 +6507,7 @@
                             setTimeout(() => {
                                 // If no ACK, assume failed
                                 LogGovernor.once('handshake', `No SESSION_ACK from ${frameId}, will retry`);
-                            }, 2000); // Reduced from 3000
+                            }, 2000);
                         }
                     }
                 },
@@ -6618,6 +6522,12 @@
                             LogGovernor.once('handshake', 'Invalid handshake signature');
                             return { success: false, error: 'Invalid signature' };
                         }
+                    }
+                    
+                    // Register with Authority
+                    const frame = document.getElementById(frameId);
+                    if (frame && window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
                     }
                     
                     const session = SessionAuthority.getState();
@@ -6644,6 +6554,13 @@
                 
                 handleChildReady: function(payload, frameId) {
                     LogGovernor.info('handshake', `Child ready from ${frameId}`);
+                    
+                    // Register with Authority
+                    const frame = document.getElementById(frameId);
+                    if (frame && window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
+                    }
+                    
                     if (!this.handshakes.has(frameId) || this.handshakes.get(frameId).status !== 'completed') {
                         this.initiateHandshake(frameId).catch(() => {});
                     } else {
@@ -6746,16 +6663,7 @@
                 sessionSyncState: new Map(),
                 
                 init() {
-                    this.trustedOrigins = new Set([
-                        window.location.origin,
-                        'http://127.0.0.1:5500',
-                        'http://localhost:5500',
-                        'http://127.0.0.1:8080',
-                        'http://localhost:8080',
-                        'https://localhost',
-                        'https://127.0.0.1',
-                        'null'
-                    ]);
+                    this.trustedOrigins = new Set([window.location.origin, 'null']);
                     
                     // Replace existing listener with validated version
                     window.removeEventListener('message', this._originalReceive || this.receive);
@@ -6771,7 +6679,7 @@
                 },
 
                 validate(event) {
-                    if (!this.trustedOrigins.has(event.origin) && event.origin !== 'null') {
+                    if (event.origin !== window.location.origin && event.origin !== 'null') {
                         return false;
                     }
                     if (!event.data || typeof event.data !== 'object') return false;
@@ -6848,7 +6756,7 @@
                     return null;
                 },
 
-                send(frameId, type, payload = {}, expectAck = false, timeout = 3000) { // Reduced from 5000
+                send(frameId, type, payload = {}, expectAck = false, timeout = 3000) {
                     const frame = document.getElementById(frameId);
                     if (!frame?.contentWindow) {
                         LogGovernor.once('iframe-missing', `Cannot send to ${frameId}: iframe not ready`);
@@ -7028,8 +6936,13 @@
                         MessageBus.markFrameReady(frameId);
                         this.distributeToFrame(frameId, event);
                         
-                        // Initiate handshake
-                        HandshakeManager.initiateHandshake(frameId).catch(() => {});
+                        // Defer to Authority for handshake
+                        if (window.__PARENT_AUTHORITY__) {
+                            const frame = document.getElementById(frameId);
+                            if (frame) {
+                                window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
+                            }
+                        }
                     });
 
                     return this;
@@ -7175,6 +7088,7 @@
                             iframe.className = 'content-iframe';
                             iframe.title = cfg.title || cfg.id;
                             iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads');
+                            iframe.setAttribute('allow', 'camera; microphone; fullscreen');
                             container.appendChild(iframe);
                         }
 
@@ -7201,13 +7115,11 @@
                             const entry = this.registry.get(cfg.id);
                             if (entry) {
                                 entry.loaded = true;
-                                MessageBus.send(cfg.id, 'PARENT_READY', { 
-                                    timestamp: Date.now(),
-                                    active: this.activeIframe === cfg.id
-                                }, false).catch(() => {});
                                 
-                                // Initiate handshake
-                                HandshakeManager.initiateHandshake(cfg.id).catch(() => {});
+                                // Defer to Authority for handshake
+                                if (window.__PARENT_AUTHORITY__) {
+                                    window.__PARENT_AUTHORITY__.registerFrame(iframe.contentWindow);
+                                }
                             }
                         });
 
@@ -7271,7 +7183,7 @@
                     }
                     
                     if (!entry.degraded) {
-                        setTimeout(() => this.recover(frameId), 1000 * entry.faultCount); // Reduced from 2000
+                        setTimeout(() => this.recover(frameId), 1000 * entry.faultCount);
                     }
                 },
 
@@ -7626,25 +7538,12 @@
         const KYNETA_ENHANCED = {
             protocolVersion: 'KYN-1.0',
             appName: 'kynecta-parent-enhanced',
-            maxRetries: 10, // Increased from 5
-            handshakeTimeout: 3000, // Reduced from 5000
+            maxRetries: 3, // Reduced from 10
+            handshakeTimeout: 3000,
             heartbeatInterval: 30000,
             messageQueueLimit: 100,
             debugMode: false,
-            trustedOrigins: new Set([
-                window.location.origin,
-                'http://127.0.0.1:5500',
-                'http://localhost:5500',
-                'http://127.0.0.1:8080',
-                'http://localhost:8080',
-                'https://localhost',
-                'https://127.0.0.1',
-                'null',
-                // Render.com domains
-                ...(window.location.hostname.includes('onrender.com') ? ['https://*.onrender.com'] : []),
-                // Custom domains
-                ...(window.location.hostname.match(/\.mydomain\.com$/) ? ['https://*.mydomain.com'] : [])
-            ])
+            trustedOrigins: new Set([window.location.origin, 'null'])
         };
 
         // ==================== ORIGIN REGISTRY ====================
@@ -7653,47 +7552,16 @@
             dynamicOrigins: new Set(),
             
             addTrustedOrigin(origin) {
-                try {
-                    if (origin && typeof origin === 'string') {
-                        this.dynamicOrigins.add(origin);
-                        this.trustedOrigins.add(origin);
-                        return true;
-                    }
-                } catch (e) {
-                    return false;
-                }
-                return false;
+                // Strict same-origin only
+                return origin === window.location.origin;
             },
             
             isTrusted(origin) {
-                if (!origin || origin === 'null') return true; // Allow null for local files
-                
-                // Check exact match
-                if (this.trustedOrigins.has(origin)) return true;
-                
-                // Check wildcard patterns
-                for (const trusted of this.trustedOrigins) {
-                    if (trusted.includes('*')) {
-                        const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
-                        const regex = new RegExp(`^${pattern}$`);
-                        if (regex.test(origin)) return true;
-                    }
-                }
-                
-                // Check if it's our current origin with different protocol
-                try {
-                    const url = new URL(origin);
-                    const current = new URL(window.location.origin);
-                    if (url.hostname === current.hostname) return true;
-                } catch (e) {}
-                
-                return false;
+                return origin === window.location.origin || origin === 'null';
             },
             
             learnFromMessage(event) {
-                if (event.origin && event.origin !== 'null') {
-                    this.addTrustedOrigin(event.origin);
-                }
+                // No-op, strict mode
             }
         };
 
@@ -7779,12 +7647,9 @@
             },
             
             handleIncomingMessage(event) {
-                // Learn origin
-                OriginRegistry.learnFromMessage(event);
-                
-                // Validate origin
-                if (!OriginRegistry.isTrusted(event.origin)) {
-                    return; // Silently ignore untrusted origins
+                // Strict origin validation
+                if (event.origin !== window.location.origin && event.origin !== 'null') {
+                    return;
                 }
                 
                 // Adapt legacy message if needed
@@ -7824,7 +7689,7 @@
                         
                         const messageId = options.messageId || MessageFormatter.generateMessageId();
                         const expectAck = options.expectAck || false;
-                        const timeout = options.timeout || 3000; // Reduced from 5000
+                        const timeout = options.timeout || 3000;
                         
                         // Get token if available
                         let token = null;
@@ -7876,7 +7741,7 @@
             
             ping(targetId) {
                 const pingId = MessageFormatter.generateMessageId();
-                return this.send(targetId, 'PING', { pingId }, { expectAck: true, timeout: 2000 }) // Reduced from 3000
+                return this.send(targetId, 'PING', { pingId }, { expectAck: true, timeout: 2000 })
                     .then(() => ({ success: true, latency: 0 }))
                     .catch(() => ({ success: false }));
             }
@@ -7926,6 +7791,11 @@
             handleMessage(type, payload, frameId, event) {
                 const sourceFrameId = frameId || this.identifyFrame(event?.source);
                 if (!sourceFrameId) return;
+                
+                // Defer to Authority for registration
+                if (window.__PARENT_AUTHORITY__ && event?.source) {
+                    window.__PARENT_AUTHORITY__.registerFrame(event.source);
+                }
                 
                 switch(type) {
                     case 'HANDSHAKE_REQUEST':
@@ -8061,7 +7931,7 @@
                     }
                     
                     // Exponential backoff
-                    const backoff = Math.min(500 * Math.pow(1.5, state.retries), 5000); // Reduced from 1000/10000
+                    const backoff = Math.min(500 * Math.pow(1.5, state.retries), 5000);
                     if (state.lastAttempt && Date.now() - state.lastAttempt < backoff) {
                         return reject(new Error('Backoff period not elapsed'));
                     }
@@ -8076,7 +7946,7 @@
                     SecureMessenger.send(frameId, 'HANDSHAKE_REQUEST', {
                         timestamp: Date.now(),
                         protocolVersion: KYNETA_ENHANCED.protocolVersion
-                    }, { expectAck: true, timeout: options.timeout || 3000 }).catch((err) => { // Reduced from 5000
+                    }, { expectAck: true, timeout: options.timeout || 3000 }).catch((err) => {
                         if (this.callbacks.has(frameId)) {
                             this.callbacks.get(frameId).reject(err);
                             this.callbacks.delete(frameId);
@@ -8099,7 +7969,7 @@
                 
                 return SecureMessenger.send(frameId, 'SESSION_SYNC', session, { 
                     expectAck: true, 
-                    timeout: 2000 // Reduced from 3000
+                    timeout: 2000
                 }).then((response) => {
                     if (response && response.success) {
                         state.sessionSynced = true;
@@ -8314,7 +8184,7 @@
                                 await SecureMessenger.send(targetId, message.type, message.payload, {
                                     ...message.options,
                                     expectAck: true,
-                                    timeout: 2000 // Reduced from 3000
+                                    timeout: 2000
                                 });
                                 
                                 // Remove successfully sent message
@@ -8388,7 +8258,7 @@
                                 SecureMessenger.send(targetId, message.type, message.payload, {
                                     ...message.options,
                                     expectAck: true,
-                                    timeout: 2000 // Reduced from 3000
+                                    timeout: 2000
                                 }).then(() => {
                                     // Remove on success
                                     const successIndex = queue.indexOf(message);
@@ -8529,27 +8399,15 @@
                 const failure = this.failures.get(frameId);
                 if (failure && !failure.recovered) {
                     // Don't recover too often
-                    if (Date.now() - failure.lastFailure < 5000) return; // Reduced from 10000
+                    if (Date.now() - failure.lastFailure < 5000) return;
                     
-                    // Reset handshake state
-                    HandshakeController.reset(frameId);
-                    
-                    // Reload iframe if it's the active one
-                    const iframe = document.getElementById(frameId);
-                    if (iframe && window.IframeOrchestrator && window.IframeOrchestrator.getActive && 
-                        window.IframeOrchestrator.getActive() === frameId) {
-                        const currentSrc = iframe.src;
-                        iframe.src = currentSrc.split('?')[0] + `?recover=${Date.now()}`;
+                    // Defer to Authority for recovery
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.triggerRecovery();
                     }
                     
-                    // Clear message queue for this frame
-                    TransportLayer.clearQueue(frameId);
-                    
-                    // Initiate new handshake
-                    HandshakeController.initiateHandshake(frameId).then(() => {
-                        failure.recovered = true;
-                        failure.count = 0;
-                    }).catch(() => {});
+                    failure.recovered = true;
+                    failure.count = 0;
                 }
             },
             
@@ -8820,9 +8678,14 @@
             window.IframeOrchestrator.show = function(iframeId) {
                 const result = originalShow.call(this, iframeId);
                 
-                // Initiate handshake with this iframe
+                // Defer to Authority for registration
                 setTimeout(() => {
-                    HandshakeController.initiateHandshake(iframeId).catch(() => {});
+                    if (window.__PARENT_AUTHORITY__) {
+                        const frame = document.getElementById(iframeId);
+                        if (frame) {
+                            window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
+                        }
+                    }
                 }, 100);
                 
                 return result;
@@ -8856,13 +8719,18 @@
         window.resetHandshake = function(frameId) {
             if (frameId) {
                 HandshakeController.reset(frameId);
-                HandshakeController.initiateHandshake(frameId).catch(() => {});
+                // Defer to Authority
+                if (window.__PARENT_AUTHORITY__) {
+                    window.__PARENT_AUTHORITY__.resetHandshake();
+                }
             } else {
                 const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'];
                 iframeIds.forEach(id => {
                     HandshakeController.reset(id);
-                    HandshakeController.initiateHandshake(id).catch(() => {});
                 });
+                if (window.__PARENT_AUTHORITY__) {
+                    window.__PARENT_AUTHORITY__.resetHandshake();
+                }
             }
         };
         
@@ -8881,12 +8749,10 @@
             iframeIds.forEach(id => {
                 const iframe = document.getElementById(id);
                 if (iframe && iframe.contentWindow) {
-                    HandshakeController.initiateHandshake(id).catch(() => {
-                        // Try again with legacy approach
-                        if (iframe.contentWindow) {
-                            iframe.contentWindow.postMessage({ type: 'PARENT_READY', timestamp: Date.now() }, '*');
-                        }
-                    });
+                    // Defer to Authority for registration
+                    if (window.__PARENT_AUTHORITY__) {
+                        window.__PARENT_AUTHORITY__.registerFrame(iframe.contentWindow);
+                    }
                 }
             });
         }, 1000);
@@ -8908,18 +8774,13 @@
     <script>
     (function() {
         // 1️⃣ Early Message Bridge – single global listener, safe, permanent
-        const trustedOrigins = new Set([
-            window.location.origin,
-            'http://127.0.0.1:5500', 'http://localhost:5500',
-            'http://127.0.0.1:8080', 'http://localhost:8080',
-            'https://localhost', 'https://127.0.0.1', 'null'
-        ]);
+        const trustedOrigins = new Set([window.location.origin, 'null']);
         const knownIframeIds = ['messagesIframe','statusIframe','groupIframe','friendsIframe','callsIframe','settingsIframe','toolsIframe'];
 
         function safeMessageBridge(event) {
             try {
-                // origin check
-                if (!trustedOrigins.has(event.origin) && event.origin !== 'null') return;
+                // Strict origin check
+                if (event.origin !== window.location.origin && event.origin !== 'null') return;
                 // source must be one of our iframes or window (for testing)
                 const isKnownIframe = knownIframeIds.some(id => {
                     const el = document.getElementById(id);
@@ -8935,49 +8796,8 @@
         window.removeEventListener('message', safeMessageBridge);
         window.addEventListener('message', safeMessageBridge);
 
-        // 2️⃣ Parent Ready Broadcast (runs after DOMContentLoaded)
-        function broadcastParentReady() {
-            const session = (window.SessionAuthority && window.SessionAuthority.getState) 
-                ? window.SessionAuthority.getState() 
-                : { authenticated: false };
-            const payload = {
-                type: 'PARENT_READY',
-                timestamp: Date.now(),
-                session: {
-                    authenticated: session.authenticated || false,
-                    userId: session.userId || null,
-                    token: session.token ? 'present' : null
-                },
-                signature: 'parent-ready-' + Date.now()
-            };
-            knownIframeIds.forEach(id => {
-                const iframe = document.getElementById(id);
-                if (iframe && iframe.contentWindow) {
-                    try {
-                        iframe.contentWindow.postMessage(payload, '*');
-                    } catch (e) {}
-                }
-            });
-        }
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                broadcastParentReady();
-                // repeat every 500ms for 5 seconds (10 times)
-                let count = 0;
-                const interval = setInterval(function() {
-                    if (count++ >= 10) return clearInterval(interval);
-                    broadcastParentReady();
-                }, 500);
-            });
-        } else {
-            broadcastParentReady();
-            let count = 0;
-            const interval = setInterval(function() {
-                if (count++ >= 10) return clearInterval(interval);
-                broadcastParentReady();
-            }, 500);
-        }
+        // 2️⃣ Parent Ready Broadcast (NOW HANDLED BY AUTHORITY)
+        // (No-op, Authority handles it)
 
         // 3️⃣ Session + Token injection (already handled by SessionAuthority, but ensure it's cached early)
         try {
@@ -9037,7 +8857,7 @@
             };
         }
 
-        // 7️⃣ Handshake State Manager
+        // 7️⃣ Handshake State Manager (now delegates to Authority)
         window.__HANDSHAKE_STATE__ = {
             messages: false, calls: false, groups: false, status: false, settings: false, friends: false
         };

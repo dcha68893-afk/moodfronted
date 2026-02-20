@@ -1,14 +1,9 @@
 // calls-core.js
 // ==================== IFRAME CORE MODULE ====================
-// Version: 3.0.0
-// Purpose: Independent, resilient iframe micro-frontend for chat system
-// Security: XSS protected, input sanitized, CSP compliant
+// Version: 3.1.0 - STABILIZED RELEASE
+// Purpose: Passive iframe module with tolerant heartbeat and no independent handshake
+// Security: XSS protected, input sanitized, CSP compliant, origin validation enforced
 // License: Proprietary
-// UPDATES: v3.0.0 - Added IframeAuthority, StartupGovernor, IframeHandshakeAuthority,
-//                    IframeEnvironment, IframeTransport, IframeSessionClient,
-//                    SafeStorage, ReliabilityEngine, UIFailsafe, NavigationGuard,
-//                    RecoveryManager, CompatibilityBridge, DiagnosticsAgent,
-//                    OriginSecurity, MultiModuleCoordinator
 // ==================== EXPORT CONTRACT ====================
 
 (function() {
@@ -368,9 +363,8 @@
 
     const CONFIG = {
         // Core
-        VERSION: '3.0.0',
-        PROTOCOL_VERSION: 'KYN-3.0',
-        
+        VERSION: '3.1.0',
+        PROTOCOL_VERSION: 'KYN-3.1',
         
         // Timeouts
         HANDSHAKE_TIMEOUT: ENV_TIMEOUTS.handshake,
@@ -419,7 +413,9 @@
         ],
         TRUSTED_PROTOCOLS: ['http:', 'https:'],
         
-        // Heartbeat
+        // Heartbeat - TOLERANT CONFIGURATION
+        HEARTBEAT_MAX_FAILURES: 3,
+        HEARTBEAT_INTERVAL_MS: 15000,
         HEARTBEAT_MISSED_THRESHOLD: 3
     };
 
@@ -466,6 +462,71 @@
         ERROR: 'ERROR',
         RECOVERING: 'RECOVERING'
     };
+
+    // ==================== HEARTBEAT CONFIGURATION - TOLERANT VERSION ====================
+    const HEARTBEAT_CONFIG = {
+        failures: 0,
+        maxFailures: CONFIG.HEARTBEAT_MAX_FAILURES || 3,
+        interval: CONFIG.HEARTBEAT_INTERVAL_MS || 15000,
+        lastBeat: 0,
+        timer: null,
+        enabled: true
+    };
+
+    function handleHeartbeatFailure() {
+        HEARTBEAT_CONFIG.failures++;
+
+        if (HEARTBEAT_CONFIG.failures < HEARTBEAT_CONFIG.maxFailures) {
+            if (DEBUG) {
+                logOnce('warn', `[Calls] Heartbeat missed but tolerated: ${HEARTBEAT_CONFIG.failures}/${HEARTBEAT_CONFIG.maxFailures}`);
+            }
+            return;
+        }
+
+        if (DEBUG) {
+            logOnce('warn', `[Calls] Heartbeat threshold exceeded, attempting soft recovery.`);
+        }
+        attemptSoftRecovery();
+    }
+
+    function resetHeartbeat() {
+        HEARTBEAT_CONFIG.failures = 0;
+        if (DEBUG) {
+            logOnce('info', '[Calls] Heartbeat reset');
+        }
+    }
+
+    function attemptSoftRecovery() {
+        // Do NOT reset handshake
+        // Do NOT clear call state
+        // Do NOT notify other modules
+        // Do NOT trigger global recovery
+
+        if (DEBUG) {
+            logOnce('info', "[Calls] Soft recovery triggered.");
+        }
+
+        // Re-request active users - silently
+        fetchActiveCallUsers().catch(() => {});
+
+        // Reset heartbeat counter
+        HEARTBEAT_CONFIG.failures = 0;
+    }
+
+    async function fetchActiveCallUsers() {
+        try {
+            // If we have an API client, fetch active users
+            if (window.callAPI && typeof window.callAPI.getActiveUsers === 'function') {
+                const users = await window.callAPI.getActiveUsers();
+                if (window.renderUsers && typeof window.renderUsers === 'function') {
+                    window.renderUsers(users);
+                }
+            }
+            resetHeartbeat();
+        } catch (error) {
+            handleHeartbeatFailure();
+        }
+    }
 
     // ==================== MESSAGE TYPES ====================
     const MESSAGE_TYPES = {
@@ -554,7 +615,11 @@
         USER_LOGGED_IN: 'USER_LOGGED_IN',
         
         // Incoming call
-        INCOMING_CALL_SIMULATED: 'INCOMING_CALL_SIMULATED'
+        INCOMING_CALL_SIMULATED: 'INCOMING_CALL_SIMULATED',
+        
+        // Registration - NEW
+        IFRAME_REGISTERED: 'IFRAME_REGISTERED',
+        CALLS_STATUS_WARNING: 'CALLS_STATUS_WARNING'
     };
 
     // ==================== ORIGIN SECURITY ====================
@@ -673,6 +738,7 @@
         validateEvent: function(event) {
             if (!event || !event.origin) return false;
             
+            // SECURITY: Validate origin strictly
             const trusted = this.isTrusted(event.origin);
             
             if (!trusted && DEBUG) {
@@ -911,7 +977,7 @@
         _heartbeatInterval: null,
         _lastHeartbeat: 0,
         _heartbeatMissed: 0,
-        _maxMissedHeartbeats: CONFIG.HEARTBEAT_MISSED_THRESHOLD,
+        _maxMissedHeartbeats: CONFIG.HEARTBEAT_MAX_FAILURES || 3,
         
         initialize: function() {
             this._setupListeners();
@@ -962,7 +1028,7 @@
                     const priority = options.priority || 'normal';
                     
                     const message = {
-                    protocol: CONFIG.PROTOCOL_VERSION,
+                        protocol: CONFIG.PROTOCOL_VERSION,
                         messageId,
                         type,
                         source: 'iframe',
@@ -1079,7 +1145,7 @@
                     this._messageCache.add(cacheKey);
                     setTimeout(() => this._messageCache.delete(cacheKey), CONFIG.MESSAGE_CACHE_TTL);
                     
-                    // Send message
+                    // Send message with secure origin
                     window.parent.postMessage(item.message, this._targetOrigin);
                     
                     if (DEBUG) {
@@ -1115,10 +1181,17 @@
         },
         
         handleIncoming: function(event) {
+            // SECURITY: Strict origin validation
+            if (!OriginSecurity.validateEvent(event)) {
+                if (DEBUG) {
+                    logOnce('warn', 'Message rejected - invalid origin', { origin: event.origin });
+                }
+                return;
+            }
+            
             const message = event.data;
             
             if (!message || typeof message !== 'object') return;
-            if (!OriginSecurity.validateEvent(event)) return;
             
             // Check for ACK
             if (message.type === MESSAGE_TYPES.ACK) {
@@ -1139,6 +1212,7 @@
                 message.type === MESSAGE_TYPES.PONG) {
                 this._lastHeartbeat = Date.now();
                 this._heartbeatMissed = 0;
+                resetHeartbeat();
             }
             
             // Notify listeners
@@ -1170,12 +1244,15 @@
                     this.send(MESSAGE_TYPES.HEARTBEAT, { timestamp: Date.now() }, { requireAck: false })
                         .catch(() => {});
                     
-                    // Check if we missed heartbeats
+                    // TOLERANT: Check if we missed heartbeats but don't degrade immediately
                     if (Date.now() - this._lastHeartbeat > interval * 2) {
                         this._heartbeatMissed++;
+                        handleHeartbeatFailure();
                         
                         if (this._heartbeatMissed >= this._maxMissedHeartbeats) {
-                            logOnce('warn', 'Missed heartbeats, connection may be lost');
+                            if (DEBUG) {
+                                logOnce('warn', 'Missed heartbeats, connection may be lost');
+                            }
                             this._notifyListeners('connection_suspect', { missed: this._heartbeatMissed });
                         }
                     }
@@ -1238,6 +1315,46 @@
 
     // Initialize transport
     IframeTransport.initialize();
+
+    // ==================== PASSIVE REGISTRATION (NO INDEPENDENT HANDSHAKE) ====================
+    let lastRegisterSent = 0;
+    let isRegistered = false;
+
+    function registerWithParent() {
+        const now = Date.now();
+        // Throttle registration to once every 3 seconds
+        if (now - lastRegisterSent < 3000) return;
+        lastRegisterSent = now;
+        
+        if (isRegistered && DEBUG) {
+            logOnce('info', 'Already registered with parent');
+            return;
+        }
+        
+        if (DEBUG) {
+            logOnce('info', 'Registering with parent');
+        }
+        
+        try {
+            window.parent.postMessage({
+                type: MESSAGE_TYPES.IFRAME_REGISTERED,
+                module: "calls",
+                version: CONFIG.VERSION,
+                protocol: CONFIG.PROTOCOL_VERSION,
+                timestamp: now
+            }, OriginSecurity.getTargetOrigin());
+            
+            isRegistered = true;
+        } catch (error) {
+            if (DEBUG) {
+                logOnce('error', 'Failed to register with parent', error);
+            }
+        }
+    }
+
+    function safeRegister() {
+        registerWithParent();
+    }
 
     // ==================== STARTUP GOVERNOR ====================
     const StartupGovernor = {
@@ -1425,7 +1542,7 @@
     // Initialize startup governor
     StartupGovernor.initialize();
 
-    // ==================== IFRAME HANDSHAKE AUTHORITY ====================
+    // ==================== IFRAME HANDSHAKE AUTHORITY - PASSIVE VERSION ====================
     const IframeHandshakeAuthority = {
         _state: STATE.HANDSHAKE_IDLE,
         _attempts: 0,
@@ -1455,6 +1572,7 @@
         
         _setupListeners: function() {
             const handler = (event) => {
+                // SECURITY: Strict origin validation
                 if (!OriginSecurity.validateEvent(event)) return;
                 
                 const message = event.data;
@@ -1481,173 +1599,51 @@
             this._listeners.add({ type: 'message', handler });
         },
         
+        // Passive - does not initiate handshake, only responds
+        respondToHandshake: function(message, event) {
+            if (!OriginSecurity.validateEvent(event)) return;
+            
+            if (message.type === MESSAGE_TYPES.HANDSHAKE_REQUEST) {
+                // Send CHILD_READY only in response to request
+                this._sendChildReady();
+                
+                // Send HANDSHAKE_RESPONSE if needed
+                const response = {
+                    type: MESSAGE_TYPES.HANDSHAKE_RESPONSE,
+                    payload: {
+                        ready: true,
+                        version: CONFIG.VERSION,
+                        protocol: CONFIG.PROTOCOL_VERSION,
+                        environment: IframeEnvironment.detect(),
+                        timestamp: Date.now()
+                    },
+                    messageId: message.messageId
+                };
+                
+                try {
+                    window.parent.postMessage(response, OriginSecurity.getTargetOrigin());
+                } catch (e) {
+                    // Ignore
+                }
+            }
+        },
+        
+        // start method kept for compatibility but does nothing now
         start: async function(options = {}) {
-            // Prevent multiple starts
-            if (this._lock) {
-                return { success: false, reason: 'already_in_progress' };
+            if (DEBUG) {
+                logOnce('info', 'Handshake start called but ignored - passive mode');
             }
-            
-            if (this._handshakeDone) {
-                return { success: true, reason: 'already_complete' };
-            }
-            
-            if (!StartupGovernor.acquireLock()) {
-                return { success: false, reason: 'startup_lock_failed' };
-            }
-            
-            this._lock = true;
-            this._state = STATE.HANDSHAKE_IN_PROGRESS;
-            StartupGovernor.transitionHandshake(STATE.HANDSHAKE_IN_PROGRESS);
-            
-            try {
-                const result = await this._performHandshake(options);
-                
-                if (result.success) {
-                    this._state = STATE.HANDSHAKE_COMPLETE;
-                    StartupGovernor.transitionHandshake(STATE.HANDSHAKE_COMPLETE);
-                    StartupGovernor.transition(STATE.READY);
-                    StartupGovernor.resetAttempts();
-                } else {
-                    this._state = STATE.HANDSHAKE_FAILED;
-                    StartupGovernor.transitionHandshake(STATE.HANDSHAKE_FAILED);
-                }
-                
-                return result;
-                
-            } catch (error) {
-                this._state = STATE.HANDSHAKE_FAILED;
-                StartupGovernor.transitionHandshake(STATE.HANDSHAKE_FAILED);
-                
-                logOnce('error', 'Handshake failed', error);
-                return { success: false, reason: error.message };
-                
-            } finally {
-                this._lock = false;
-                StartupGovernor.releaseLock();
-            }
-        },
-        
-        _performHandshake: async function(options) {
-            const timeout = options.timeout || this._timeout;
-            const maxAttempts = options.maxAttempts || this._maxAttempts;
-            
-            // Wait for parent ready (if not already received)
-            if (!this._parentReady) {
-                const parentReady = await this._waitForParentReady(timeout);
-                if (!parentReady) {
-                    return { success: false, reason: 'parent_ready_timeout' };
-                }
-            }
-            
-            // Send child ready
-            this._sendChildReady();
-            
-            // Wait for handshake ACK
-            const handshakeAck = await this._waitForHandshakeAck(timeout);
-            
-            if (handshakeAck) {
-                return { success: true };
-            }
-            
-            // Try with retries
-            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                this._attempts = attempt;
-                
-                const ack = await this._sendHandshakeRequest(attempt, timeout);
-                
-                if (ack) {
-                    return { success: true, attempts: attempt };
-                }
-                
-                let delay = StartupGovernor.getBackoffDelay();
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-            
-            return { success: false, reason: 'max_attempts_exceeded' };
-        },
-        
-        _waitForParentReady: function(timeout) {
-            return new Promise((resolve) => {
-                if (this._parentReady) {
-                    resolve(true);
-                    return;
-                }
-                
-                const timer = setTimeout(() => {
-                    window.removeEventListener('message', handler);
-                    resolve(false);
-                }, timeout);
-                
-                const handler = (event) => {
-                    if (!OriginSecurity.validateEvent(event)) return;
-                    
-                    const message = event.data;
-                    if (message && message.type === MESSAGE_TYPES.PARENT_READY) {
-                        clearTimeout(timer);
-                        window.removeEventListener('message', handler);
-                        this._parentReady = true;
-                        resolve(true);
-                    }
-                };
-                
-                window.addEventListener('message', handler);
-            });
-        },
-        
-        _waitForHandshakeAck: function(timeout) {
-            return new Promise((resolve) => {
-                if (this._handshakeDone) {
-                    resolve(true);
-                    return;
-                }
-                
-                const timer = setTimeout(() => {
-                    window.removeEventListener('message', handler);
-                    resolve(false);
-                }, timeout);
-                
-                const handler = (event) => {
-                    if (!OriginSecurity.validateEvent(event)) return;
-                    
-                    const message = event.data;
-                    if (message && (message.type === MESSAGE_TYPES.HANDSHAKE_ACK || 
-                                   message.type === MESSAGE_TYPES.ACK)) {
-                        clearTimeout(timer);
-                        window.removeEventListener('message', handler);
-                        this._handshakeDone = true;
-                        resolve(true);
-                    }
-                };
-                
-                window.addEventListener('message', handler);
-            });
+            return { success: true, passive: true };
         },
         
         _sendChildReady: function() {
             IframeTransport.send(MESSAGE_TYPES.CHILD_READY, {
                 ready: true,
                 version: CONFIG.VERSION,
-            protocol: CONFIG.PROTOCOL_VERSION,
+                protocol: CONFIG.PROTOCOL_VERSION,
                 environment: IframeEnvironment.detect(),
                 timestamp: Date.now()
             }, { requireAck: false, priority: 'high' }).catch(() => {});
-        },
-        
-        _sendHandshakeRequest: function(attempt, timeout) {
-            return new Promise((resolve) => {
-                const messageId = IframeTransport._generateMessageId();
-                
-                IframeTransport.send(MESSAGE_TYPES.HANDSHAKE_REQUEST, {
-                    attempt,
-                    frameId: window.name || IframeEnvironment.detect(),
-                protocol: CONFIG.PROTOCOL_VERSION,
-                    timestamp: Date.now()
-                }, { messageId, requireAck: true, timeout }).then(() => {
-                    resolve(true);
-                }).catch(() => {
-                    resolve(false);
-                });
-            });
         },
         
         reset: function() {
@@ -1737,6 +1733,7 @@
         
         _setupListeners: function() {
             const handler = (event) => {
+                // SECURITY: Strict origin validation
                 if (!OriginSecurity.validateEvent(event)) return;
                 
                 const message = event.data;
@@ -2302,7 +2299,7 @@
     // Initialize reliability engine
     ReliabilityEngine.initialize();
 
-    // ==================== RECOVERY MANAGER ====================
+    // ==================== RECOVERY MANAGER - SOFT RECOVERY ONLY ====================
     const RecoveryManager = {
         _recoveryInProgress: false,
         _recoveryAttempts: 0,
@@ -2380,6 +2377,7 @@
             }
         },
         
+        // Soft recovery - does NOT trigger global recovery
         recover: async function() {
             if (this._recoveryInProgress) {
                 return { success: false, reason: 'in_progress' };
@@ -2388,7 +2386,7 @@
             this._recoveryInProgress = true;
             this._recoveryAttempts++;
             
-            logOnce('info', `Starting recovery (attempt ${this._recoveryAttempts})`);
+            logOnce('info', `Starting soft recovery (attempt ${this._recoveryAttempts})`);
             this._notifyListeners('start', { attempt: this._recoveryAttempts });
             
             StartupGovernor.transition(STATE.RECOVERING);
@@ -2406,44 +2404,36 @@
                     this._recoveryInProgress = false;
                     StartupGovernor.transition(STATE.DEGRADED);
                     this._notifyListeners('failed', { reason: 'no_parent' });
+                    
+                    // Send warning instead of recovery request
+                    this._sendStatusWarning('no_parent');
+                    
                     return { success: false, reason: 'no_parent' };
                 }
                 
-                // Step 3: Attempt handshake
-                IframeHandshakeAuthority.reset();
-                const handshakeResult = await IframeHandshakeAuthority.start();
-                
-                if (!handshakeResult.success) {
-                    throw new Error(`Handshake failed: ${handshakeResult.reason}`);
-                }
-                
-                // Step 4: Sync session
-                IframeSessionClient.requestSync();
-                
-                // Wait for session with timeout
-                const sessionReceived = await this._waitForSession(5000);
-                
-                if (!sessionReceived) {
-                    logOnce('warn', 'Recovery: No session received');
-                }
+                // Step 3: Re-request active users only
+                await fetchActiveCallUsers();
                 
                 this._recoveryAttempts = 0;
                 this._recoveryInProgress = false;
                 StartupGovernor.transition(STATE.ACTIVE);
                 
-                logOnce('info', 'Recovery successful');
+                logOnce('info', 'Soft recovery successful');
                 this._notifyListeners('success', {});
                 
                 return { success: true };
                 
             } catch (error) {
-                logOnce('error', 'Recovery failed', error);
+                logOnce('error', 'Soft recovery failed', error);
                 
                 this._recoveryInProgress = false;
                 StartupGovernor.transition(STATE.DEGRADED);
                 this._notifyListeners('failed', { error: error.message });
                 
-                // Retry with backoff
+                // Send warning instead of recovery request
+                this._sendStatusWarning('recovery_failed');
+                
+                // Retry with backoff only if within limits
                 if (this._recoveryAttempts < this._maxRecoveryAttempts) {
                     let delay = this._recoveryBackoff * Math.pow(2, this._recoveryAttempts - 1);
                     
@@ -2451,7 +2441,7 @@
                         delay *= 1.5;
                     }
                     
-                    logOnce('info', `Recovery retrying in ${delay}ms`);
+                    logOnce('info', `Soft recovery retrying in ${delay}ms`);
                     
                     this._recoveryTimer = setTimeout(() => {
                         this.recover();
@@ -2459,6 +2449,19 @@
                 }
                 
                 return { success: false, reason: error.message };
+            }
+        },
+        
+        _sendStatusWarning: function(reason) {
+            try {
+                window.parent.postMessage({
+                    type: MESSAGE_TYPES.CALLS_STATUS_WARNING,
+                    severity: "soft",
+                    reason: reason,
+                    timestamp: Date.now()
+                }, OriginSecurity.getTargetOrigin());
+            } catch (e) {
+                // Ignore
             }
         },
         
@@ -2651,7 +2654,7 @@
             }
             
             const canonical = {
-            protocol: CONFIG.PROTOCOL_VERSION,
+                protocol: CONFIG.PROTOCOL_VERSION,
                 messageId: rawMessage.id || rawMessage.messageId || this._generateId(),
                 type: rawMessage.type,
                 source: rawMessage.source || 'parent',
@@ -3937,7 +3940,8 @@
                     _PARENT_READY_ = true;
                     
                     if (this._state === 'idle' || this._state === 'waiting') {
-                        this.start();
+                        // Do NOT auto-start - just update state
+                        this._state = 'ready';
                     }
                 }
             };
@@ -3964,100 +3968,14 @@
             // Don't start if already complete
             if (_HANDSHAKE_DONE_ || this._state === 'complete') {
                 this._notify('already_complete');
-                return { success: true, state: this._state };
+                return { success: true, state: this._state, passive: true };
             }
             
-            // Don't start if already in progress
-            if (this._state === 'in_progress') {
-                this._notify('already_in_progress');
-                return { success: false, state: this._state };
+            if (DEBUG) {
+                logger.once('Handshake start called but ignored - passive mode');
             }
             
-            // Acquire startup lock
-            if (!StartupGovernor.acquireLock()) {
-                this._notify('lock_failed');
-                return { success: false, reason: 'startup_lock' };
-            }
-            
-            this._state = 'in_progress';
-            this._attempts++;
-            
-            this._notify('start', { attempt: this._attempts });
-            
-            try {
-                // Step 1: Send CHILD_READY if not already sent
-                this.sendChildReady();
-                
-                // Step 2: Wait for PARENT_READY (with timeout)
-                const parentReady = await this.waitForParentReady();
-                if (!parentReady) {
-                    this._state = 'timeout';
-                    StartupGovernor.releaseLock();
-                    this._notify('parent_ready_timeout');
-                    
-                    // Retry if allowed
-                    if (StartupGovernor.shouldRetry()) {
-                        const delay = StartupGovernor.getBackoffDelay();
-                        setTimeout(() => this.start(), delay);
-                    }
-                    
-                    return { success: false, reason: 'parent_ready_timeout' };
-                }
-                
-                // Step 3: Send HANDSHAKE_REQUEST
-                const handshakeAck = await this.sendHandshakeRequest();
-                if (!handshakeAck) {
-                    this._state = 'timeout';
-                    StartupGovernor.releaseLock();
-                    this._notify('handshake_ack_timeout');
-                    
-                    if (StartupGovernor.shouldRetry()) {
-                        const delay = StartupGovernor.getBackoffDelay();
-                        setTimeout(() => this.start(), delay);
-                    }
-                    
-                    return { success: false, reason: 'handshake_ack_timeout' };
-                }
-                
-                // Step 4: Request session
-                const sessionResult = await this.requestSession();
-                
-                if (sessionResult.success) {
-                    this._state = 'complete';
-                    _HANDSHAKE_DONE_ = true;
-                    StartupGovernor.transition(STATE.READY);
-                    StartupGovernor.resetAttempts();
-                    StartupGovernor.releaseLock();
-                    
-                    this._notify('complete', sessionResult);
-                    
-                    return { success: true };
-                } else {
-                    this._state = 'session_failed';
-                    StartupGovernor.releaseLock();
-                    this._notify('session_failed', sessionResult);
-                    
-                    if (StartupGovernor.shouldRetry()) {
-                        const delay = StartupGovernor.getBackoffDelay();
-                        setTimeout(() => this.start(), delay);
-                    }
-                    
-                    return { success: false, reason: 'session_failed' };
-                }
-                
-            } catch (error) {
-                logger.error('Handshake failed', error);
-                this._state = 'error';
-                StartupGovernor.releaseLock();
-                this._notify('error', error);
-                
-                if (StartupGovernor.shouldRetry()) {
-                    const delay = StartupGovernor.getBackoffDelay();
-                    setTimeout(() => this.start(), delay);
-                }
-                
-                return { success: false, reason: error.message };
-            }
+            return { success: true, state: this._state, passive: true };
         },
         
         sendChildReady: function() {
@@ -4109,7 +4027,7 @@
                 const message = MessageBridge.createMessage(MESSAGE_TYPES.HANDSHAKE_REQUEST, {
                     attempt: this._attempts,
                     frameId: iframeId,
-                    protocol: PROTOCOL_VERSION
+                    protocol: CONFIG.PROTOCOL_VERSION
                 }, { legacy: true, messageId });
                 
                 const timeout = setTimeout(() => {
@@ -4775,6 +4693,7 @@
                 message.type === MESSAGE_TYPES.PONG) {
                 this._lastHeartbeat = Date.now();
                 this._heartbeatMissed = 0;
+                resetHeartbeat();
             }
             
             // Notify listeners
@@ -4818,9 +4737,10 @@
                         payload: { timestamp: Date.now() }
                     }, { requireAck: false });
                     
-                    // Check if we missed heartbeats
+                    // TOLERANT: Check if we missed heartbeats
                     if (Date.now() - this._lastHeartbeat > interval * 2) {
                         this._heartbeatMissed++;
+                        handleHeartbeatFailure();
                         
                         if (this._heartbeatMissed >= this._maxMissedHeartbeats) {
                             logger.warn('TransportAgent: Missed heartbeats, connection may be lost');
@@ -5240,10 +5160,7 @@
             return { success: true };
         }
         
-        const message = MessageBridge.createMessage('HANDSHAKE_REQUEST', {
-            timestamp: Date.now()
-        });
-        window.parent.postMessage(message, OriginAdapter.getTargetOrigin());
+        // Don't automatically send HANDSHAKE_REQUEST - wait for parent
         
         try {
             const result = await Promise.race([
@@ -5317,17 +5234,9 @@ async function safeInit() {
         
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                // Try to get session from parent first
+                // Try to get session from parent first (but don't send request unless parent sends first)
                 if (window.parent && window.parent !== window) {
-                    const requestMessage = MessageBridge.createMessage('REQUEST_SESSION', {
-                        iframeId: iframeId,
-                        attempt: attempt,
-                        timestamp: Date.now()
-                    }, { legacy: true });
-                    
-                    window.parent.postMessage(requestMessage, OriginAdapter.getTargetOrigin());
-                    
-                    // Wait for response with timeout
+                    // Wait for parent to send session - don't proactively request
                     session = await Promise.race([
                         waitForSession(CONFIG.MAX_SESSION_WAIT || 8000),
                         new Promise(resolve => setTimeout(() => resolve(null), 5000))
@@ -6165,8 +6074,22 @@ async function safeInit() {
 
     // ==================== ORIGINAL PARENT MESSAGE HANDLER ====================
     window.addEventListener('message', (e) => {
+        // SECURITY: Strict origin validation
+        if (!OriginSecurity.validateEvent(e)) {
+            if (DEBUG) {
+                logger.warn('Message rejected - invalid origin', { origin: e.origin });
+            }
+            return;
+        }
+        
+        if (!OriginAdapter.validateEvent(e)) {
+            if (DEBUG) {
+                logger.warn('Message rejected - invalid origin (adapter)', { origin: e.origin });
+            }
+            return;
+        }
+        
         if (!e || !e.data) return;
-        if (!OriginAdapter.validateEvent(e)) return;
         
         const adaptedMessage = CompatibilityBridge.adaptIncoming(e.data);
         
@@ -6466,12 +6389,7 @@ async function safeInit() {
                 
                 this.establishMessagingChannel();
                 
-                const handshakeResult = await this.startSecureHandshake().catch(() => {
-                    logger.warn('Secure handshake failed, using fallback');
-                    this.fallbackMode = true;
-                    return { success: false, fallback: true };
-                });
-                
+                // Don't start secure handshake automatically - wait for parent
                 this.startHeartbeat();
                 this.setupResynchronization();
                 
@@ -6524,6 +6442,14 @@ async function safeInit() {
         }
         
         handleParentMessage(event) {
+            // SECURITY: Strict origin validation
+            if (!OriginSecurity.validateEvent(event)) {
+                if (DEBUG) {
+                    logger.warn('Message rejected - invalid origin', { origin: event.origin });
+                }
+                return;
+            }
+            
             if (!OriginAdapter.validateEvent(event)) return;
             
             const data = CompatibilityBridge.adaptIncoming(event.data);
@@ -6562,7 +6488,6 @@ async function safeInit() {
             
             if (this.fallbackMode) {
                 logger.info('Fallback mode active, skipping secure handshake');
-                this.initiateHandshake();
                 return { success: false, fallback: true };
             }
             
@@ -6570,7 +6495,6 @@ async function safeInit() {
             if (!canRetry(retryKey, maxHandshakeAttempts)) {
                 logger.warn('Max handshake attempts reached, enabling fallback');
                 this.fallbackMode = true;
-                this.initiateHandshake();
                 return { success: false, fallback: true };
             }
             
@@ -6671,11 +6595,6 @@ async function safeInit() {
             secureHandshakeInProgress = false;
             this.secureHandshakeRequested = false;
             this.fallbackMode = true;
-            
-            if (!this.handshakeComplete) {
-                logger.info('Falling back to legacy handshake protocol...');
-                this.initiateHandshake();
-            }
         }
         
         handleSecureSessionData(sessionData) {
@@ -6761,7 +6680,7 @@ async function safeInit() {
                 return;
             }
             
-            await this.requestSessionWithBackoff();
+            // Don't auto-request session - wait for parent
         }
         
         async requestSessionWithBackoff() {
@@ -7438,6 +7357,7 @@ async function safeInit() {
         
         handleHeartbeatResponse() {
             this.lastHeartbeat = Date.now();
+            resetHeartbeat();
         }
         
         handleChildReadyAck() {
@@ -7470,7 +7390,7 @@ async function safeInit() {
         checkParentConnection() {
             if (!this.handshakeComplete && this.parentDetected && !this.fallbackMode) {
                 logger.info('Checking parent connection...');
-                this.startSecureHandshake();
+                // Don't auto-start handshake
             }
         }
         
@@ -7765,25 +7685,17 @@ async function safeInit() {
             }
             
             if (parentCoordinator.parentDetected && !parentCoordinator.fallbackMode) {
-                for (let attempt = 1; attempt <= 3; attempt++) {
-                    try {
-                        await parentCoordinator.startSecureHandshake();
-                        if (_HANDSHAKE_DONE_) break;
-                        
-                        logger.info(`Handshake attempt ${attempt} waiting for response...`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                    } catch (e) {
-                        logger.warn(`Handshake attempt ${attempt} failed`, e);
-                    }
+                // Don't automatically start handshake - wait for parent
+                logger.info('Waiting for parent handshake...');
+                
+                // Just set parent ready if not already
+                if (_PARENT_READY_) {
+                    logger.info('Parent already ready');
                 }
             } else {
                 logger.info('Skipping handshake - fallback mode active');
                 _PARENT_READY_ = true;
                 _HANDSHAKE_DONE_ = true;
-            }
-            
-            if (!_PARENT_READY_ && parentCoordinator.parentDetected) {
-                notifyParentReady();
             }
             
             return {
@@ -10360,974 +10272,205 @@ async function safeInit() {
 
     function cacheElements() {
         try {
-            elements.appContainer = document.getElementById('appContainer');
-            elements.syncIndicator = document.getElementById('syncIndicator');
-            elements.apiStatusIndicator = document.getElementById('apiStatusIndicator');
-            elements.apiStatusText = document.getElementById('apiStatusText');
-            elements.newCallBtn = document.getElementById('newCallBtn');
-            elements.quickVoiceBtn = document.getElementById('quickVoiceBtn');
-            elements.quickVideoBtn = document.getElementById('quickVideoBtn');
-            elements.quickGroupBtn = document.getElementById('quickGroupBtn');
-            elements.contactsList = document.getElementById('contactsList');
-            elements.contactsLoading = document.getElementById('contactsLoading');
-            elements.callsLoading = document.getElementById('callsLoading');
-            elements.offlineBanner = document.getElementById('offlineBanner');
-            elements.settingsToggle = document.getElementById('settingsToggle');
-            elements.settingsPanel = document.getElementById('settingsPanel');
-            elements.callContainer = document.getElementById('callContainer');
-            elements.callDuration = document.getElementById('callDuration');
-            elements.callMoodIndicator = document.getElementById('callMoodIndicator');
-            elements.callIntentionIndicator = document.getElementById('callIntentionIndicator');
-            elements.videoGrid = document.getElementById('videoGrid');
-            elements.notificationArea = document.getElementById('notificationArea');
-            elements.muteBtn = document.getElementById('muteBtn');
-            elements.videoBtn = document.getElementById('videoBtn');
-            elements.screenShareBtn = document.getElementById('screenShareBtn');
-            elements.endCallBtn = document.getElementById('endCallBtn');
-            elements.menuDotsBtn = document.getElementById('menuDotsBtn');
-            elements.menuDotsDropdown = document.getElementById('menuDotsDropdown');
-            elements.menuParticipants = document.getElementById('menuParticipants');
-            elements.menuChat = document.getElementById('menuChat');
-            elements.menuWhiteboard = document.getElementById('menuWhiteboard');
-            elements.menuNotes = document.getElementById('menuNotes');
-            elements.menuPolls = document.getElementById('menuPolls');
-            elements.menuRelationship = document.getElementById('menuRelationship');
-            elements.declineCallBtn = document.getElementById('declineCallBtn');
-            elements.acceptCallBtn = document.getElementById('acceptCallBtn');
-            elements.acceptVideoCallBtn = document.getElementById('acceptVideoCallBtn');
-            elements.newCallModal = document.getElementById('newCallModal');
-            elements.closeNewCallModal = document.getElementById('closeNewCallModal');
-            elements.contactSearch = document.getElementById('contactSearch');
-            elements.groupContactSearch = document.getElementById('groupContactSearch');
-            elements.startVoiceCallBtn = document.getElementById('startVoiceCallBtn');
-            elements.startVideoCallBtn = document.getElementById('startVideoCallBtn');
-            elements.startGroupCallBtn = document.getElementById('startGroupCallBtn');
-            elements.instantGroupOption = document.getElementById('instantGroupOption');
-            elements.scheduledGroupOption = document.getElementById('scheduledGroupOption');
-            elements.copyLinkBtn = document.getElementById('copyLinkBtn');
-            elements.shareLinkBtn = document.getElementById('shareLinkBtn');
-            elements.generateVoiceLinkBtn = document.getElementById('generateVoiceLinkBtn');
-            elements.generateVideoLinkBtn = document.getElementById('generateVideoLinkBtn');
-            elements.callLinkInput = document.getElementById('callLinkInput');
-            elements.mpesaOption = document.getElementById('mpesaOption');
-            elements.cancelPaymentBtn = document.getElementById('cancelPaymentBtn');
-            elements.processPaymentBtn = document.getElementById('processPaymentBtn');
-            elements.cancelUpgradeBtn = document.getElementById('cancelUpgradeBtn');
-            elements.upgradeNowBtn = document.getElementById('upgradeNowBtn');
-            elements.paymentModal = document.getElementById('paymentModal');
-            elements.premiumLimitOverlay = document.getElementById('premiumLimitOverlay');
-            elements.phoneNumber = document.getElementById('phoneNumber');
-            elements.paymentAmount = document.getElementById('paymentAmount');
-            elements.cancelMoodBtn = document.getElementById('cancelMoodBtn');
-            elements.setMoodBtn = document.getElementById('setMoodBtn');
-            elements.cancelIntentionBtn = document.getElementById('cancelIntentionBtn');
-            elements.setIntentionBtn = document.getElementById('setIntentionBtn');
-            elements.moodSelectionModal = document.getElementById('moodSelectionModal');
-            elements.intentionSelectionModal = document.getElementById('intentionSelectionModal');
-            elements.skipNotesBtn = document.getElementById('skipNotesBtn');
-            elements.saveNotesBtn = document.getElementById('saveNotesBtn');
-            elements.summaryDoneBtn = document.getElementById('summaryDoneBtn');
-            elements.privateNotesModal = document.getElementById('privateNotesModal');
-            elements.privateNotesTitle = document.getElementById('privateNotesTitle');
-            elements.privateNotesSubtitle = document.getElementById('privateNotesSubtitle');
-            elements.privateNotesTextarea = document.getElementById('privateNotesTextarea');
-            elements.callSummaryModal = document.getElementById('callSummaryModal');
-            elements.summaryDuration = document.getElementById('summaryDuration');
-            elements.summaryTime = document.getElementById('summaryTime');
-            elements.summaryType = document.getElementById('summaryType');
-            elements.summaryMood = document.getElementById('summaryMood');
-            elements.summaryIntention = document.getElementById('summaryIntention');
-            elements.summaryParticipants = document.getElementById('summaryParticipants');
-            elements.urlParamCancelBtn = document.getElementById('urlParamCancelBtn');
-            elements.urlParamJoinBtn = document.getElementById('urlParamJoinBtn');
-            elements.urlParamOverlay = document.getElementById('urlParamOverlay');
-            elements.resetSettingsBtn = document.getElementById('resetSettingsBtn');
-            elements.emotionalContextToggle = document.getElementById('emotionalContextToggle');
-            elements.callIntentionToggle = document.getElementById('callIntentionToggle');
-            elements.inCallChatToggle = document.getElementById('inCallChatToggle');
-            elements.whiteboardToggle = document.getElementById('whiteboardToggle');
-            elements.pollsToggle = document.getElementById('pollsToggle');
-            elements.notesToggle = document.getElementById('notesToggle');
-            elements.focusModeToggle = document.getElementById('focusModeToggle');
-            elements.liveReactionsToggle = document.getElementById('liveReactionsToggle');
-            elements.speakerBtn = document.getElementById('speakerBtn');
-            elements.moodBtn = document.getElementById('moodBtn');
-            elements.intentionBtn = document.getElementById('intentionBtn');
-            elements.focusModeBtn = document.getElementById('focusModeBtn');
-            elements.reactionsContainer = document.getElementById('reactionsContainer');
-            elements.pipCloseBtn = document.getElementById('pipCloseBtn');
-            elements.pipContainer = document.getElementById('pipContainer');
-            elements.sidebar = document.getElementById('sidebar');
-            elements.callWithName = document.getElementById('callWithName');
-            elements.callStatusText = document.getElementById('callStatusText');
-            elements.callTypeIcon = document.getElementById('callTypeIcon');
-            elements.offlineCallPlaceholder = document.getElementById('offlineCallPlaceholder');
-            elements.allCallsSection = document.getElementById('allCallsSection');
-            elements.missedCallsSection = document.getElementById('missedCallsSection');
-            elements.groupCallsSection = document.getElementById('groupCallsSection');
-            elements.allCallsList = document.getElementById('allCallsList');
-            elements.settingsToggleIcon = document.getElementById('settingsToggleIcon');
-            elements.incomingCallModal = document.getElementById('incomingCallModal');
-            elements.incomingCallName = document.getElementById('incomingCallName');
-            elements.incomingCallType = document.getElementById('incomingCallType');
-            elements.incomingCallAvatar = document.getElementById('incomingCallAvatar');
-            elements.incomingCallMood = document.getElementById('incomingCallMood');
-            elements.incomingCallIntention = document.getElementById('incomingCallIntention');
-            elements.declineTimer = document.getElementById('declineTimer');
-        } catch (error) {
-            logger.error('cacheElements', error);
-        }
-    }
-
-    function loadSettings() {
-        try {
-            const savedSettings = SecurityCore.safeLocalStorageGet('callSettings');
-            if (savedSettings) {
-                AppState.settings = { ...AppState.settings, ...SecurityCore.safeJSONParse(savedSettings, {}) };
-                applySettingsToUI();
-            }
-        } catch (error) {
-            logger.error('loadSettings', error);
-        }
-    }
-
-    function saveSettings() {
-        try {
-            SecurityCore.safeLocalStorageSet('callSettings', JSON.stringify(AppState.settings));
-        } catch (error) {
-            logger.error('saveSettings', error);
-        }
-    }
-
-    function applySettingsToUI() {
-        try {
-            if (elements.emotionalContextToggle) elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
-            if (elements.callIntentionToggle) elements.callIntentionToggle.checked = AppState.settings.callIntention;
-            if (elements.inCallChatToggle) elements.inCallChatToggle.checked = AppState.settings.inCallChat;
-            if (elements.whiteboardToggle) elements.whiteboardToggle.checked = AppState.settings.whiteboard;
-            if (elements.pollsToggle) elements.pollsToggle.checked = AppState.settings.polls;
-            if (elements.notesToggle) elements.notesToggle.checked = AppState.settings.notes;
-            if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
-            if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
-        } catch (error) {
-            logger.error('applySettingsToUI', error);
-        }
-    }
-
-    function updatePremiumUI() {
-        if (!elements.quickGroupBtn || !elements.screenShareBtn) return;
-        
-        try {
-            if (AppState.isPremium || session.isDemoMode()) {
-                elements.quickGroupBtn.disabled = false;
-                elements.screenShareBtn.disabled = false;
-            } else {
-                elements.quickGroupBtn.disabled = true;
-                elements.screenShareBtn.disabled = true;
-            }
-        } catch (error) {
-            logger.error('updatePremiumUI', error);
-        }
-    }
-
-    function renderCallHistory() {
-        if (!elements.callsLoading || !elements.allCallsList) return;
-        
-        try {
-            elements.callsLoading.style.display = 'none';
-            
-            if (!AppState.callHistory || AppState.callHistory.length === 0) {
-                if (elements.allCallsList) {
-                    elements.allCallsList.innerHTML = '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No call history</p></div>';
-                }
-                return;
-            }
-            
-            let html = '';
-            AppState.callHistory.slice(0, 20).forEach(call => {
-                const date = new Date(call.date);
-                const timeAgo = formatTimeAgo(date);
-                const duration = call.missed ? 'Missed' : formatDuration(call.duration);
-                const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
-                const statusClass = call.missed ? 'missed' : '';
+            const selectors = {
+                appContainer: '#appContainer',
+                sidebar: '#sidebar',
+                callContainer: '#callContainer',
                 
-                html += `
-                    <div class="call-history-item ${statusClass}">
-                        <div class="call-avatar">${SecurityCore.sanitizeString(call.contact.charAt(0))}</div>
-                        <div class="call-info">
-                            <div class="call-name">${SecurityCore.sanitizeString(call.contact)}</div>
-                            <div class="call-details">
-                                <i class="fas ${icon}"></i>
-                                <span>${SecurityCore.sanitizeString(duration)}</span>
-                                <span>•</span>
-                                <span>${SecurityCore.sanitizeString(timeAgo)}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            elements.allCallsList.innerHTML = html;
-        } catch (error) {
-            logger.error('renderCallHistory', error);
-        }
-    }
-
-    function formatTimeAgo(date) {
-        const seconds = Math.floor((Date.now() - date) / 1000);
-        if (seconds < 60) return 'just now';
-        const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return `${minutes}m ago`;
-        const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours}h ago`;
-        const days = Math.floor(hours / 24);
-        return `${days}d ago`;
-    }
-
-    function formatDuration(seconds) {
-        if (!seconds && seconds !== 0) return '0:00';
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    function stringToColor(str) {
-        if (!str) return '#000000';
-        
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            hash = str.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        
-        const color = Math.floor(Math.abs((Math.sin(hash) * 16777215) % 16777215)).toString(16);
-        return '#' + '0'.repeat(6 - color.length) + color;
-    }
-
-    function initializeOfflineDetection() {
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-    }
-
-    function handleOnline() {
-        AppState.isOnline = true;
-        if (elements.offlineBanner) elements.offlineBanner.style.display = 'none';
-        if (window.callAPI) window.callAPI.performBackgroundSync();
-        
-        TransportAgent.processOfflineQueue();
-        
-        if (!getValidatedSession() && !session.isDemoMode()) {
-            requestResync();
-        }
-    }
-
-    function handleOffline() {
-        AppState.isOnline = false;
-        showOfflineUI();
-    }
-
-    function showOfflineUI() {
-        if (elements.offlineBanner) elements.offlineBanner.style.display = 'flex';
-        if (elements.syncIndicator) {
-            elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
-        }
-    }
-
-    function handleStorageEvent(e) {
-        if (e.key === 'USER_TOKEN' && e.newValue) {
-            session.setToken(e.newValue);
-        }
-    }
-
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-
-    function updateMoodIndicator(mood) {
-        if (!elements.callMoodIndicator) return;
-        const moodIcons = {
-            happy: 'fa-smile',
-            neutral: 'fa-meh',
-            sad: 'fa-frown',
-            angry: 'fa-angry',
-            tired: 'fa-tired'
-        };
-        const icon = moodIcons[mood] || 'fa-meh';
-        elements.callMoodIndicator.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(mood)}</span>`;
-        elements.callMoodIndicator.className = `mood-indicator mood-${SecurityCore.sanitizeString(mood)}`;
-    }
-
-    function updateIntentionIndicator(intention) {
-        if (!elements.callIntentionIndicator) return;
-        const intentionLabels = {
-            quick: 'Quick Chat',
-            important: 'Important',
-            emergency: 'Emergency',
-            checkin: 'Check-in',
-            work: 'Work'
-        };
-        const label = intentionLabels[intention] || 'Quick Chat';
-        elements.callIntentionIndicator.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
-        elements.callIntentionIndicator.className = `intention-indicator intention-${SecurityCore.sanitizeString(intention)}`;
-    }
-
-    function updateParticipantBadge() {
-        const badge = document.querySelector('.participant-badge');
-        if (badge) {
-            badge.textContent = AppState.callParticipants.length + 1;
-        }
-    }
-
-    function updateChatBadge() {
-        if (AppState.unreadChatCount > 0) {
-            const badge = document.querySelector('.chat-badge');
-            if (badge) {
-                badge.textContent = AppState.unreadChatCount;
-                badge.style.display = 'flex';
-            }
-        }
-    }
-
-    function updateGroupCallButton() {
-        if (elements.quickGroupBtn) {
-            elements.quickGroupBtn.disabled = !AppState.isPremium && !session.isDemoMode();
-        }
-    }
-
-    function updateVideoLayout() {
-        const videoCount = elements.videoGrid.querySelectorAll('.video-container').length;
-        if (videoCount === 1) {
-            elements.videoGrid.style.gridTemplateColumns = '1fr';
-        } else if (videoCount === 2) {
-            elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
-        } else if (videoCount === 3) {
-            elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
-        } else if (videoCount >= 4) {
-            elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
-        }
-    }
-
-    function initializeWhiteboard(canvas) {
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 2;
-    }
-
-    function sendChatMessage(message) {
-        if (!message || !AppState.isInCall) return;
-        const chatMessages = document.getElementById('chatMessagesPanel');
-        if (chatMessages) {
-            const msgEl = document.createElement('div');
-            msgEl.className = 'chat-message self';
-            msgEl.innerHTML = `
-                <div class="message-sender">You</div>
-                <div class="message-content">${SecurityCore.sanitizeString(message)}</div>
-                <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-            `;
-            chatMessages.appendChild(msgEl);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-    }
-
-    function saveSharedNotes(notes) {
-        if (!notes) return;
-        try {
-            const savedNotes = SecurityCore.safeJSONParse(SecurityCore.safeLocalStorageGet('sharedNotes') || '[]', []);
-            savedNotes.push({
-                notes: SecurityCore.sanitizeString(notes),
-                timestamp: Date.now(),
-                callId: AppState.activeCallId
-            });
-            SecurityCore.safeLocalStorageSet('sharedNotes', JSON.stringify(savedNotes));
-        } catch (error) {
-            logger.error('saveSharedNotes', error);
-        }
-    }
-
-    function createCallHistoryItem(call) {
-        const date = new Date(call.date);
-        const timeAgo = formatTimeAgo(date);
-        const duration = call.missed ? 'Missed' : formatDuration(call.duration);
-        const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
-        const statusClass = call.missed ? 'missed' : '';
-        
-        return `
-            <div class="call-history-item ${statusClass}">
-                <div class="call-avatar">${SecurityCore.sanitizeString(call.contact.charAt(0))}</div>
-                <div class="call-info">
-                    <div class="call-name">${SecurityCore.sanitizeString(call.contact)}</div>
-                    <div class="call-details">
-                        <i class="fas ${icon}"></i>
-                        <span>${SecurityCore.sanitizeString(duration)}</span>
-                        <span>•</span>
-                        <span>${SecurityCore.sanitizeString(timeAgo)}</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function makeDraggable(element) {
-        if (!element) return;
-        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-        element.onmousedown = dragMouseDown;
-        
-        function dragMouseDown(e) {
-            e = e || window.event;
-            e.preventDefault();
-            pos3 = e.clientX;
-            pos4 = e.clientY;
-            document.onmouseup = closeDragElement;
-            document.onmousemove = elementDrag;
-        }
-        
-        function elementDrag(e) {
-            e = e || window.event;
-            e.preventDefault();
-            pos1 = pos3 - e.clientX;
-            pos2 = pos4 - e.clientY;
-            pos3 = e.clientX;
-            pos4 = e.clientY;
-            element.style.top = (element.offsetTop - pos2) + 'px';
-            element.style.left = (element.offsetLeft - pos1) + 'px';
-        }
-        
-        function closeDragElement() {
-            document.onmouseup = null;
-            document.onmousemove = null;
-        }
-    }
-
-    function closePip() {
-        if (elements.pipContainer) {
-            elements.pipContainer.style.display = 'none';
-        }
-    }
-
-    function checkPremiumFeature(feature) {
-        if (session.isDemoMode()) return true;
-        if (!AppState.isPremium && !AppState.premiumFeatures[feature]) {
-            if (elements.premiumLimitOverlay) {
-                const featureNameEl = document.getElementById('premiumFeatureName');
-                if (featureNameEl) {
-                    featureNameEl.textContent = feature === 'groupCalls' ? 'Group Calls' :
-                                              feature === 'screenSharing' ? 'Screen Sharing' :
-                                              feature === 'whiteboard' ? 'Whiteboard' :
-                                              feature === 'polls' ? 'Polls' :
-                                              feature === 'relationshipInsights' ? 'Relationship Insights' :
-                                              'Premium Feature';
-                }
-                elements.premiumLimitOverlay.classList.add('active');
-            }
-            return false;
-        }
-        return true;
-    }
-
-    function updateSetting(event) {
-        const setting = event.target.id.replace('Toggle', '');
-        const settingKey = setting.charAt(0).toLowerCase() + setting.slice(1);
-        AppState.settings[settingKey] = event.target.checked;
-        saveSettings();
-        applySettingChange(settingKey, event.target.checked);
-    }
-
-    function applySettingChange(settingKey, value) {
-        if (settingKey === 'focusMode' && AppState.isInCall) {
-            if (value) {
-                document.body.classList.add('focus-mode');
-            } else {
-                document.body.classList.remove('focus-mode');
-            }
-        }
-    }
-
-    function resetSettings() {
-        AppState.settings = {
-            emotionalContext: true,
-            callIntention: true,
-            inCallChat: true,
-            whiteboard: true,
-            polls: true,
-            notes: true,
-            focusMode: false,
-            liveReactions: true,
-            theme: 'light'
-        };
-        saveSettings();
-        applySettingsToUI();
-        showNotification('Settings reset to default', 'success');
-    }
-
-    function checkUrlParameters() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const callId = urlParams.get('call');
-        const callType = urlParams.get('type') || 'voice';
-        
-        if (callId && elements.urlParamOverlay) {
-            const urlParamCallId = document.getElementById('urlParamCallId');
-            if (urlParamCallId) {
-                urlParamCallId.textContent = SecurityCore.sanitizeString(callId);
-            }
-            elements.urlParamOverlay.dataset.callId = callId;
-            elements.urlParamOverlay.dataset.callType = callType;
-            elements.urlParamOverlay.classList.add('active');
-        }
-    }
-
-    function closeUrlParamOverlay() {
-        if (elements.urlParamOverlay) {
-            elements.urlParamOverlay.classList.remove('active');
-        }
-    }
-
-    function joinUrlParamCall() {
-        if (!elements.urlParamOverlay) return;
-        const callId = elements.urlParamOverlay.dataset.callId;
-        const callType = elements.urlParamOverlay.dataset.callType || 'voice';
-        
-        closeUrlParamOverlay();
-        
-        if (window.callCore) {
-            window.callCore.startCall({
-                type: callType,
-                callId: callId,
-                participants: [{ id: 'remote', name: 'Call Participant' }]
-            }).catch(error => {
-                showNotification(`Failed to join call: ${error.message}`, 'error');
-            });
-        }
-    }
-
-    function requestResync() {
-        logger.info('Requesting session resync from parent');
-        const message = MessageBridge.createMessage('REQUEST_RESYNC', {
-            iframeId: iframeId,
-            timestamp: Date.now()
-        });
-        window.parent.postMessage(message, OriginAdapter.getTargetOrigin());
-    }
-
-    function simulateIncomingCall(callerId, metadata = {}) {
-        if (AppState.isInCall) {
-            showNotification('Already in a call', 'warning');
-            return false;
-        }
-        
-        try {
-            let callerContact = null;
-            
-            if (AppState.contacts && AppState.contacts.length > 0) {
-                callerContact = AppState.contacts.find(c => c.id === callerId);
-            }
-            
-            if (!callerContact) {
-                callerContact = {
-                    id: callerId || 'simulated-' + Date.now(),
-                    name: metadata.name || 'Test Caller',
-                    avatar: metadata.avatar || null,
-                    isPremium: metadata.isPremium || false
-                };
-            }
-            
-            const callMetadata = {
-                callType: metadata.callType || 'voice',
-                mood: metadata.mood || 'neutral',
-                intention: metadata.intention || 'quick',
-                isGroup: metadata.isGroup || false,
-                callId: 'simulated-call-' + Date.now(),
-                timestamp: Date.now()
+                newCallBtn: '#newCallBtn',
+                quickVoiceBtn: '#quickVoiceBtn',
+                quickVideoBtn: '#quickVideoBtn',
+                quickGroupBtn: '#quickGroupBtn',
+                settingsToggle: '#settingsToggle',
+                settingsToggleIcon: '#settingsToggleIcon',
+                menuDotsBtn: '#menuDotsBtn',
+                menuDotsDropdown: '#menuDotsDropdown',
+                
+                menuParticipants: '#menuParticipants',
+                menuChat: '#menuChat',
+                menuWhiteboard: '#menuWhiteboard',
+                menuNotes: '#menuNotes',
+                menuPolls: '#menuPolls',
+                menuRelationship: '#menuRelationship',
+                
+                muteBtn: '#muteBtn',
+                videoBtn: '#videoBtn',
+                screenShareBtn: '#screenShareBtn',
+                speakerBtn: '#speakerBtn',
+                moodBtn: '#moodBtn',
+                intentionBtn: '#intentionBtn',
+                focusModeBtn: '#focusModeBtn',
+                endCallBtn: '#endCallBtn',
+                
+                callWithName: '#callWithName',
+                callStatusText: '#callStatusText',
+                callTypeIcon: '#callTypeIcon',
+                callDuration: '#callDuration',
+                callMoodIndicator: '#callMoodIndicator',
+                callIntentionIndicator: '#callIntentionIndicator',
+                videoGrid: '#videoGrid',
+                offlineCallPlaceholder: '#offlineCallPlaceholder',
+                reactionsContainer: '#reactionsContainer',
+                
+                newCallModal: '#newCallModal',
+                closeNewCallModal: '#closeNewCallModal',
+                incomingCallModal: '#incomingCallModal',
+                incomingCallName: '#incomingCallName',
+                incomingCallType: '#incomingCallType',
+                incomingCallAvatar: '#incomingCallAvatar',
+                incomingCallMood: '#incomingCallMood',
+                incomingCallIntention: '#incomingCallIntention',
+                declineTimer: '#declineTimer',
+                declineCallBtn: '#declineCallBtn',
+                acceptCallBtn: '#acceptCallBtn',
+                acceptVideoCallBtn: '#acceptVideoCallBtn',
+                
+                settingsPanel: '#settingsPanel',
+                resetSettingsBtn: '#resetSettingsBtn',
+                emotionalContextToggle: '#emotionalContextToggle',
+                callIntentionToggle: '#callIntentionToggle',
+                inCallChatToggle: '#inCallChatToggle',
+                whiteboardToggle: '#whiteboardToggle',
+                pollsToggle: '#pollsToggle',
+                notesToggle: '#notesToggle',
+                focusModeToggle: '#focusModeToggle',
+                liveReactionsToggle: '#liveReactionsToggle',
+                
+                contactSearch: '#contactSearch',
+                groupContactSearch: '#groupContactSearch',
+                contactsList: '#contactsList',
+                contactsLoading: '#contactsLoading',
+                callsLoading: '#callsLoading',
+                startVoiceCallBtn: '#startVoiceCallBtn',
+                startVideoCallBtn: '#startVideoCallBtn',
+                startGroupCallBtn: '#startGroupCallBtn',
+                instantGroupOption: '#instantGroupOption',
+                scheduledGroupOption: '#scheduledGroupOption',
+                
+                copyLinkBtn: '#copyLinkBtn',
+                shareLinkBtn: '#shareLinkBtn',
+                generateVoiceLinkBtn: '#generateVoiceLinkBtn',
+                generateVideoLinkBtn: '#generateVideoLinkBtn',
+                callLinkInput: '#callLinkInput',
+                
+                mpesaOption: '#mpesaOption',
+                cancelPaymentBtn: '#cancelPaymentBtn',
+                processPaymentBtn: '#processPaymentBtn',
+                cancelUpgradeBtn: '#cancelUpgradeBtn',
+                upgradeNowBtn: '#upgradeNowBtn',
+                paymentModal: '#paymentModal',
+                premiumLimitOverlay: '#premiumLimitOverlay',
+                phoneNumber: '#phoneNumber',
+                paymentAmount: '#paymentAmount',
+                
+                cancelMoodBtn: '#cancelMoodBtn',
+                setMoodBtn: '#setMoodBtn',
+                cancelIntentionBtn: '#cancelIntentionBtn',
+                setIntentionBtn: '#setIntentionBtn',
+                moodSelectionModal: '#moodSelectionModal',
+                intentionSelectionModal: '#intentionSelectionModal',
+                
+                skipNotesBtn: '#skipNotesBtn',
+                saveNotesBtn: '#saveNotesBtn',
+                summaryDoneBtn: '#summaryDoneBtn',
+                privateNotesModal: '#privateNotesModal',
+                privateNotesTitle: '#privateNotesTitle',
+                privateNotesSubtitle: '#privateNotesSubtitle',
+                privateNotesTextarea: '#privateNotesTextarea',
+                callSummaryModal: '#callSummaryModal',
+                summaryDuration: '#summaryDuration',
+                summaryTime: '#summaryTime',
+                summaryType: '#summaryType',
+                summaryMood: '#summaryMood',
+                summaryIntention: '#summaryIntention',
+                summaryParticipants: '#summaryParticipants',
+                
+                urlParamCancelBtn: '#urlParamCancelBtn',
+                urlParamJoinBtn: '#urlParamJoinBtn',
+                urlParamOverlay: '#urlParamOverlay',
+                urlParamCallId: '#urlParamCallId',
+                
+                allCallsSection: '#allCallsSection',
+                missedCallsSection: '#missedCallsSection',
+                groupCallsSection: '#groupCallsSection',
+                allCallsList: '#allCallsList',
+                
+                pipCloseBtn: '#pipCloseBtn',
+                pipContainer: '#pipContainer',
+                
+                syncIndicator: '#syncIndicator',
+                apiStatusIndicator: '#apiStatusIndicator',
+                apiStatusText: '#apiStatusText',
+                offlineBanner: '#offlineBanner',
+                notificationArea: '#notificationArea'
             };
             
-            if (elements.incomingCallModal && elements.incomingCallName) {
-                elements.incomingCallName.textContent = SecurityCore.sanitizeString(callerContact.name);
-                elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
-                
-                const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
-                elements.incomingCallAvatar.innerHTML = SecurityCore.sanitizeString(initials);
-                elements.incomingCallAvatar.style.backgroundColor = stringToColor(callerContact.name);
-                
-                if (metadata.mood) {
-                    const moodIcons = {
-                        happy: 'fa-smile',
-                        neutral: 'fa-meh',
-                        sad: 'fa-frown',
-                        angry: 'fa-angry',
-                        tired: 'fa-tired'
-                    };
-                    const icon = moodIcons[metadata.mood] || 'fa-meh';
-                    elements.incomingCallMood.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(metadata.mood)}</span>`;
-                    elements.incomingCallMood.className = `mood-indicator mood-${SecurityCore.sanitizeString(metadata.mood)}`;
-                    elements.incomingCallMood.style.display = 'inline-flex';
-                } else {
-                    elements.incomingCallMood.style.display = 'none';
+            Object.entries(selectors).forEach(([key, selector]) => {
+                try {
+                    const element = document.querySelector(selector);
+                    if (element) {
+                        elements[key] = element;
+                    }
+                } catch (error) {
+                    if (DEBUG) {
+                        logOnce('warn', `Failed to cache element: ${key}`, { selector, error: error.message });
+                    }
                 }
+            });
+            
+            try {
+                elements.categoryBtns = document.querySelectorAll('.category-btn');
+                elements.newCallTabs = document.querySelectorAll('.new-call-tab');
+                elements.moodOptions = document.querySelectorAll('.mood-option');
+                elements.intentionOptions = document.querySelectorAll('.intention-option');
+                elements.reactionBtns = document.querySelectorAll('.reaction-btn');
+                elements.paymentOptions = document.querySelectorAll('.payment-option');
                 
-                if (metadata.intention) {
-                    const intentionLabels = {
-                        quick: 'Quick Chat',
-                        important: 'Important',
-                        emergency: 'Emergency',
-                        checkin: 'Check-in',
-                        work: 'Work'
-                    };
-                    const label = intentionLabels[metadata.intention] || 'Quick Chat';
-                    elements.incomingCallIntention.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
-                    elements.incomingCallIntention.className = `intention-indicator intention-${SecurityCore.sanitizeString(metadata.intention)}`;
-                    elements.incomingCallIntention.style.display = 'inline-flex';
-                } else {
-                    elements.incomingCallIntention.style.display = 'none';
-                }
-                
-                let timeLeft = 45;
-                elements.declineTimer.textContent = timeLeft;
-                
-                const countdown = setInterval(() => {
-                    timeLeft--;
-                    elements.declineTimer.textContent = timeLeft;
-                    if (timeLeft <= 0) {
-                        clearInterval(countdown);
-                        if (elements.incomingCallModal.classList.contains('active')) {
-                            elements.incomingCallModal.classList.remove('active');
+                Object.defineProperty(elements, 'contactCheckboxes', {
+                    get: function() { 
+                        try {
+                            return document.querySelectorAll('.contact-checkbox'); 
+                        } catch (e) {
+                            return [];
                         }
                     }
-                }, 1000);
-                
-                elements.incomingCallModal.dataset.timer = countdown;
-                elements.incomingCallModal.dataset.caller = JSON.stringify(callerContact);
-                elements.incomingCallModal.dataset.metadata = JSON.stringify(callMetadata);
-                
-                elements.incomingCallModal.classList.add('active');
-                
-                parentComm.send('INCOMING_CALL_SIMULATED', {
-                    callerId: callerContact.id,
-                    metadata: callMetadata,
-                    timestamp: Date.now()
                 });
                 
-                return true;
+                Object.defineProperty(elements, 'groupContactCheckboxes', {
+                    get: function() { 
+                        try {
+                            return document.querySelectorAll('.group-contact'); 
+                        } catch (e) {
+                            return [];
+                        }
+                    }
+                });
+                
+                Object.defineProperty(elements, 'selectedContacts', {
+                    get: function() { 
+                        try {
+                            return document.querySelectorAll('.contact-item.selected'); 
+                        } catch (e) {
+                            return [];
+                        }
+                    }
+                });
+            } catch (error) {
+                if (DEBUG) {
+                    logOnce('error', 'Failed to cache dynamic element groups', error);
+                }
             }
             
-            return false;
+            return Object.keys(elements).length;
         } catch (error) {
-            logger.error('simulateIncomingCall', error);
-            return false;
+            if (DEBUG) {
+                logOnce('error', 'Failed to cache elements', error);
+            }
+            return 0;
         }
     }
 
-    const auth = {
-        retryCount: 0,
-        
-        sync: async function() {
-            try {
-                logger.info('Starting auth sync');
-                session.setState(STATE.SYNC);
-                
-                const initialized = await session.init();
-                
-                if (initialized) {
-                    this.retryCount = 0;
-                    session.setState(STATE.READY);
-                    return true;
-                }
-                
-                if (session.isDemoMode()) {
-                    session.setState(STATE.DEGRADED);
-                    return false;
-                }
-                
-                if (this.retryCount < CONFIG.AUTH_RETRY_LIMIT) {
-                    this.retryCount++;
-                    logger.warn(`Auth retry ${this.retryCount}/${CONFIG.AUTH_RETRY_LIMIT}`);
-                    
-                    const delay = CONFIG.AUTH_RETRY_DELAY * this.retryCount;
-                    const timer = setTimeout(() => this.sync(), delay);
-                    timers.add(timer);
-                    return false;
-                }
-                
-                logger.warn('Auth sync failed after max retries');
-                session.setState(STATE.DEGRADED);
-                RecoveryManager.scheduleRecovery();
-                return false;
-            } catch (error) {
-                logger.error('Auth sync failed', error);
-                session.setState(STATE.DEGRADED);
-                RecoveryManager.scheduleRecovery();
-                return false;
-            }
-        },
-        
-        check: function() {
-            return session.validateToken();
-        },
-        
-        refresh: function() {
-            return session.refreshToken();
-        },
-        
-        logout: function() {
-            session.clearToken();
-            parentComm.send('USER_LOGGED_OUT', { timestamp: Date.now() });
-            logger.info('Logout completed');
-            return this.sync();
-        }
-    };
-
-    const lifecycle = {
-        init: async function() {
-            try {
-                logger.info(`Starting lifecycle (${iframeId})`);
-                logger.info(`Environment: ${window.parent === window ? 'standalone' : 'embedded'}`);
-                
-                StartupGovernor.transition(STATE.INIT);
-                
-                CompatibilityBridge.detect();
-                
-                const handshakeResult = await HandshakeClient.start();
-                if (!handshakeResult.success) {
-                    logger.warn('Handshake failed, using fallback');
-                }
-                
-                const authSynced = await auth.sync();
-                
-                if (authSynced) {
-                    StartupGovernor.transition(STATE.READY);
-                } else {
-                    logger.warn('Proceeding in degraded/demo mode');
-                    StartupGovernor.transition(STATE.DEGRADED);
-                }
-                
-                this.setupVisibilityHandling();
-                this.setupConnectivityHandling();
-                TransportAgent.startHeartbeat(CONFIG.HEARTBEAT_INTERVAL);
-                
-                RecoveryManager.createCheckpoint('initialized');
-                
-                parentComm.send('IFRAME_READY', {
-                    iframeId: iframeId,
-                    state: currentState,
-                    sessionValid: session.validateToken(),
-                    demoMode: session.isDemoMode(),
-                    timestamp: Date.now()
-                });
-                
-                logger.info('Lifecycle initialization complete');
-                return true;
-            } catch (error) {
-                logger.error('Lifecycle initialization failed', error);
-                StartupGovernor.transition(STATE.DEGRADED);
-                RecoveryManager.scheduleRecovery();
-                return false;
-            }
-        },
-        
-        setupVisibilityHandling: function() {
-            const handler = () => {
-                if (document.hidden) {
-                    if (currentState === STATE.ACTIVE) {
-                        StartupGovernor.transition(STATE.SUSPENDED);
-                        parentComm.send('IFRAME_SUSPENDED', { timestamp: Date.now() });
-                    }
-                } else {
-                    if (currentState === STATE.SUSPENDED || currentState === STATE.READY || currentState === STATE.DEGRADED) {
-                        StartupGovernor.transition(STATE.ACTIVE);
-                        parentComm.send('IFRAME_ACTIVE', { timestamp: Date.now() });
-                        
-                        if (session.validateToken()) {
-                            session.refreshToken();
-                        } else if (!session.isDemoMode()) {
-                            auth.sync();
-                        }
-                        
-                        if (!getValidatedSession() && !session.isDemoMode()) {
-                            requestResync();
-                        }
-                    }
-                }
-            };
-            
-            document.addEventListener('visibilitychange', handler);
-            eventListeners.set('visibilitychange', handler);
-            
-            if (!document.hidden) {
-                StartupGovernor.transition(STATE.ACTIVE);
-            }
-        },
-        
-        setupConnectivityHandling: function() {
-            const onlineHandler = () => {
-                isOnline = true;
-                logger.info('Network online');
-                
-                if (currentState === STATE.DEGRADED && !session.isDemoMode()) {
-                    auth.sync();
-                } else if (session.validateToken()) {
-                    parentComm.send('NETWORK_RESTORED', { timestamp: Date.now() });
-                    
-                    TransportAgent.processOfflineQueue();
-                    
-                    if (!getValidatedSession()) {
-                        requestResync();
-                    }
-                }
-            };
-            
-            const offlineHandler = () => {
-                isOnline = false;
-                logger.warn('Network offline');
-                parentComm.send('NETWORK_LOST', { timestamp: Date.now() });
-            };
-            
-            window.addEventListener('online', onlineHandler);
-            window.addEventListener('offline', offlineHandler);
-            
-            eventListeners.set('online', onlineHandler);
-            eventListeners.set('offline', offlineHandler);
-        },
-        
-        destroy: function() {
-            logger.info('Destroying iframe instance');
-            StartupGovernor.transition(STATE.DESTROYED);
-            
-            timers.forEach(timer => {
-                try {
-                    if (timer && typeof timer === 'object' && 'ref' in timer) {
-                        clearInterval(timer);
-                        clearTimeout(timer);
-                    }
-                } catch (e) {}
-            });
-            timers.clear();
-            
-            eventListeners.forEach((handler, event) => {
-                try {
-                    window.removeEventListener(event, handler);
-                    document.removeEventListener(event, handler);
-                } catch (e) {}
-            });
-            eventListeners.clear();
-            
-            pendingRequests.forEach((req) => {
-                try { if (req.cleanup) req.cleanup(); } catch (e) {}
-            });
-            pendingRequests.clear();
-            
-            TransportAgent.cleanup();
-            SessionClient.cleanup();
-            
-            parentComm.send('IFRAME_DESTROYED', {
-                iframeId: iframeId,
-                timestamp: Date.now()
-            });
-            
-            logger.info('Iframe destroyed');
-            return { success: true };
-        }
-    };
-
-    const messageHandler = {
-        init: function() {
-            window.addEventListener('message', this.handleMessage.bind(this));
-            logger.info('Message handler initialized');
-        },
-        
-        handleMessage: function(event) {
-            if (!OriginAdapter.validateEvent(event)) return;
-            
-            const adaptedMessage = CompatibilityBridge.adaptIncoming(event.data);
-            
-            if (!adaptedMessage || typeof adaptedMessage !== 'object') return;
-            if (!MessageValidator.validate(adaptedMessage)) return;
-            
-            try {
-                const data = adaptedMessage;
-                
-                switch (data.type) {
-                    case 'SESSION_UPDATE':
-                        if (data.payload?.token) {
-                            session.setToken(data.payload.token, data.payload.expiry);
-                        }
-                        break;
-                    case 'TOKEN_REFRESH':
-                        if (data.payload?.token) {
-                            session.setToken(data.payload.token, data.payload.expiry);
-                            parentComm.send('TOKEN_REFRESHED', { timestamp: Date.now() });
-                        }
-                        break;
-                    case 'LOGOUT':
-                        logger.info('Logout requested by parent');
-                        session.clearToken();
-                        parentComm.send('USER_LOGGED_OUT', { timestamp: Date.now() });
-                        auth.sync();
-                        break;
-                    case 'PING':
-                        if (data.payload?.requestId) {
-                            const pongMessage = MessageBridge.createMessage('PONG', {
-                                requestId: data.payload.requestId,
-                                state: currentState,
-                                sessionValid: session.validateToken(),
-                                demoMode: session.isDemoMode(),
-                                timestamp: Date.now()
-                            });
-                            window.parent.postMessage(pongMessage, OriginAdapter.getTargetOrigin());
-                        }
-                        break;
-                    case 'PONG':
-                        break;
-                    case 'PARENT_CRASH_RECOVERY':
-                        logger.warn('Parent crash detected, initiating recovery');
-                        RecoveryManager.recover();
-                        break;
-                    case 'ACK':
-                        parentComm._handleAck(data);
-                        break;
-                    case 'SESSION_INIT':
-                        if (data.payload && data.payload.session && data.payload.session.token) {
-                            session.setToken(data.payload.session.token, data.payload.session.expiry);
-                            if (data.payload.session.user) {
-                                currentUser = data.payload.session.user;
-                                userDataLoaded = true;
-                            }
-                            logger.info('Session initialized from parent via SESSION_INIT');
-                        }
-                        break;
-                    case 'SESSION_SYNC':
-                        if (data.payload) {
-                            handleSessionSync(data.payload, data.messageId);
-                        }
-                        break;
-                    case 'SESSION_ACK':
-                        if (data.payload) {
-                            handleParentAck(data.payload);
-                        }
-                        break;
-                    case 'PAGE_ACTIVATED':
-                        logger.info('Parent page activated');
-                        if (currentState === STATE.SUSPENDED) {
-                            StartupGovernor.transition(STATE.ACTIVE);
-                        }
-                        break;
-                    case 'NAVIGATE':
-                        logger.info('Parent navigation:', data.payload);
-                        break;
-                }
-            } catch (error) {
-                logger.error('Failed to handle parent message', error, adaptedMessage?.type);
-            }
-        }
-    };
-
+    // ==================== BOOTSTRAP ====================
     function bootstrapIframe() {
         if (sessionInitialized) {
             logger.once('Session already initialized, skipping bootstrap');
@@ -11347,14 +10490,9 @@ async function safeInit() {
             CompatibilityBridge.detect();
             
             cacheElements();
-            messageHandler.init();
             
-            lifecycle.init().then(() => {
-                logger.info('Lifecycle initialized');
-            }).catch(error => {
-                logger.error('Lifecycle initialization failed', error);
-                RecoveryManager.scheduleRecovery();
-            });
+            // PASSIVE: Register with parent, don't initiate handshake
+            safeRegister();
             
             window.callAPI = new CallAPIIntegration();
             
@@ -11416,7 +10554,7 @@ async function safeInit() {
                 appContainer.style.opacity = '1';
             }
             
-            const loadingIndicators = document.querySelectorAll('.loading-indicator, .initializing-overlay');
+            const loadingIndicators = document.querySelectorAll('.loading-indicator, .initializing-overlay, .core-loading-message');
             loadingIndicators.forEach(indicator => {
                 if (indicator) indicator.style.display = 'none';
             });
@@ -11451,459 +10589,1812 @@ async function safeInit() {
         }
     }
 
-    function showNotification(message, type = 'success') {
-        try {
-            const notification = document.createElement('div');
-            notification.className = `call-notification ${type}`;
+    // ==================== MISSING FUNCTIONS ADDED ====================
+async function initializeCore(options = {}) {
+    return ErrorBoundary.executeAsync(async () => {
+        logger.info('initializeCore called', options);
+        const result = await safeInit();
+        return { 
+            status: coreReady ? 'ready' : 'degraded', 
+            mode: session.isDemoMode ? session.isDemoMode() : 'demo',
+            iframeId,
+            timestamp: Date.now()
+        };
+    }, 'initializeCore', { status: 'failed', mode: 'demo' });
+}
+
+function shutdownCore() {
+    return ErrorBoundary.execute(() => {
+        logger.info('shutdownCore called');
+        return lifecycle.destroy();
+    }, 'shutdownCore', { success: false });
+}
+
+async function initializeUI() {
+    return ErrorBoundary.executeAsync(async () => {
+        logger.info('initializeUI called');
+        cacheElements();
+        return {
+            success: true,
+            elements: Object.keys(elements).length,
+            timestamp: Date.now()
+        };
+    }, 'initializeUI', { success: false, elements: 0 });
+}
+
+function cleanupUISession() {
+    return ErrorBoundary.execute(() => {
+        logger.info('cleanupUISession called');
+        if (window.callAPI) window.callAPI.cleanup();
+        if (window.callCore) window.callCore.cleanup();
+        if (parentCoordinator) parentCoordinator.cleanup();
+        TransportAgent.cleanup();
+        SessionClient.cleanup();
+        session.clearToken();
+        return { success: true, timestamp: Date.now() };
+    }, 'cleanupUISession', { success: false });
+}
+
+function receiveFromParent(type, handler) {
+    return ErrorBoundary.execute(() => {
+        if (!type || typeof handler !== 'function') {
+            logger.error('receiveFromParent: invalid parameters');
+            return false;
+        }
+        
+        const wrappedHandler = (message, origin) => {
+            try {
+                const adaptedMessage = CompatibilityBridge.adaptIncoming(message);
+                handler(adaptedMessage.payload || adaptedMessage, { 
+                    origin, 
+                    id: adaptedMessage.messageId, 
+                    timestamp: adaptedMessage.timestamp 
+                });
+            } catch (error) {
+                logger.error(`Handler error for ${type}`, error);
+            }
+        };
+        
+        window.addEventListener('message', (event) => {
+            if (!OriginAdapter.validateEvent(event)) return;
+            const adapted = CompatibilityBridge.adaptIncoming(event.data);
+            if (!adapted || adapted.type !== type) return;
+            if (!MessageValidator.validate(adapted)) return;
             
-            notification.innerHTML = `
-                <div class="call-notification-content">
-                    <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                    <div class="call-notification-message">${SecurityCore.sanitizeString(message)}</div>
-                </div>
-                <button class="call-notification-close">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
+            wrappedHandler(adapted, event.origin);
+        });
+        
+        logger.once('Registered receive handler: ' + type);
+        return true;
+    }, 'receiveFromParent', false);
+}
+
+function simulateIncomingCall(callerId, metadata = {}) {
+    if (AppState.isInCall) {
+        showNotification('Already in a call', 'warning');
+        return false;
+    }
+    
+    try {
+        let callerContact = null;
+        
+        if (AppState.contacts && AppState.contacts.length > 0) {
+            callerContact = AppState.contacts.find(c => c.id === callerId);
+        }
+        
+        if (!callerContact) {
+            callerContact = {
+                id: callerId || 'simulated-' + Date.now(),
+                name: metadata.name || 'Test Caller',
+                avatar: metadata.avatar || null,
+                isPremium: metadata.isPremium || false
+            };
+        }
+        
+        const callMetadata = {
+            callType: metadata.callType || 'voice',
+            mood: metadata.mood || 'neutral',
+            intention: metadata.intention || 'quick',
+            isGroup: metadata.isGroup || false,
+            callId: 'simulated-call-' + Date.now(),
+            timestamp: Date.now()
+        };
+        
+        if (elements.incomingCallModal && elements.incomingCallName) {
+            elements.incomingCallName.textContent = SecurityCore.sanitizeString(callerContact.name);
+            elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
             
-            const notificationArea = document.getElementById('notificationArea') || document.body;
-            notificationArea.appendChild(notification);
+            const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+            elements.incomingCallAvatar.innerHTML = SecurityCore.sanitizeString(initials);
+            elements.incomingCallAvatar.style.backgroundColor = stringToColor(callerContact.name);
             
-            const closeBtn = notification.querySelector('.call-notification-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', () => notification.remove());
+            if (metadata.mood) {
+                const moodIcons = {
+                    happy: 'fa-smile',
+                    neutral: 'fa-meh',
+                    sad: 'fa-frown',
+                    angry: 'fa-angry',
+                    tired: 'fa-tired'
+                };
+                const icon = moodIcons[metadata.mood] || 'fa-meh';
+                elements.incomingCallMood.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(metadata.mood)}</span>`;
+                elements.incomingCallMood.className = `mood-indicator mood-${SecurityCore.sanitizeString(metadata.mood)}`;
+                elements.incomingCallMood.style.display = 'inline-flex';
+            } else {
+                elements.incomingCallMood.style.display = 'none';
             }
             
-            const timer = setTimeout(() => {
-                if (notification.parentNode) notification.remove();
-            }, 3000);
-            timers.add(timer);
-        } catch (error) {
-            logger.error('showNotification', error);
+            if (metadata.intention) {
+                const intentionLabels = {
+                    quick: 'Quick Chat',
+                    important: 'Important',
+                    emergency: 'Emergency',
+                    checkin: 'Check-in',
+                    work: 'Work'
+                };
+                const label = intentionLabels[metadata.intention] || 'Quick Chat';
+                elements.incomingCallIntention.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
+                elements.incomingCallIntention.className = `intention-indicator intention-${SecurityCore.sanitizeString(metadata.intention)}`;
+                elements.incomingCallIntention.style.display = 'inline-flex';
+            } else {
+                elements.incomingCallIntention.style.display = 'none';
+            }
+            
+            let timeLeft = 45;
+            elements.declineTimer.textContent = timeLeft;
+            
+            const countdown = setInterval(() => {
+                timeLeft--;
+                elements.declineTimer.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(countdown);
+                    if (elements.incomingCallModal.classList.contains('active')) {
+                        elements.incomingCallModal.classList.remove('active');
+                    }
+                }
+            }, 1000);
+            
+            elements.incomingCallModal.dataset.timer = countdown;
+            elements.incomingCallModal.dataset.caller = JSON.stringify(callerContact);
+            elements.incomingCallModal.dataset.metadata = JSON.stringify(callMetadata);
+            
+            elements.incomingCallModal.classList.add('active');
+            
+            parentComm.send('INCOMING_CALL_SIMULATED', {
+                callerId: callerContact.id,
+                metadata: callMetadata,
+                timestamp: Date.now()
+            });
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        logger.error('simulateIncomingCall', error);
+        return false;
+    }
+}
+
+function showNotification(message, type = 'success') {
+    try {
+        const notification = document.createElement('div');
+        notification.className = `call-notification ${type}`;
+        
+        notification.innerHTML = `
+            <div class="call-notification-content">
+                <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                <div class="call-notification-message">${SecurityCore.sanitizeString(message)}</div>
+            </div>
+            <button class="call-notification-close">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        const notificationArea = document.getElementById('notificationArea') || document.body;
+        notificationArea.appendChild(notification);
+        
+        const closeBtn = notification.querySelector('.call-notification-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => notification.remove());
+        }
+        
+        const timer = setTimeout(() => {
+            if (notification.parentNode) notification.remove();
+        }, 3000);
+        timers.add(timer);
+    } catch (error) {
+        logger.error('showNotification', error);
+    }
+}
+
+function initializeOfflineDetection() {
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+}
+
+function handleOnline() {
+    AppState.isOnline = true;
+    if (elements.offlineBanner) elements.offlineBanner.style.display = 'none';
+    if (window.callAPI) window.callAPI.performBackgroundSync();
+    
+    TransportAgent.processOfflineQueue();
+    
+    if (!getValidatedSession() && !session.isDemoMode()) {
+        requestResync();
+    }
+}
+
+function handleOffline() {
+    AppState.isOnline = false;
+    showOfflineUI();
+}
+
+function showOfflineUI() {
+    if (elements.offlineBanner) elements.offlineBanner.style.display = 'flex';
+    if (elements.syncIndicator) {
+        elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+    }
+}
+
+function handleStorageEvent(e) {
+    if (e.key === 'USER_TOKEN' && e.newValue) {
+        session.setToken(e.newValue);
+    }
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function makeDraggable(element) {
+    if (!element) return;
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    element.onmousedown = dragMouseDown;
+    
+    function dragMouseDown(e) {
+        e = e || window.event;
+        e.preventDefault();
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        document.onmouseup = closeDragElement;
+        document.onmousemove = elementDrag;
+    }
+    
+    function elementDrag(e) {
+        e = e || window.event;
+        e.preventDefault();
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        element.style.top = (element.offsetTop - pos2) + 'px';
+        element.style.left = (element.offsetLeft - pos1) + 'px';
+    }
+    
+    function closeDragElement() {
+        document.onmouseup = null;
+        document.onmousemove = null;
+    }
+}
+
+function closePip() {
+    if (elements.pipContainer) {
+        elements.pipContainer.style.display = 'none';
+    }
+}
+
+function checkPremiumFeature(feature) {
+    if (session.isDemoMode()) return true;
+    if (!AppState.isPremium && !AppState.premiumFeatures[feature]) {
+        if (elements.premiumLimitOverlay) {
+            const featureNameEl = document.getElementById('premiumFeatureName');
+            if (featureNameEl) {
+                featureNameEl.textContent = feature === 'groupCalls' ? 'Group Calls' :
+                                          feature === 'screenSharing' ? 'Screen Sharing' :
+                                          feature === 'whiteboard' ? 'Whiteboard' :
+                                          feature === 'polls' ? 'Polls' :
+                                          feature === 'relationshipInsights' ? 'Relationship Insights' :
+                                          'Premium Feature';
+            }
+            elements.premiumLimitOverlay.classList.add('active');
+        }
+        return false;
+    }
+    return true;
+}
+
+function updateSetting(event) {
+    const setting = event.target.id.replace('Toggle', '');
+    const settingKey = setting.charAt(0).toLowerCase() + setting.slice(1);
+    AppState.settings[settingKey] = event.target.checked;
+    saveSettings();
+    applySettingChange(settingKey, event.target.checked);
+}
+
+function applySettingChange(settingKey, value) {
+    if (settingKey === 'focusMode' && AppState.isInCall) {
+        if (value) {
+            document.body.classList.add('focus-mode');
+        } else {
+            document.body.classList.remove('focus-mode');
         }
     }
+}
 
-    window.CallApp = {
-        id: iframeId,
-        state: () => currentState,
-        session: () => session.getStatus(),
-        auth: () => auth.check(),
-        refresh: () => auth.refresh(),
-        logout: () => auth.logout(),
-        simulateIncomingCall,
-        startTestCall: () => {
-            if (AppState.contacts && AppState.contacts.length > 0) {
-                if (window.callCore) {
-                    window.callCore.startCall({
-                        type: 'video',
-                        contactId: AppState.contacts[0].id,
-                        participants: [AppState.contacts[0]]
-                    }).catch(error => {
-                        logger.error('Test call failed', error);
+function resetSettings() {
+    AppState.settings = {
+        emotionalContext: true,
+        callIntention: true,
+        inCallChat: true,
+        whiteboard: true,
+        polls: true,
+        notes: true,
+        focusMode: false,
+        liveReactions: true,
+        theme: 'light'
+    };
+    saveSettings();
+    applySettingsToUI();
+    showNotification('Settings reset to default', 'success');
+}
+
+function loadSettings() {
+    try {
+        const savedSettings = SecurityCore.safeLocalStorageGet('callSettings');
+        if (savedSettings) {
+            AppState.settings = { ...AppState.settings, ...SecurityCore.safeJSONParse(savedSettings, {}) };
+            applySettingsToUI();
+        }
+    } catch (error) {
+        logger.error('loadSettings', error);
+    }
+}
+
+function saveSettings() {
+    try {
+        SecurityCore.safeLocalStorageSet('callSettings', JSON.stringify(AppState.settings));
+    } catch (error) {
+        logger.error('saveSettings', error);
+    }
+}
+
+function applySettingsToUI() {
+    try {
+        if (elements.emotionalContextToggle) elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
+        if (elements.callIntentionToggle) elements.callIntentionToggle.checked = AppState.settings.callIntention;
+        if (elements.inCallChatToggle) elements.inCallChatToggle.checked = AppState.settings.inCallChat;
+        if (elements.whiteboardToggle) elements.whiteboardToggle.checked = AppState.settings.whiteboard;
+        if (elements.pollsToggle) elements.pollsToggle.checked = AppState.settings.polls;
+        if (elements.notesToggle) elements.notesToggle.checked = AppState.settings.notes;
+        if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
+        if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
+    } catch (error) {
+        logger.error('applySettingsToUI', error);
+    }
+}
+
+function updatePremiumUI() {
+    if (!elements.quickGroupBtn || !elements.screenShareBtn) return;
+    
+    try {
+        if (AppState.isPremium || session.isDemoMode()) {
+            elements.quickGroupBtn.disabled = false;
+            elements.screenShareBtn.disabled = false;
+        } else {
+            elements.quickGroupBtn.disabled = true;
+            elements.screenShareBtn.disabled = true;
+        }
+    } catch (error) {
+        logger.error('updatePremiumUI', error);
+    }
+}
+
+function updateMoodIndicator(mood) {
+    if (!elements.callMoodIndicator) return;
+    const moodIcons = {
+        happy: 'fa-smile',
+        neutral: 'fa-meh',
+        sad: 'fa-frown',
+        angry: 'fa-angry',
+        tired: 'fa-tired'
+    };
+    const icon = moodIcons[mood] || 'fa-meh';
+    elements.callMoodIndicator.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(mood)}</span>`;
+    elements.callMoodIndicator.className = `mood-indicator mood-${SecurityCore.sanitizeString(mood)}`;
+}
+
+function updateIntentionIndicator(intention) {
+    if (!elements.callIntentionIndicator) return;
+    const intentionLabels = {
+        quick: 'Quick Chat',
+        important: 'Important',
+        emergency: 'Emergency',
+        checkin: 'Check-in',
+        work: 'Work'
+    };
+    const label = intentionLabels[intention] || 'Quick Chat';
+    elements.callIntentionIndicator.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
+    elements.callIntentionIndicator.className = `intention-indicator intention-${SecurityCore.sanitizeString(intention)}`;
+}
+
+function updateParticipantBadge() {
+    const badge = document.querySelector('.participant-badge');
+    if (badge) {
+        badge.textContent = AppState.callParticipants.length + 1;
+    }
+}
+
+function updateChatBadge() {
+    if (AppState.unreadChatCount > 0) {
+        const badge = document.querySelector('.chat-badge');
+        if (badge) {
+            badge.textContent = AppState.unreadChatCount;
+            badge.style.display = 'flex';
+        }
+    }
+}
+
+function updateGroupCallButton() {
+    if (elements.quickGroupBtn) {
+        elements.quickGroupBtn.disabled = !AppState.isPremium && !session.isDemoMode();
+    }
+}
+
+function updateVideoLayout() {
+    const videoCount = elements.videoGrid.querySelectorAll('.video-container').length;
+    if (videoCount === 1) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr';
+    } else if (videoCount === 2) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
+    } else if (videoCount === 3) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
+    } else if (videoCount >= 4) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
+    }
+}
+
+function initializeWhiteboard(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+}
+
+function sendChatMessage(message) {
+    if (!message || !AppState.isInCall) return;
+    const chatMessages = document.getElementById('chatMessagesPanel');
+    if (chatMessages) {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'chat-message self';
+        msgEl.innerHTML = `
+            <div class="message-sender">You</div>
+            <div class="message-content">${SecurityCore.sanitizeString(message)}</div>
+            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+        `;
+        chatMessages.appendChild(msgEl);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}
+
+function saveSharedNotes(notes) {
+    if (!notes) return;
+    try {
+        const savedNotes = SecurityCore.safeJSONParse(SecurityCore.safeLocalStorageGet('sharedNotes') || '[]', []);
+        savedNotes.push({
+            notes: SecurityCore.sanitizeString(notes),
+            timestamp: Date.now(),
+            callId: AppState.activeCallId
+        });
+        SecurityCore.safeLocalStorageSet('sharedNotes', JSON.stringify(savedNotes));
+    } catch (error) {
+        logger.error('saveSharedNotes', error);
+    }
+}
+
+function renderCallHistory() {
+    if (!elements.callsLoading || !elements.allCallsList) return;
+    
+    try {
+        elements.callsLoading.style.display = 'none';
+        
+        if (!AppState.callHistory || AppState.callHistory.length === 0) {
+            if (elements.allCallsList) {
+                elements.allCallsList.innerHTML = '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No call history</p></div>';
+            }
+            return;
+        }
+        
+        let html = '';
+        AppState.callHistory.slice(0, 20).forEach(call => {
+            const date = new Date(call.date);
+            const timeAgo = formatTimeAgo(date);
+            const duration = call.missed ? 'Missed' : formatDuration(call.duration);
+            const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
+            const statusClass = call.missed ? 'missed' : '';
+            
+            html += `
+                <div class="call-history-item ${statusClass}">
+                    <div class="call-avatar">${SecurityCore.sanitizeString(call.contact.charAt(0))}</div>
+                    <div class="call-info">
+                        <div class="call-name">${SecurityCore.sanitizeString(call.contact)}</div>
+                        <div class="call-details">
+                            <i class="fas ${icon}"></i>
+                            <span>${SecurityCore.sanitizeString(duration)}</span>
+                            <span>•</span>
+                            <span>${SecurityCore.sanitizeString(timeAgo)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        elements.allCallsList.innerHTML = html;
+    } catch (error) {
+        logger.error('renderCallHistory', error);
+    }
+}
+
+function formatTimeAgo(date) {
+    const seconds = Math.floor((Date.now() - date) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+}
+
+function formatDuration(seconds) {
+    if (!seconds && seconds !== 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function closeUrlParamOverlay() {
+    if (elements.urlParamOverlay) {
+        elements.urlParamOverlay.classList.remove('active');
+    }
+}
+
+function joinUrlParamCall() {
+    if (!elements.urlParamOverlay) return;
+    const callId = elements.urlParamOverlay.dataset.callId;
+    const callType = elements.urlParamOverlay.dataset.callType || 'voice';
+    
+    closeUrlParamOverlay();
+    
+    if (window.callCore) {
+        window.callCore.startCall({
+            type: callType,
+            callId: callId,
+            participants: [{ id: 'remote', name: 'Call Participant' }]
+        }).catch(error => {
+            showNotification(`Failed to join call: ${error.message}`, 'error');
+        });
+    }
+}
+
+function checkUrlParameters() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const callId = urlParams.get('call');
+    const callType = urlParams.get('type') || 'voice';
+    
+    if (callId && elements.urlParamOverlay) {
+        const urlParamCallId = document.getElementById('urlParamCallId');
+        if (urlParamCallId) {
+            urlParamCallId.textContent = SecurityCore.sanitizeString(callId);
+        }
+        elements.urlParamOverlay.dataset.callId = callId;
+        elements.urlParamOverlay.dataset.callType = callType;
+        elements.urlParamOverlay.classList.add('active');
+    }
+}
+
+function requestResync() {
+    logger.info('Requesting session resync from parent');
+    const message = MessageBridge.createMessage('REQUEST_RESYNC', {
+        iframeId: iframeId,
+        timestamp: Date.now()
+    });
+    window.parent.postMessage(message, OriginAdapter.getTargetOrigin());
+}
+
+function createCallHistoryItem(call) {
+    const date = new Date(call.date);
+    const timeAgo = formatTimeAgo(date);
+    const duration = call.missed ? 'Missed' : formatDuration(call.duration);
+    const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
+    const statusClass = call.missed ? 'missed' : '';
+    
+    return `
+        <div class="call-history-item ${statusClass}">
+            <div class="call-avatar">${SecurityCore.sanitizeString(call.contact.charAt(0))}</div>
+            <div class="call-info">
+                <div class="call-name">${SecurityCore.sanitizeString(call.contact)}</div>
+                <div class="call-details">
+                    <i class="fas ${icon}"></i>
+                    <span>${SecurityCore.sanitizeString(duration)}</span>
+                    <span>•</span>
+                    <span>${SecurityCore.sanitizeString(timeAgo)}</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ==================== ADDITIONAL MISSING FUNCTIONS ====================
+async function startHandshake(options = {}) {
+    return ErrorBoundary.executeAsync(async () => {
+        logger.info('startHandshake called', options);
+        
+        // In passive mode, we don't initiate handshake, just wait for parent
+        const maxAttempts = options.maxAttempts || CONFIG.HANDSHAKE_MAX_ATTEMPTS;
+        const timeout = options.timeout || CONFIG.HANDSHAKE_TIMEOUT;
+        
+        // Don't actually start handshake - just wait for parent
+        return new Promise((resolve) => {
+            if (_HANDSHAKE_DONE_ || _PARENT_READY_) {
+                resolve({ 
+                    success: true, 
+                    handshakeComplete: _HANDSHAKE_DONE_, 
+                    parentReady: _PARENT_READY_,
+                    attempts: _HANDSHAKE_RETRIES_,
+                    passive: true 
+                });
+                return;
+            }
+            
+            const timeoutId = setTimeout(() => {
+                window.removeEventListener('message', handler);
+                resolve({ 
+                    success: false, 
+                    error: 'timeout',
+                    handshakeComplete: _HANDSHAKE_DONE_,
+                    parentReady: _PARENT_READY_
+                });
+            }, timeout);
+            
+            const handler = (event) => {
+                if (!OriginAdapter.validateEvent(event)) return;
+                const message = MessageBridge.normalizeMessage(event.data);
+                if (!message) return;
+                
+                if (message.type === MESSAGE_TYPES.PARENT_READY || 
+                    message.type === MESSAGE_TYPES.HANDSHAKE_ACK) {
+                    clearTimeout(timeoutId);
+                    window.removeEventListener('message', handler);
+                    _PARENT_READY_ = true;
+                    if (message.type === MESSAGE_TYPES.HANDSHAKE_ACK) {
+                        _HANDSHAKE_DONE_ = true;
+                    }
+                    resolve({ 
+                        success: true, 
+                        handshakeComplete: _HANDSHAKE_DONE_,
+                        parentReady: _PARENT_READY_,
+                        attempts: _HANDSHAKE_RETRIES_,
+                        passive: true
                     });
                 }
-            }
-        },
-        getState: () => AppState,
-        checkApiStatus: () => {
-            try {
-                return {
-                    isAuthenticated: AppState.isAuthenticated,
-                    apiReady: AppState.apiReady,
-                    user: AppState.user,
-                    tokenReady: window.callAPI ? window.callAPI.tokenManager.isTokenReady() : false,
-                    parentCoordinator: parentCoordinator ? parentCoordinator.getStatus() : null,
-                    secureHandshakeInProgress: secureHandshakeInProgress,
-                    secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false,
-                    state: currentState,
-                    demoMode: session.isDemoMode()
-                };
-            } catch (error) {
-                logger.error('CallApp.checkApiStatus', error);
-                return {
-                    isAuthenticated: false,
-                    apiReady: false,
-                    user: null,
-                    tokenReady: false,
-                    parentCoordinator: null,
-                    secureHandshakeInProgress: false,
-                    secureSessionValid: false,
-                    state: currentState,
-                    demoMode: true
-                };
-            }
-        },
-        notifyParent: (type, data) => {
-            const message = MessageBridge.createMessage(type, data, { legacy: true });
-            window.parent.postMessage(message, OriginAdapter.getTargetOrigin());
-        },
-        requestSecureSession: () => {
-            if (parentCoordinator) parentCoordinator.startSecureHandshake();
-        },
-        getHandshakeStatus: () => {
-            try {
-                return {
-                    secureHandshakeInProgress: secureHandshakeInProgress,
-                    secureSessionValid: parentCoordinator ? parentCoordinator.secureSessionValid : false,
-                    secureHandshakeAttempts: secureHandshakeAttempts,
-                    maxHandshakeAttempts: maxHandshakeAttempts,
-                    handshakeComplete: parentCoordinator ? parentCoordinator.handshakeComplete : false,
-                    fallbackMode: parentCoordinator ? parentCoordinator.fallbackMode : true
-                };
-            } catch (error) {
-                logger.error('CallApp.getHandshakeStatus', error);
-                return {
-                    secureHandshakeInProgress: false,
-                    secureSessionValid: false,
-                    secureHandshakeAttempts: 0,
-                    maxHandshakeAttempts: maxHandshakeAttempts,
-                    handshakeComplete: false,
-                    fallbackMode: true
-                };
-            }
-        },
-        destroy: () => lifecycle.destroy(),
-        cleanupUISession: () => {
-            logger.info('Cleaning up UI session');
-            if (window.callAPI) window.callAPI.cleanup();
-            if (window.callCore) window.callCore.cleanup();
-            if (parentCoordinator) parentCoordinator.cleanup();
-            TransportAgent.cleanup();
-            SessionClient.cleanup();
-            session.clearToken();
-            return true;
-        },
-        requestResync: () => requestResync(),
-        getValidatedSession: () => getValidatedSession(),
-        isValidSession: (session) => isValidSession(session),
-        getDiagnostics: () => DiagnosticsAgent ? DiagnosticsAgent.getReport() : null,
-        getTransportStatus: () => TransportAgent.getStatus(),
-        getCompatibilityStatus: () => CompatibilityBridge.getStatus(),
-        getRecoveryStatus: () => RecoveryManager.getStatus(),
-        getEnvironment: () => EnvironmentDetector.getFullReport(),
-        getStartupStatus: () => StartupGovernor.getMetrics(),
-        getOriginStatus: () => OriginAdapter.getMode()
-    };
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            safeInit().catch(e => logger.error('Auto-start failed', e));
+            };
+            
+            window.addEventListener('message', handler);
+            
+            // Send a single registration message (not handshake request)
+            safeRegister();
         });
-    } else {
-        safeInit().catch(e => logger.error('Auto-start failed', e));
-    }
+    }, 'startHandshake', { success: false, passive: true });
+}
 
-    window.iframeCore = {
-        id: iframeId,
-        getState: () => currentState,
-        getSession: () => session.getStatus(),
-        refreshSession: () => auth.refresh(),
-        logout: () => auth.logout(),
-        sendMessage: (type, payload) => {
+function sendToParent(type, payload = {}, options = {}) {
+    return ErrorBoundary.execute(() => {
+        logger.once('sendToParent: ' + type);
+        
+        if (options.requireResponse) {
+            return parentComm.request(type, payload, options.timeout || 5000);
+        }
+        
+        if (options.requireAck) {
+            return parentComm.sendWithAck(type, payload, options.timeout || 5000);
+        }
+        
+        return parentComm.send(type, payload);
+    }, 'sendToParent', options.requireResponse ? Promise.reject(new Error('Send failed')) : false);
+}
+
+async function requestSession(options = {}) {
+    return ErrorBoundary.executeAsync(async () => {
+        logger.info('requestSession called', options);
+        
+        // Don't actively request - wait for parent to provide
+        const sessionData = await SessionManager.acquire();
+        
+        return {
+            success: sessionData,
+            valid: session.validateToken(),
+            demoMode: session.isDemoMode(),
+            guestMode: session.isGuestMode(),
+            user: currentUser,
+            timestamp: Date.now()
+        };
+    }, 'requestSession', { success: false, valid: false, demoMode: true });
+}
+
+async function waitForHandshake(timeout = CONFIG.HANDSHAKE_TIMEOUT) {
+    const startTime = Date.now();
+    
+    if (!handshakePromise) {
+        handshakePromise = new Promise((resolve, reject) => {
+            handshakeResolve = resolve;
+            handshakeReject = reject;
+        });
+    }
+    
+    if (_HANDSHAKE_DONE_ || _PARENT_READY_) {
+        handshakeResolve?.({ success: true, handshakeComplete: _HANDSHAKE_DONE_, parentReady: _PARENT_READY_ });
+        return { success: true, handshakeComplete: _HANDSHAKE_DONE_, parentReady: _PARENT_READY_ };
+    }
+    
+    try {
+        const result = await Promise.race([
+            handshakePromise,
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Handshake timeout')), timeout)
+            )
+        ]);
+        return result;
+    } catch (error) {
+        logger.warn('Handshake wait failed', error);
+        return { success: false, error: error.message };
+    } finally {
+        handshakePromise = null;
+        handshakeResolve = null;
+        handshakeReject = null;
+    }
+}
+
+async function waitForParent(timeout = CONFIG.HANDSHAKE_TIMEOUT) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+        if (_PARENT_READY_ && window.parent && window.parent !== window) {
+            logger.info('Parent ready');
+            return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    logger.warn('Parent wait timeout');
+    return false;
+}
+
+async function verifySession() {
+    const session = getValidatedSession();
+    if (!session) {
+        throw new Error('No valid session');
+    }
+    
+    if (session.expiresAt < Date.now()) {
+        logger.warn('Session expired');
+        return false;
+    }
+    
+    try {
+        const result = await parentComm.request('VERIFY_SESSION', {
+            token: session.token,
+            userId: session.userId,
+            timestamp: Date.now()
+        }, 3000);
+        
+        return result?.valid === true;
+    } catch (error) {
+        logger.warn('Session verification failed', error);
+        return true;
+    }
+}
+
+function isValidSession(session) {
+    if (!session || typeof session !== 'object') {
+        return false;
+    }
+    
+    // Accept demo mode sessions
+    if (session.demoMode || session._demoMode) {
+        return true;
+    }
+    
+    if (typeof session.token !== 'string' || session.token.length < 5) {
+        return false;
+    }
+    
+    if (!session.userId && !session.user?.id) {
+        return false;
+    }
+    
+    const expiresAt = session.expiresAt || session.expiry;
+    if (expiresAt && typeof expiresAt === 'number' && expiresAt < Date.now()) {
+        return false;
+    }
+    
+    return true;
+}
+
+function getValidatedSession() {
+    if (validatedSession && (Date.now() - sessionValidationTimestamp) < SESSION_VALIDATION_TTL) {
+        return validatedSession;
+    }
+    
+    const session = {
+        token: sessionToken,
+        userId: currentUser?.id || currentUser?.userId,
+        expiresAt: sessionExpiry || (Date.now() + 3600000),
+        signature: SecurityCore.createSignature({ userId: currentUser?.id }, Date.now()),
+        refreshToken: null
+    };
+    
+    if (isValidSession(session)) {
+        validatedSession = session;
+        sessionValidationTimestamp = Date.now();
+        return session;
+    }
+    
+    return null;
+}
+
+function sendSessionAck(type, payload) {
+    try {
+        if (window.parent && window.parent !== window) {
             const message = MessageBridge.createMessage(type, payload, { legacy: true });
             window.parent.postMessage(message, OriginAdapter.getTargetOrigin());
-        },
-        requestToken: () => session.requestToken(),
-        destroy: () => lifecycle.destroy(),
-        onStateChange: (callback) => {
-            if (typeof callback === 'function') {
-                stateChangeCallbacks.add(callback);
-                return () => stateChangeCallbacks.delete(callback);
-            }
-        },
-        diag: () => ({
-            timers: timers.size,
-            pendingRequests: pendingRequests.size,
-            errorCacheSize: errorCache.size,
-            messageCacheSize: messageCache.size,
-            listeners: eventListeners.size,
-            online: isOnline,
-            visible: !document.hidden,
-            state: currentState,
-            sessionValid: session.validateToken(),
-            demoMode: session.isDemoMode(),
-            parentDetected: !!(window.parent && window.parent !== window),
-            logger: logger.getMetrics ? logger.getMetrics() : {},
-            callCoreState: callCoreState,
-            sessionAckReceived: sessionAckReceived,
-            sessionAckTimestamp: sessionAckTimestamp,
-            validatedSession: !!validatedSession,
-            sessionValidationTimestamp: sessionValidationTimestamp,
-            transport: TransportAgent.getStatus(),
-            handshake: HandshakeClient.getStatus(),
-            compatibility: CompatibilityBridge.getStatus(),
-            recovery: RecoveryManager.getStatus(),
-            environment: EnvironmentDetector.getFullReport(),
-            startup: StartupGovernor.getMetrics(),
-            origin: OriginAdapter.getMode()
-        })
+            logger.info(`Session ACK sent: ${type}`);
+        }
+    } catch (e) {
+        logger.error('Failed to send session ACK', e);
+    }
+}
+
+// ==================== UTILITY FUNCTIONS ====================
+function stringToColor(str) {
+    if (!str) return '#6c5ce7';
+    
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    const colors = ['#6c5ce7', '#00b894', '#0984e3', '#fdcb6e', '#e17055', '#d63031', '#e84342', '#6c5ce7'];
+    return colors[Math.abs(hash) % colors.length];
+}
+
+function formatTimeAgo(date) {
+    const seconds = Math.floor((Date.now() - date) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+}
+
+function formatDuration(seconds) {
+    if (!seconds && seconds !== 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
     };
+}
 
-    async function initializeCore(options = {}) {
-        return ErrorBoundary.executeAsync(async () => {
-            logger.info('initializeCore called', options);
-            const result = await safeInit();
-            return { 
-                status: coreReady ? 'ready' : 'degraded', 
-                mode: session.isDemoMode() ? 'demo' : session.isGuestMode() ? 'guest' : 'production',
-                iframeId,
-                timestamp: Date.now()
-            };
-        }, 'initializeCore', { status: 'failed', mode: 'demo' });
+function makeDraggable(element) {
+    if (!element) return;
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    element.onmousedown = dragMouseDown;
+    
+    function dragMouseDown(e) {
+        e = e || window.event;
+        e.preventDefault();
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        document.onmouseup = closeDragElement;
+        document.onmousemove = elementDrag;
     }
+    
+    function elementDrag(e) {
+        e = e || window.event;
+        e.preventDefault();
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        element.style.top = (element.offsetTop - pos2) + 'px';
+        element.style.left = (element.offsetLeft - pos1) + 'px';
+    }
+    
+    function closeDragElement() {
+        document.onmouseup = null;
+        document.onmousemove = null;
+    }
+}
 
-    async function startHandshake(options = {}) {
-        return ErrorBoundary.executeAsync(async () => {
-            logger.info('startHandshake called', options);
-            
-            const maxAttempts = options.maxAttempts || CONFIG.HANDSHAKE_MAX_ATTEMPTS;
-            const timeout = options.timeout || CONFIG.HANDSHAKE_TIMEOUT;
-            
-            return RetryManager.executeWithRetry(async () => {
-                if (_HANDSHAKE_DONE_ || session.isDemoMode()) {
-                    return { success: true, handshakeComplete: _HANDSHAKE_DONE_, attempts: _HANDSHAKE_RETRIES_ };
+function closePip() {
+    if (elements.pipContainer) {
+        elements.pipContainer.style.display = 'none';
+    }
+}
+
+function checkPremiumFeature(feature) {
+    if (session.isDemoMode()) return true;
+    if (!AppState.isPremium && !AppState.premiumFeatures[feature]) {
+        if (elements.premiumLimitOverlay) {
+            const featureNameEl = document.getElementById('premiumFeatureName');
+            if (featureNameEl) {
+                featureNameEl.textContent = feature === 'groupCalls' ? 'Group Calls' :
+                                          feature === 'screenSharing' ? 'Screen Sharing' :
+                                          feature === 'whiteboard' ? 'Whiteboard' :
+                                          feature === 'polls' ? 'Polls' :
+                                          feature === 'relationshipInsights' ? 'Relationship Insights' :
+                                          'Premium Feature';
+            }
+            elements.premiumLimitOverlay.classList.add('active');
+        }
+        return false;
+    }
+    return true;
+}
+
+function updatePremiumUI() {
+    if (!elements.quickGroupBtn || !elements.screenShareBtn) return;
+    
+    try {
+        if (AppState.isPremium || session.isDemoMode()) {
+            elements.quickGroupBtn.disabled = false;
+            elements.screenShareBtn.disabled = false;
+        } else {
+            elements.quickGroupBtn.disabled = true;
+            elements.screenShareBtn.disabled = true;
+        }
+    } catch (error) {
+        logger.error('updatePremiumUI', error);
+    }
+}
+
+function loadSettings() {
+    try {
+        const savedSettings = SecurityCore.safeLocalStorageGet('callSettings');
+        if (savedSettings) {
+            AppState.settings = { ...AppState.settings, ...SecurityCore.safeJSONParse(savedSettings, {}) };
+            applySettingsToUI();
+        }
+    } catch (error) {
+        logger.error('loadSettings', error);
+    }
+}
+
+function saveSettings() {
+    try {
+        SecurityCore.safeLocalStorageSet('callSettings', JSON.stringify(AppState.settings));
+    } catch (error) {
+        logger.error('saveSettings', error);
+    }
+}
+
+function applySettingsToUI() {
+    try {
+        if (elements.emotionalContextToggle) elements.emotionalContextToggle.checked = AppState.settings.emotionalContext;
+        if (elements.callIntentionToggle) elements.callIntentionToggle.checked = AppState.settings.callIntention;
+        if (elements.inCallChatToggle) elements.inCallChatToggle.checked = AppState.settings.inCallChat;
+        if (elements.whiteboardToggle) elements.whiteboardToggle.checked = AppState.settings.whiteboard;
+        if (elements.pollsToggle) elements.pollsToggle.checked = AppState.settings.polls;
+        if (elements.notesToggle) elements.notesToggle.checked = AppState.settings.notes;
+        if (elements.focusModeToggle) elements.focusModeToggle.checked = AppState.settings.focusMode;
+        if (elements.liveReactionsToggle) elements.liveReactionsToggle.checked = AppState.settings.liveReactions;
+    } catch (error) {
+        logger.error('applySettingsToUI', error);
+    }
+}
+
+function updateSetting(event) {
+    const setting = event.target.id.replace('Toggle', '');
+    const settingKey = setting.charAt(0).toLowerCase() + setting.slice(1);
+    AppState.settings[settingKey] = event.target.checked;
+    saveSettings();
+    applySettingChange(settingKey, event.target.checked);
+}
+
+function applySettingChange(settingKey, value) {
+    if (settingKey === 'focusMode' && AppState.isInCall) {
+        if (value) {
+            document.body.classList.add('focus-mode');
+        } else {
+            document.body.classList.remove('focus-mode');
+        }
+    }
+}
+
+function resetSettings() {
+    AppState.settings = {
+        emotionalContext: true,
+        callIntention: true,
+        inCallChat: true,
+        whiteboard: true,
+        polls: true,
+        notes: true,
+        focusMode: false,
+        liveReactions: true,
+        theme: 'light'
+    };
+    saveSettings();
+    applySettingsToUI();
+    showNotification('Settings reset to default', 'success');
+}
+
+function handleOnline() {
+    AppState.isOnline = true;
+    if (elements.offlineBanner) elements.offlineBanner.style.display = 'none';
+    if (window.callAPI) window.callAPI.performBackgroundSync();
+    
+    TransportAgent.processOfflineQueue();
+    
+    if (!getValidatedSession() && !session.isDemoMode()) {
+        requestResync();
+    }
+}
+
+function handleOffline() {
+    AppState.isOnline = false;
+    showOfflineUI();
+}
+
+function showOfflineUI() {
+    if (elements.offlineBanner) elements.offlineBanner.style.display = 'flex';
+    if (elements.syncIndicator) {
+        elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
+    }
+}
+
+function handleStorageEvent(e) {
+    if (e.key === 'USER_TOKEN' && e.newValue) {
+        session.setToken(e.newValue);
+    }
+}
+
+function initializeOfflineDetection() {
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+}
+
+function showUI() {
+    try {
+        const appContainer = document.getElementById('appContainer');
+        if (appContainer) {
+            appContainer.style.visibility = 'visible';
+            appContainer.style.opacity = '1';
+        }
+        
+        const loadingIndicators = document.querySelectorAll('.loading-indicator, .initializing-overlay, .core-loading-message');
+        loadingIndicators.forEach(indicator => {
+            if (indicator) indicator.style.display = 'none';
+        });
+    } catch (error) {
+        logger.error('showUI', error);
+    }
+}
+
+function enableUI() {
+    const isAuthenticated = parentCoordinator ? parentCoordinator.sessionValidated : AppState.isAuthenticated;
+    
+    try {
+        if (elements.newCallBtn) elements.newCallBtn.disabled = !isAuthenticated && !session.isDemoMode();
+        if (elements.quickVoiceBtn) elements.quickVoiceBtn.disabled = !isAuthenticated && !session.isDemoMode();
+        if (elements.quickVideoBtn) elements.quickVideoBtn.disabled = !isAuthenticated && !session.isDemoMode();
+        
+        if (AppState.isOnline) {
+            if (elements.syncIndicator) {
+                if (session.isDemoMode()) {
+                    elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
+                } else {
+                    elements.syncIndicator.innerHTML = '<i class="fas fa-sync"></i><span>Synced</span>';
                 }
-                
-                _HANDSHAKE_RETRIES_++;
-                
-                const handshakeMessage = MessageBridge.createMessage('CHILD_READY', {
-                    attempt: _HANDSHAKE_RETRIES_,
-                    maxAttempts: maxAttempts
-                }, { legacy: true });
-                
-                window.parent.postMessage(handshakeMessage, OriginAdapter.getTargetOrigin());
-                
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                return { 
-                    success: _HANDSHAKE_DONE_, 
-                    handshakeComplete: _HANDSHAKE_DONE_,
-                    attempts: _HANDSHAKE_RETRIES_,
-                    parentReady: _PARENT_READY_
-                };
-            }, 'handshake', { maxRetries: maxAttempts, timeout });
-        }, 'startHandshake', { success: false });
-    }
-
-    function sendToParent(type, payload = {}, options = {}) {
-        return ErrorBoundary.execute(() => {
-            logger.once('sendToParent: ' + type);
-            
-            if (options.requireResponse) {
-                return parentComm.request(type, payload, options.timeout || 5000);
             }
-            
-            if (options.requireAck) {
-                return parentComm.sendWithAck(type, payload, options.timeout || 5000);
+        } else {
+            if (elements.syncIndicator) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
             }
-            
-            return parentComm.send(type, payload);
-        }, 'sendToParent', options.requireResponse ? Promise.reject(new Error('Send failed')) : false);
+        }
+    } catch (error) {
+        logger.error('enableUI', error);
     }
+}
 
-    async function requestSession(options = {}) {
-        return ErrorBoundary.executeAsync(async () => {
-            logger.info('requestSession called', options);
+function checkUrlParameters() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const callId = urlParams.get('call');
+    const callType = urlParams.get('type') || 'voice';
+    
+    if (callId && elements.urlParamOverlay) {
+        const urlParamCallId = document.getElementById('urlParamCallId');
+        if (urlParamCallId) {
+            urlParamCallId.textContent = SecurityCore.sanitizeString(callId);
+        }
+        elements.urlParamOverlay.dataset.callId = callId;
+        elements.urlParamOverlay.dataset.callType = callType;
+        elements.urlParamOverlay.classList.add('active');
+    }
+}
+
+function closeUrlParamOverlay() {
+    if (elements.urlParamOverlay) {
+        elements.urlParamOverlay.classList.remove('active');
+    }
+}
+
+function joinUrlParamCall() {
+    if (!elements.urlParamOverlay) return;
+    const callId = elements.urlParamOverlay.dataset.callId;
+    const callType = elements.urlParamOverlay.dataset.callType || 'voice';
+    
+    closeUrlParamOverlay();
+    
+    if (window.callCore) {
+        window.callCore.startCall({
+            type: callType,
+            callId: callId,
+            participants: [{ id: 'remote', name: 'Call Participant' }]
+        }).catch(error => {
+            showNotification(`Failed to join call: ${error.message}`, 'error');
+        });
+    }
+}
+
+function updateMoodIndicator(mood) {
+    if (!elements.callMoodIndicator) return;
+    const moodIcons = {
+        happy: 'fa-smile',
+        neutral: 'fa-meh',
+        sad: 'fa-frown',
+        angry: 'fa-angry',
+        tired: 'fa-tired'
+    };
+    const icon = moodIcons[mood] || 'fa-meh';
+    elements.callMoodIndicator.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(mood)}</span>`;
+    elements.callMoodIndicator.className = `mood-indicator mood-${SecurityCore.sanitizeString(mood)}`;
+}
+
+function updateIntentionIndicator(intention) {
+    if (!elements.callIntentionIndicator) return;
+    const intentionLabels = {
+        quick: 'Quick Chat',
+        important: 'Important',
+        emergency: 'Emergency',
+        checkin: 'Check-in',
+        work: 'Work'
+    };
+    const label = intentionLabels[intention] || 'Quick Chat';
+    elements.callIntentionIndicator.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
+    elements.callIntentionIndicator.className = `intention-indicator intention-${SecurityCore.sanitizeString(intention)}`;
+}
+
+function updateParticipantBadge() {
+    const badge = document.querySelector('.participant-badge');
+    if (badge) {
+        badge.textContent = AppState.callParticipants.length + 1;
+    }
+}
+
+function updateChatBadge() {
+    if (AppState.unreadChatCount > 0) {
+        const badge = document.querySelector('.chat-badge');
+        if (badge) {
+            badge.textContent = AppState.unreadChatCount;
+            badge.style.display = 'flex';
+        }
+    }
+}
+
+function updateGroupCallButton() {
+    if (elements.quickGroupBtn) {
+        elements.quickGroupBtn.disabled = !AppState.isPremium && !session.isDemoMode();
+    }
+}
+
+function updateVideoLayout() {
+    const videoCount = elements.videoGrid.querySelectorAll('.video-container').length;
+    if (videoCount === 1) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr';
+    } else if (videoCount === 2) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
+    } else if (videoCount === 3) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
+    } else if (videoCount >= 4) {
+        elements.videoGrid.style.gridTemplateColumns = '1fr 1fr';
+    }
+}
+
+function initializeWhiteboard(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+}
+
+function sendChatMessage(message) {
+    if (!message || !AppState.isInCall) return;
+    const chatMessages = document.getElementById('chatMessagesPanel');
+    if (chatMessages) {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'chat-message self';
+        msgEl.innerHTML = `
+            <div class="message-sender">You</div>
+            <div class="message-content">${SecurityCore.sanitizeString(message)}</div>
+            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+        `;
+        chatMessages.appendChild(msgEl);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}
+
+function saveSharedNotes(notes) {
+    if (!notes) return;
+    try {
+        const savedNotes = SecurityCore.safeJSONParse(SecurityCore.safeLocalStorageGet('sharedNotes') || '[]', []);
+        savedNotes.push({
+            notes: SecurityCore.sanitizeString(notes),
+            timestamp: Date.now(),
+            callId: AppState.activeCallId
+        });
+        SecurityCore.safeLocalStorageSet('sharedNotes', JSON.stringify(savedNotes));
+    } catch (error) {
+        logger.error('saveSharedNotes', error);
+    }
+}
+
+function renderCallHistory() {
+    if (!elements.callsLoading || !elements.allCallsList) return;
+    
+    try {
+        elements.callsLoading.style.display = 'none';
+        
+        if (!AppState.callHistory || AppState.callHistory.length === 0) {
+            if (elements.allCallsList) {
+                elements.allCallsList.innerHTML = '<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No call history</p></div>';
+            }
+            return;
+        }
+        
+        let html = '';
+        AppState.callHistory.slice(0, 20).forEach(call => {
+            const date = new Date(call.date);
+            const timeAgo = formatTimeAgo(date);
+            const duration = call.missed ? 'Missed' : formatDuration(call.duration);
+            const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
+            const statusClass = call.missed ? 'missed' : '';
             
-            const sessionData = await SessionManager.acquire();
-            
-            return {
-                success: sessionData,
-                valid: session.validateToken(),
-                demoMode: session.isDemoMode(),
-                guestMode: session.isGuestMode(),
-                user: currentUser,
-                timestamp: Date.now()
+            html += `
+                <div class="call-history-item ${statusClass}">
+                    <div class="call-avatar">${SecurityCore.sanitizeString(call.contact.charAt(0))}</div>
+                    <div class="call-info">
+                        <div class="call-name">${SecurityCore.sanitizeString(call.contact)}</div>
+                        <div class="call-details">
+                            <i class="fas ${icon}"></i>
+                            <span>${SecurityCore.sanitizeString(duration)}</span>
+                            <span>•</span>
+                            <span>${SecurityCore.sanitizeString(timeAgo)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        elements.allCallsList.innerHTML = html;
+    } catch (error) {
+        logger.error('renderCallHistory', error);
+    }
+}
+
+function createCallHistoryItem(call) {
+    const date = new Date(call.date);
+    const timeAgo = formatTimeAgo(date);
+    const duration = call.missed ? 'Missed' : formatDuration(call.duration);
+    const icon = call.type === 'video' ? 'fa-video' : 'fa-phone';
+    const statusClass = call.missed ? 'missed' : '';
+    
+    return `
+        <div class="call-history-item ${statusClass}">
+            <div class="call-avatar">${SecurityCore.sanitizeString(call.contact.charAt(0))}</div>
+            <div class="call-info">
+                <div class="call-name">${SecurityCore.sanitizeString(call.contact)}</div>
+                <div class="call-details">
+                    <i class="fas ${icon}"></i>
+                    <span>${SecurityCore.sanitizeString(duration)}</span>
+                    <span>•</span>
+                    <span>${SecurityCore.sanitizeString(timeAgo)}</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function simulateIncomingCall(callerId, metadata = {}) {
+    if (AppState.isInCall) {
+        showNotification('Already in a call', 'warning');
+        return false;
+    }
+    
+    try {
+        let callerContact = null;
+        
+        if (AppState.contacts && AppState.contacts.length > 0) {
+            callerContact = AppState.contacts.find(c => c.id === callerId);
+        }
+        
+        if (!callerContact) {
+            callerContact = {
+                id: callerId || 'simulated-' + Date.now(),
+                name: metadata.name || 'Test Caller',
+                avatar: metadata.avatar || null,
+                isPremium: metadata.isPremium || false
             };
-        }, 'requestSession', { success: false, valid: false, demoMode: true });
+        }
+        
+        const callMetadata = {
+            callType: metadata.callType || 'voice',
+            mood: metadata.mood || 'neutral',
+            intention: metadata.intention || 'quick',
+            isGroup: metadata.isGroup || false,
+            callId: 'simulated-call-' + Date.now(),
+            timestamp: Date.now()
+        };
+        
+        if (elements.incomingCallModal && elements.incomingCallName) {
+            elements.incomingCallName.textContent = SecurityCore.sanitizeString(callerContact.name);
+            elements.incomingCallType.textContent = callMetadata.callType === 'video' ? 'Video Call' : 'Voice Call';
+            
+            const initials = callerContact.name.split(' ').map(n => n[0]).join('').toUpperCase();
+            elements.incomingCallAvatar.innerHTML = SecurityCore.sanitizeString(initials);
+            elements.incomingCallAvatar.style.backgroundColor = stringToColor(callerContact.name);
+            
+            if (metadata.mood) {
+                const moodIcons = {
+                    happy: 'fa-smile',
+                    neutral: 'fa-meh',
+                    sad: 'fa-frown',
+                    angry: 'fa-angry',
+                    tired: 'fa-tired'
+                };
+                const icon = moodIcons[metadata.mood] || 'fa-meh';
+                elements.incomingCallMood.innerHTML = `<i class="fas ${icon}"></i><span>${SecurityCore.sanitizeString(metadata.mood)}</span>`;
+                elements.incomingCallMood.className = `mood-indicator mood-${SecurityCore.sanitizeString(metadata.mood)}`;
+                elements.incomingCallMood.style.display = 'inline-flex';
+            } else {
+                elements.incomingCallMood.style.display = 'none';
+            }
+            
+            if (metadata.intention) {
+                const intentionLabels = {
+                    quick: 'Quick Chat',
+                    important: 'Important',
+                    emergency: 'Emergency',
+                    checkin: 'Check-in',
+                    work: 'Work'
+                };
+                const label = intentionLabels[metadata.intention] || 'Quick Chat';
+                elements.incomingCallIntention.innerHTML = `<i class="fas fa-bullseye"></i><span>${SecurityCore.sanitizeString(label)}</span>`;
+                elements.incomingCallIntention.className = `intention-indicator intention-${SecurityCore.sanitizeString(metadata.intention)}`;
+                elements.incomingCallIntention.style.display = 'inline-flex';
+            } else {
+                elements.incomingCallIntention.style.display = 'none';
+            }
+            
+            let timeLeft = 45;
+            elements.declineTimer.textContent = timeLeft;
+            
+            const countdown = setInterval(() => {
+                timeLeft--;
+                elements.declineTimer.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(countdown);
+                    if (elements.incomingCallModal.classList.contains('active')) {
+                        elements.incomingCallModal.classList.remove('active');
+                    }
+                }
+            }, 1000);
+            
+            elements.incomingCallModal.dataset.timer = countdown;
+            elements.incomingCallModal.dataset.caller = JSON.stringify(callerContact);
+            elements.incomingCallModal.dataset.metadata = JSON.stringify(callMetadata);
+            
+            elements.incomingCallModal.classList.add('active');
+            
+            parentComm.send('INCOMING_CALL_SIMULATED', {
+                callerId: callerContact.id,
+                metadata: callMetadata,
+                timestamp: Date.now()
+            });
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        logger.error('simulateIncomingCall', error);
+        return false;
     }
+}
 
-    function receiveFromParent(type, handler) {
-        return ErrorBoundary.execute(() => {
-            if (!type || typeof handler !== 'function') {
-                logger.error('receiveFromParent: invalid parameters');
+function showNotification(message, type = 'success') {
+    try {
+        const notification = document.createElement('div');
+        notification.className = `call-notification ${type}`;
+        
+        notification.innerHTML = `
+            <div class="call-notification-content">
+                <div class="call-notification-title">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                <div class="call-notification-message">${SecurityCore.sanitizeString(message)}</div>
+            </div>
+            <button class="call-notification-close">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        const notificationArea = document.getElementById('notificationArea') || document.body;
+        notificationArea.appendChild(notification);
+        
+        const closeBtn = notification.querySelector('.call-notification-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => notification.remove());
+        }
+        
+        const timer = setTimeout(() => {
+            if (notification.parentNode) notification.remove();
+        }, 3000);
+        timers.add(timer);
+    } catch (error) {
+        logger.error('showNotification', error);
+    }
+}// ==================== AUTH MANAGEMENT ====================
+const auth = {
+    retryCount: 0,
+    
+    sync: async function() {
+        try {
+            logger.info('Starting auth sync');
+            session.setState(STATE.SYNC);
+            
+            const initialized = await session.init();
+            
+            if (initialized) {
+                this.retryCount = 0;
+                session.setState(STATE.READY);
+                return true;
+            }
+            
+            if (session.isDemoMode()) {
+                session.setState(STATE.DEGRADED);
                 return false;
             }
             
-            const wrappedHandler = (message, origin) => {
-                try {
-                    const adaptedMessage = CompatibilityBridge.adaptIncoming(message);
-                    handler(adaptedMessage.payload || adaptedMessage, { 
-                        origin, 
-                        id: adaptedMessage.messageId, 
-                        timestamp: adaptedMessage.timestamp 
-                    });
-                } catch (error) {
-                    logger.error(`Handler error for ${type}`, error);
-                }
-            };
-            
-            window.addEventListener('message', (event) => {
-                if (!OriginAdapter.validateEvent(event)) return;
-                const adapted = CompatibilityBridge.adaptIncoming(event.data);
-                if (!adapted || adapted.type !== type) return;
-                if (!MessageValidator.validate(adapted)) return;
+            if (this.retryCount < CONFIG.AUTH_RETRY_LIMIT) {
+                this.retryCount++;
+                logger.warn(`Auth retry ${this.retryCount}/${CONFIG.AUTH_RETRY_LIMIT}`);
                 
-                wrappedHandler(adapted, event.origin);
+                const delay = CONFIG.AUTH_RETRY_DELAY * this.retryCount;
+                const timer = setTimeout(() => this.sync(), delay);
+                timers.add(timer);
+                return false;
+            }
+            
+            logger.warn('Auth sync failed after max retries');
+            session.setState(STATE.DEGRADED);
+            RecoveryManager.scheduleRecovery();
+            return false;
+        } catch (error) {
+            logger.error('Auth sync failed', error);
+            session.setState(STATE.DEGRADED);
+            RecoveryManager.scheduleRecovery();
+            return false;
+        }
+    },
+    
+    check: function() {
+        return session.validateToken();
+    },
+    
+    refresh: function() {
+        return session.refreshToken();
+    },
+    
+    logout: function() {
+        session.clearToken();
+        parentComm.send('USER_LOGGED_OUT', { timestamp: Date.now() });
+        logger.info('Logout completed');
+        return this.sync();
+    }
+};
+
+// ==================== LIFECYCLE MANAGEMENT ====================
+const lifecycle = {
+    init: async function() {
+        try {
+            logger.info(`Starting lifecycle (${iframeId})`);
+            logger.info(`Environment: ${window.parent === window ? 'standalone' : 'embedded'}`);
+            
+            StartupGovernor.transition(STATE.INIT);
+            
+            CompatibilityBridge.detect();
+            
+            const handshakeResult = await HandshakeClient.start();
+            if (!handshakeResult.success) {
+                logger.warn('Handshake failed, using fallback');
+            }
+            
+            const authSynced = await auth.sync();
+            
+            if (authSynced) {
+                StartupGovernor.transition(STATE.READY);
+            } else {
+                logger.warn('Proceeding in degraded/demo mode');
+                StartupGovernor.transition(STATE.DEGRADED);
+            }
+            
+            this.setupVisibilityHandling();
+            this.setupConnectivityHandling();
+            TransportAgent.startHeartbeat(CONFIG.HEARTBEAT_INTERVAL);
+            
+            RecoveryManager.createCheckpoint('initialized');
+            
+            parentComm.send('IFRAME_READY', {
+                iframeId: iframeId,
+                state: currentState,
+                sessionValid: session.validateToken(),
+                demoMode: session.isDemoMode(),
+                timestamp: Date.now()
             });
             
-            logger.once('Registered receive handler: ' + type);
+            logger.info('Lifecycle initialization complete');
             return true;
-        }, 'receiveFromParent', false);
+        } catch (error) {
+            logger.error('Lifecycle initialization failed', error);
+            StartupGovernor.transition(STATE.DEGRADED);
+            RecoveryManager.scheduleRecovery();
+            return false;
+        }
+    },
+    
+    setupVisibilityHandling: function() {
+        const handler = () => {
+            if (document.hidden) {
+                if (currentState === STATE.ACTIVE) {
+                    StartupGovernor.transition(STATE.SUSPENDED);
+                    parentComm.send('IFRAME_SUSPENDED', { timestamp: Date.now() });
+                }
+            } else {
+                if (currentState === STATE.SUSPENDED || currentState === STATE.READY || currentState === STATE.DEGRADED) {
+                    StartupGovernor.transition(STATE.ACTIVE);
+                    parentComm.send('IFRAME_ACTIVE', { timestamp: Date.now() });
+                    
+                    if (session.validateToken()) {
+                        session.refreshToken();
+                    } else if (!session.isDemoMode()) {
+                        auth.sync();
+                    }
+                    
+                    if (!getValidatedSession() && !session.isDemoMode()) {
+                        requestResync();
+                    }
+                }
+            }
+        };
+        
+        document.addEventListener('visibilitychange', handler);
+        eventListeners.set('visibilitychange', handler);
+        
+        if (!document.hidden) {
+            StartupGovernor.transition(STATE.ACTIVE);
+        }
+    },
+    
+    setupConnectivityHandling: function() {
+        const onlineHandler = () => {
+            isOnline = true;
+            logger.info('Network online');
+            
+            if (currentState === STATE.DEGRADED && !session.isDemoMode()) {
+                auth.sync();
+            } else if (session.validateToken()) {
+                parentComm.send('NETWORK_RESTORED', { timestamp: Date.now() });
+                
+                TransportAgent.processOfflineQueue();
+                
+                if (!getValidatedSession()) {
+                    requestResync();
+                }
+            }
+        };
+        
+        const offlineHandler = () => {
+            isOnline = false;
+            logger.warn('Network offline');
+            parentComm.send('NETWORK_LOST', { timestamp: Date.now() });
+        };
+        
+        window.addEventListener('online', onlineHandler);
+        window.addEventListener('offline', offlineHandler);
+        
+        eventListeners.set('online', onlineHandler);
+        eventListeners.set('offline', offlineHandler);
+    },
+    
+    destroy: function() {
+        logger.info('Destroying iframe instance');
+        StartupGovernor.transition(STATE.DESTROYED);
+        
+        timers.forEach(timer => {
+            try {
+                if (timer && typeof timer === 'object' && 'ref' in timer) {
+                    clearInterval(timer);
+                    clearTimeout(timer);
+                }
+            } catch (e) {}
+        });
+        timers.clear();
+        
+        eventListeners.forEach((handler, event) => {
+            try {
+                window.removeEventListener(event, handler);
+                document.removeEventListener(event, handler);
+            } catch (e) {}
+        });
+        eventListeners.clear();
+        
+        pendingRequests.forEach((req) => {
+            try { if (req.cleanup) req.cleanup(); } catch (e) {}
+        });
+        pendingRequests.clear();
+        
+        TransportAgent.cleanup();
+        SessionClient.cleanup();
+        
+        parentComm.send('IFRAME_DESTROYED', {
+            iframeId: iframeId,
+            timestamp: Date.now()
+        });
+        
+        logger.info('Iframe destroyed');
+        return { success: true };
     }
+};
 
-    function shutdownCore() {
-        return ErrorBoundary.execute(() => {
-            logger.info('shutdownCore called');
-            return lifecycle.destroy();
-        }, 'shutdownCore', { success: false });
+// ==================== MESSAGE HANDLER ====================
+const messageHandler = {
+    init: function() {
+        window.addEventListener('message', this.handleMessage.bind(this));
+        logger.info('Message handler initialized');
+    },
+    
+    handleMessage: function(event) {
+        if (!OriginAdapter.validateEvent(event)) return;
+        
+        const adaptedMessage = CompatibilityBridge.adaptIncoming(event.data);
+        
+        if (!adaptedMessage || typeof adaptedMessage !== 'object') return;
+        if (!MessageValidator.validate(adaptedMessage)) return;
+        
+        try {
+            const data = adaptedMessage;
+            
+            switch (data.type) {
+                case 'SESSION_UPDATE':
+                    if (data.payload?.token) {
+                        session.setToken(data.payload.token, data.payload.expiry);
+                    }
+                    break;
+                case 'TOKEN_REFRESH':
+                    if (data.payload?.token) {
+                        session.setToken(data.payload.token, data.payload.expiry);
+                        parentComm.send('TOKEN_REFRESHED', { timestamp: Date.now() });
+                    }
+                    break;
+                case 'LOGOUT':
+                    logger.info('Logout requested by parent');
+                    session.clearToken();
+                    parentComm.send('USER_LOGGED_OUT', { timestamp: Date.now() });
+                    auth.sync();
+                    break;
+                case 'PING':
+                    if (data.payload?.requestId) {
+                        const pongMessage = MessageBridge.createMessage('PONG', {
+                            requestId: data.payload.requestId,
+                            state: currentState,
+                            sessionValid: session.validateToken(),
+                            demoMode: session.isDemoMode(),
+                            timestamp: Date.now()
+                        });
+                        window.parent.postMessage(pongMessage, OriginAdapter.getTargetOrigin());
+                    }
+                    break;
+                case 'PONG':
+                    break;
+                case 'PARENT_CRASH_RECOVERY':
+                    logger.warn('Parent crash detected, initiating recovery');
+                    RecoveryManager.recover();
+                    break;
+                case 'ACK':
+                    parentComm._handleAck(data);
+                    break;
+                case 'SESSION_INIT':
+                    if (data.payload && data.payload.session && data.payload.session.token) {
+                        session.setToken(data.payload.session.token, data.payload.session.expiry);
+                        if (data.payload.session.user) {
+                            currentUser = data.payload.session.user;
+                            userDataLoaded = true;
+                        }
+                        logger.info('Session initialized from parent via SESSION_INIT');
+                    }
+                    break;
+                case 'SESSION_SYNC':
+                    if (data.payload) {
+                        handleSessionSync(data.payload, data.messageId);
+                    }
+                    break;
+                case 'SESSION_ACK':
+                    if (data.payload) {
+                        handleParentAck(data.payload);
+                    }
+                    break;
+                case 'PAGE_ACTIVATED':
+                    logger.info('Parent page activated');
+                    if (currentState === STATE.SUSPENDED) {
+                        StartupGovernor.transition(STATE.ACTIVE);
+                    }
+                    break;
+                case 'NAVIGATE':
+                    logger.info('Parent navigation:', data.payload);
+                    break;
+            }
+        } catch (error) {
+            logger.error('Failed to handle parent message', error, adaptedMessage?.type);
+        }
     }
-
-    async function initializeUI() {
-        return ErrorBoundary.executeAsync(async () => {
-            logger.info('initializeUI called');
-            cacheElements();
-            return {
-                success: true,
-                elements: Object.keys(elements).length,
-                timestamp: Date.now()
-            };
-        }, 'initializeUI', { success: false, elements: 0 });
-    }
-
-    function cleanupUISession() {
-        return ErrorBoundary.execute(() => {
-            logger.info('cleanupUISession called');
-            if (window.callAPI) window.callAPI.cleanup();
-            if (window.callCore) window.callCore.cleanup();
-            if (parentCoordinator) parentCoordinator.cleanup();
-            TransportAgent.cleanup();
-            SessionClient.cleanup();
-            session.clearToken();
-            return { success: true, timestamp: Date.now() };
-        }, 'cleanupUISession', { success: false });
-    }
+};
 
     // ==================== EXPORT NEW MODULES ====================
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = {
-            // Original exports
-            initializeCore,
-            startHandshake,
-            sendToParent,
-            requestSession,
-            receiveFromParent,
-            shutdownCore,
-            initializeUI,
-            cleanupUISession,
-            isValidSession,
-            getValidatedSession,
-            waitForSession,
-            waitForParent,
-            waitForHandshake,
-            verifySession,
-            safeInit,
-            requestResync,
-            sendSessionAck,
-            CoreInitializer,
-            CallCore,
-            ParentCoordinator,
-            TokenManager,
-            SecureAPIClient,
-            CallAPIIntegration,
-            AppState,
-            elements,
-            simulateIncomingCall,
-            showNotification,
-            bootstrapIframe,
-            cacheElements,
-            initializeOfflineDetection,
-            showUI,
-            enableUI,
-            checkUrlParameters,
-            makeDraggable,
-            closePip,
-            checkPremiumFeature,
-            updatePremiumUI,
-            loadSettings,
-            saveSettings,
-            applySettingsToUI,
-            updateSetting,
-            applySettingChange,
-            resetSettings,
-            handleOnline,
-            handleOffline,
-            showOfflineUI,
-            handleStorageEvent,
-            debounce,
-            stringToColor,
-            formatTimeAgo,
-            formatDuration,
-            closeUrlParamOverlay,
-            joinUrlParamCall,
-            updateMoodIndicator,
-            updateIntentionIndicator,
-            updateParticipantBadge,
-            updateChatBadge,
-            updateGroupCallButton,
-            updateVideoLayout,
-            initializeWhiteboard,
-            sendChatMessage,
-            saveSharedNotes,
-            renderCallHistory,
-            createCallHistoryItem,
-            currentUser,
-            userDataLoaded,
-            parentCoordinator,
-            sessionAuthorityReady,
-            SecurityCore,
-            STATE,
-            CallCoreState,
-            logger,
-            auth,
-            lifecycle,
-            parentComm,
-            MessageValidator,
-            RetryManager,
-            ErrorBoundary,
-            MessageIdGenerator,
-            MessageBridge,
-            HandshakeClient,
-            SessionClient,
-            TransportAgent,
-            RecoveryManager,
-            CompatibilityBridge,
-            DiagnosticsAgent,
-            StartupGovernor,
-            EnvironmentDetector,
-            OriginAdapter,
-            MESSAGE_TYPES,
-            PROTOCOL_VERSION: CONFIG.PROTOCOL_VERSION,
-            
-            // New module exports
-            IframeEnvironment,
-            OriginSecurity,
-            SafeStorage,
-            IframeTransport,
-            IframeHandshakeAuthority,
-            IframeSessionClient,
-            ReliabilityEngine,
-            MultiModuleCoordinator,
-            UIFailsafe,
-            NavigationGuard
-        };
-    }
-
-    window.callsCore = {
-        // Original exports
+   // ==================== EXPORT ONLY CORE FUNCTIONALITY ====================
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        // Core initialization
         initializeCore,
         startHandshake,
         sendToParent,
         requestSession,
         receiveFromParent,
         shutdownCore,
-        initializeUI,
-        cleanupUISession,
+        
+        // Session management
         isValidSession,
         getValidatedSession,
         waitForSession,
@@ -11913,63 +12404,51 @@ async function safeInit() {
         safeInit,
         requestResync,
         sendSessionAck,
+        
+        // Core classes
         CoreInitializer,
         CallCore,
         ParentCoordinator,
         TokenManager,
         SecureAPIClient,
         CallAPIIntegration,
+        
+        // Core state
         AppState,
-        elements,
-        simulateIncomingCall,
-        showNotification,
-        bootstrapIframe,
-        cacheElements,
-        initializeOfflineDetection,
-        showUI,
-        enableUI,
-        checkUrlParameters,
-        makeDraggable,
-        closePip,
-        checkPremiumFeature,
-        updatePremiumUI,
-        loadSettings,
-        saveSettings,
-        applySettingsToUI,
-        updateSetting,
-        applySettingChange,
-        resetSettings,
-        handleOnline,
-        handleOffline,
-        showOfflineUI,
-        handleStorageEvent,
-        debounce,
-        stringToColor,
-        formatTimeAgo,
-        formatDuration,
-        closeUrlParamOverlay,
-        joinUrlParamCall,
-        updateMoodIndicator,
-        updateIntentionIndicator,
-        updateParticipantBadge,
-        updateChatBadge,
-        updateGroupCallButton,
-        updateVideoLayout,
-        initializeWhiteboard,
-        sendChatMessage,
-        saveSharedNotes,
-        renderCallHistory,
-        createCallHistoryItem,
         currentUser,
         userDataLoaded,
         parentCoordinator,
         sessionAuthorityReady,
+        
+        // Security
         SecurityCore,
+        
+        // Constants
         STATE,
         CallCoreState,
+        MESSAGE_TYPES,
+        PROTOCOL_VERSION: CONFIG.PROTOCOL_VERSION,
+        
+        // Core modules
+        IframeEnvironment,
+        OriginSecurity,
+        SafeStorage,
+        IframeTransport,
+        IframeHandshakeAuthority,
+        IframeSessionClient,
+        ReliabilityEngine,
+        MultiModuleCoordinator,
+        UIFailsafe,
+        NavigationGuard,
+        
+        // Logging
         logger,
+        
+        // Auth
         auth,
         lifecycle,
+        
+        // Communication
         parentComm,
         MessageValidator,
         RetryManager,
@@ -11985,20 +12464,110 @@ async function safeInit() {
         StartupGovernor,
         EnvironmentDetector,
         OriginAdapter,
-        MESSAGE_TYPES,
-        PROTOCOL_VERSION: CONFIG.PROTOCOL_VERSION,
         
-        // New module exports
-        IframeEnvironment,
-        OriginSecurity,
-        SafeStorage,
-        IframeTransport,
-        IframeHandshakeAuthority,
-        IframeSessionClient,
-        ReliabilityEngine,
-        MultiModuleCoordinator,
-        UIFailsafe,
-        NavigationGuard
+        // UI elements - these should come from calls-ui.js, not core
+        // Removing UI exports to prevent confusion
     };
+}
+
+window.callsCore = {
+    // Core initialization
+    initializeCore,
+    startHandshake,
+    sendToParent,
+    requestSession,
+    receiveFromParent,
+    shutdownCore,
+    
+    // Session management
+    isValidSession,
+    getValidatedSession,
+    waitForSession,
+    waitForParent,
+    waitForHandshake,
+    verifySession,
+    safeInit,
+    requestResync,
+    sendSessionAck,
+    
+    // Core classes
+    CoreInitializer,
+    CallCore,
+    ParentCoordinator,
+    TokenManager,
+    SecureAPIClient,
+    CallAPIIntegration,
+    
+    // Core state
+    AppState,
+    currentUser,
+    userDataLoaded,
+    parentCoordinator,
+    sessionAuthorityReady,
+    
+    // Security
+    SecurityCore,
+    
+    // Constants
+    STATE,
+    CallCoreState,
+    MESSAGE_TYPES,
+    PROTOCOL_VERSION: CONFIG.PROTOCOL_VERSION,
+    
+    // Core modules
+    IframeEnvironment,
+    OriginSecurity,
+    SafeStorage,
+    IframeTransport,
+    IframeHandshakeAuthority,
+    IframeSessionClient,
+    ReliabilityEngine,
+    MultiModuleCoordinator,
+    UIFailsafe,
+    NavigationGuard,
+    
+    // Logging
+    logger,
+    
+    // Auth
+    auth,
+    lifecycle,
+    
+    // Communication
+    parentComm,
+    MessageValidator,
+    RetryManager,
+    ErrorBoundary,
+    MessageIdGenerator,
+    MessageBridge,
+    HandshakeClient,
+    SessionClient,
+    TransportAgent,
+    RecoveryManager,
+    CompatibilityBridge,
+    DiagnosticsAgent,
+    StartupGovernor,
+    EnvironmentDetector,
+    OriginAdapter,
+    
+    // Helper to check if core is ready
+    isReady: function() {
+        return coreReady && sessionInitialized;
+    },
+    
+    // Get core version
+    version: CONFIG.VERSION
+};
+    // ==================== AUTO-START (PASSIVE) ====================
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            // Only register, don't initiate handshake
+            safeRegister();
+            bootstrapIframe();
+        });
+    } else {
+        safeRegister();
+        bootstrapIframe();
+    }
 
 })();

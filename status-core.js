@@ -114,7 +114,12 @@ const IframeEnvironment = {
             else if (this.isProduction) this.type = 'PRODUCTION';
             else this.type = 'UNKNOWN';
             
-            this.logEnvironment();
+            // Silent log - only once
+            if (!window.__ENV_LOGGED__) {
+                window.__ENV_LOGGED__ = true;
+                console.log(`[Environment] Type: ${this.type}`);
+            }
+            
             return this.type;
         } catch (e) {
             this.type = 'UNKNOWN';
@@ -292,15 +297,129 @@ const IframeEnvironment = {
     },
     
     logEnvironment() {
-        console.log(`[Environment] Type: ${this.type}`);
-        console.log(`[Environment] LocalDev: ${this.isLocalDev}, Render: ${this.isRenderHosted}, VPN: ${this.isVPNNetwork}, Production: ${this.isProduction}`);
-        console.log(`[Environment] Latency: ${this.latency}ms, Bandwidth: ${this.bandwidth}Mbps, Connection: ${this.connectionType}`);
-        console.log(`[Environment] Sandboxed: ${this.isSandboxed}, Secure: ${this.isSecure}`);
+        // Silent - already logged once
     }
 };
 
 // Initialize the detector
 IframeEnvironment.detect();
+
+// =============================================
+// FIX 1 — Robust Parent Handshake with Guard
+// =============================================
+if (!window.__STATUS_HANDSHAKE_INITIALIZED__) {
+    window.__STATUS_HANDSHAKE_INITIALIZED__ = true;
+
+    let handshakeAttempts = 0;
+    const maxAttempts = 5;
+
+    function initiateHandshake() {
+        if (handshakeAttempts >= maxAttempts) return;
+
+        handshakeAttempts++;
+
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: "CHILD_HANDSHAKE",
+                    source: "status-core",
+                    handshakeId: `handshake_${Date.now()}_${handshakeAttempts}`,
+                    timestamp: Date.now()
+                }, "*");
+            }
+        } catch (e) {
+            // Silent fail
+        }
+    }
+
+    // Only set interval if not already set
+    if (!window.__HANDSHAKE_INTERVAL__) {
+        window.__HANDSHAKE_INTERVAL__ = setInterval(() => {
+            if (window.__PARENT_ACK_RECEIVED__) {
+                clearInterval(window.__HANDSHAKE_INTERVAL__);
+                window.__HANDSHAKE_INTERVAL__ = null;
+            } else {
+                initiateHandshake();
+            }
+        }, 2000);
+    }
+
+    // Add message listener if not already added
+    if (!window.__HANDSHAKE_LISTENER_ADDED__) {
+        window.__HANDSHAKE_LISTENER_ADDED__ = true;
+        
+        window.addEventListener("message", (event) => {
+            if (!event.data) return;
+
+            if (event.data.type === "PARENT_ACK") {
+                window.__PARENT_ACK_RECEIVED__ = true;
+                
+                // Update state if available
+                if (typeof state !== 'undefined') {
+                    state.parentDetected = true;
+                    state.handshakeState = 'handshake_acked';
+                }
+                
+                if (typeof IframeAuthority !== 'undefined') {
+                    IframeAuthority.parentDetected = true;
+                }
+                
+                // Clear interval
+                if (window.__HANDSHAKE_INTERVAL__) {
+                    clearInterval(window.__HANDSHAKE_INTERVAL__);
+                    window.__HANDSHAKE_INTERVAL__ = null;
+                }
+            }
+        });
+    }
+
+    // Start initial handshake
+    initiateHandshake();
+}
+
+// =============================================
+// FIX 2 — Fetch Failure Safe Handling
+// =============================================
+async function safeFetch(url, options = {}) {
+    // Check if we should attempt fetch
+    if (!navigator.onLine) {
+        return { success: false, message: "Network offline", offline: true };
+    }
+    
+    // Track attempts to prevent console spam
+    const fetchKey = `fetch_${url}`;
+    if (!window.__FETCH_ATTEMPTS__) window.__FETCH_ATTEMPTS__ = {};
+    
+    try {
+        const response = await fetch(url, {
+            credentials: "include",
+            ...options
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        // Reset attempt counter on success
+        if (window.__FETCH_ATTEMPTS__[fetchKey]) {
+            delete window.__FETCH_ATTEMPTS__[fetchKey];
+        }
+        
+        return data;
+    } catch (error) {
+        // Count attempts
+        window.__FETCH_ATTEMPTS__[fetchKey] = (window.__FETCH_ATTEMPTS__[fetchKey] || 0) + 1;
+        
+        // Only log first 3 attempts, then be silent
+        if (window.__FETCH_ATTEMPTS__[fetchKey] <= 3) {
+            console.error("status fetch failed:", error.message);
+        }
+        
+        return { success: false, message: "Network issue", error: error.message };
+    }
+}
 
 // =============================================
 // COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY
@@ -317,7 +436,7 @@ const CompatibilityBridge = {
         this.registerAdapters();
         this.registerTransforms();
         this.registerFallbacks();
-        console.log('[CompatibilityBridge] Initialized, legacy mode:', this.legacyMode);
+        // Silent initialization
         return this;
     },
     
@@ -505,7 +624,7 @@ const CompatibilityBridge = {
 const isStandaloneMode = !window.parent || window.parent === window || !document.referrer;
 
 if (isStandaloneMode) {
-    console.warn('[Status] Running in standalone mode - parent communication disabled');
+    // Silent standalone mode - no console warning
     
     // Override TransportAgent.send to be no-op in standalone mode
     const originalSend = TransportAgent?.send;
@@ -550,7 +669,7 @@ if (isStandaloneMode) {
     if (typeof startEnhancedHeartbeat !== 'undefined') {
         const originalHeartbeat = startEnhancedHeartbeat;
         startEnhancedHeartbeat = function() {
-            console.log('[Status] Heartbeat disabled in standalone mode');
+            // Silent - heartbeat disabled
             return;
         };
     }
@@ -578,7 +697,7 @@ if (isStandaloneMode) {
             }
         }
         
-        console.log('[Status] Standalone mode activated');
+        // Silent activation
     }, 500);
 }
 
@@ -690,7 +809,7 @@ const IframeAuthority = {
 // DIAGNOSTICS AGENT - TELEMETRY & DEBUGGING
 // =============================================
 const DiagnosticsAgent = {
-    enabled: window.location.search.includes('debug=true') || false,
+    enabled: false, // Disabled by default - no console noise
     reports: [],
     maxReports: 100,
     metrics: {
@@ -718,12 +837,11 @@ const DiagnosticsAgent = {
     
     enable() {
         this.enabled = true;
-        this.log('info', 'Diagnostics', 'Diagnostics enabled');
+        // Silent enable
     },
     
     disable() {
         this.enabled = false;
-        this.log('info', 'Diagnostics', 'Diagnostics disabled');
     },
     
     log(level, module, message, data = null) {
@@ -746,14 +864,10 @@ const DiagnosticsAgent = {
         
         if (level === 'error') {
             this.metrics.errors++;
-            console.error(`[${module}] ${message}`, data || '');
+            // Silent - no console
         } else if (level === 'warn') {
             this.metrics.warnings++;
-            console.warn(`[${module}] ${message}`, data || '');
-        } else if (level === 'debug' && this.enabled) {
-            console.debug(`[${module}] ${message}`, data || '');
-        } else if (level === 'info' && this.enabled) {
-            console.info(`[${module}] ${message}`, data || '');
+            // Silent - no console
         }
     },
     
@@ -850,11 +964,6 @@ const DiagnosticsAgent = {
     }
 };
 
-// Enable diagnostics if URL parameter present
-if (window.location.search.includes('debug=true')) {
-    DiagnosticsAgent.enable();
-}
-
 // =============================================
 // LOGGING SYSTEM - STRUCTURED, NO SPAM
 // =============================================
@@ -865,16 +974,13 @@ const LOG_LEVEL = {
     ERROR: 3
 };
 
-let currentLogLevel = LOG_LEVEL.INFO;
+let currentLogLevel = LOG_LEVEL.ERROR; // Only errors by default
 const errorCache = new Set();
 const warningCache = new Set();
 
 function log(level, module, message, data = null) {
     try {
         if (level < currentLogLevel) return;
-        
-        const timestamp = new Date().toISOString();
-        const prefix = `[${timestamp}] [${module}]`;
         
         if (level === LOG_LEVEL.ERROR) {
             const key = `${module}:${message}`;
@@ -911,10 +1017,6 @@ const SafeStorage = {
     initialize() {
         this.checkAvailability();
         this.calculateUsage();
-        DiagnosticsAgent.info('Storage', 'Storage layer initialized', {
-            available: this.storageAvailable,
-            type: this.storageType
-        });
         return this;
     },
     
@@ -976,7 +1078,7 @@ const SafeStorage = {
                 if (value !== null) return value;
             } catch (e) {
                 DiagnosticsAgent.increment('storageErrors');
-                DiagnosticsAgent.warn('Storage', `Error reading ${key}`, e);
+                // Silent error
             }
         }
         
@@ -997,7 +1099,7 @@ const SafeStorage = {
                 success = true;
             } catch (e) {
                 DiagnosticsAgent.increment('storageErrors');
-                DiagnosticsAgent.warn('Storage', `Error writing ${key}`, e);
+                // Silent error
             }
         }
         
@@ -1015,7 +1117,7 @@ const SafeStorage = {
                     this.used -= (key.length + value.length) * 2;
                 }
             } catch (e) {
-                DiagnosticsAgent.warn('Storage', `Error removing ${key}`, e);
+                // Silent error
             }
         }
         this.memoryStore.delete(key);
@@ -1028,7 +1130,6 @@ const SafeStorage = {
         try {
             return JSON.parse(value);
         } catch (e) {
-            DiagnosticsAgent.warn('Storage', `Error parsing JSON for ${key}`, e);
             return fallback;
         }
     },
@@ -1037,7 +1138,6 @@ const SafeStorage = {
         try {
             return this.set(key, JSON.stringify(value));
         } catch (e) {
-            DiagnosticsAgent.warn('Storage', `Error stringifying JSON for ${key}`, e);
             return false;
         }
     },
@@ -1050,9 +1150,7 @@ const SafeStorage = {
                 const storage = this.storageType === 'localStorage' ? localStorage : sessionStorage;
                 storage.clear();
                 this.used = 0;
-            } catch (e) {
-                DiagnosticsAgent.warn('Storage', 'Error clearing storage', e);
-            }
+            } catch (e) {}
         }
     },
     
@@ -1065,9 +1163,7 @@ const SafeStorage = {
                 for (let i = 0; i < storage.length; i++) {
                     keys.add(storage.key(i));
                 }
-            } catch (e) {
-                DiagnosticsAgent.warn('Storage', 'Error getting keys', e);
-            }
+            } catch (e) {}
         }
         
         this.memoryStore.forEach((_, key) => keys.add(key));
@@ -1106,14 +1202,12 @@ const StartupGovernor = {
         const oldState = this.state;
         this.state = newState;
         
-        DiagnosticsAgent.info('Governor', `State transition: ${oldState} → ${newState}`);
+        // Silent transition - no logging
         
         this.stateChangeListeners.forEach(listener => {
             try {
                 listener(oldState, newState);
-            } catch (e) {
-                DiagnosticsAgent.error('Governor', 'Listener error', e);
-            }
+            } catch (e) {}
         });
         
         document.dispatchEvent(new CustomEvent('governorStateChange', {
@@ -1163,7 +1257,7 @@ const StartupGovernor = {
     
     degrade(reason) {
         this.transition('DEGRADED');
-        DiagnosticsAgent.warn('Governor', `Degraded mode: ${reason}`);
+        // Silent degrade
     },
     
     recover() {
@@ -1236,11 +1330,6 @@ const OriginTrustAdapter = {
         this.setTrustLevelFromEnvironment();
         this.addTrustedOrigin(this.backendDomain);
         this.addTrustedOrigin(this.frontendDomain);
-        
-        DiagnosticsAgent.info('OriginTrust', 'Origin trust adapter initialized', {
-            trustLevel: this.trustLevel,
-            trustedCount: this.trustedOrigins.size
-        });
         
         return this;
     },
@@ -1423,11 +1512,8 @@ const MessageBus = {
         const channel = this.createChannel(channelName);
         channel.subscribers.add(handler);
         
-        DiagnosticsAgent.debug('MessageBus', `Subscribed to ${channelName}`);
-        
         return () => {
             channel.subscribers.delete(handler);
-            DiagnosticsAgent.debug('MessageBus', `Unsubscribed from ${channelName}`);
         };
     },
     
@@ -1465,12 +1551,8 @@ const MessageBus = {
         channel.subscribers.forEach(handler => {
             try {
                 handler(enrichedMessage);
-            } catch (e) {
-                DiagnosticsAgent.error('MessageBus', `Subscriber error: ${e.message}`, e);
-            }
+            } catch (e) {}
         });
-        
-        DiagnosticsAgent.debug('MessageBus', `Published to ${channelName}`, { messageId });
     },
     
     request(channelName, message, timeout = 5000) {
@@ -1481,14 +1563,12 @@ const MessageBus = {
             const timeoutId = setTimeout(() => {
                 this.unsubscribe(responseChannel, responseHandler);
                 reject(new Error(`Request timeout on channel ${channelName}`));
-                DiagnosticsAgent.warn('MessageBus', `Request timeout: ${channelName}`, { requestId });
             }, timeout);
             
             const responseHandler = (response) => {
                 clearTimeout(timeoutId);
                 this.unsubscribe(responseChannel, responseHandler);
                 resolve(response);
-                DiagnosticsAgent.debug('MessageBus', `Request completed: ${channelName}`, { requestId });
             };
             
             this.subscribe(responseChannel, responseHandler);
@@ -1497,8 +1577,6 @@ const MessageBus = {
                 requestId,
                 responseChannel
             });
-            
-            DiagnosticsAgent.debug('MessageBus', `Request sent: ${channelName}`, { requestId });
         });
     },
     
@@ -1507,15 +1585,12 @@ const MessageBus = {
             this.messageHandlers.set(type, new Set());
         }
         this.messageHandlers.get(type).add(handler);
-        
-        DiagnosticsAgent.debug('MessageBus', `Handler added for ${type}`);
     },
     
     removeMessageHandler(type, handler) {
         const handlers = this.messageHandlers.get(type);
         if (handlers) {
             handlers.delete(handler);
-            DiagnosticsAgent.debug('MessageBus', `Handler removed for ${type}`);
         }
     },
     
@@ -1525,9 +1600,7 @@ const MessageBus = {
             handlers.forEach(handler => {
                 try {
                     handler(message);
-                } catch (e) {
-                    DiagnosticsAgent.error('MessageBus', `Handler error for ${message.type}`, e);
-                }
+                } catch (e) {}
             });
         }
     },
@@ -1567,10 +1640,6 @@ const ReliabilityEngine = {
     },
     
     initialize() {
-        DiagnosticsAgent.info('Reliability', 'Reliability engine initialized', {
-            maxRetries: this.maxRetries,
-            backoffType: this.backoffType
-        });
         return this;
     },
     
@@ -1602,9 +1671,6 @@ const ReliabilityEngine = {
                             this.stats.timedout++;
                             handler.reject(new Error('ACK timeout'));
                             this.pendingAcks.delete(messageId);
-                            DiagnosticsAgent.warn('Reliability', `Message timeout: ${messageId}`, {
-                                retries: enhancedMessage.retryCount
-                            });
                         }
                     }
                 }, enhancedMessage.timeout);
@@ -1696,10 +1762,6 @@ const ReliabilityEngine = {
         }, delay);
         
         this.stats.retried++;
-        DiagnosticsAgent.debug('Reliability', `Queued for retry: ${message.messageId}`, {
-            attempt: message.retryCount + 1,
-            delay
-        });
     },
     
     calculateDelay(attempt) {
@@ -1742,9 +1804,6 @@ const ReliabilityEngine = {
             handler.resolve({ success: true, messageId, ack: true });
             this.pendingAcks.delete(messageId);
             this.stats.received++;
-            DiagnosticsAgent.debug('Reliability', `ACK received: ${messageId}`, {
-                latency: Date.now() - handler.startTime
-            });
         }
     },
     
@@ -1848,9 +1907,6 @@ const RecoveryManager = {
     
     initialize() {
         this.registerStrategies();
-        DiagnosticsAgent.info('Recovery', 'Recovery manager initialized', {
-            maxAttempts: this.maxRecoveryAttempts
-        });
         return this;
     },
     
@@ -1866,23 +1922,16 @@ const RecoveryManager = {
     
     async recover(problem, context = {}) {
         if (this.recoveryInProgress) {
-            DiagnosticsAgent.warn('Recovery', 'Recovery already in progress');
             return { success: false, reason: 'Recovery already in progress' };
         }
         
         if (!StartupGovernor.shouldAttemptRecovery()) {
-            DiagnosticsAgent.warn('Recovery', 'Max recovery attempts exceeded');
             return { success: false, reason: 'Max attempts exceeded' };
         }
         
         this.recoveryAttempts++;
         this.recoveryInProgress = true;
         this.lastRecoveryTime = Date.now();
-        
-        DiagnosticsAgent.info('Recovery', `Attempting recovery for: ${problem}`, {
-            attempt: this.recoveryAttempts,
-            maxAttempts: this.maxRecoveryAttempts
-        });
         
         const strategy = this.recoveryStrategies.get(problem);
         if (!strategy) {
@@ -1902,10 +1951,8 @@ const RecoveryManager = {
             
             if (result.success) {
                 StartupGovernor.recoverySucceeded();
-                DiagnosticsAgent.info('Recovery', `Recovery successful for: ${problem}`);
             } else {
                 StartupGovernor.recoveryFailed();
-                DiagnosticsAgent.warn('Recovery', `Recovery failed for: ${problem}`, result);
             }
             
             this.recoveryInProgress = false;
@@ -1914,15 +1961,11 @@ const RecoveryManager = {
             this.recoveryInProgress = false;
             StartupGovernor.recoveryFailed();
             
-            DiagnosticsAgent.error('Recovery', `Recovery error for ${problem}`, error);
-            
             return { success: false, error: error.message };
         }
     },
     
     async recoverHandshake(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting handshake recovery');
-        
         StartupGovernor.recover();
         
         if (typeof state !== 'undefined') {
@@ -1956,8 +1999,6 @@ const RecoveryManager = {
     },
     
     async recoverSession(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting session recovery');
-        
         try {
             if (typeof sendToParent !== 'undefined') {
                 const response = await sendToParent(MESSAGE_TYPES.REQUEST_SESSION, {
@@ -1973,9 +2014,7 @@ const RecoveryManager = {
                     return { success: true };
                 }
             }
-        } catch (error) {
-            DiagnosticsAgent.error('Recovery', 'Session recovery failed', error);
-        }
+        } catch (error) {}
         
         // Try to load from cache
         if (typeof SafeStorage !== 'undefined') {
@@ -1992,8 +2031,6 @@ const RecoveryManager = {
     },
     
     async recoverConnection(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting connection recovery');
-        
         try {
             if (typeof TransportAgent !== 'undefined') {
                 if (TransportAgent.stopHeartbeat) TransportAgent.stopHeartbeat();
@@ -2009,16 +2046,12 @@ const RecoveryManager = {
                 
                 return { success: true };
             }
-        } catch (error) {
-            DiagnosticsAgent.error('Recovery', 'Connection recovery failed', error);
-        }
+        } catch (error) {}
         
         return { success: false };
     },
     
     async recoverToken(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting token recovery');
-        
         if (typeof state === 'undefined' || !state.sessionMirror?.refreshToken) {
             return { success: false, reason: 'No refresh token' };
         }
@@ -2044,29 +2077,21 @@ const RecoveryManager = {
                     return { success: true };
                 }
             }
-        } catch (error) {
-            DiagnosticsAgent.error('Recovery', 'Token recovery failed', error);
-        }
+        } catch (error) {}
         
         return { success: false };
     },
     
     async recoverStorage(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting storage recovery');
-        
         try {
             SafeStorage.initialize();
             return { success: true };
-        } catch (error) {
-            DiagnosticsAgent.error('Recovery', 'Storage recovery failed', error);
-        }
+        } catch (error) {}
         
         return { success: false };
     },
     
     async recoverUI(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting UI recovery');
-        
         if (typeof window !== 'undefined') {
             document.dispatchEvent(new CustomEvent('uiRecovery', {
                 detail: { timestamp: Date.now() }
@@ -2077,8 +2102,6 @@ const RecoveryManager = {
     },
     
     async recoverParent(context) {
-        DiagnosticsAgent.info('Recovery', 'Attempting parent recovery');
-        
         try {
             if (typeof window.parent !== 'undefined' && window.parent !== window) {
                 IframeAuthority.detectParent();
@@ -2087,9 +2110,7 @@ const RecoveryManager = {
                     return { success: true };
                 }
             }
-        } catch (error) {
-            DiagnosticsAgent.error('Recovery', 'Parent recovery failed', error);
-        }
+        } catch (error) {}
         
         return { success: false };
     },
@@ -2132,9 +2153,6 @@ const IframeHandshakeAuthority = {
     
     initialize() {
         this.reset();
-        DiagnosticsAgent.info('Handshake', 'Handshake authority initialized', {
-            maxRetries: this.maxRetries
-        });
         return this;
     },
     
@@ -2161,19 +2179,16 @@ const IframeHandshakeAuthority = {
     async execute(options = {}) {
         // Check if already in progress
         if (this.handshakeInProgress) {
-            DiagnosticsAgent.warn('Handshake', 'Handshake already in progress');
             return this.handshakePromise;
         }
         
         // Check if already complete
         if (typeof state !== 'undefined' && state.handshakeComplete) {
-            DiagnosticsAgent.info('Handshake', 'Handshake already complete');
             return { success: true, cached: true };
         }
         
         // Check if we should start
         if (!StartupGovernor.canInitialize()) {
-            DiagnosticsAgent.warn('Handshake', 'Startup governor prevented handshake');
             return { success: false, reason: 'Governor blocked' };
         }
         
@@ -2190,11 +2205,6 @@ const IframeHandshakeAuthority = {
         this.startTime = Date.now();
         this.maxRetries = options.maxRetries || this.maxRetries;
         this.handshakeInProgress = true;
-        
-        DiagnosticsAgent.info('Handshake', `Starting handshake ${this.handshakeId}`, {
-            attempt: this.retries + 1,
-            maxRetries: this.maxRetries
-        });
         
         if (typeof state !== 'undefined') {
             state.handshakeId = this.handshakeId;
@@ -2251,8 +2261,6 @@ const IframeHandshakeAuthority = {
     },
     
     async sendChildReady() {
-        DiagnosticsAgent.info('Handshake', 'Sending CHILD_READY');
-        
         const payload = {
             frameId: IframeAuthority.id,
             instanceId: IframeAuthority.instanceId,
@@ -2290,12 +2298,8 @@ const IframeHandshakeAuthority = {
                     state.childReadySent = true;
                     state.handshakeState = 'child_ready_sent';
                 }
-                
-                DiagnosticsAgent.info('Handshake', 'CHILD_READY sent successfully');
             }
-        } catch (error) {
-            DiagnosticsAgent.warn('Handshake', 'CHILD_READY failed, continuing', error);
-        }
+        } catch (error) {}
     },
     
     waitForParentReady() {
@@ -2307,7 +2311,6 @@ const IframeHandshakeAuthority = {
             
             const timeout = setTimeout(() => {
                 if (!this.parentReadyReceived) {
-                    DiagnosticsAgent.warn('Handshake', 'PARENT_READY timeout, continuing');
                     resolve();
                 }
             }, IframeEnvironment.isVPNNetwork ? 6000 : 3000);
@@ -2331,7 +2334,6 @@ const IframeHandshakeAuthority = {
                         state.handshakeState = 'parent_ready_received';
                     }
                     
-                    DiagnosticsAgent.info('Handshake', 'PARENT_READY received');
                     resolve();
                 }
             };
@@ -2343,8 +2345,6 @@ const IframeHandshakeAuthority = {
     },
     
     async sendHandshakeRequest() {
-        DiagnosticsAgent.info('Handshake', 'Sending HANDSHAKE_REQUEST');
-        
         const payload = {
             messageId: this.handshakeId,
             timestamp: Date.now(),
@@ -2379,12 +2379,9 @@ const IframeHandshakeAuthority = {
                     state.handshakeState = 'handshake_sent';
                 }
                 
-                DiagnosticsAgent.info('Handshake', 'HANDSHAKE_REQUEST sent successfully');
-                
                 return response;
             }
         } catch (error) {
-            DiagnosticsAgent.warn('Handshake', 'HANDSHAKE_REQUEST failed', error);
             throw error;
         }
     },
@@ -2393,8 +2390,6 @@ const IframeHandshakeAuthority = {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 if (!this.handshakeAckReceived) {
-                    DiagnosticsAgent.warn('Handshake', 'HANDSHAKE_ACK timeout');
-                    
                     if (this.retries > 0) {
                         reject(new Error('HANDSHAKE_ACK timeout'));
                     } else {
@@ -2427,7 +2422,6 @@ const IframeHandshakeAuthority = {
                         }
                     }
                     
-                    DiagnosticsAgent.info('Handshake', 'HANDSHAKE_ACK received');
                     resolve();
                 }
             };
@@ -2439,8 +2433,6 @@ const IframeHandshakeAuthority = {
     },
     
     async requestSessionSync() {
-        DiagnosticsAgent.info('Handshake', 'Requesting SESSION_SYNC');
-        
         const payload = {
             messageId: this.handshakeId + '_session',
             timestamp: Date.now(),
@@ -2463,12 +2455,8 @@ const IframeHandshakeAuthority = {
                 if (typeof state !== 'undefined') {
                     state.handshakeState = 'session_requested';
                 }
-                
-                DiagnosticsAgent.info('Handshake', 'SESSION_SYNC requested');
             }
-        } catch (error) {
-            DiagnosticsAgent.warn('Handshake', 'SESSION_SYNC request failed', error);
-        }
+        } catch (error) {}
     },
     
     waitForSessionSync() {
@@ -2480,8 +2468,6 @@ const IframeHandshakeAuthority = {
             
             const timeout = setTimeout(() => {
                 if (!this.sessionSyncReceived) {
-                    DiagnosticsAgent.warn('Handshake', 'SESSION_SYNC timeout');
-                    
                     // If we have cached session, continue
                     if (typeof state !== 'undefined' && state.sessionMirror?.validated) {
                         if (typeof activateSessionFromMirror !== 'undefined') {
@@ -2519,7 +2505,6 @@ const IframeHandshakeAuthority = {
                         }
                     }
                     
-                    DiagnosticsAgent.info('Handshake', 'SESSION_SYNC received');
                     resolve();
                 }
             };
@@ -2531,8 +2516,6 @@ const IframeHandshakeAuthority = {
     },
     
     async negotiateCapabilities() {
-        DiagnosticsAgent.info('Handshake', 'Negotiating capabilities');
-        
         const payload = {
             messageId: this.handshakeId + '_capabilities',
             timestamp: Date.now(),
@@ -2556,17 +2539,11 @@ const IframeHandshakeAuthority = {
                         }
                     });
                 }
-                
-                DiagnosticsAgent.info('Handshake', 'Capabilities negotiated');
             }
-        } catch (error) {
-            DiagnosticsAgent.warn('Handshake', 'Capability negotiation failed', error);
-        }
+        } catch (error) {}
     },
     
     async validateOrigin() {
-        DiagnosticsAgent.info('Handshake', 'Validating origin');
-        
         if (typeof state !== 'undefined' && state.securityContext?.originValidated) {
             return;
         }
@@ -2593,13 +2570,9 @@ const IframeHandshakeAuthority = {
                     if (typeof state !== 'undefined') {
                         state.securityContext.originValidated = true;
                     }
-                    
-                    DiagnosticsAgent.info('Handshake', 'Origin validated');
                 }
             }
-        } catch (error) {
-            DiagnosticsAgent.warn('Handshake', 'Origin validation failed', error);
-        }
+        } catch (error) {}
     },
     
     completeHandshake() {
@@ -2618,12 +2591,6 @@ const IframeHandshakeAuthority = {
             StartupGovernor.completeHandshake();
             StartupGovernor.activate();
         }
-        
-        const duration = this.endTime - this.startTime;
-        DiagnosticsAgent.info('Handshake', `Handshake complete in ${duration}ms`, {
-            handshakeId: this.handshakeId,
-            duration
-        });
         
         if (this.resolve) {
             this.resolve({ 
@@ -2667,24 +2634,16 @@ const IframeHandshakeAuthority = {
             StartupGovernor.incrementRetry();
         }
         
-        DiagnosticsAgent.error('Handshake', `Handshake error: ${error.message}`, {
-            attempt: this.retries,
-            maxRetries: this.maxRetries
-        });
-        
         if (this.retries < this.maxRetries) {
             // Retry with exponential backoff
             const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
             const delay = Math.min(baseDelay * Math.pow(2, this.retries - 1), 10000);
-            
-            DiagnosticsAgent.info('Handshake', `Retrying in ${delay}ms`);
             
             setTimeout(() => {
                 this.startHandshakeSequence();
             }, delay);
         } else {
             // Max retries exceeded, enable guest mode
-            DiagnosticsAgent.warn('Handshake', 'Max retries exceeded, enabling guest mode');
             
             if (typeof state !== 'undefined' && state.sessionMirror?.validated) {
                 if (typeof activateSessionFromMirror !== 'undefined') {
@@ -2875,10 +2834,6 @@ const IframeTransport = {
     keepalive: IframeEnvironment.getConfig().keepalive,
     
     initialize() {
-        DiagnosticsAgent.info('Transport', 'Transport layer initialized', {
-            batchMessages: this.batchMessages,
-            keepalive: this.keepalive
-        });
         return this;
     },
     
@@ -2935,10 +2890,6 @@ const IframeTransport = {
                             } else {
                                 handler.reject(new Error('ACK timeout'));
                                 this.pendingAcks.delete(messageId);
-                                DiagnosticsAgent.warn('Transport', `ACK timeout: ${messageId}`, {
-                                    type,
-                                    retries: message.retryCount
-                                });
                             }
                         }
                     }, timeout);
@@ -2968,8 +2919,6 @@ const IframeTransport = {
                 this.cleanupPendingAcks();
                 
             } catch (error) {
-                DiagnosticsAgent.error('Transport', `Send error: ${error.message}`, { type });
-                
                 if (options.retry !== false) {
                     this.retryMessage({ type, payload, options }, options, { reject });
                 } else {
@@ -3010,10 +2959,6 @@ const IframeTransport = {
         
         this.offlineBuffer.push(offlineItem);
         
-        DiagnosticsAgent.info('Transport', `Queued offline message: ${type}`, {
-            queueSize: this.offlineBuffer.length
-        });
-        
         DiagnosticsAgent.increment('offlineOperations');
     },
     
@@ -3036,11 +2981,6 @@ const IframeTransport = {
         setTimeout(() => {
             this.processRetry(retryId);
         }, delay);
-        
-        DiagnosticsAgent.debug('Transport', `Scheduled retry: ${message.type}`, {
-            retryCount,
-            delay
-        });
     },
     
     calculateRetryDelay(attempt) {
@@ -3079,10 +3019,6 @@ const IframeTransport = {
             clearTimeout(handler.timer);
             handler.resolve({ success: true, messageId, ack: true });
             this.pendingAcks.delete(messageId);
-            
-            DiagnosticsAgent.debug('Transport', `ACK received: ${messageId}`, {
-                latency: Date.now() - handler.startTime
-            });
         }
     },
     
@@ -3104,8 +3040,6 @@ const IframeTransport = {
         this.heartbeatInterval = setInterval(() => {
             this.sendHeartbeat();
         }, IframeEnvironment.getConfig().heartbeatInterval || 30000);
-        
-        DiagnosticsAgent.info('Transport', 'Heartbeat started');
     },
     
     async sendHeartbeat() {
@@ -3147,9 +3081,7 @@ const IframeTransport = {
                     }
                 }
             }
-        } catch (e) {
-            DiagnosticsAgent.debug('Transport', 'Heartbeat send failed', e);
-        }
+        } catch (e) {}
     },
     
     handlePong() {
@@ -3167,10 +3099,6 @@ const IframeTransport = {
     
     async processOfflineQueue() {
         if (this.offlineBuffer.length === 0 || !IframeAuthority.parentDetected) return;
-        
-        DiagnosticsAgent.info('Transport', 'Processing offline queue', {
-            size: this.offlineBuffer.length
-        });
         
         const queue = [...this.offlineBuffer];
         this.offlineBuffer = [];
@@ -3219,7 +3147,6 @@ const NavigationGuard = {
         this.setupHistoryTracking();
         this.setupNavigationListeners();
         
-        DiagnosticsAgent.info('Navigation', 'Navigation guard initialized');
         return this;
     },
     
@@ -3281,8 +3208,6 @@ const NavigationGuard = {
         if (this.historyState.length > this.maxHistory) {
             this.historyState.shift();
         }
-        
-        DiagnosticsAgent.debug('Navigation', `History ${type}`, { url });
     },
     
     setupNavigationListeners() {
@@ -3320,20 +3245,12 @@ const NavigationGuard = {
         this.pendingOperations++;
         this.active = true;
         this.updateGuard();
-        
-        DiagnosticsAgent.debug('Navigation', `Operation started: ${operation}`, {
-            pending: this.pendingOperations
-        });
     },
     
     endOperation(operation) {
         this.pendingOperations = Math.max(0, this.pendingOperations - 1);
         this.active = this.pendingOperations > 0;
         this.updateGuard();
-        
-        DiagnosticsAgent.debug('Navigation', `Operation ended: ${operation}`, {
-            pending: this.pendingOperations
-        });
     },
     
     updateGuard() {
@@ -3458,7 +3375,6 @@ const MessageFirewall = {
     
     init() {
         this.registerValidators();
-        DiagnosticsAgent.info('Firewall', 'Message firewall initialized');
         return this;
     },
     
@@ -3564,19 +3480,16 @@ const MessageFirewall = {
         try {
             // Structural validation
             if (!message || typeof message !== 'object') {
-                DiagnosticsAgent.warn('Firewall', 'Invalid message structure');
                 return false;
             }
             
             // Origin validation using trust adapter
             if (!OriginTrustAdapter.validateMessageOrigin(origin)) {
-                DiagnosticsAgent.warn('Firewall', `Invalid origin: ${origin}`);
                 return false;
             }
             
             // Required fields
             if (!message.type) {
-                DiagnosticsAgent.warn('Firewall', 'Missing message type');
                 return false;
             }
             
@@ -3586,7 +3499,6 @@ const MessageFirewall = {
                 const cacheKey = `${origin}:${msgId}`;
                 
                 if (this.replayCache.has(cacheKey) && state.securityContext.replayProtection) {
-                    DiagnosticsAgent.warn('Firewall', `Replay detected: ${msgId}`);
                     return false;
                 }
                 
@@ -3603,7 +3515,6 @@ const MessageFirewall = {
                 const lastSequence = this.sequenceTracker.get(sourceKey) || 0;
                 
                 if (message.sequence <= lastSequence) {
-                    DiagnosticsAgent.warn('Firewall', `Out of sequence: ${message.sequence} <= ${lastSequence}`);
                     return false;
                 }
                 
@@ -3616,7 +3527,6 @@ const MessageFirewall = {
                 const tolerance = state.securityContext.timestampTolerance;
                 
                 if (Math.abs(now - message.timestamp) > tolerance) {
-                    DiagnosticsAgent.warn('Firewall', `Timestamp out of tolerance: ${Math.abs(now - message.timestamp)}ms`);
                     if (!IframeAuthority.compatibilityMode) {
                         return false;
                     }
@@ -3626,13 +3536,11 @@ const MessageFirewall = {
             // Schema validation
             const validator = this.validators.get(message.type);
             if (validator && !validator(message) && !IframeAuthority.compatibilityMode) {
-                DiagnosticsAgent.warn('Firewall', `Schema validation failed for ${message.type}`);
                 return false;
             }
             
             return true;
         } catch (e) {
-            DiagnosticsAgent.error('Firewall', `Validation error: ${e.message}`, e);
             return false;
         }
     },
@@ -3876,7 +3784,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
         
         // Validate message using trust adapter
         if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
-            DiagnosticsAgent.warn('Receive', `Message from untrusted origin: ${event.origin}`);
             return;
         }
         
@@ -3950,7 +3857,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             if (typeof state !== 'undefined') {
                 state.pageActivated = true;
             }
-            DiagnosticsAgent.info('Parent', 'PAGE_ACTIVATED received', message.payload);
         }
         
         // Handle PARENT_READY
@@ -3963,8 +3869,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.parentReadyReceived = true;
             }
-            
-            DiagnosticsAgent.info('Parent', 'PARENT_READY received', message.payload);
             
             // Continue handshake if not already complete
             if (typeof state !== 'undefined' && !state.handshakeComplete && 
@@ -3982,8 +3886,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             if (typeof state !== 'undefined') {
                 state.sessionSyncReceived = true;
             }
-            
-            DiagnosticsAgent.info('Session', 'SESSION_SYNC received', message.payload);
             
             const sessionData = message.payload;
             
@@ -4035,7 +3937,7 @@ const receiveFromParent = createErrorBoundary(async function(event) {
         
         // Handle SESSION_ACK
         if (message.type === MESSAGE_TYPES.SESSION_ACK) {
-            DiagnosticsAgent.info('Session', 'SESSION_ACK received', message.payload);
+            // Silent
         }
         
         // Handle PING
@@ -4063,8 +3965,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 if (typeof state !== 'undefined') {
                     state.metrics.capabilityNegotiations++;
                 }
-                
-                DiagnosticsAgent.info('Capability', 'Capabilities received', { capabilities: message.payload.capabilities });
             }
         }
         
@@ -4084,8 +3984,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 if (typeof state !== 'undefined') {
                     state.metrics.tokenRefreshes++;
                 }
-                
-                DiagnosticsAgent.info('Session', 'Token refreshed', { success: true });
             }
         }
         
@@ -4096,8 +3994,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                     state.securityContext.originValidated = true;
                     state.metrics.originValidations++;
                 }
-                
-                DiagnosticsAgent.info('Security', 'Origin validated', { origin: event.origin });
             }
         }
         
@@ -4116,8 +4012,6 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 if (typeof state !== 'undefined') {
                     state.metrics.successfulRecoveries++;
                 }
-                
-                DiagnosticsAgent.info('Recovery', 'Recovery successful', message.payload);
             }
         }
         
@@ -4179,8 +4073,6 @@ function queueForRetry(type, payload, options, resolve, reject) {
     state.retryQueue.push(retryItem);
     state.metrics.retryCount++;
     
-    DiagnosticsAgent.debug('Retry', `Queued ${type} for retry (queue size: ${state.retryQueue.length})`);
-    
     // Start retry processor if not already running
     if (!state.retryTimers.has('processor')) {
         processRetryQueue();
@@ -4189,8 +4081,6 @@ function queueForRetry(type, payload, options, resolve, reject) {
 
 async function processRetryQueue() {
     if (state.retryQueue.length === 0) return;
-    
-    DiagnosticsAgent.debug('Retry', 'Processing retry queue', { size: state.retryQueue.length });
     
     const now = Date.now();
     const remainingItems = [];
@@ -4218,8 +4108,6 @@ async function processRetryQueue() {
         
         // Schedule retry
         const timer = setTimeout(async () => {
-            DiagnosticsAgent.debug('Retry', `Retrying ${item.type} (attempt ${item.attempts})`);
-            
             try {
                 const result = await sendToParent(item.type, item.payload, {
                     ...item.options,
@@ -4269,7 +4157,6 @@ const SessionClient = {
     initialize() {
         this.loadCachedSession();
         this.setupRefreshTimer();
-        DiagnosticsAgent.info('Session', 'Session client initialized');
         return this;
     },
     
@@ -4282,13 +4169,10 @@ const SessionClient = {
                 this.sessionExpiry = cached.expiry ? new Date(cached.expiry) : null;
                 
                 if (this.sessionExpiry && this.sessionExpiry > new Date()) {
-                    DiagnosticsAgent.info('Session', 'Loaded valid cached session');
                     return true;
                 }
             }
-        } catch (e) {
-            DiagnosticsAgent.warn('Session', 'Failed to load cached session', e);
-        }
+        } catch (e) {}
         return false;
     },
     
@@ -4319,7 +4203,6 @@ const SessionClient = {
         if (this.refreshInProgress) return this.session;
         
         this.refreshInProgress = true;
-        DiagnosticsAgent.info('Session', 'Refreshing session');
         
         try {
             const response = await sendToParent(MESSAGE_TYPES.TOKEN_REFRESH, {
@@ -4340,13 +4223,9 @@ const SessionClient = {
                 this.cacheSession();
                 this.notifyListeners('refreshed', this.session);
                 
-                DiagnosticsAgent.info('Session', 'Session refreshed successfully');
-                
                 return this.session;
             }
         } catch (error) {
-            DiagnosticsAgent.error('Session', 'Session refresh failed', error);
-            
             // If refresh fails, try recovery
             if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
                 RecoveryManager.recover('token', { error });
@@ -4413,11 +4292,6 @@ const SessionClient = {
         this.sessionValid = true;
         this.cacheSession();
         
-        DiagnosticsAgent.info('Session', `Session updated from ${source}`, {
-            user: this.session?.user?.id,
-            hasToken: !!this.session?.token
-        });
-        
         this.notifyListeners('updated', this.session, oldSession);
         
         // Disable offline mode
@@ -4434,7 +4308,6 @@ const SessionClient = {
         
         SafeStorage.remove('session_cache');
         
-        DiagnosticsAgent.info('Session', 'Session cleared');
         this.notifyListeners('cleared', null);
     },
     
@@ -4469,9 +4342,7 @@ const SessionClient = {
         this.sessionListeners.forEach(listener => {
             try {
                 listener({ event, session, oldSession });
-            } catch (e) {
-                DiagnosticsAgent.error('Session', 'Listener error', e);
-            }
+            } catch (e) {}
         });
     }
 }.initialize();
@@ -4543,11 +4414,6 @@ function updateSessionMirror(sessionData, source = 'parent') {
             
             // Also update session client
             SessionClient.updateSession(sessionData, source);
-            
-            DiagnosticsAgent.info('Session', `Session mirror updated from ${source}`, {
-                user: state.sessionMirror.user?.id,
-                hasToken: !!state.sessionMirror.token
-            });
             
             // Cache session
             SafeStorage.setJSON(UNIFIED_TOKEN_KEY, state.sessionMirror.token);
@@ -4635,8 +4501,6 @@ function startEnhancedHeartbeat() {
                     state.heartbeatMissed++;
                     
                     if (state.heartbeatMissed >= state.maxMissedHeartbeats) {
-                        DiagnosticsAgent.warn('Heartbeat', `Missed ${state.heartbeatMissed} heartbeats, checking connection`);
-                        
                         // Trigger recovery
                         if (typeof RecoveryManager !== 'undefined') {
                             RecoveryManager.recover('connection');
@@ -4645,9 +4509,7 @@ function startEnhancedHeartbeat() {
                 }
             }
             
-        } catch (e) {
-            DiagnosticsAgent.debug('Heartbeat', 'Heartbeat send failed', e);
-        }
+        } catch (e) {}
     }, IframeEnvironment.getConfig().heartbeatInterval || 30000);
     
     state.intervals.add(state.heartbeatInterval);
@@ -4655,12 +4517,10 @@ function startEnhancedHeartbeat() {
 
 async function triggerConnectionRecovery() {
     if (state.metrics.recoveryAttempts > 3) {
-        DiagnosticsAgent.warn('Recovery', 'Max recovery attempts exceeded');
         return;
     }
     
     state.metrics.recoveryAttempts++;
-    DiagnosticsAgent.info('Recovery', 'Starting connection recovery', { attempt: state.metrics.recoveryAttempts });
     
     try {
         // Send recovery request
@@ -4677,14 +4537,10 @@ async function triggerConnectionRecovery() {
         
         if (response && response.payload && response.payload.success) {
             state.heartbeatMissed = 0;
-            DiagnosticsAgent.info('Recovery', 'Connection recovered');
         }
     } catch (error) {
-        DiagnosticsAgent.error('Recovery', 'Recovery failed', error);
-        
         // If recovery fails, attempt re-handshake
         if (state.metrics.recoveryAttempts >= 2) {
-            DiagnosticsAgent.warn('Recovery', 'Attempting full re-handshake');
             if (typeof reestablishConnection !== 'undefined') {
                 reestablishConnection();
             }
@@ -4693,8 +4549,6 @@ async function triggerConnectionRecovery() {
 }
 
 async function reestablishConnection() {
-    DiagnosticsAgent.info('Connection', 'Re-establishing connection');
-    
     state.handshakeComplete = false;
     state.handshakeState = 'reconnecting';
     
@@ -4706,7 +4560,6 @@ async function reestablishConnection() {
         const result = await HandshakeClient.execute({ maxRetries: 3 });
         
         if (result && result.success) {
-            DiagnosticsAgent.info('Connection', 'Connection re-established');
             state.heartbeatMissed = 0;
             
             if (typeof StartupGovernor !== 'undefined') {
@@ -4714,8 +4567,6 @@ async function reestablishConnection() {
             }
         }
     } catch (error) {
-        DiagnosticsAgent.error('Connection', 'Failed to re-establish connection', error);
-        
         // Enable offline mode
         state.offlineModeEnabled = true;
         if (typeof isOfflineMode !== 'undefined') {
@@ -4748,15 +4599,11 @@ async function requestParentConfig() {
         if (response && response.payload && response.payload.config) {
             applyParentConfig(response.payload.config);
         }
-    } catch (error) {
-        DiagnosticsAgent.warn('Config', 'Failed to get parent config', error);
-    }
+    } catch (error) {}
 }
 
 function applyParentConfig(config) {
     try {
-        DiagnosticsAgent.info('Config', 'Applying parent configuration', config);
-        
         if (config.heartbeatInterval) {
             // Adjust heartbeat interval if needed
             IframeEnvironment.getConfig().heartbeatInterval = config.heartbeatInterval;
@@ -4783,9 +4630,7 @@ function applyParentConfig(config) {
             detail: config
         }));
         
-    } catch (error) {
-        DiagnosticsAgent.error('Config', 'Failed to apply config', error);
-    }
+    } catch (error) {}
 }
 
 // =============================================
@@ -4815,12 +4660,9 @@ async function refreshToken() {
             
             SafeStorage.set(UNIFIED_TOKEN_KEY, state.token);
             
-            DiagnosticsAgent.info('Session', 'Token refreshed successfully');
             return state.token;
         }
     } catch (error) {
-        DiagnosticsAgent.error('Session', 'Token refresh failed', error);
-        
         // Try recovery
         if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
             RecoveryManager.recover('token', { error });
@@ -4861,7 +4703,6 @@ const ParentDetector = {
                         this.checkInterval = null;
                     }
                     
-                    DiagnosticsAgent.info('Parent', 'Parent detected and available');
                     resolve(true);
                     return;
                 }
@@ -4876,7 +4717,6 @@ const ParentDetector = {
                         this.checkInterval = null;
                     }
                     
-                    DiagnosticsAgent.warn('Parent', 'Parent not available after max checks');
                     resolve(false);
                     return;
                 }
@@ -4935,7 +4775,6 @@ const ParentDetector = {
 // INITIALIZATION PIPELINE - PREFLIGHT → READY
 // =============================================
 async function preflightStage() {
-    DiagnosticsAgent.info('Init', 'Preflight stage');
     try {
         if (typeof window === 'undefined') throw new Error('Window not available');
         if (typeof document === 'undefined') throw new Error('Document not available');
@@ -4951,13 +4790,11 @@ async function preflightStage() {
 }
 
 async function dependencyCheckStage() {
-    DiagnosticsAgent.info('Init', 'Dependency check stage');
     try {
         const requiredApis = ['localStorage', 'postMessage', 'addEventListener'];
         const missing = requiredApis.filter(api => typeof window[api] === 'undefined');
         
         if (missing.length > 0) {
-            DiagnosticsAgent.warn('Init', `Missing dependencies: ${missing.join(', ')}`);
             state.dependenciesLoaded = false;
             return { success: false, fallback: true, missing };
         }
@@ -4972,23 +4809,17 @@ async function dependencyCheckStage() {
 }
 
 async function parentDetectStage(timeout = 2000) {
-    DiagnosticsAgent.info('Init', 'Parent detect stage');
-    
     const detected = await ParentDetector.detect();
     
     if (detected) {
         return { success: true };
     } else {
-        DiagnosticsAgent.warn('Init', 'Parent not detected');
         return { success: false, fallback: true };
     }
 }
 
 async function handshakeStage(options = {}) {
-    DiagnosticsAgent.info('Init', 'Handshake stage');
-    
     if (!state.parentDetected) {
-        DiagnosticsAgent.warn('Init', 'Parent not detected, skipping handshake');
         state.handshakeComplete = false;
         return { success: false, fallback: true };
     }
@@ -5010,16 +4841,12 @@ async function handshakeStage(options = {}) {
 }
 
 async function sessionSyncStage(timeout = 5000) {
-    DiagnosticsAgent.info('Init', 'Session sync stage');
-    
     if (!state.handshakeComplete || !state.parentDetected) {
         if (state.sessionMirror.validated) {
-            DiagnosticsAgent.info('Init', 'Using cached session mirror');
             activateSessionFromMirror();
             return { success: true, guestMode: false, cached: true };
         }
         
-        DiagnosticsAgent.warn('Init', 'Handshake incomplete, enabling guest mode');
         enableGuestMode();
         return { success: false, guestMode: true };
     }
@@ -5067,7 +4894,6 @@ async function sessionSyncStage(timeout = 5000) {
             updateSessionMirror(sessionData, 'session_sync');
             activateSessionFromMirror();
             
-            DiagnosticsAgent.info('Init', 'Authenticated session established');
             return { success: true, guestMode: false, user: state.user };
         }
     } catch (error) {
@@ -5075,7 +4901,6 @@ async function sessionSyncStage(timeout = 5000) {
     }
     
     if (state.sessionMirror.validated) {
-        DiagnosticsAgent.info('Init', 'Falling back to cached session mirror');
         activateSessionFromMirror();
         return { success: true, guestMode: false, cached: true };
     }
@@ -5101,16 +4926,10 @@ function activateSessionFromMirror() {
         capabilities: state.sessionMirror.capabilities
     };
     
-    DiagnosticsAgent.info('Session', 'Activated from mirror', {
-        user: state.user?.id,
-        hasToken: !!state.token
-    });
-    
     return true;
 }
 
 async function serviceInitStage() {
-    DiagnosticsAgent.info('Init', 'Service init stage');
     try {
         const cachedSession = loadCachedSession();
         if (cachedSession && !state.sessionActive && !state.sessionMirror.validated) {
@@ -5125,7 +4944,6 @@ async function serviceInitStage() {
 }
 
 function readyStage() {
-    DiagnosticsAgent.info('Init', 'Ready stage');
     state.initialized = true;
     state.readyState = 'ready';
     
@@ -5143,18 +4961,14 @@ function readyStage() {
 
 const initializeCore = createErrorBoundary(async function(options = {}) {
     if (state.initialized) {
-        DiagnosticsAgent.warn('Core', 'Already initialized');
         return { success: true, state: state.readyState };
     }
     
     if (!StartupGovernor.canInitialize()) {
-        DiagnosticsAgent.warn('Core', 'Startup governor blocked initialization');
         return { success: false, reason: 'Governor blocked' };
     }
     
     StartupGovernor.acquireLock();
-    
-    DiagnosticsAgent.info('Core', 'Starting enhanced initialization pipeline');
     
     try {
         state.readyState = 'preflight';
@@ -5230,8 +5044,6 @@ function enableGuestMode() {
         validated: false,
         guestMode: true
     };
-    
-    DiagnosticsAgent.info('Guest', 'Guest mode enabled');
 }
 
 function loadCachedSession() {
@@ -5270,7 +5082,6 @@ const shutdownCore = createErrorBoundary(async function() {
     if (state.shutdownInProgress) return;
     
     state.shutdownInProgress = true;
-    DiagnosticsAgent.info('Core', 'Shutting down');
     
     try {
         // Clear intervals
@@ -5316,8 +5127,6 @@ const shutdownCore = createErrorBoundary(async function() {
                 instanceId: state.instanceId
             }, { requiresAck: false, silent: true });
         }
-        
-        DiagnosticsAgent.info('Core', 'Shutdown complete');
         
     } catch (error) {
         DiagnosticsAgent.error('Core', `Shutdown error: ${error.message}`, error);
@@ -5374,8 +5183,6 @@ addMessageHandler(MESSAGE_TYPES.AUTH_VALIDATED, (message) => {
 
 // Parent ready handler
 addMessageHandler(MESSAGE_TYPES.PARENT_READY, (message) => {
-    DiagnosticsAgent.info('Parent', 'Parent ready signal received');
-    
     if (!state.handshakeComplete && StartupGovernor.shouldRetryHandshake()) {
         HandshakeClient.execute().catch(() => {});
     }
@@ -5383,7 +5190,6 @@ addMessageHandler(MESSAGE_TYPES.PARENT_READY, (message) => {
 
 // Logout handler
 addMessageHandler(MESSAGE_TYPES.LOGOUT, (message) => {
-    DiagnosticsAgent.info('Session', 'Logout received from parent');
     handleLogout(message.payload);
 });
 
@@ -5404,12 +5210,9 @@ addMessageHandler(MESSAGE_TYPES.PONG, (message) => {
 
 addMessageHandler(MESSAGE_TYPES.PAGE_ACTIVATED, (message) => {
     state.pageActivated = true;
-    DiagnosticsAgent.info('Parent', 'Page activated');
 });
 
 addMessageHandler(MESSAGE_TYPES.NAVIGATE, (message) => {
-    DiagnosticsAgent.info('Parent', 'Navigate request', message.payload);
-    
     if (message.payload && message.payload.path) {
         // Handle navigation if needed
         document.dispatchEvent(new CustomEvent('navigate', {
@@ -5453,7 +5256,6 @@ addMessageHandler(MESSAGE_TYPES.CONFIG_RESPONSE, (message) => {
 addMessageHandler(MESSAGE_TYPES.RECOVERY_RESPONSE, (message) => {
     if (message.payload && message.payload.success) {
         state.metrics.successfulRecoveries++;
-        DiagnosticsAgent.info('Recovery', 'Recovery successful');
     }
 });
 
@@ -5463,13 +5265,11 @@ addMessageHandler(MESSAGE_TYPES.RECOVERY_RESPONSE, (message) => {
 function registerFeature(name, implementation) {
     try {
         if (state.features.has(name)) {
-            DiagnosticsAgent.warn('Feature', `Duplicate registration: ${name}`);
             return false;
         }
         
         const wrappedImplementation = createErrorBoundary(implementation, `Feature:${name}`, null);
         state.features.set(name, wrappedImplementation);
-        DiagnosticsAgent.debug('Feature', `Registered: ${name}`);
         return true;
     } catch (e) {
         DiagnosticsAgent.error('Feature', `Registration failed ${name}: ${e.message}`, e);
@@ -5480,7 +5280,6 @@ function registerFeature(name, implementation) {
 function executeFeature(name, ...args) {
     try {
         if (isCircuitOpen(`feature:${name}`)) {
-            DiagnosticsAgent.warn('Feature', `Circuit breaker open: ${name}`);
             return null;
         }
         
@@ -5490,7 +5289,6 @@ function executeFeature(name, ...args) {
         
         const feature = state.features.get(name);
         if (!feature) {
-            DiagnosticsAgent.warn('Feature', `Not found: ${name}`);
             return null;
         }
         
@@ -5768,8 +5566,6 @@ function sendChildReadyMessage() {
         parentCoordinator.childReadySent = true;
         state.childReadySent = true;
         
-        DiagnosticsAgent.info('Parent', 'CHILD_READY sent');
-        
     } catch (error) {
         DiagnosticsAgent.error('Parent', 'sendChildReadyMessage error', error);
     }
@@ -5807,7 +5603,6 @@ function requestSessionFromParent() {
                     parentCoordinator.handshakeInProgress = false;
                     setTimeout(requestSessionFromParent, 1000);
                 } else {
-                    DiagnosticsAgent.warn('Handshake', 'Secure handshake failed');
                     handleSessionFailed();
                 }
             }
@@ -6419,7 +6214,7 @@ function startTokenReadinessCheck() {
 }
 
 // =============================================
-// SECURE API CALL WITH FALLBACK
+// SECURE API CALL WITH FALLBACK - Using safeFetch
 // =============================================
 const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
     if (state.offlineModeEnabled && options.method && options.method !== 'GET') {
@@ -6440,7 +6235,7 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
     }
     
     try {
-        // Use standard fetch with token
+        // Use safeFetch with token
         const headers = {
             'Content-Type': 'application/json',
             ...options.headers
@@ -6450,23 +6245,12 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
             headers['Authorization'] = `Bearer ${token}`;
         }
         
-        const timeoutMs = IframeEnvironment.isVPNNetwork ? 60000 : 30000;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-        
-        const response = await fetch(endpoint, {
+        const response = await safeFetch(endpoint, {
             ...options,
-            headers,
-            signal: controller.signal
+            headers
         });
         
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error ${response.status}`);
-        }
-        
-        return await response.json();
+        return response;
     } catch (error) {
         const isAuthError = error.message?.includes('401') || 
                            error.message?.includes('403') ||
@@ -7932,11 +7716,6 @@ function updateLocalStateWithSession(sessionData) {
         triggerTokenReadyCallbacks();
         processPendingApiRequests();
         
-        DiagnosticsAgent.info('Session', 'Local state updated from session', {
-            user: sessionData.user?.id,
-            hasToken: !!sessionData.token
-        });
-        
         return true;
     } catch (error) {
         DiagnosticsAgent.error('Session', 'updateLocalStateWithSession error', error);
@@ -7951,14 +7730,12 @@ function enableDiagnostics() {
     state.diagnosticsEnabled = true;
     window.__IFRAME_DEBUG__ = true;
     DiagnosticsAgent.enable();
-    DiagnosticsAgent.info('Diagnostics', 'Diagnostics enabled');
 }
 
 function disableDiagnostics() {
     state.diagnosticsEnabled = false;
     window.__IFRAME_DEBUG__ = false;
     DiagnosticsAgent.disable();
-    DiagnosticsAgent.info('Diagnostics', 'Diagnostics disabled');
 }
 
 function getDiagnostics() {
@@ -8028,8 +7805,6 @@ function detectSandbox() {
                           (() => { try { return !window.parent.location; } catch { return true; } })();
         
         if (sandboxed) {
-            DiagnosticsAgent.info('Sandbox', 'Detected sandboxed environment');
-            
             // Adjust security for sandbox
             state.securityContext.signatureRequired = false;
             state.securityContext.encryptionRequired = false;
@@ -8131,7 +7906,6 @@ function logOnce(level, msg) {
 
 async function safeInit() {
     if (_INITIALIZATION_STARTED_) {
-        logOnce('warn', 'Initialization already started');
         return;
     }
     
@@ -8139,8 +7913,6 @@ async function safeInit() {
     
     let tries = 0;
     const maxTries = 5;
-    
-    logOnce('info', 'Starting safe initialization');
     
     // Detect environment
     IframeEnvironment.detect();
@@ -8152,18 +7924,13 @@ async function safeInit() {
     const parentAvailable = await ParentDetector.detect();
     
     if (parentAvailable) {
-        logOnce('info', 'Parent handshake establishing');
-        
         // Execute enhanced handshake
         const handshakeResult = await HandshakeClient.execute({ maxRetries: IframeEnvironment.getConfig().maxRetries }).catch(() => null);
         
         if (handshakeResult && handshakeResult.success) {
             _PARENT_READY_ = true;
             _HANDSHAKE_DONE_ = true;
-            logOnce('info', 'Parent handshake established');
         } else {
-            logOnce('warn', 'Running in fallback mode - handshake failed');
-            
             // Try to load from mirror
             if (state.sessionMirror.validated) {
                 activateSessionFromMirror();
@@ -8172,8 +7939,6 @@ async function safeInit() {
             }
         }
     } else {
-        logOnce('warn', 'Running in fallback mode - parent not ready');
-        
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
         } else {
@@ -8182,7 +7947,6 @@ async function safeInit() {
     }
     
     try {
-        logOnce('info', 'Binding UI immediately');
         initializeUIWithCachedData();
         
         setTimeout(async () => {
@@ -8203,7 +7967,6 @@ function notifyParentReady() {
     if (_HANDSHAKE_DONE_) return;
     
     if (_HANDSHAKE_RETRIES_ >= MAX_HANDSHAKE) {
-        logOnce('warn', `Handshake failed after ${MAX_HANDSHAKE} attempts`);
         return;
     }
     
@@ -8224,7 +7987,6 @@ function notifyParentReady() {
             window.parent.postMessage(message, '*');
             
             _HANDSHAKE_RETRIES_++;
-            logOnce('info', `Handshake attempt ${_HANDSHAKE_RETRIES_}/${MAX_HANDSHAKE}`);
         } catch (error) {
             logOnce('error', 'Failed to send handshake to parent');
         }
@@ -8411,7 +8173,10 @@ if (typeof window !== 'undefined') {
             NavigationGuard,
             DiagnosticsAgent,
             ReliabilityEngine,
-            IframeHandshakeAuthority
+            IframeHandshakeAuthority,
+            
+            // Safe fetch
+            safeFetch
         };
         
         // Enable debug mode if URL parameter present
@@ -8611,7 +8376,10 @@ export {
     DiagnosticsAgent,
     ReliabilityEngine,
     IframeHandshakeAuthority,
-    SafeStorage
+    SafeStorage,
+    
+    // Safe fetch
+    safeFetch
 };
 
 // =============================================
@@ -8623,4 +8391,4 @@ if (typeof window !== 'undefined' && !state.initialized) {
     }, 10);
 }
 
-console.log('[Status] Core system initialized successfully (v5.0 - enhanced resilience, security, and reliability)');
+// Silent initialization - no console log
