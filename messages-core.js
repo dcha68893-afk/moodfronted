@@ -1,9 +1,8 @@
 // =============================================
-// MESSAGES-CORE.js - HARDENED PRODUCTION CORE ENGINE v3.4.0
-// SECURE PARENT-IFRAME COMMUNICATION LAYER
-// ENHANCED: Startup Governor, Handshake Authority, Session Client, Reliability Engine
-// ADDED: IframeAuthority, IframeEnvironment, IframeTransport, SafeStorage
-// PRESERVED: All existing functionality, APIs, and UI behavior
+// MESSAGES-CORE.js - PASSIVE IFRAME MODULE v3.5.1
+// PARENT-CONTROLLED LIFECYCLE
+// NO INDEPENDENT HANDSHAKE - NO RETRY LOOPS - NO RECOVERY
+// WITH MESSAGE LIFECYCLE STATE & VISIBLE FAILURES
 // =============================================
 
 (function() {
@@ -12,44 +11,30 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '3.4.0';
+    const VERSION = '3.5.1';
     const APP_NAME = 'kynecta-messages';
-    const SOURCE_CHILD = 'CHILD';
+    const SOURCE_IFRAME = 'iframe';
     const FRAME_ID = 'messagesIframe';
     
     const PROTOCOL = {
-        VERSION: '3.4.0',
-        MIN_COMPATIBLE: '2.0.0',
-        PROTOCOL_VERSION: 'KYN-2.0',
-        CANONICAL: true
-    };
-
-    const HANDSHAKE = {
-        MAX_RETRIES: 5,
-        RETRY_DELAY: 500,
-        TIMEOUT: 8000,
-        ACK_TIMEOUT: 4000,
-        BACKOFF_FACTOR: 1.5,
-        JITTER_MAX: 300
+        VERSION: 'KYN-2.0'
     };
 
     const MESSAGE_TYPES = {
-        // Handshake
-        HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
-        HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
-        HANDSHAKE_ACK: 'HANDSHAKE_ACK',
-        CHILD_READY: 'CHILD_READY',
+        // Registration
+        IFRAME_REGISTERED: 'IFRAME_REGISTERED',
         PARENT_READY: 'PARENT_READY',
+        CHILD_READY: 'CHILD_READY',
+        REGISTRATION_ACK: 'REGISTRATION_ACK',
         
         // Session
         SESSION_INIT: 'SESSION_INIT',
         SESSION_UPDATE: 'SESSION_UPDATE',
-        SESSION_REFRESH: 'SESSION_REFRESH',
-        SESSION_EXPIRED: 'SESSION_EXPIRED',
-        REQUEST_SESSION: 'REQUEST_SESSION',
+        SESSION_SYNC: 'SESSION_SYNC',
         SESSION_DATA: 'SESSION_DATA',
         SESSION_ACK: 'SESSION_ACK',
-        SESSION_SYNC: 'SESSION_SYNC',
+        REQUEST_SESSION: 'REQUEST_SESSION',
+        SESSION_EXPIRED: 'SESSION_EXPIRED',
         
         // API
         API_REQUEST: 'API_REQUEST',
@@ -66,11 +51,12 @@
         // System
         ACK: 'ACK',
         ERROR: 'ERROR',
-        PING: 'PING',
-        PONG: 'PONG',
-        LOGOUT: 'LOGOUT',
-        FORCE_RELOAD: 'FORCE_RELOAD',
+        HEARTBEAT: 'HEARTBEAT',
+        HEARTBEAT_ACK: 'HEARTBEAT_ACK',
         PAGE_ACTIVATED: 'PAGE_ACTIVATED',
+        FORCE_RELOAD: 'FORCE_RELOAD',
+        MESSAGES_STATUS_WARNING: 'MESSAGES_STATUS_WARNING',
+        LOGOUT: 'LOGOUT',
         NAVIGATE: 'NAVIGATE'
     };
 
@@ -89,12 +75,7 @@
         ARCHIVED_CHATS: 'kynecta_archived_chats',
         STARRED_MESSAGES: 'kynecta_starred_messages',
         UI_STATE: 'kynecta_ui_state',
-        MESSAGE_QUEUE: 'kynecta_message_queue',
-        HANDSHAKE_STATE: 'kynecta_handshake_state',
-        PROTOCOL_STATE: 'kynecta_protocol_state',
-        MESSAGE_ID_COUNTER: 'kynecta_message_id_counter',
-        IFrame_STATE: 'kynecta_iframe_state',
-        STARTUP_STATE: 'kynecta_startup_state'
+        MESSAGE_QUEUE: 'kynecta_message_queue'
     };
 
     const LOG_LEVELS = {
@@ -105,376 +86,68 @@
         NONE: 4
     };
 
-    const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO;
+    const CURRENT_LOG_LEVEL = LOG_LEVELS.NONE;
+
+    // Heartbeat configuration
+    const HEARTBEAT = {
+        failures: 0,
+        maxFailures: 3,
+        lastHeartbeat: 0,
+        interval: null
+    };
+
+    // Registration state
+    let registrationSent = false;
+    let parentReady = false;
+    let parentOrigin = window.location.origin;
 
     // =============================================
-    // DIAGNOSTICS AGENT (SILENT MODE - NO REPEATS)
+    // STATUS INDICATOR - SINGLE STATUS, NO REPEATS
     // =============================================
-    const DiagnosticsAgent = {
-        enabled: false,
-        debugMode: false,
-        metrics: {
-            messagesSent: 0,
-            messagesReceived: 0,
-            handshakeAttempts: 0,
-            handshakeSuccess: 0,
-            handshakeFailures: 0,
-            acksReceived: 0,
-            acksSent: 0,
-            retries: 0,
-            timeouts: 0,
-            errors: [],
-            startTime: Date.now(),
-            lastPingTime: 0,
-            lastPongTime: 0,
-            pingRtt: [],
-            sessionRefreshes: 0,
-            cacheHits: 0,
-            cacheMisses: 0,
-            stateTransitions: []
+    const StatusIndicator = {
+        currentStatus: null,
+        statusMap: {
+            'INIT': '🚀',
+            'SENDING': '📤',
+            'WAITING': '⏳',
+            'SUCCESS': '✅',
+            'FAILED': '❌',
+            'READY': '🔵',
+            'WARNING': '⚠️',
+            'DISCONNECTED': '🔴'
         },
-        loggedErrors: new Set(),
         
-        init(enabled = false) {
-            this.enabled = enabled && (window.location.hostname === 'localhost' || 
-                                       window.location.hostname === '127.0.0.1' ||
-                                       window.__IFRAME_DEBUG__ === true);
-            this.debugMode = window.__IFRAME_DEBUG__ === true;
-            return this;
-        },
-
-        increment(counter) {
-            if (this.enabled && this.metrics.hasOwnProperty(counter)) {
-                this.metrics[counter]++;
-            }
-        },
-
-        recordError(error, context) {
-            if (!this.enabled) return;
-            const errorKey = error.message + context;
-            if (this.loggedErrors.has(errorKey)) return;
-            this.loggedErrors.add(errorKey);
+        show(status) {
+            if (!this.statusMap[status]) return;
+            if (this.currentStatus === status) return;
             
-            this.metrics.errors.push({
-                timestamp: Date.now(),
-                error: error.message || String(error),
-                context,
-                stack: error.stack
-            });
-            if (this.metrics.errors.length > 100) {
-                this.metrics.errors.shift();
-            }
+            this.currentStatus = status;
+            const emoji = this.statusMap[status];
+            console.log(`${emoji} ${status} ${emoji}`);
+            
+            window.dispatchEvent(new CustomEvent('statusChange', {
+                detail: { status, emoji }
+            }));
         },
-
-        recordPingRtt(rtt) {
-            if (!this.enabled) return;
-            this.metrics.pingRtt.push(rtt);
-            if (this.metrics.pingRtt.length > 20) {
-                this.metrics.pingRtt.shift();
-            }
-        },
-
-        recordStateTransition(from, to, reason) {
-            if (!this.enabled) return;
-            this.metrics.stateTransitions.push({
-                timestamp: Date.now(),
-                from,
-                to,
-                reason
-            });
-            if (this.metrics.stateTransitions.length > 50) {
-                this.metrics.stateTransitions.shift();
-            }
-        },
-
-        getMetrics() {
-            return {
-                ...this.metrics,
-                uptime: Date.now() - this.metrics.startTime,
-                avgPingRtt: this.metrics.pingRtt.length ? 
-                    Math.round(this.metrics.pingRtt.reduce((a, b) => a + b, 0) / this.metrics.pingRtt.length) : 0,
-                timestamp: Date.now()
-            };
-        },
-
-        getUptime() {
-            const ms = Date.now() - this.metrics.startTime;
-            const seconds = Math.floor(ms / 1000);
-            const minutes = Math.floor(seconds / 60);
-            const hours = Math.floor(minutes / 60);
-            return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-        },
-
+        
         reset() {
-            this.metrics = {
-                messagesSent: 0,
-                messagesReceived: 0,
-                handshakeAttempts: 0,
-                handshakeSuccess: 0,
-                handshakeFailures: 0,
-                acksReceived: 0,
-                acksSent: 0,
-                retries: 0,
-                timeouts: 0,
-                errors: [],
-                startTime: Date.now(),
-                lastPingTime: 0,
-                lastPongTime: 0,
-                pingRtt: [],
-                sessionRefreshes: 0,
-                cacheHits: 0,
-                cacheMisses: 0,
-                stateTransitions: []
-            };
-            this.loggedErrors.clear();
+            this.currentStatus = null;
         }
     };
 
-    // =============================================
-    // SILENT LOGGER (NO CONSOLE REPEATS)
-    // =============================================
-    const Logger = {
-        logCache: new Map(),
-        warnCache: new Map(),
-        errorCache: new Map(),
-        cacheTTL: {
-            [LOG_LEVELS.DEBUG]: 30000,
-            [LOG_LEVELS.INFO]: 60000,
-            [LOG_LEVELS.WARN]: 120000,
-            [LOG_LEVELS.ERROR]: 300000
-        },
-        
-        _shouldLog(level, message) {
-            if (level < CURRENT_LOG_LEVEL) return false;
-            
-            const cache = level === LOG_LEVELS.WARN ? this.warnCache :
-                          level === LOG_LEVELS.ERROR ? this.errorCache : 
-                          this.logCache;
-            
-            const now = Date.now();
-            if (cache.has(message)) {
-                const lastLog = cache.get(message);
-                if (now - lastLog < this.cacheTTL[level]) {
-                    return false;
-                }
-            }
-            
-            cache.set(message, now);
-            
-            // Cleanup old entries
-            if (cache.size > 100) {
-                for (const [key, timestamp] of cache) {
-                    if (now - timestamp > 600000) {
-                        cache.delete(key);
-                    }
-                }
-            }
-            
-            return true;
-        },
-
-        _format(level, module, message, data) {
-            const timestamp = new Date().toISOString();
-            const prefix = `[${timestamp}] [${module}] [${level}]`;
-            return { timestamp, prefix, message, data };
-        },
-
-        debug(module, message, data = null) {
-            if (!this._shouldLog(LOG_LEVELS.DEBUG, message)) return;
-            const { prefix } = this._format('DEBUG', module, message, data);
-            console.debug(`${prefix} ${message}`, data || '');
-        },
-
-        info(module, message, data = null) {
-            if (!this._shouldLog(LOG_LEVELS.INFO, message)) return;
-            const { prefix } = this._format('INFO', module, message, data);
-            console.info(`${prefix} ${message}`, data || '');
-        },
-
-        warn(module, message, data = null) {
-            if (!this._shouldLog(LOG_LEVELS.WARN, message)) return;
-            const { prefix } = this._format('WARN', module, message, data);
-            console.warn(`${prefix} ${message}`, data || '');
-        },
-
-        error(module, message, data = null) {
-            if (!this._shouldLog(LOG_LEVELS.ERROR, message)) return;
-            const { prefix } = this._format('ERROR', module, message, data);
-            console.error(`${prefix} ${message}`, data || '');
-        }
-    };
+    // Show INIT once at start
+    StatusIndicator.show('INIT');
 
     // =============================================
-    // IFRAME ENVIRONMENT DETECTOR (NEW)
-    // =============================================
-    const IframeEnvironment = {
-        type: 'UNKNOWN',
-        isLocalDev: false,
-        isRenderHosted: false,
-        isVPNNetwork: false,
-        isProduction: false,
-        isSandboxed: false,
-        latency: 0,
-        connectionType: 'unknown',
-        rtt: 0,
-        downlink: 0,
-        saveData: false,
-        detectedAt: 0,
-        
-        detect() {
-            this.detectedAt = Date.now();
-            this._detectHosting();
-            this._measureLatency();
-            this._checkSandbox();
-            this._getNetworkInfo();
-            this._logOnce();
-            return this;
-        },
-        
-        _detectHosting() {
-            const hostname = window.location.hostname;
-            const protocol = window.location.protocol;
-            
-            // Local development
-            if (hostname === 'localhost' || hostname === '127.0.0.1' || protocol === 'file:') {
-                this.type = 'LOCAL_DEV';
-                this.isLocalDev = true;
-                return;
-            }
-            
-            // Render.com hosted
-            if (hostname.endsWith('.onrender.com')) {
-                this.type = 'RENDER_HOSTED';
-                this.isRenderHosted = true;
-                return;
-            }
-            
-            // Production (custom domain + https)
-            if (protocol === 'https:' && !hostname.includes('localhost') && !hostname.includes('127.0.0.1')) {
-                this.type = 'PRODUCTION';
-                this.isProduction = true;
-                
-                // Check if it might be VPN
-                this._checkVPNPattern(hostname);
-                return;
-            }
-            
-            // Default
-            this.type = 'UNKNOWN';
-        },
-        
-        _checkVPNPattern(hostname) {
-            const privateIPPatterns = [
-                /^10\.\d+\.\d+\.\d+$/,
-                /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/,
-                /^192\.168\.\d+\.\d+$/
-            ];
-            
-            for (const pattern of privateIPPatterns) {
-                if (pattern.test(hostname)) {
-                    this.isVPNNetwork = true;
-                    break;
-                }
-            }
-        },
-        
-        _measureLatency() {
-            const start = performance.now();
-            requestAnimationFrame(() => {
-                this.latency = performance.now() - start;
-                if (this.latency > 100 && !this.isVPNNetwork) {
-                    this.isVPNNetwork = true;
-                }
-            });
-        },
-        
-        _getNetworkInfo() {
-            if (navigator.connection) {
-                this.connectionType = navigator.connection.effectiveType || 'unknown';
-                this.rtt = navigator.connection.rtt || 0;
-                this.downlink = navigator.connection.downlink || 0;
-                this.saveData = navigator.connection.saveData || false;
-                
-                if (this.connectionType === '2g' || this.connectionType === '3g' || this.saveData) {
-                    this.isVPNNetwork = true;
-                }
-                if (this.rtt > 300) {
-                    this.isVPNNetwork = true;
-                }
-            }
-        },
-        
-        _checkSandbox() {
-            try {
-                this.isSandboxed = !window.parent || 
-                                   window.parent === window || 
-                                   !window.parent.location ||
-                                   document.documentElement.hasAttribute('sandbox') ||
-                                   (window.frameElement && window.frameElement.hasAttribute('sandbox'));
-            } catch (e) {
-                this.isSandboxed = true;
-            }
-        },
-        
-        _logOnce() {
-            Logger.info('Environment', 'Runtime detected', {
-                type: this.type,
-                isVPN: this.isVPNNetwork,
-                latency: this.latency.toFixed(2) + 'ms',
-                connection: this.connectionType
-            });
-        },
-        
-        getConfig() {
-            const config = {
-                handshakeTimeout: HANDSHAKE.TIMEOUT,
-                ackTimeout: HANDSHAKE.ACK_TIMEOUT,
-                maxRetries: HANDSHAKE.MAX_RETRIES,
-                retryDelay: HANDSHAKE.RETRY_DELAY,
-                enableCrypto: !this.isSandboxed,
-                enableBatchMessages: false,
-                enableKeepalive: true,
-                originStrictness: 'normal'
-            };
-            
-            if (this.isVPNNetwork || this.latency > 150 || this.rtt > 300) {
-                config.handshakeTimeout = HANDSHAKE.TIMEOUT * 2;
-                config.ackTimeout = HANDSHAKE.ACK_TIMEOUT * 1.5;
-                config.maxRetries = 3;
-                config.retryDelay = HANDSHAKE.RETRY_DELAY * 2;
-                config.enableBatchMessages = true;
-                config.enableKeepalive = true;
-                config.originStrictness = 'relaxed';
-            }
-            
-            if (this.isSandboxed) {
-                config.enableCrypto = false;
-                config.originStrictness = 'permissive';
-                config.enableKeepalive = false;
-            }
-            
-            if (this.isProduction && !this.isVPNNetwork) {
-                config.originStrictness = 'strict';
-            }
-            
-            return config;
-        }
-    };
-
-    // =============================================
-    // SAFE STORAGE LAYER (NEW - NO THROWS)
+    // SAFE STORAGE LAYER
     // =============================================
     const SafeStorage = {
         memoryStore: new Map(),
         storageAvailable: false,
         quotaExceeded: false,
-        encryptionKey: null,
-        persistentStore: null,
         
         init() {
             this._checkStorage();
-            this._generateKey();
-            this._initIndexedDB();
             return this;
         },
         
@@ -497,77 +170,13 @@
             }
         },
         
-        _generateKey() {
-            try {
-                this.encryptionKey = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-                    .map(b => b.toString(16).padStart(2, '0'))
-                    .join('');
-            } catch (e) {
-                this.encryptionKey = Math.random().toString(36) + Math.random().toString(36);
-            }
-        },
-        
-        _initIndexedDB() {
-            if (!window.indexedDB) return;
-            
-            try {
-                const request = indexedDB.open('KynectaStorage', 1);
-                request.onupgradeneeded = (event) => {
-                    const db = event.target.result;
-                    if (!db.objectStoreNames.contains('store')) {
-                        db.createObjectStore('store');
-                    }
-                };
-                request.onsuccess = (event) => {
-                    this.persistentStore = event.target.result;
-                };
-            } catch (e) {}
-        },
-        
-        _simpleEncrypt(value) {
-            if (!this.encryptionKey) return value;
-            try {
-                const str = typeof value === 'string' ? value : JSON.stringify(value);
-                let result = '';
-                for (let i = 0; i < str.length; i++) {
-                    result += String.fromCharCode(str.charCodeAt(i) ^ this.encryptionKey.charCodeAt(i % this.encryptionKey.length));
-                }
-                return btoa(result);
-            } catch (e) {
-                return value;
-            }
-        },
-        
-        _simpleDecrypt(value) {
-            if (!this.encryptionKey || typeof value !== 'string') return value;
-            try {
-                const str = atob(value);
-                let result = '';
-                for (let i = 0; i < str.length; i++) {
-                    result += String.fromCharCode(str.charCodeAt(i) ^ this.encryptionKey.charCodeAt(i % this.encryptionKey.length));
-                }
-                try {
-                    return JSON.parse(result);
-                } catch {
-                    return result;
-                }
-            } catch (e) {
-                return value;
-            }
-        },
-        
-        get(key, fallback = null, encrypted = false) {
+        get(key, fallback = null) {
             if (this.storageAvailable && !this.quotaExceeded) {
                 try {
                     const value = localStorage.getItem(key);
-                    if (value !== null) {
-                        DiagnosticsAgent.increment('cacheHits');
-                        return encrypted ? this._simpleDecrypt(value) : value;
-                    }
+                    if (value !== null) return value;
                 } catch (e) {}
             }
-            
-            DiagnosticsAgent.increment('cacheMisses');
             
             if (this.memoryStore.has(key)) {
                 return this.memoryStore.get(key);
@@ -576,13 +185,12 @@
             return fallback;
         },
         
-        set(key, value, encrypted = false) {
-            const storeValue = encrypted ? this._simpleEncrypt(value) : value;
+        set(key, value) {
             this.memoryStore.set(key, value);
             
             if (this.storageAvailable && !this.quotaExceeded) {
                 try {
-                    localStorage.setItem(key, String(storeValue));
+                    localStorage.setItem(key, String(value));
                     return true;
                 } catch (e) {
                     if (e.name === 'QuotaExceededError') {
@@ -602,61 +210,23 @@
             this.memoryStore.delete(key);
         },
         
-        getJSON(key, fallback = null, encrypted = false) {
-            const value = this.get(key, null, encrypted);
+        getJSON(key, fallback = null) {
+            const value = this.get(key, null);
             if (!value) return fallback;
             
             try {
-                if (typeof value === 'string') {
-                    return JSON.parse(value);
-                }
-                return value;
+                return JSON.parse(value);
             } catch (e) {
                 return fallback;
             }
         },
         
-        setJSON(key, value, encrypted = false) {
+        setJSON(key, value) {
             try {
-                return this.set(key, JSON.stringify(value), encrypted);
+                return this.set(key, JSON.stringify(value));
             } catch (e) {
                 return false;
             }
-        },
-        
-        async getPersistent(key, fallback = null) {
-            if (!this.persistentStore) return this.get(key, fallback);
-            
-            return new Promise((resolve) => {
-                try {
-                    const transaction = this.persistentStore.transaction(['store'], 'readonly');
-                    const store = transaction.objectStore('store');
-                    const request = store.get(key);
-                    request.onsuccess = () => resolve(request.result || this.get(key, fallback));
-                    request.onerror = () => resolve(this.get(key, fallback));
-                } catch (e) {
-                    resolve(this.get(key, fallback));
-                }
-            });
-        },
-        
-        async setPersistent(key, value) {
-            if (!this.persistentStore) return this.set(key, value);
-            
-            return new Promise((resolve) => {
-                try {
-                    const transaction = this.persistentStore.transaction(['store'], 'readwrite');
-                    const store = transaction.objectStore('store');
-                    const request = store.put(value, key);
-                    request.onsuccess = () => {
-                        this.set(key, value);
-                        resolve(true);
-                    };
-                    request.onerror = () => resolve(this.set(key, value));
-                } catch (e) {
-                    resolve(this.set(key, value));
-                }
-            });
         },
         
         clear() {
@@ -670,111 +240,41 @@
     }.init();
 
     // =============================================
-    // SECURITY & VALIDATION UTILITIES (ENHANCED)
+    // SECURITY & VALIDATION UTILITIES
     // =============================================
     const SecurityUtils = {
         allowedOrigins: new Set([
             window.location.origin,
-            'http://localhost:3000',
-            'http://localhost:5500',
-            'http://127.0.0.1:5500',
-            'http://localhost:8080',
-            'http://127.0.0.1:8080',
-            'https://localhost',
-            'https://127.0.0.1',
             'https://moodchat-fy56.onrender.com',
-            'https://moodfronted.onrender.com',
-            'null'
-        ]),
-
-        trustedDomains: new Set([
-            '.onrender.com',
-            '.vercel.app',
-            '.netlify.app',
-            '.github.io'
+            'https://moodfronted.onrender.com'
         ]),
 
         messageIdCounter: 0,
         replayWindow: 300000,
         replayCache: new Map(),
         maxReplayEntries: 1000,
-        backendDomain: 'moodchat-fy56.onrender.com',
 
         initOriginTrust() {
             const hostname = window.location.hostname;
-            
             this.allowedOrigins.add(`https://${hostname}`);
             this.allowedOrigins.add(`http://${hostname}`);
+            this.allowedOrigins.add(window.location.origin);
             
             if (hostname.endsWith('.onrender.com')) {
                 this.allowedOrigins.add(`https://${hostname}`);
-                this.allowedOrigins.add(`http://${hostname}`);
             }
-            
-            this.allowedOrigins.add(window.location.origin);
-            
-            try {
-                const httpsOrigin = window.location.origin.replace('http://', 'https://');
-                const httpOrigin = window.location.origin.replace('https://', 'http://');
-                this.allowedOrigins.add(httpsOrigin);
-                this.allowedOrigins.add(httpOrigin);
-            } catch (e) {}
         },
 
         validateOrigin(origin) {
-            if (!origin || origin === 'null') {
-                return IframeEnvironment.isSandboxed;
-            }
-            
+            if (!origin || origin === 'null') return true;
             if (this.allowedOrigins.has(origin)) return true;
-            
-            if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
-                const port = origin.split(':').pop();
-                if (port && !isNaN(port) && Number(port) > 0 && Number(port) < 65536) {
-                    this.allowedOrigins.add(origin);
-                    return true;
-                }
-            }
-
-            for (const domain of this.trustedDomains) {
-                if (origin.includes(domain)) {
-                    this.allowedOrigins.add(origin);
-                    return true;
-                }
-            }
-
-            try {
-                const parentUrl = new URL(origin);
-                const currentUrl = new URL(window.location.origin);
-                if (parentUrl.hostname.endsWith('.' + currentUrl.hostname) || 
-                    currentUrl.hostname.endsWith('.' + parentUrl.hostname)) {
-                    this.allowedOrigins.add(origin);
-                    return true;
-                }
-            } catch (e) {}
-
-            if (origin.match(/^https?:\/\/(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)/)) {
-                const config = IframeEnvironment.getConfig();
-                if (config.originStrictness === 'relaxed' || config.originStrictness === 'permissive') {
-                    this.allowedOrigins.add(origin);
-                    return true;
-                }
-            }
-
-            return false;
+            return origin === window.location.origin;
         },
 
         validateMessageStructure(data) {
             if (!data || typeof data !== 'object') return false;
             if (!data.type || typeof data.type !== 'string') return false;
-            
-            const validSource = !data.source || 
-                               data.source === SOURCE_CHILD || 
-                               data.source === 'PARENT' ||
-                               data.source === 'iframe' ||
-                               data.source === 'parent';
-            
-            return validSource;
+            return true;
         },
 
         generateMessageId() {
@@ -782,57 +282,6 @@
             const random = Math.random().toString(36).substring(2, 10);
             const counter = (this.messageIdCounter++ % 1000).toString(36);
             return `msg_${timestamp}_${random}_${counter}`;
-        },
-
-        generateSignature(payload, timestamp, token = null) {
-            if (!payload) return '';
-            
-            try {
-                const seed = token ? token + 'kynecta-dynamic-v4' : 'kynecta-static-seed-v4';
-                const str = JSON.stringify(payload) + timestamp + seed;
-                
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    const char = str.charCodeAt(i);
-                    hash = ((hash << 7) - hash) + char;
-                    hash = hash & hash;
-                }
-                
-                if (token) {
-                    for (let i = 0; i < token.length; i += 3) {
-                        hash = ((hash << 5) - hash) + token.charCodeAt(i);
-                        hash = hash & hash;
-                    }
-                }
-                
-                return Math.abs(hash).toString(36) + timestamp.toString(36).substring(0, 4);
-            } catch (e) {
-                return '';
-            }
-        },
-
-        verifySignature(message) {
-            if (!message.signature || !message.timestamp) return true;
-            
-            if (message.type === MESSAGE_TYPES.HANDSHAKE_REQUEST ||
-                message.type === MESSAGE_TYPES.HANDSHAKE_RESPONSE ||
-                message.type === MESSAGE_TYPES.PING ||
-                message.type === MESSAGE_TYPES.PONG ||
-                message.type === MESSAGE_TYPES.ACK) {
-                return true;
-            }
-            
-            if (!message.payload && message.type !== MESSAGE_TYPES.ACK) return true;
-            
-            const token = SessionMirror ? SessionMirror.getToken() : null;
-            const expectedSig = this.generateSignature(message.payload || {}, message.timestamp, token);
-            const isValid = message.signature === expectedSig;
-            
-            if (!isValid && DiagnosticsAgent.enabled) {
-                DiagnosticsAgent.recordError(new Error('Invalid signature'), message.type);
-            }
-            
-            return true;
         },
 
         sanitizeString(str) {
@@ -844,12 +293,8 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;')
                 .replace(/javascript:/gi, '')
-                .replace(/data:/gi, '')
-                .replace(/vbscript:/gi, '')
                 .replace(/onload/gi, 'data-onload')
                 .replace(/onerror/gi, 'data-onerror')
-                .replace(/onclick/gi, 'data-onclick')
-                .replace(/onmouse/gi, 'data-onmouse')
                 .replace(/<script/gi, '&lt;script')
                 .replace(/<\/script/gi, '&lt;/script');
         },
@@ -900,20 +345,14 @@
             return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         },
 
-        checkReplay(messageId, type, timestamp) {
+        checkReplay(messageId, timestamp) {
             if (!messageId) return false;
             
             const now = Date.now();
             const age = now - timestamp;
             
-            if (age > this.replayWindow) {
-                return true;
-            }
-            
-            if (timestamp > now + 120000) {
-                return true;
-            }
-            
+            if (age > this.replayWindow) return true;
+            if (timestamp > now + 120000) return true;
             if (this.replayCache.has(messageId)) return true;
             
             this.replayCache.set(messageId, now);
@@ -930,17 +369,6 @@
             return false;
         },
 
-        validateToken(token) {
-            if (!token || typeof token !== 'string') return false;
-            if (token.length < 10) return false;
-            if (token.includes('undefined') || token.includes('null')) return false;
-            return true;
-        },
-
-        extractFrameId(message) {
-            return message.frameId || message.payload?.frameId || FRAME_ID;
-        },
-
         isForThisFrame(message) {
             const targetFrame = message.target || message.frameId;
             return !targetFrame || targetFrame === 'iframe' || targetFrame === FRAME_ID;
@@ -950,167 +378,332 @@
     SecurityUtils.initOriginTrust();
 
     // =============================================
-    // CIRCUIT BREAKER (ENHANCED)
+    // DIAGNOSTICS AGENT
     // =============================================
-    class CircuitBreaker {
-        constructor(name, failureThreshold = 3, recoveryTimeout = 30000, halfOpenMaxCalls = 1) {
-            this.name = name;
-            this.failureCount = 0;
-            this.failureThreshold = failureThreshold;
-            this.recoveryTimeout = recoveryTimeout;
-            this.halfOpenMaxCalls = halfOpenMaxCalls;
-            this.halfOpenCalls = 0;
-            this.lastFailureTime = null;
-            this.state = 'CLOSED';
-            this.metrics = {
-                totalCalls: 0,
-                successfulCalls: 0,
-                failedCalls: 0,
-                rejectedCalls: 0,
-                lastStateChange: Date.now()
+    const DiagnosticsAgent = {
+        enabled: false,
+        metrics: {
+            messagesSent: 0,
+            messagesReceived: 0,
+            acksReceived: 0,
+            acksSent: 0,
+            errors: [],
+            startTime: Date.now(),
+            pingRtt: [],
+            sessionRefreshes: 0,
+            cacheHits: 0,
+            cacheMisses: 0
+        },
+        loggedErrors: new Set(),
+        
+        init(enabled = false) {
+            this.enabled = enabled && (window.location.hostname === 'localhost' || 
+                                       window.location.hostname === '127.0.0.1' ||
+                                       window.__IFRAME_DEBUG__ === true);
+            return this;
+        },
+
+        increment(counter) {
+            if (this.enabled && this.metrics.hasOwnProperty(counter)) {
+                this.metrics[counter]++;
+            }
+        },
+
+        recordError(error, context) {
+            if (!this.enabled) return;
+            const errorKey = error.message + context;
+            if (this.loggedErrors.has(errorKey)) return;
+            this.loggedErrors.add(errorKey);
+            
+            this.metrics.errors.push({
+                timestamp: Date.now(),
+                error: error.message || String(error),
+                context,
+                stack: error.stack
+            });
+            if (this.metrics.errors.length > 100) {
+                this.metrics.errors.shift();
+            }
+        },
+
+        recordPingRtt(rtt) {
+            if (!this.enabled) return;
+            this.metrics.pingRtt.push(rtt);
+            if (this.metrics.pingRtt.length > 20) {
+                this.metrics.pingRtt.shift();
+            }
+        },
+
+        getMetrics() {
+            return {
+                ...this.metrics,
+                uptime: Date.now() - this.metrics.startTime,
+                avgPingRtt: this.metrics.pingRtt.length ? 
+                    Math.round(this.metrics.pingRtt.reduce((a, b) => a + b, 0) / this.metrics.pingRtt.length) : 0,
+                timestamp: Date.now()
             };
-        }
+        },
 
-        async call(fn, fallback = null) {
-            this.metrics.totalCalls++;
-            
-            if (this.state === 'OPEN') {
-                if (Date.now() - this.lastFailureTime > this.recoveryTimeout) {
-                    this._transitionTo('HALF_OPEN');
-                } else {
-                    this.metrics.rejectedCalls++;
-                    return typeof fallback === 'function' ? fallback() : fallback;
-                }
-            }
-            
-            if (this.state === 'HALF_OPEN') {
-                if (this.halfOpenCalls >= this.halfOpenMaxCalls) {
-                    this.metrics.rejectedCalls++;
-                    return typeof fallback === 'function' ? fallback() : fallback;
-                }
-                this.halfOpenCalls++;
-            }
-
-            try {
-                const result = await fn();
-                this.metrics.successfulCalls++;
-                
-                if (this.state === 'HALF_OPEN') {
-                    this._transitionTo('CLOSED');
-                }
-                
-                return result;
-            } catch (error) {
-                this.metrics.failedCalls++;
-                this.failureCount++;
-                this.lastFailureTime = Date.now();
-                
-                if (this.state === 'HALF_OPEN' || this.failureCount >= this.failureThreshold) {
-                    this._transitionTo('OPEN');
-                }
-                
-                if (DiagnosticsAgent.enabled) {
-                    DiagnosticsAgent.recordError(error, `CircuitBreaker.${this.name}`);
-                }
-                
-                return typeof fallback === 'function' ? fallback() : fallback;
-            }
-        }
-
-        _transitionTo(newState) {
-            const oldState = this.state;
-            this.state = newState;
-            this.metrics.lastStateChange = Date.now();
-            
-            if (newState === 'CLOSED') {
-                this.failureCount = 0;
-                this.halfOpenCalls = 0;
-            } else if (newState === 'HALF_OPEN') {
-                this.halfOpenCalls = 0;
-            }
-            
-            Logger.debug('CircuitBreaker', `${this.name} ${oldState} -> ${newState}`);
-        }
+        getUptime() {
+            const ms = Date.now() - this.metrics.startTime;
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+        },
 
         reset() {
-            this._transitionTo('CLOSED');
             this.metrics = {
-                totalCalls: 0,
-                successfulCalls: 0,
-                failedCalls: 0,
-                rejectedCalls: 0,
-                lastStateChange: Date.now()
+                messagesSent: 0,
+                messagesReceived: 0,
+                acksReceived: 0,
+                acksSent: 0,
+                errors: [],
+                startTime: Date.now(),
+                pingRtt: [],
+                sessionRefreshes: 0,
+                cacheHits: 0,
+                cacheMisses: 0
             };
+            this.loggedErrors.clear();
         }
+    };
 
-        getState() {
+    // =============================================
+    // SILENT LOGGER
+    // =============================================
+    const Logger = {
+        logCache: new Map(),
+        warnCache: new Map(),
+        errorCache: new Map(),
+        cacheTTL: {
+            [LOG_LEVELS.DEBUG]: 30000,
+            [LOG_LEVELS.INFO]: 60000,
+            [LOG_LEVELS.WARN]: 120000,
+            [LOG_LEVELS.ERROR]: 300000
+        },
+        
+        _shouldLog(level, message) {
+            if (level < CURRENT_LOG_LEVEL) return false;
+            
+            const cache = level === LOG_LEVELS.WARN ? this.warnCache :
+                          level === LOG_LEVELS.ERROR ? this.errorCache : 
+                          this.logCache;
+            
+            const now = Date.now();
+            if (cache.has(message)) {
+                const lastLog = cache.get(message);
+                if (now - lastLog < this.cacheTTL[level]) {
+                    return false;
+                }
+            }
+            
+            cache.set(message, now);
+            
+            if (cache.size > 100) {
+                for (const [key, timestamp] of cache) {
+                    if (now - timestamp > 600000) {
+                        cache.delete(key);
+                    }
+                }
+            }
+            
+            return true;
+        },
+
+        _format(level, module, message, data) {
+            const timestamp = new Date().toISOString();
+            const prefix = `[${timestamp}] [${module}] [${level}]`;
+            return { timestamp, prefix, message, data };
+        },
+
+        debug(module, message, data = null) {
+            if (!this._shouldLog(LOG_LEVELS.DEBUG, message)) return;
+        },
+
+        info(module, message, data = null) {
+            if (!this._shouldLog(LOG_LEVELS.INFO, message)) return;
+        },
+
+        warn(module, message, data = null) {
+            if (!this._shouldLog(LOG_LEVELS.WARN, message)) return;
+        },
+
+        error(module, message, data = null) {
+            if (!this._shouldLog(LOG_LEVELS.ERROR, message)) return;
+        }
+    };
+
+    // =============================================
+    // MESSAGE LIFECYCLE MANAGER
+    // =============================================
+    const MessageLifecycle = {
+        TIMEOUT_DURATION: 7000,
+        MAX_RETRIES: 2,
+        pendingMessages: new Map(),
+
+        createMessage(messageData) {
             return {
-                name: this.name,
-                state: this.state,
-                failureCount: this.failureCount,
-                failureThreshold: this.failureThreshold,
-                metrics: { ...this.metrics }
+                id: messageData.id,
+                status: "sending",
+                reason: null,
+                timestamp: Date.now(),
+                retryCount: 0,
+                timeoutRef: null,
+                ...messageData
             };
+        },
+
+        startTracking(message, sendFn) {
+            const messageId = message.id;
+            
+            const timeoutRef = setTimeout(() => {
+                this.handleTimeout(messageId);
+            }, this.TIMEOUT_DURATION);
+
+            message.timeoutRef = timeoutRef;
+            this.pendingMessages.set(messageId, { message, sendFn });
+            return message;
+        },
+
+        handleAck(messageId) {
+            const pending = this.pendingMessages.get(messageId);
+            if (pending) {
+                clearTimeout(pending.message.timeoutRef);
+                pending.message.status = "delivered";
+                pending.message.reason = null;
+                this.updateMessageUI(pending.message);
+                this.pendingMessages.delete(messageId);
+            }
+        },
+
+        handleTimeout(messageId) {
+            const pending = this.pendingMessages.get(messageId);
+            if (!pending) return;
+
+            const message = pending.message;
+            
+            if (!SessionMirror || !SessionMirror.isAuthenticated()) {
+                message.reason = "Session not available";
+            } else if (!navigator.onLine) {
+                message.reason = "No internet connection";
+            } else if (!ParentDetector || !ParentDetector.isReady) {
+                message.reason = "Connection not established";
+            } else {
+                message.reason = "Recipient not responding";
+            }
+
+            if (message.retryCount < this.MAX_RETRIES) {
+                message.retryCount++;
+                message.status = "sending";
+                message.reason = null;
+                
+                clearTimeout(message.timeoutRef);
+                
+                try {
+                    pending.sendFn();
+                    message.timeoutRef = setTimeout(() => {
+                        this.handleTimeout(messageId);
+                    }, this.TIMEOUT_DURATION);
+                    return;
+                } catch (e) {}
+            }
+
+            message.status = "failed";
+            if (!message.reason) {
+                message.reason = "Message delivery failed after retries";
+            }
+            
+            clearTimeout(message.timeoutRef);
+            this.updateMessageUI(message);
+            this.pendingMessages.delete(messageId);
+        },
+
+        updateMessageUI(message) {
+            const index = messages.findIndex(m => m.id === message.id);
+            if (index !== -1) {
+                messages[index] = { ...messages[index], ...message };
+                
+                window.dispatchEvent(new CustomEvent('messageStatusChanged', {
+                    detail: { message: messages[index] }
+                }));
+            }
+        },
+
+        isReadyToSend() {
+            if (!SessionMirror || !SessionMirror.isAuthenticated()) {
+                return { ready: false, reason: "Session not initialized" };
+            }
+            if (!ParentDetector || !ParentDetector.isReady) {
+                return { ready: false, reason: "Connection not ready" };
+            }
+            if (!navigator.onLine) {
+                return { ready: false, reason: "No internet connection" };
+            }
+            return { ready: true };
         }
-    }
+    };
 
     // =============================================
-    // IFRAME TRANSPORT (NEW - CENTRALIZED POSTMESSAGE)
+    // MESSAGE TRANSPORT LAYER - WITH LIFECYCLE
     // =============================================
-    const IframeTransport = {
+    const MessageTransport = {
         pendingAcks: new Map(),
         messageQueue: [],
         sequenceNumber: 0,
         outboundMessages: new Map(),
-        envConfig: null,
-        maxRetries: 5,
-        backoffFactor: 1.5,
+        maxRetries: 0,
         maxQueueSize: 100,
-        batchQueue: [],
-        batchTimer: null,
-        batchEnabled: false,
         
         init() {
-            this.envConfig = IframeEnvironment.getConfig();
             return this;
         },
         
         send(type, payload = {}, options = {}) {
             const messageId = options.messageId || SecurityUtils.generateMessageId();
             const timestamp = Date.now();
-            const token = SessionMirror ? SessionMirror.getToken() : null;
+
+            const readyCheck = MessageLifecycle.isReadyToSend();
+            if (!readyCheck.ready) {
+                const failedMessage = {
+                    id: messageId,
+                    status: "failed",
+                    reason: readyCheck.reason,
+                    timestamp,
+                    type,
+                    payload
+                };
+                MessageLifecycle.updateMessageUI(failedMessage);
+                return Promise.resolve({ 
+                    success: false, 
+                    error: readyCheck.reason,
+                    messageId,
+                    status: "failed",
+                    reason: readyCheck.reason
+                });
+            }
             
             const message = {
-                protocol: PROTOCOL.PROTOCOL_VERSION,
-                messageId,
-                type,
-                source: 'iframe',
+                protocol: PROTOCOL.VERSION,
+                messageId: messageId,
+                type: type,
+                source: SOURCE_IFRAME,
                 target: 'parent',
                 frameId: FRAME_ID,
-                timestamp,
+                timestamp: timestamp,
                 payload: SecurityUtils.sanitizePayload(payload),
-                token: token,
                 app: APP_NAME,
                 version: VERSION,
                 requiresAck: options.requiresAck !== false,
-                id: messageId,
                 sequence: ++this.sequenceNumber
             };
-
-            if (token && type !== MESSAGE_TYPES.HANDSHAKE_REQUEST && 
-                type !== MESSAGE_TYPES.PING && 
-                type !== MESSAGE_TYPES.PONG &&
-                type !== MESSAGE_TYPES.CHILD_READY) {
-                message.signature = SecurityUtils.generateSignature(message.payload, timestamp, token);
-            }
 
             return this._postMessage(message, options);
         },
         
         _postMessage(message, options = {}) {
-            const targetOrigin = options.targetOrigin || '*';
+            const targetOrigin = options.targetOrigin || parentOrigin;
             const requiresAck = options.requiresAck !== false;
-            const timeout = options.timeout || this.envConfig.ackTimeout || HANDSHAKE.ACK_TIMEOUT;
             
             return new Promise((resolve) => {
                 if (!window.parent || window.parent === window) {
@@ -1118,16 +711,19 @@
                     return;
                 }
 
-                this.outboundMessages.set(message.messageId, {
-                    message,
-                    timestamp: Date.now(),
-                    attempts: 0,
-                    requiresAck,
-                    resolve
-                });
-
                 if (requiresAck) {
-                    this._sendWithAck(message, targetOrigin, timeout, resolve);
+                    const lifecycleMessage = MessageLifecycle.createMessage({
+                        id: message.messageId,
+                        type: message.type,
+                        payload: message.payload,
+                        timestamp: message.timestamp
+                    });
+
+                    MessageLifecycle.startTracking(lifecycleMessage, () => {
+                        this._sendWithAck(message, targetOrigin, resolve, true);
+                    });
+
+                    this._sendWithAck(message, targetOrigin, resolve, false);
                 } else {
                     try {
                         window.parent.postMessage(message, targetOrigin);
@@ -1139,35 +735,31 @@
             });
         },
         
-        _sendWithAck(message, targetOrigin, timeout, resolve) {
+        _sendWithAck(message, targetOrigin, resolve, isRetry = false) {
             const messageId = message.messageId;
+            
+            StatusIndicator.show('SENDING');
             
             const timer = setTimeout(() => {
                 const pending = this.pendingAcks.get(messageId);
                 if (pending) {
                     this.pendingAcks.delete(messageId);
+                    this.outboundMessages.delete(messageId);
                     
-                    const record = this.outboundMessages.get(messageId);
-                    if (record) {
-                        record.attempts++;
-                        
-                        if (record.attempts < this.maxRetries) {
-                            DiagnosticsAgent.increment('retries');
-                            
-                            const backoff = timeout * Math.pow(this.backoffFactor, record.attempts - 1);
-                            const jitter = Math.random() * HANDSHAKE.JITTER_MAX;
-                            const delay = backoff + jitter;
-                            
-                            setTimeout(() => {
-                                this._sendWithAck(message, targetOrigin, timeout, resolve);
-                            }, delay);
-                        } else {
-                            this.outboundMessages.delete(messageId);
-                            this._queueMessage(message, true, resolve);
-                        }
+                    if (!isRetry) {
+                        MessageLifecycle.handleTimeout(messageId);
                     }
+                    
+                    StatusIndicator.show('FAILED');
+                    resolve({ 
+                        success: false, 
+                        error: 'timeout', 
+                        messageId,
+                        status: 'failed',
+                        reason: 'Recipient not responding'
+                    });
                 }
-            }, timeout);
+            }, MessageLifecycle.TIMEOUT_DURATION);
 
             this.pendingAcks.set(messageId, {
                 resolve,
@@ -1182,13 +774,24 @@
             } catch (error) {
                 clearTimeout(timer);
                 this.pendingAcks.delete(messageId);
+                
+                if (!isRetry) {
+                    MessageLifecycle.handleTimeout(messageId);
+                }
+                
                 this._queueMessage(message, true, resolve);
             }
         },
         
         _queueMessage(message, requiresAck, resolve) {
             if (this.messageQueue.length >= this.maxQueueSize) {
-                resolve({ success: false, error: 'queue_full', messageId: message.messageId });
+                resolve({ 
+                    success: false, 
+                    error: 'queue_full', 
+                    messageId: message.messageId,
+                    status: 'failed',
+                    reason: 'Message queue full'
+                });
                 return;
             }
 
@@ -1196,7 +799,6 @@
                 message,
                 requiresAck,
                 timestamp: Date.now(),
-                attempts: 0,
                 messageId: message.messageId,
                 resolve
             });
@@ -1208,16 +810,21 @@
             const originalId = ackMessage.payload?.messageId || ackMessage.payload?.originalId;
             if (!originalId) return false;
 
+            MessageLifecycle.handleAck(originalId);
+
             const pending = this.pendingAcks.get(originalId);
             if (pending) {
                 clearTimeout(pending.timer);
                 this.pendingAcks.delete(originalId);
                 this.outboundMessages.delete(originalId);
                 
+                StatusIndicator.show('SUCCESS');
+                
                 pending.resolve({ 
                     success: true, 
                     ack: ackMessage.payload,
-                    receivedAt: Date.now()
+                    receivedAt: Date.now(),
+                    status: 'delivered'
                 });
                 
                 DiagnosticsAgent.increment('acksReceived');
@@ -1231,36 +838,22 @@
 
             const now = Date.now();
             const oneHour = 3600000;
-            const fiveMinutes = 300000;
             
             const freshQueue = this.messageQueue.filter(msg => msg.timestamp > now - oneHour);
-            const toSend = freshQueue.filter(msg => 
-                msg.timestamp > now - fiveMinutes && 
-                msg.attempts < this.maxRetries
-            );
 
-            for (const queued of toSend) {
-                queued.attempts++;
-                
+            for (const queued of freshQueue) {
                 try {
-                    const result = await this._postMessage(
+                    await this._postMessage(
                         queued.message,
                         { requiresAck: queued.requiresAck }
                     );
                     
-                    if (result.success) {
-                        const index = freshQueue.findIndex(q => q.messageId === queued.messageId);
-                        if (index !== -1) freshQueue.splice(index, 1);
-                        queued.resolve(result);
-                    }
-                } catch (error) {
-                    if (queued.attempts >= this.maxRetries) {
-                        queued.resolve({ success: false, error: 'max_retries' });
-                    }
-                }
+                    const index = freshQueue.findIndex(q => q.messageId === queued.messageId);
+                    if (index !== -1) freshQueue.splice(index, 1);
+                } catch (error) {}
             }
 
-            this.messageQueue = freshQueue.filter(msg => !toSend.includes(msg));
+            this.messageQueue = freshQueue;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MESSAGE_QUEUE, this.messageQueue);
         },
         
@@ -1272,64 +865,14 @@
                     this.pendingAcks.delete(messageId);
                 }
                 this.outboundMessages.delete(messageId);
+                MessageLifecycle.pendingMessages.delete(messageId);
             } else {
                 for (const [_, pending] of this.pendingAcks) {
                     clearTimeout(pending.timer);
                 }
                 this.pendingAcks.clear();
                 this.outboundMessages.clear();
-            }
-        },
-        
-        enableBatching(batchSize = 10, batchDelay = 100) {
-            this.batchEnabled = true;
-            this.batchSize = batchSize;
-            this.batchDelay = batchDelay;
-        },
-        
-        disableBatching() {
-            this.batchEnabled = false;
-            if (this.batchTimer) {
-                clearTimeout(this.batchTimer);
-                this.batchTimer = null;
-            }
-            this._flushBatch();
-        },
-        
-        _addToBatch(message) {
-            if (!this.batchEnabled) return false;
-            
-            this.batchQueue.push(message);
-            
-            if (this.batchQueue.length >= this.batchSize) {
-                this._flushBatch();
-            } else if (!this.batchTimer) {
-                this.batchTimer = setTimeout(() => this._flushBatch(), this.batchDelay);
-            }
-            return true;
-        },
-        
-        _flushBatch() {
-            if (this.batchTimer) {
-                clearTimeout(this.batchTimer);
-                this.batchTimer = null;
-            }
-            
-            if (this.batchQueue.length === 0) return;
-            
-            const batch = [...this.batchQueue];
-            this.batchQueue = [];
-            
-            try {
-                window.parent.postMessage({
-                    type: 'BATCH',
-                    payload: { messages: batch },
-                    batch: true,
-                    count: batch.length,
-                    timestamp: Date.now()
-                }, '*');
-            } catch (error) {
-                batch.forEach(msg => this._postMessage(msg, { requiresAck: false }));
+                MessageLifecycle.pendingMessages.clear();
             }
         },
         
@@ -1338,77 +881,38 @@
                 pendingAcks: this.pendingAcks.size,
                 queuedMessages: this.messageQueue.length,
                 outboundMessages: this.outboundMessages.size,
-                sequenceNumber: this.sequenceNumber
+                sequenceNumber: this.sequenceNumber,
+                pendingLifecycle: MessageLifecycle.pendingMessages.size
             };
         }
     }.init();
 
     // =============================================
-    // MESSAGE FIREWALL (ENHANCED - USES IFRAME TRANSPORT)
+    // MESSAGE FIREWALL
     // =============================================
     const MessageFirewall = {
         processedMessages: new Set(),
         messageSequence: 0,
-        circuitBreaker: new CircuitBreaker('MessageFirewall', 5, 60000),
-        transportClient: IframeTransport,
-        legacyMode: false,
-        protocolVersion: PROTOCOL.PROTOCOL_VERSION,
-        maxMessageSize: 1024 * 1024,
+        transport: MessageTransport,
 
         validate(event) {
-            return this.circuitBreaker.call(() => {
-                if (!SecurityUtils.validateOrigin(event.origin)) {
-                    return false;
-                }
+            if (!SecurityUtils.validateOrigin(event.origin)) return false;
+            if (!event.source || event.source === window) return false;
+            if (!SecurityUtils.validateMessageStructure(event.data)) return false;
 
-                if (!event.source || event.source === window) {
-                    return false;
-                }
+            const data = event.data;
+            if (!SecurityUtils.isForThisFrame(data)) return false;
 
-                try {
-                    const size = new Blob([JSON.stringify(event.data)]).size;
-                    if (size > this.maxMessageSize) {
-                        return false;
-                    }
-                } catch (e) {}
+            const messageId = data.messageId || data.id;
+            if (messageId && SecurityUtils.checkReplay(messageId, data.timestamp || 0)) return false;
+            if (messageId && this.processedMessages.has(messageId)) return false;
 
-                if (!SecurityUtils.validateMessageStructure(event.data)) {
-                    return false;
-                }
+            if (messageId) {
+                this.processedMessages.add(messageId);
+                setTimeout(() => this.processedMessages.delete(messageId), 60000);
+            }
 
-                const data = event.data;
-
-                if (!SecurityUtils.isForThisFrame(data)) {
-                    return false;
-                }
-
-                const messageId = data.messageId || data.id;
-                if (messageId && SecurityUtils.checkReplay(messageId, data.type, data.timestamp || 0)) {
-                    return false;
-                }
-
-                if (messageId && this.processedMessages.has(messageId)) {
-                    return false;
-                }
-
-                if (messageId) {
-                    this.processedMessages.add(messageId);
-                    setTimeout(() => this.processedMessages.delete(messageId), 60000);
-                }
-
-                if (data.type !== MESSAGE_TYPES.HANDSHAKE_REQUEST && 
-                    data.type !== MESSAGE_TYPES.HANDSHAKE_RESPONSE &&
-                    data.type !== MESSAGE_TYPES.PING &&
-                    data.type !== MESSAGE_TYPES.PONG &&
-                    data.payload && data.signature) {
-                    
-                    if (!SecurityUtils.verifySignature(data)) {
-                        this.legacyMode = true;
-                    }
-                }
-
-                return true;
-            }, () => false);
+            return true;
         },
 
         parse(event) {
@@ -1416,7 +920,7 @@
 
             const data = event.data;
             
-            if (data.protocol === PROTOCOL.PROTOCOL_VERSION) {
+            if (data.protocol === PROTOCOL.VERSION) {
                 return this._normalizeCanonical(data);
             }
             
@@ -1451,8 +955,8 @@
                 receivedAt: Date.now()
             };
 
-            if (data.type === MESSAGE_TYPES.ACK) {
-                this.transportClient.handleAck(data);
+            if (data.type === MESSAGE_TYPES.ACK || data.type === MESSAGE_TYPES.HEARTBEAT_ACK) {
+                this.transport.handleAck(data);
             }
 
             return normalized;
@@ -1483,8 +987,8 @@
                 canonical.payload = SecurityUtils.sanitizePayload(canonical.payload);
             }
 
-            if (data.type === MESSAGE_TYPES.ACK) {
-                this.transportClient.handleAck(data);
+            if (data.type === MESSAGE_TYPES.ACK || data.type === MESSAGE_TYPES.HEARTBEAT_ACK) {
+                this.transport.handleAck(data);
             }
 
             return canonical;
@@ -1493,536 +997,250 @@
         createOutbound(type, payload = {}, options = {}) {
             const messageId = options.messageId || SecurityUtils.generateMessageId();
             const timestamp = Date.now();
-            const token = SessionMirror ? SessionMirror.getToken() : null;
             
             const message = {
-                protocol: PROTOCOL.PROTOCOL_VERSION,
+                protocol: PROTOCOL.VERSION,
                 messageId,
                 type,
-                source: 'iframe',
+                source: SOURCE_IFRAME,
                 target: 'parent',
                 frameId: FRAME_ID,
                 timestamp,
                 payload: SecurityUtils.sanitizePayload(payload),
-                token: token,
                 app: APP_NAME,
                 version: VERSION,
                 requiresAck: options.requiresAck !== false,
-                id: messageId,
                 sequence: ++this.messageSequence
             };
-
-            if (token && type !== MESSAGE_TYPES.HANDSHAKE_REQUEST && 
-                type !== MESSAGE_TYPES.PING && 
-                type !== MESSAGE_TYPES.PONG &&
-                type !== MESSAGE_TYPES.CHILD_READY) {
-                message.signature = SecurityUtils.generateSignature(message.payload, timestamp, token);
-            }
 
             return message;
         },
 
         send(type, payload = {}, options = {}) {
-            const message = this.createOutbound(type, payload, options);
-            return this.transportClient.send(
-                type,
-                payload,
-                options
-            );
+            if (options.requiresAck !== false) {
+                StatusIndicator.show('SENDING');
+            }
+            return this.transport.send(type, payload, options);
         },
 
         processQueue() {
-            return this.transportClient.processQueue();
+            return this.transport.processQueue();
         },
 
         getStats() {
             return {
                 processedMessages: this.processedMessages.size,
                 messageSequence: this.messageSequence,
-                legacyMode: this.legacyMode,
-                transport: this.transportClient.getStats()
+                transport: this.transport.getStats()
             };
         }
     };
 
     // =============================================
-    // STARTUP GOVERNOR (NEW - SINGLE AUTHORITY)
+    // SINGLE PASSIVE REGISTRATION
     // =============================================
-    const StartupGovernor = {
-        state: 'INIT',
-        lock: false,
-        subscribers: new Set(),
-        startTime: 0,
-        stageTimes: {},
-        envConfig: null,
-        mutex: false,
-        
+    function registerWithParent() {
+        if (registrationSent) return;
+        if (!window.parent || window.parent === window) {
+            return;
+        }
+
+        registrationSent = true;
+        parentOrigin = window.location.origin;
+
+        try {
+            window.parent.postMessage({
+                type: MESSAGE_TYPES.IFRAME_REGISTERED,
+                module: "messages",
+                frameId: FRAME_ID,
+                version: VERSION,
+                timestamp: Date.now()
+            }, parentOrigin);
+        } catch (e) {
+            registrationSent = false;
+        }
+    }
+
+    // =============================================
+    // PARENT DETECTOR & HEARTBEAT
+    // =============================================
+    const ParentDetector = {
+        isReady: false,
+        pingInterval: null,
+        lastPong: 0,
+        listeners: new Set(),
+        pingIntervalMs: 15000,
+        connectionQuality: 'unknown',
+        lastPingTime: 0,
+        heartbeatEnabled: true,
+        lastWarningTime: 0,
+        lastDisconnectTime: 0,
+
         init() {
-            this.startTime = Date.now();
-            this.envConfig = IframeEnvironment.getConfig();
-            this._loadSavedState();
+            this._checkParent();
+            this._startPing();
             return this;
         },
-        
-        _loadSavedState() {
-            const saved = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STARTUP_STATE);
-            if (saved && saved.timestamp > Date.now() - 3600000) {
-                if (saved.state === 'ACTIVE' || saved.state === 'SYNCING') {
-                    this.state = saved.state;
-                }
+
+        _checkParent() {
+            const hasParent = window.parent && window.parent !== window;
+            const canPostMessage = typeof window.parent?.postMessage === 'function';
+            
+            this.isReady = hasParent && canPostMessage;
+            
+            if (this.isReady) {
+                StatusIndicator.show('READY');
+                this._notifyListeners();
+            } else {
+                StatusIndicator.show('DISCONNECTED');
             }
         },
-        
-        _saveState() {
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STARTUP_STATE, {
-                state: this.state,
-                timestamp: Date.now(),
-                stages: this.stageTimes
-            });
+
+        _startPing() {
+            this.pingInterval = setInterval(() => {
+                if (!this.isReady) {
+                    this._checkParent();
+                    return;
+                }
+
+                this._sendPing();
+            }, this.pingIntervalMs);
         },
-        
-        canProceed(nextState) {
-            if (this.mutex) return false;
+
+        _sendPing() {
+            if (!this.heartbeatEnabled) return;
             
-            const transitions = {
-                'INIT': ['WAIT_PARENT', 'HANDSHAKING', 'SYNCING', 'ACTIVE', 'DEGRADED'],
-                'WAIT_PARENT': ['HANDSHAKING', 'SYNCING', 'ACTIVE', 'DEGRADED', 'RECOVERING'],
-                'HANDSHAKING': ['SYNCING', 'ACTIVE', 'DEGRADED', 'RECOVERING'],
-                'SYNCING': ['ACTIVE', 'DEGRADED', 'RECOVERING'],
-                'ACTIVE': ['DEGRADED', 'RECOVERING'],
-                'DEGRADED': ['ACTIVE', 'RECOVERING'],
-                'RECOVERING': ['ACTIVE', 'DEGRADED']
+            try {
+                this.lastPingTime = Date.now();
+                
+                const message = {
+                    protocol: PROTOCOL.VERSION,
+                    type: MESSAGE_TYPES.HEARTBEAT,
+                    source: SOURCE_IFRAME,
+                    target: 'parent',
+                    frameId: FRAME_ID,
+                    messageId: SecurityUtils.generateMessageId(),
+                    timestamp: this.lastPingTime,
+                    payload: { 
+                        timestamp: this.lastPingTime,
+                        frameId: FRAME_ID
+                    }
+                };
+                
+                window.parent.postMessage(message, parentOrigin);
+                
+            } catch (e) {}
+        },
+
+        handleHeartbeatAck(ackMessage) {
+            const now = Date.now();
+            const rtt = now - (ackMessage.payload?.timestamp || this.lastPingTime || now);
+            
+            this.lastPong = now;
+            HEARTBEAT.failures = 0;
+            HEARTBEAT.lastHeartbeat = now;
+            
+            if (!this.isReady) {
+                this.isReady = true;
+                StatusIndicator.show('READY');
+                this._notifyListeners();
+            }
+            
+            DiagnosticsAgent.recordPingRtt(rtt);
+        },
+
+        handlePong(pongMessage) {
+            const now = Date.now();
+            const rtt = now - (pongMessage.payload?.timestamp || this.lastPingTime || now);
+            
+            this.lastPong = now;
+            HEARTBEAT.failures = 0;
+            HEARTBEAT.lastHeartbeat = now;
+            
+            if (!this.isReady) {
+                this.isReady = true;
+                StatusIndicator.show('READY');
+                this._notifyListeners();
+            }
+            
+            DiagnosticsAgent.recordPingRtt(rtt);
+        },
+
+        handleHeartbeatMiss() {
+            HEARTBEAT.failures++;
+            HEARTBEAT.lastHeartbeat = Date.now();
+
+            if (HEARTBEAT.failures < HEARTBEAT.maxFailures) {
+                const now = Date.now();
+                if (now - this.lastWarningTime > 30000) {
+                    StatusIndicator.show('WARNING');
+                    this.lastWarningTime = now;
+                }
+                return;
+            }
+
+            if (HEARTBEAT.failures === HEARTBEAT.maxFailures) {
+                const now = Date.now();
+                if (now - this.lastDisconnectTime > 60000) {
+                    StatusIndicator.show('DISCONNECTED');
+                    this.lastDisconnectTime = now;
+                }
+                this._requestStatusRefresh();
+            }
+        },
+
+        _requestStatusRefresh() {
+            if (!window.parent || window.parent === window) return;
+
+            try {
+                window.parent.postMessage({
+                    type: MESSAGE_TYPES.MESSAGES_STATUS_WARNING,
+                    severity: "soft",
+                    frameId: FRAME_ID,
+                    timestamp: Date.now()
+                }, parentOrigin);
+            } catch (e) {}
+        },
+
+        subscribe(callback) {
+            this.listeners.add(callback);
+            if (this.isReady) callback({ ready: true, connectionQuality: this.connectionQuality });
+            return () => this.listeners.delete(callback);
+        },
+
+        _notifyListeners() {
+            const data = { 
+                ready: this.isReady, 
+                connectionQuality: this.connectionQuality,
+                lastPong: this.lastPong
             };
             
-            const allowed = transitions[this.state] || [];
-            return allowed.includes(nextState);
-        },
-        
-        acquireLock() {
-            if (this.mutex) return false;
-            this.mutex = true;
-            return true;
-        },
-        
-        releaseLock() {
-            this.mutex = false;
-        },
-        
-        transitionTo(nextState, reason = '') {
-            if (!this.canProceed(nextState)) {
-                return false;
-            }
-            
-            const oldState = this.state;
-            this.state = nextState;
-            this.stageTimes[nextState] = Date.now();
-            
-            this._saveState();
-            DiagnosticsAgent.recordStateTransition(oldState, nextState, reason);
-            
-            Logger.info('Startup', `${oldState} -> ${nextState}`, { reason });
-            
-            this._notifySubscribers({ oldState, newState: nextState, reason });
-            return true;
-        },
-        
-        getState() {
-            return this.state;
-        },
-        
-        getDuration() {
-            return Date.now() - this.startTime;
-        },
-        
-        isActive() {
-            return this.state === 'ACTIVE';
-        },
-        
-        isDegraded() {
-            return this.state === 'DEGRADED';
-        },
-        
-        isRecovering() {
-            return this.state === 'RECOVERING';
-        },
-        
-        subscribe(callback) {
-            this.subscribers.add(callback);
-            return () => this.subscribers.delete(callback);
-        },
-        
-        _notifySubscribers(data) {
-            this.subscribers.forEach(cb => {
+            this.listeners.forEach(cb => {
                 try {
                     cb(data);
                 } catch (e) {}
             });
             
-            window.dispatchEvent(new CustomEvent('startupStateChanged', { detail: data }));
-        }
-    }.init();
-
-    // =============================================
-    // IFRAME HANDSHAKE AUTHORITY (NEW - SINGLE INSTANCE)
-    // =============================================
-    const IframeHandshakeAuthority = {
-        state: 'PENDING',
-        retryCount: 0,
-        handshakeId: null,
-        handshakePromise: null,
-        handshakeResolve: null,
-        handshakeTimer: null,
-        parentReadyReceived: false,
-        handshakeStartTime: 0,
-        handshakeEndTime: 0,
-        handshakeResponse: null,
-        versionNegotiated: VERSION,
-        listeners: new Set(),
-        envConfig: null,
-        completed: false,
-        handshakeAttempts: 0,
-        maxHandshakeAttempts: 10,
-        
-        init() {
-            this.envConfig = IframeEnvironment.getConfig();
-            const savedState = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.HANDSHAKE_STATE);
-            if (savedState && savedState.state === 'COMPLETED' && 
-                savedState.timestamp > Date.now() - 3600000) {
-                this.state = 'COMPLETED';
-                this.parentReadyReceived = true;
-                this.versionNegotiated = savedState.version || VERSION;
-                this.completed = true;
-            }
-            return this;
+            window.dispatchEvent(new CustomEvent('parentStatusChanged', { detail: data }));
         },
 
-        async start() {
-            if (this.completed) {
-                return Promise.resolve({ success: true, cached: true });
-            }
-
-            if (this.state === 'IN_PROGRESS' && this.handshakePromise) {
-                return this.handshakePromise;
-            }
-
-            if (!StartupGovernor.acquireLock()) {
-                return Promise.resolve({ success: false, locked: true });
-            }
-
-            this.state = 'IN_PROGRESS';
-            this.handshakeId = SecurityUtils.generateMessageId();
-            this.handshakeStartTime = Date.now();
-            
-            this.handshakePromise = new Promise((resolve, reject) => {
-                this.handshakeResolve = resolve;
-                this._waitForParentReady();
-            });
-
-            return this.handshakePromise;
-        },
-
-        _waitForParentReady() {
-            if (!window.parent || window.parent === window) {
-                this._completeLegacy();
-                return;
-            }
-
-            this._sendChildReady();
-
-            const timeout = this.envConfig.handshakeTimeout || HANDSHAKE.TIMEOUT;
-            
-            this.parentReadyTimer = setTimeout(() => {
-                if (!this.parentReadyReceived) {
-                    this._performHandshake();
-                }
-            }, timeout);
-        },
-
-        _sendChildReady() {
-            try {
-                const message = MessageFirewall.createOutbound(
-                    MESSAGE_TYPES.CHILD_READY,
-                    {
-                        version: VERSION,
-                        readyAt: Date.now(),
-                        frameId: FRAME_ID,
-                        capabilities: [
-                            'messages', 'session', 'progressive-security',
-                            'canonical-protocol', 'ack-support', 'enhanced-handshake'
-                        ],
-                        protocol: PROTOCOL.PROTOCOL_VERSION,
-                        timestamp: Date.now(),
-                        env: IframeEnvironment.type
-                    },
-                    { requiresAck: false }
-                );
-                window.parent.postMessage(message, '*');
-            } catch (e) {}
-        },
-
-        handleParentReady(parentReadyMessage) {
-            if (this.parentReadyReceived || this.completed) {
-                return;
-            }
-            
-            this.parentReadyReceived = true;
-            if (this.parentReadyTimer) {
-                clearTimeout(this.parentReadyTimer);
-                this.parentReadyTimer = null;
-            }
-            
-            if (parentReadyMessage.origin) {
-                SecurityUtils.allowedOrigins.add(parentReadyMessage.origin);
-            }
-            
-            this._performHandshake();
-        },
-
-        _performHandshake() {
-            if (!window.parent || window.parent === window) {
-                this._completeLegacy();
-                return;
-            }
-
-            DiagnosticsAgent.increment('handshakeAttempts');
-
-            const handshakeMessage = MessageFirewall.createOutbound(
-                MESSAGE_TYPES.HANDSHAKE_REQUEST,
-                {
-                    version: VERSION,
-                    compatibleVersions: ['2.0.0', '2.0.4', '3.0.0', '3.1.0', '3.2.0', '3.3.0', '3.4.0'],
-                    clientId: this.handshakeId,
-                    timestamp: Date.now(),
-                    features: ['messages', 'session', 'progressive-security', 'canonical-protocol'],
-                    frameId: FRAME_ID,
-                    protocol: PROTOCOL.PROTOCOL_VERSION,
-                    capabilities: ['ack', 'batch', 'offline', 'enhanced-recovery']
-                },
-                { requiresAck: true, timeout: this.envConfig.ackTimeout || HANDSHAKE.ACK_TIMEOUT }
-            );
-
-            this.handshakeTimer = setTimeout(() => {
-                this._handleTimeout();
-            }, this.envConfig.handshakeTimeout || HANDSHAKE.TIMEOUT);
-
-            IframeTransport.send(
-                MESSAGE_TYPES.HANDSHAKE_REQUEST,
-                handshakeMessage.payload,
-                { requiresAck: true }
-            ).then(result => {
-                if (!result.success && !result.queued) {
-                    this._handleTimeout();
-                }
-            });
-        },
-
-        _handleTimeout() {
-            if (this.state !== 'IN_PROGRESS' || this.completed) return;
-
-            this.retryCount++;
-            this.handshakeAttempts++;
-            
-            if (this.handshakeAttempts < (this.envConfig.maxRetries || HANDSHAKE.MAX_RETRIES) && 
-                this.handshakeAttempts < this.maxHandshakeAttempts) {
-                const delay = (this.envConfig.retryDelay || HANDSHAKE.RETRY_DELAY) * 
-                              Math.pow(HANDSHAKE.BACKOFF_FACTOR, this.retryCount - 1);
-                const jitter = Math.random() * HANDSHAKE.JITTER_MAX;
-                setTimeout(() => this._performHandshake(), delay + jitter);
-            } else {
-                DiagnosticsAgent.increment('handshakeFailures');
-                this._completeLegacy();
-            }
-        },
-
-        _completeLegacy() {
-            this.state = 'COMPLETED';
-            this.completed = true;
-            this.handshakeEndTime = Date.now();
-            this.versionNegotiated = 'legacy';
-            
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HANDSHAKE_STATE, {
-                state: 'COMPLETED',
-                timestamp: Date.now(),
-                legacy: true,
-                version: 'legacy'
-            });
-            
-            if (this.handshakeTimer) {
-                clearTimeout(this.handshakeTimer);
-                this.handshakeTimer = null;
-            }
-            
-            StartupGovernor.releaseLock();
-            
-            this._notifyListeners({ success: true, legacy: true });
-            
-            if (this.handshakeResolve) {
-                this.handshakeResolve({ success: true, legacy: true });
-            }
-        },
-
-        complete(response) {
-            if (this.state !== 'IN_PROGRESS' || this.completed) return false;
-
-            if (!response || !response.payload || response.type !== MESSAGE_TYPES.HANDSHAKE_RESPONSE) {
-                this._completeLegacy();
-                return false;
-            }
-
-            const payload = response.payload;
-            
-            if (!this._isVersionCompatible(payload.version)) {
-                this._completeLegacy();
-                return false;
-            }
-
-            this.state = 'COMPLETED';
-            this.completed = true;
-            this.handshakeEndTime = Date.now();
-            this.versionNegotiated = payload.version;
-            this.handshakeResponse = payload;
-            
-            if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
-            
-            DiagnosticsAgent.increment('handshakeSuccess');
-            
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HANDSHAKE_STATE, {
-                state: 'COMPLETED',
-                timestamp: Date.now(),
-                version: payload.version,
-                response: payload
-            });
-
-            StartupGovernor.releaseLock();
-
-            this._notifyListeners({ success: true, version: payload.version });
-
-            if (this.handshakeResolve) {
-                this.handshakeResolve({ success: true, version: payload.version });
-            }
-
-            return true;
-        },
-
-        _isVersionCompatible(version) {
-            if (!version) return false;
-            if (version === VERSION) return true;
-            const compatible = ['2.0.0', '2.0.4', '3.0.0', '3.1.0', '3.2.0', '3.3.0', '3.4.0'];
-            return compatible.includes(version);
-        },
-
-        isCompleted() {
-            return this.completed;
-        },
-
-        getHandshakeInfo() {
+        getStats() {
             return {
-                state: this.state,
-                version: this.versionNegotiated,
-                startTime: this.handshakeStartTime,
-                endTime: this.handshakeEndTime,
-                duration: this.handshakeEndTime ? this.handshakeEndTime - this.handshakeStartTime : 0,
-                retryCount: this.retryCount,
-                completed: this.completed
+                isReady: this.isReady,
+                connectionQuality: this.connectionQuality,
+                lastPong: this.lastPong,
+                heartbeatFailures: HEARTBEAT.failures
             };
         },
 
-        subscribe(callback) {
-            this.listeners.add(callback);
-            if (this.completed) {
-                callback(this.getHandshakeInfo());
-            }
-            return () => this.listeners.delete(callback);
-        },
-
-        _notifyListeners(data) {
-            const info = this.getHandshakeInfo();
-            this.listeners.forEach(cb => {
-                try {
-                    cb({ ...info, ...data });
-                } catch (e) {}
-            });
-            
-            window.dispatchEvent(new CustomEvent('handshakeCompleted', { 
-                detail: { ...info, ...data }
-            }));
-        },
-
-        reset() {
-            this.state = 'PENDING';
-            this.retryCount = 0;
-            this.completed = false;
-            this.parentReadyReceived = false;
-            this.handshakeAttempts = 0;
-            
-            if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
-            if (this.parentReadyTimer) clearTimeout(this.parentReadyTimer);
-            
-            this.handshakeTimer = null;
-            this.handshakePromise = null;
-            
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.HANDSHAKE_STATE);
+        destroy() {
+            if (this.pingInterval) clearInterval(this.pingInterval);
+            this.listeners.clear();
         }
     }.init();
 
     // =============================================
-    // ENHANCED HANDSHAKE GUARD (FIX 1)
-    // =============================================
-    if (!window.__MESSAGE_HANDSHAKE_INITIALIZED__) {
-        window.__MESSAGE_HANDSHAKE_INITIALIZED__ = true;
-        
-        // Only set up guard if handshake not already completed
-        setTimeout(() => {
-            if (!IframeHandshakeAuthority.isCompleted() && !window.__PARENT_ACK_RECEIVED__) {
-                let handshakeAttempts = 0;
-                const maxAttempts = 5;
-                
-                function initiateHandshake() {
-                    if (handshakeAttempts >= maxAttempts || IframeHandshakeAuthority.isCompleted() || window.__PARENT_ACK_RECEIVED__) return;
-                    
-                    handshakeAttempts++;
-                    
-                    try {
-                        window.parent.postMessage({
-                            type: "CHILD_HANDSHAKE",
-                            source: "friend-core",
-                            timestamp: Date.now(),
-                            attempt: handshakeAttempts
-                        }, "*");
-                    } catch (e) {}
-                }
-                
-                const handshakeInterval = setInterval(() => {
-                    if (window.__PARENT_ACK_RECEIVED__ || IframeHandshakeAuthority.isCompleted()) {
-                        clearInterval(handshakeInterval);
-                    } else {
-                        initiateHandshake();
-                    }
-                }, 2000);
-                
-                window.addEventListener("message", (event) => {
-                    if (!event.data) return;
-                    
-                    if (event.data.type === "PARENT_ACK" || 
-                        (event.data.type === MESSAGE_TYPES.HANDSHAKE_RESPONSE) ||
-                        (event.data.type === MESSAGE_TYPES.PARENT_READY)) {
-                        window.__PARENT_ACK_RECEIVED__ = true;
-                        
-                        // Also feed into IframeHandshakeAuthority if needed
-                        if (!IframeHandshakeAuthority.isCompleted() && 
-                            event.data.type === MESSAGE_TYPES.HANDSHAKE_RESPONSE) {
-                            IframeHandshakeAuthority.complete(event.data);
-                        }
-                    }
-                });
-                
-                initiateHandshake();
-            }
-        }, 500);
-    }
-
-    // =============================================
-    // SESSION MIRROR (ENHANCED)
+    // SESSION MIRROR
     // =============================================
     const SessionMirror = {
         _state: {
@@ -2046,13 +1264,12 @@
         _expiryCheckInterval: null,
         _refreshPromise: null,
         _tokenRefreshBuffer: 60000,
-        _sessionSyncTimer: null,
 
         init() {
             if (this._initPromise) return this._initPromise;
             
             this._initPromise = new Promise((resolve) => {
-                const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, null, true);
+                const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE);
                 if (cached && cached.expiresAt > Date.now()) {
                     this._state = {
                         ...cached,
@@ -2066,7 +1283,6 @@
                 }
                 
                 this._startExpiryCheck();
-                this._startSessionSync();
                 resolve(this._state);
             });
             
@@ -2093,20 +1309,8 @@
             }, 30000);
         },
 
-        _startSessionSync() {
-            if (this._sessionSyncTimer) clearInterval(this._sessionSyncTimer);
-            
-            this._sessionSyncTimer = setInterval(() => {
-                if (this._state.authenticated) {
-                    this._requestSync();
-                }
-            }, 60000);
-        },
-
         acceptSession(snapshot) {
-            if (!snapshot || typeof snapshot !== 'object') {
-                return false;
-            }
+            if (!snapshot || typeof snapshot !== 'object') return false;
 
             const oldState = { ...this._state };
             
@@ -2119,7 +1323,7 @@
                 expiresAt: snapshot.expiresAt || (Date.now() + 3600000),
                 receivedAt: Date.now(),
                 fromCache: false,
-                version: snapshot.version || PROTOCOL.VERSION,
+                version: snapshot.version || VERSION,
                 userId: snapshot.user?.id || snapshot.user?.userId || snapshot.userId,
                 sessionId: snapshot.sessionId || this._generateSessionId(),
                 lastActivity: Date.now()
@@ -2133,10 +1337,10 @@
                 expiresAt: this._state.expiresAt,
                 version: this._state.version,
                 sessionId: this._state.sessionId
-            }, true);
+            });
 
             if (this._state.user) {
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user, false);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user);
             }
 
             this._setupRefreshTimer();
@@ -2154,7 +1358,7 @@
             if (update.user) {
                 this._state.user = { ...this._state.user, ...update.user };
                 this._state.userId = this._state.user?.id || this._state.user?.userId;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user, false);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user);
                 changed = true;
             }
             
@@ -2196,7 +1400,7 @@
                     expiresAt: this._state.expiresAt,
                     version: this._state.version,
                     sessionId: this._state.sessionId
-                }, true);
+                });
                 
                 this._setupRefreshTimer();
                 this._notifySubscribers('session-updated', { old: oldState, new: this._state });
@@ -2262,7 +1466,7 @@
             this._refreshPromise = new Promise((resolve) => {
                 try {
                     const message = MessageFirewall.createOutbound(
-                        MESSAGE_TYPES.SESSION_REFRESH,
+                        MESSAGE_TYPES.SESSION_SYNC,
                         { 
                             timestamp: Date.now(),
                             frameId: FRAME_ID,
@@ -2272,7 +1476,7 @@
                     );
                     
                     if (message) {
-                        window.parent.postMessage(message, '*');
+                        window.parent.postMessage(message, parentOrigin);
                         setTimeout(() => {
                             this._refreshPromise = null;
                             resolve(false);
@@ -2287,22 +1491,6 @@
             });
             
             return this._refreshPromise;
-        },
-
-        _requestSync() {
-            if (!window.parent || window.parent === window) return;
-            
-            try {
-                MessageFirewall.send(
-                    MESSAGE_TYPES.SESSION_SYNC,
-                    { 
-                        timestamp: Date.now(),
-                        frameId: FRAME_ID,
-                        sessionId: this._state.sessionId
-                    },
-                    { requiresAck: false }
-                );
-            } catch (e) {}
         },
 
         subscribe(callback) {
@@ -2363,14 +1551,6 @@
             return this._state.authenticated && this._state.expiresAt > Date.now();
         },
 
-        hasPermission(permission) {
-            return this._state.permissions.includes(permission);
-        },
-
-        hasCapability(capability) {
-            return this._state.capabilities.includes(capability);
-        },
-
         getTimeUntilExpiry() {
             if (!this._state.authenticated) return 0;
             return Math.max(0, this._state.expiresAt - Date.now());
@@ -2382,9 +1562,9 @@
     };
 
     // =============================================
-    // IFRAME SESSION CLIENT (NEW)
+    // SESSION CLIENT - PASSIVE
     // =============================================
-    const IframeSessionClient = {
+    const SessionClient = {
         syncInProgress: false,
         lastSyncTime: 0,
         syncInterval: 60000,
@@ -2422,7 +1602,7 @@
             const now = Date.now();
             if (!force && now - this.lastSyncTime < this.syncInterval) return false;
             
-            if (!window.parent || window.parent === window || !IframeHandshakeAuthority.isCompleted()) return false;
+            if (!window.parent || window.parent === window) return false;
 
             this.syncInProgress = true;
 
@@ -2519,7 +1699,7 @@
             this.refreshInProgress = true;
             
             MessageFirewall.send(
-                MESSAGE_TYPES.SESSION_REFRESH,
+                MESSAGE_TYPES.SESSION_SYNC,
                 {
                     timestamp: Date.now(),
                     frameId: FRAME_ID,
@@ -2544,580 +1724,21 @@
     }.init();
 
     // =============================================
-    // COMPATIBILITY BRIDGE (NEW)
+    // MESSAGING CLIENT
     // =============================================
-    const CompatibilityBridge = {
-        mode: 'auto',
-        features: {
-            ack: false,
-            batch: false,
-            signatures: false,
-            sessionSync: false,
-            enhancedHandshake: false
-        },
-        parentCapabilities: null,
-        
-        init() {
-            this._detectMode();
-            return this;
-        },
-        
-        _detectMode() {
-            if (IframeEnvironment.isSandboxed) {
-                this.mode = 'degraded';
-                return;
-            }
-            
-            const forcedMode = SafeStorage.get('kynecta_compat_mode');
-            if (forcedMode && ['auto', 'legacy', 'modern', 'degraded'].includes(forcedMode)) {
-                this.mode = forcedMode;
-                return;
-            }
-            
-            if (IframeHandshakeAuthority && IframeHandshakeAuthority.isCompleted()) {
-                const info = IframeHandshakeAuthority.getHandshakeInfo();
-                if (info.version === 'legacy' || info.version < '3.0.0') {
-                    this.mode = 'legacy';
-                } else if (info.version >= '3.4.0') {
-                    this.mode = 'modern';
-                } else {
-                    this.mode = 'legacy';
-                }
-            }
-            
-            this._updateFeatures();
-        },
-        
-        _updateFeatures() {
-            switch (this.mode) {
-                case 'modern':
-                    this.features = {
-                        ack: true,
-                        batch: true,
-                        signatures: true,
-                        sessionSync: true,
-                        enhancedHandshake: true
-                    };
-                    break;
-                    
-                case 'legacy':
-                case 'degraded':
-                    this.features = {
-                        ack: false,
-                        batch: false,
-                        signatures: false,
-                        sessionSync: false,
-                        enhancedHandshake: false
-                    };
-                    break;
-                    
-                default:
-                    if (this.parentCapabilities) {
-                        this.features.ack = this.parentCapabilities.includes('ack');
-                        this.features.batch = this.parentCapabilities.includes('batch');
-                        this.features.signatures = this.parentCapabilities.includes('signatures');
-                        this.features.sessionSync = this.parentCapabilities.includes('session');
-                        this.features.enhancedHandshake = this.parentCapabilities.includes('enhanced-handshake');
-                    }
-            }
-        },
-        
-        setParentCapabilities(capabilities) {
-            this.parentCapabilities = capabilities || [];
-            this._updateFeatures();
-        },
-        
-        getMode() {
-            return this.mode;
-        },
-        
-        hasFeature(feature) {
-            return this.features[feature] || false;
-        },
-        
-        adaptMessage(message) {
-            if (this.mode === 'modern') return message;
-            
-            if (this.mode === 'legacy') {
-                const adapted = {
-                    id: message.messageId || message.id,
-                    type: message.type,
-                    payload: message.payload || {},
-                    source: message.source || SOURCE_CHILD,
-                    app: APP_NAME,
-                    version: VERSION,
-                    timestamp: message.timestamp || Date.now(),
-                    frameId: message.frameId || FRAME_ID
-                };
-                delete adapted.protocol;
-                delete adapted.signature;
-                delete adapted.requiresAck;
-                return adapted;
-            }
-            
-            return message;
-        },
-        
-        adaptIncoming(message) {
-            if (!message) return message;
-            if (message.protocol) return message;
-            
-            return {
-                protocol: 'LEGACY',
-                messageId: message.id || message.messageId,
-                type: message.type,
-                source: message.source || 'PARENT',
-                target: 'iframe',
-                frameId: message.frameId || FRAME_ID,
-                timestamp: message.timestamp || Date.now(),
-                payload: message.payload || {},
-                token: message.token,
-                legacy: true
-            };
-        }
-    }.init();
-
-    // =============================================
-    // RECOVERY MANAGER (NEW)
-    // =============================================
-    const RecoveryManager = {
-        isActive: false,
-        recoveryAttempts: 0,
-        maxRecoveryAttempts: 5,
-        recoveryTimer: null,
-        listeners: new Set(),
-        recoveryStrategies: [
-            'ping-recovery',
-            'handshake-reset',
-            'session-refresh',
-            'queue-clear',
-            'transport-reset'
-        ],
-        currentStrategy: 0,
-        lastRecoveryTime: 0,
-        recoveryCooldown: 30000,
-        envConfig: null,
-
-        init() {
-            this.envConfig = IframeEnvironment.getConfig();
-            this._startMonitor();
-            return this;
-        },
-
-        _startMonitor() {
-            setInterval(() => {
-                if (!this.isActive) {
-                    this._checkHealth();
-                }
-            }, 15000);
-        },
-
-        _checkHealth() {
-            const health = {
-                parentReady: !!(window.parent && window.parent !== window),
-                handshakeCompleted: IframeHandshakeAuthority ? IframeHandshakeAuthority.isCompleted() : false,
-                sessionValid: SessionMirror ? SessionMirror.isAuthenticated() : false,
-                pendingAcks: IframeTransport ? IframeTransport.pendingAcks.size : 0,
-                queuedMessages: IframeTransport ? IframeTransport.messageQueue.length : 0,
-                connectionQuality: IframeEnvironment.isVPNNetwork ? 'poor' : 'good'
-            };
-
-            const needsRecovery = 
-                (!health.parentReady) ||
-                (!health.handshakeCompleted && this.recoveryAttempts < this.maxRecoveryAttempts) ||
-                (health.pendingAcks > 20 && health.queuedMessages > 30);
-
-            if (needsRecovery && !this.isActive) {
-                this.startRecovery('health-check');
-            }
-        },
-
-        startRecovery(reason = 'health-check') {
-            if (this.isActive) return;
-            
-            const now = Date.now();
-            if (now - this.lastRecoveryTime < this.recoveryCooldown) {
-                return;
-            }
-            
-            this.isActive = true;
-            this.recoveryAttempts++;
-            this.lastRecoveryTime = now;
-            
-            Logger.warn('Recovery', `Starting recovery (${this.recoveryAttempts})`, { reason });
-            
-            this._executeStrategy();
-        },
-
-        _executeStrategy() {
-            const strategy = this.recoveryStrategies[this.currentStrategy];
-            
-            switch (strategy) {
-                case 'ping-recovery':
-                    this._recoveryPing();
-                    break;
-                    
-                case 'handshake-reset':
-                    this._recoveryHandshake();
-                    break;
-                    
-                case 'session-refresh':
-                    this._recoverySession();
-                    break;
-                    
-                case 'queue-clear':
-                    this._recoveryQueue();
-                    break;
-                    
-                case 'transport-reset':
-                    this._recoveryTransport();
-                    break;
-            }
-            
-            this.currentStrategy = (this.currentStrategy + 1) % this.recoveryStrategies.length;
-            
-            this.recoveryTimer = setTimeout(() => {
-                if (this.isActive && this.recoveryAttempts < this.maxRecoveryAttempts) {
-                    this._executeStrategy();
-                } else if (this.recoveryAttempts >= this.maxRecoveryAttempts) {
-                    this._escalateToReload();
-                } else {
-                    this.stopRecovery();
-                }
-            }, 10000);
-        },
-
-        _recoveryPing() {
-            if (!window.parent) return;
-            
-            try {
-                window.parent.postMessage({
-                    type: MESSAGE_TYPES.PING,
-                    payload: { timestamp: Date.now(), frameId: FRAME_ID },
-                    source: SOURCE_CHILD
-                }, '*');
-            } catch (e) {}
-        },
-
-        _recoveryHandshake() {
-            IframeHandshakeAuthority.reset();
-            IframeHandshakeAuthority.start().catch(() => {});
-        },
-
-        _recoverySession() {
-            SessionMirror.clearSession();
-            IframeSessionClient.requestSession(true);
-        },
-
-        _recoveryQueue() {
-            IframeTransport.clearPending();
-            IframeTransport.messageQueue = [];
-        },
-
-        _recoveryTransport() {
-            IframeTransport.clearPending();
-            IframeTransport.messageQueue = [];
-        },
-
-        _escalateToReload() {
-            Logger.error('Recovery', 'Max attempts reached, reloading');
-            
-            this._notifyListeners({ reloading: true });
-            
-            try {
-                MessageFirewall.send(
-                    MESSAGE_TYPES.FORCE_RELOAD,
-                    { reason: 'recovery-failed', attempts: this.recoveryAttempts },
-                    { requiresAck: false }
-                );
-            } catch (e) {}
-            
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
-        },
-
-        stopRecovery() {
-            if (!this.isActive) return;
-            
-            this.isActive = false;
-            this.recoveryAttempts = 0;
-            this.currentStrategy = 0;
-            
-            if (this.recoveryTimer) {
-                clearTimeout(this.recoveryTimer);
-                this.recoveryTimer = null;
-            }
-            
-            this._notifyListeners({ recovered: true });
-        },
-
-        subscribe(callback) {
-            this.listeners.add(callback);
-            return () => this.listeners.delete(callback);
-        },
-
-        _notifyListeners(data) {
-            this.listeners.forEach(cb => {
-                try {
-                    cb(data);
-                } catch (e) {}
-            });
-            
-            window.dispatchEvent(new CustomEvent('recoveryStatus', { detail: data }));
-        }
-    }.init();
-
-    // =============================================
-    // PARENT DETECTOR (ENHANCED - USES IFRAME TRANSPORT)
-    // =============================================
-    const ParentDetector = {
-        isReady: false,
-        checkInterval: null,
-        pingInterval: null,
-        lastPong: 0,
-        listeners: new Set(),
-        pingFailures: 0,
-        maxPingFailures: 3,
-        pingTimeout: 3000,
-        pingHistory: [],
-        pingIntervalMs: 15000,
-        connectionQuality: 'unknown',
-        lastPingTime: 0,
-        envConfig: null,
-
-        init() {
-            this.envConfig = IframeEnvironment.getConfig();
-            this._checkParent();
-            this._startPing();
-            return this;
-        },
-
-        _checkParent() {
-            const hasParent = window.parent && window.parent !== window;
-            const canPostMessage = typeof window.parent?.postMessage === 'function';
-            
-            this.isReady = hasParent && canPostMessage;
-            
-            if (this.isReady) {
-                this._notifyListeners();
-            }
-        },
-
-        _startPing() {
-            this.pingInterval = setInterval(() => {
-                if (!this.isReady) {
-                    this._checkParent();
-                    return;
-                }
-
-                this._sendPing();
-            }, this.pingIntervalMs);
-        },
-
-        _sendPing() {
-            try {
-                this.lastPingTime = Date.now();
-                
-                window.parent.postMessage({
-                    type: MESSAGE_TYPES.PING,
-                    payload: { 
-                        timestamp: this.lastPingTime,
-                        frameId: FRAME_ID,
-                        sessionId: SessionMirror?.getSessionId()
-                    },
-                    source: SOURCE_CHILD,
-                    timestamp: this.lastPingTime,
-                    messageId: SecurityUtils.generateMessageId()
-                }, '*');
-                
-                setTimeout(() => {
-                    if (this.lastPingTime && Date.now() - this.lastPingTime > this.pingTimeout) {
-                        this.pingFailures++;
-                        this._recordPingResult(false, this.pingTimeout);
-                        
-                        if (this.pingFailures >= this.maxPingFailures) {
-                            this.isReady = false;
-                            this._notifyListeners();
-                        }
-                    }
-                }, this.pingTimeout + 100);
-                
-            } catch (e) {
-                this.pingFailures++;
-                this._recordPingResult(false, 0);
-                
-                if (this.pingFailures >= this.maxPingFailures) {
-                    this.isReady = false;
-                    this._notifyListeners();
-                }
-            }
-        },
-
-        handlePong(pongMessage) {
-            const now = Date.now();
-            const rtt = now - (pongMessage.payload?.originalTimestamp || this.lastPingTime || now);
-            
-            this.lastPong = now;
-            this.pingFailures = 0;
-            this._recordPingResult(true, rtt);
-            
-            if (!this.isReady) {
-                this.isReady = true;
-                this._notifyListeners();
-            }
-            
-            DiagnosticsAgent.recordPingRtt(rtt);
-        },
-
-        _recordPingResult(success, rtt) {
-            this.pingHistory.push({
-                timestamp: Date.now(),
-                success,
-                rtt
-            });
-            
-            if (this.pingHistory.length > 20) {
-                this.pingHistory.shift();
-            }
-            
-            this._updateConnectionQuality();
-        },
-
-        _updateConnectionQuality() {
-            if (this.pingHistory.length < 5) return;
-            
-            const recent = this.pingHistory.slice(-10);
-            const successRate = recent.filter(p => p.success).length / recent.length;
-            const avgRtt = recent.filter(p => p.success).reduce((sum, p) => sum + p.rtt, 0) / 
-                           recent.filter(p => p.success).length || 0;
-            
-            if (successRate < 0.5) {
-                this.connectionQuality = 'dead';
-            } else if (successRate < 0.8 || avgRtt > 1000) {
-                this.connectionQuality = 'poor';
-            } else if (avgRtt > 300) {
-                this.connectionQuality = 'fair';
-            } else {
-                this.connectionQuality = 'excellent';
-            }
-        },
-
-        subscribe(callback) {
-            this.listeners.add(callback);
-            if (this.isReady) callback({ ready: true, connectionQuality: this.connectionQuality });
-            return () => this.listeners.delete(callback);
-        },
-
-        _notifyListeners() {
-            const data = { 
-                ready: this.isReady, 
-                connectionQuality: this.connectionQuality,
-                lastPong: this.lastPong,
-                pingFailures: this.pingFailures
-            };
-            
-            this.listeners.forEach(cb => {
-                try {
-                    cb(data);
-                } catch (e) {}
-            });
-            
-            window.dispatchEvent(new CustomEvent('parentStatusChanged', { detail: data }));
-        },
-
-        getStats() {
-            return {
-                isReady: this.isReady,
-                connectionQuality: this.connectionQuality,
-                lastPong: this.lastPong,
-                pingFailures: this.pingFailures,
-                avgRtt: this.pingHistory.filter(p => p.success).length ?
-                    Math.round(this.pingHistory.filter(p => p.success).reduce((sum, p) => sum + p.rtt, 0) / 
-                              this.pingHistory.filter(p => p.success).length) : 0
-            };
-        },
-
-        destroy() {
-            if (this.pingInterval) clearInterval(this.pingInterval);
-            this.listeners.clear();
-        }
-    }.init();
-
-    // =============================================
-    // IFRAME AUTHORITY (NEW - CENTRAL COORDINATOR)
-    // =============================================
-    const IframeAuthority = {
-        initialized: false,
-        envConfig: null,
-        
-        init() {
-            if (this.initialized) return this;
-            
-            IframeEnvironment.detect();
-            this.envConfig = IframeEnvironment.getConfig();
-            
-            DiagnosticsAgent.init(window.location.hostname === 'localhost' || window.__IFRAME_DEBUG__);
-            
-            SafeStorage.init();
-            SecurityUtils.initOriginTrust();
-            StartupGovernor.init();
-            ParentDetector.init();
-            IframeHandshakeAuthority.init();
-            SessionMirror.init();
-            IframeSessionClient.init();
-            CompatibilityBridge.init();
-            IframeTransport.init();
-            RecoveryManager.init();
-            
-            this.initialized = true;
-            
-            return this;
-        },
-        
-        getHealth() {
-            return {
-                environment: IframeEnvironment.type,
-                startupState: StartupGovernor.getState(),
-                handshake: IframeHandshakeAuthority.getHandshakeInfo(),
-                parentReady: ParentDetector.isReady,
-                sessionValid: SessionMirror.isAuthenticated(),
-                connectionQuality: ParentDetector.connectionQuality,
-                compatMode: CompatibilityBridge.getMode(),
-                uptime: DiagnosticsAgent.getUptime()
-            };
-        },
-        
-        reset() {
-            IframeHandshakeAuthority.reset();
-            SessionMirror.clearSession();
-            IframeTransport.clearPending();
-            IframeTransport.messageQueue = [];
-            
-            SafeStorage.clear();
-        }
-    }.init();
-
-    // =============================================
-    // SECURE MESSAGING CLIENT (ENHANCED - USES NEW MODULES)
-    // =============================================
-    class SecureMessagingClient {
+    class MessagingClient {
         constructor() {
             this.listeners = new Map();
-            this.handshakeClient = IframeHandshakeAuthority;
             this.parentDetector = ParentDetector;
             this.sessionMirror = SessionMirror;
-            this.sessionClient = IframeSessionClient;
-            this.circuitBreaker = new CircuitBreaker('MessagingClient', 3, 10000);
+            this.sessionClient = SessionClient;
             this.messageFirewall = MessageFirewall;
-            this.recoveryManager = RecoveryManager;
-            this.compatibilityBridge = CompatibilityBridge;
-            this.iframeAuthority = IframeAuthority;
-            this.transport = IframeTransport;
+            this.transport = MessageTransport;
+            this._pendingPromises = new Map();
             this._initMessageListener();
             this._initVisibilityHandler();
             this._initNetworkHandler();
-            this._pendingPromises = new Map();
+            this._initHeartbeatMonitor();
         }
 
         _initMessageListener() {
@@ -3140,6 +1761,17 @@
             window.addEventListener('offline', () => {
                 window.dispatchEvent(new CustomEvent('networkOffline'));
             });
+        }
+
+        _initHeartbeatMonitor() {
+            setInterval(() => {
+                const now = Date.now();
+                if (HEARTBEAT.lastHeartbeat > 0 && 
+                    now - HEARTBEAT.lastHeartbeat > 20000 && 
+                    HEARTBEAT.failures < HEARTBEAT.maxFailures) {
+                    ParentDetector.handleHeartbeatMiss();
+                }
+            }, 10000);
         }
 
         _onPageActivated() {
@@ -3168,44 +1800,40 @@
         }
 
         async _receive(event) {
-            await this.circuitBreaker.call(async () => {
-                if (!SecurityUtils.validateOrigin(event.origin)) {
-                    return;
-                }
+            try {
+                if (!SecurityUtils.validateOrigin(event.origin)) return;
+                if (event.origin !== window.location.origin) return;
+                if (!event.data || typeof event.data !== 'object') return;
 
                 const message = this.messageFirewall.parse(event);
                 if (!message) return;
 
                 DiagnosticsAgent.increment('messagesReceived');
 
-                if (message.type === MESSAGE_TYPES.ACK) {
+                if (message.type === MESSAGE_TYPES.ACK || message.type === MESSAGE_TYPES.HEARTBEAT_ACK) {
                     this.transport.handleAck(message);
                 }
 
                 switch (message.type) {
                     case MESSAGE_TYPES.PONG:
-                        ParentDetector.handlePong(message);
+                    case MESSAGE_TYPES.HEARTBEAT_ACK:
+                        ParentDetector.handleHeartbeatAck(message);
                         return;
 
                     case MESSAGE_TYPES.PARENT_READY:
-                        IframeHandshakeAuthority.handleParentReady(message);
+                        parentReady = true;
                         ParentDetector.isReady = true;
+                        StatusIndicator.show('READY');
                         ParentDetector._notifyListeners();
                         SecurityUtils.allowedOrigins.add(event.origin);
                         return;
 
-                    case MESSAGE_TYPES.HANDSHAKE_RESPONSE:
-                        IframeHandshakeAuthority.complete(message);
-                        CompatibilityBridge._detectMode();
-                        StartupGovernor.transitionTo('ACTIVE', 'handshake-complete');
+                    case MESSAGE_TYPES.REGISTRATION_ACK:
                         return;
 
                     case MESSAGE_TYPES.SESSION_DATA:
                     case MESSAGE_TYPES.SESSION_INIT:
                         this.sessionClient.handleSessionData(message);
-                        if (SessionMirror && SessionMirror.isAuthenticated()) {
-                            StartupGovernor.transitionTo('ACTIVE', 'session-received');
-                        }
                         return;
 
                     case MESSAGE_TYPES.SESSION_UPDATE:
@@ -3284,38 +1912,19 @@
                         DiagnosticsAgent.recordError(error, `Handler.${message.type}`);
                     }
                 });
-            });
+            } catch (e) {}
         }
 
         async send(type, payload = {}, options = {}) {
-            return this.circuitBreaker.call(async () => {
+            try {
                 const result = await this.transport.send(type, payload, options);
                 if (result.success) {
                     DiagnosticsAgent.increment('messagesSent');
                 }
                 return result;
-            }, () => ({ success: false, error: 'circuit open' }));
-        }
-
-        _sendWithPromise(type, payload, options) {
-            return new Promise((resolve, reject) => {
-                const requestId = options.requestId || SecurityUtils.generateMessageId();
-                
-                this._pendingPromises.set(requestId, { resolve, reject });
-                
-                this.send(type, { ...payload, requestId }, options)
-                    .catch(error => {
-                        this._pendingPromises.delete(requestId);
-                        reject(error);
-                    });
-
-                setTimeout(() => {
-                    if (this._pendingPromises.has(requestId)) {
-                        this._pendingPromises.delete(requestId);
-                        reject(new Error('API request timeout'));
-                    }
-                }, options.timeout || 15000);
-            });
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
         }
 
         on(type, handler) {
@@ -3347,19 +1956,24 @@
         }
 
         getHealth() {
-            return IframeAuthority.getHealth();
+            return {
+                parentReady: ParentDetector.isReady,
+                connectionQuality: ParentDetector.connectionQuality,
+                sessionValid: SessionMirror.isAuthenticated(),
+                heartbeatFailures: HEARTBEAT.failures,
+                uptime: DiagnosticsAgent.getUptime()
+            };
         }
 
         reset() {
-            IframeAuthority.reset();
             this._pendingPromises.clear();
         }
     }
 
-    const messagingClient = new SecureMessagingClient();
+    const messagingClient = new MessagingClient();
 
     // =============================================
-    // SAFE FETCH UTILITY (FIX 2)
+    // SAFE FETCH UTILITY
     // =============================================
     async function safeFetch(url, options = {}) {
         try {
@@ -3380,10 +1994,9 @@
     }
 
     // =============================================
-    // API CLIENT (ENHANCED WITH SAFE FETCH)
+    // API CLIENT
     // =============================================
     const APIClient = {
-        circuitBreaker: new CircuitBreaker('APIClient', 3, 15000),
         pendingRequests: new Map(),
         baseUrl: '',
         defaultTimeout: 30000,
@@ -3393,14 +2006,10 @@
         },
 
         async request(endpoint, options = {}) {
-            return this.circuitBreaker.call(async () => {
-                if (!endpoint || typeof endpoint !== 'string') {
-                    return null;
-                }
+            try {
+                if (!endpoint || typeof endpoint !== 'string') return null;
 
-                if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
-                    return null;
-                }
+                if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) return null;
 
                 if (!endpoint.startsWith('/api/')) {
                     endpoint = '/api/' + endpoint.replace(/^\/+/, '');
@@ -3420,12 +2029,14 @@
                     headers['Authorization'] = `Bearer ${token}`;
                 }
 
-                if (ParentDetector.isReady && IframeHandshakeAuthority.isCompleted() && options.useParent !== false) {
+                if (ParentDetector.isReady && options.useParent !== false) {
                     return this._requestViaParent(endpoint, options, requestId);
                 }
 
                 return this._requestDirect(endpoint, options, headers, requestId);
-            }, () => null);
+            } catch (error) {
+                return null;
+            }
         },
 
         async _requestViaParent(endpoint, options, requestId) {
@@ -3481,7 +2092,6 @@
                         : JSON.stringify(SecurityUtils.sanitizePayload(options.body));
                 }
 
-                // Use safeFetch for all fetch operations
                 return await safeFetch(this.baseUrl + endpoint, fetchOptions);
             } catch (error) {
                 DiagnosticsAgent.recordError(error, `API.${endpoint}`);
@@ -3506,7 +2116,7 @@
     };
 
     // =============================================
-    // CORE STATE (PRESERVED)
+    // CORE STATE
     // =============================================
     let currentUser = null;
     let currentChat = null;
@@ -3543,202 +2153,72 @@
     let recordingCancelTimeout = null;
     let dragStartY = 0;
     let isDraggingToCancel = false;
-    let isParentReady = false;
-    let isSessionReceived = false;
-    let isInitialized = false;
-    let sessionData = null;
-    let sessionValid = false;
-    let sessionAdapter = SessionMirror;
-    let handshakeState = 'PENDING';
-    let connectionHealth = {};
 
     SessionMirror.subscribe((event) => {
         currentUser = event.state.user;
-        isSessionReceived = event.state.authenticated;
-        sessionData = event.state;
-        sessionValid = event.state.authenticated;
-        
         window.dispatchEvent(new CustomEvent('sessionUpdated', { 
             detail: { session: event.state, changeType: event.type }
         }));
     });
 
     ParentDetector.subscribe((data) => {
-        isParentReady = data.ready;
-        connectionHealth = data;
         window.dispatchEvent(new CustomEvent('parentStatusChanged', { detail: data }));
     });
 
-    IframeHandshakeAuthority.subscribe((info) => {
-        handshakeState = info.state;
-        window.dispatchEvent(new CustomEvent('handshakeStatusChanged', { detail: info }));
-    });
-
-    RecoveryManager.subscribe((data) => {
-        if (data.recovering) {
-            window.dispatchEvent(new CustomEvent('recoveryStarted', { detail: data }));
-        }
-    });
-
     // =============================================
-    // INITIALIZATION PIPELINE (ENHANCED)
+    // INITIALIZATION
     // =============================================
-    const INIT_STAGES = {
-        PREFLIGHT: 'preflight',
-        HANDSHAKE: 'handshake',
-        SESSION: 'session',
-        DATA: 'data',
-        READY: 'ready'
-    };
-
-    let currentInitStage = null;
-    let initProgress = 0;
-    let initStartTime = 0;
-
-    async function runStage(stage, fn, timeoutMs = 5000) {
-        currentInitStage = stage;
-
-        try {
-            const result = await Promise.race([
-                fn(),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error(`Stage ${stage} timeout`)), timeoutMs)
-                )
-            ]);
-
-            const stageIndex = Object.values(INIT_STAGES).indexOf(stage);
-            initProgress = (stageIndex + 1) / Object.values(INIT_STAGES).length;
-            
-            return result;
-        } catch (error) {
-            DiagnosticsAgent.recordError(error, `Init.${stage}`);
-
-            if (stage === INIT_STAGES.HANDSHAKE) {
-                return { success: false, legacy: true };
-            }
-
-            if (stage === INIT_STAGES.SESSION) {
-                return { success: false, cached: SessionMirror.getState().fromCache };
-            }
-
-            return { success: false, error: error.message };
-        }
-    }
-
     async function initialize() {
-        initStartTime = Date.now();
-        
         try {
             DiagnosticsAgent.init(window.location.hostname === 'localhost' || window.__IFRAME_DEBUG__);
-            StartupGovernor.transitionTo('WAIT_PARENT', 'init-started');
-
-            await runStage(INIT_STAGES.PREFLIGHT, async () => {
-                await SessionMirror.init();
-                loadCachedData();
-
-                if (window.parent && window.parent !== window) {
-                    try {
-                        const message = MessageFirewall.createOutbound(
-                            MESSAGE_TYPES.CHILD_READY,
-                            {
-                                version: VERSION,
-                                readyAt: Date.now(),
-                                frameId: FRAME_ID,
-                                capabilities: ['messages', 'session', 'progressive-security', 'canonical-protocol']
-                            },
-                            { requiresAck: false }
-                        );
-                        window.parent.postMessage(message, '*');
-                    } catch (e) {}
-                }
-
-                return { success: true };
-            }, 3000);
-
-            StartupGovernor.transitionTo('HANDSHAKING', 'handshake-start');
-
-            const handshakeResult = await runStage(INIT_STAGES.HANDSHAKE, async () => {
-                if (!ParentDetector.isReady) {
-                    await new Promise(resolve => {
-                        let attempts = 0;
-                        const checkInterval = setInterval(() => {
-                            attempts++;
-                            if (ParentDetector.isReady || attempts > 30) {
-                                clearInterval(checkInterval);
-                                resolve();
-                            }
-                        }, 100);
-                    });
-                }
-
-                const handshakeResult = await IframeHandshakeAuthority.start();
-                handshakeState = IframeHandshakeAuthority.state;
-                return handshakeResult;
-            }, 10000);
-
-            StartupGovernor.transitionTo('SYNCING', 'session-start');
-
-            await runStage(INIT_STAGES.SESSION, async () => {
-                if (SessionMirror.isAuthenticated()) {
-                    return { success: true, fromCache: true };
-                }
-
-                const sessionResult = await IframeSessionClient.requestSession();
-                return { success: !!sessionResult };
-            }, 10000);
-
-            await runStage(INIT_STAGES.DATA, async () => {
-                await loadCoreData();
-                return { success: true };
-            }, 15000);
-
-            await runStage(INIT_STAGES.READY, async () => {
-                isInitialized = true;
-                
-                StartupGovernor.transitionTo('ACTIVE', 'init-complete');
-
-                messagingClient.send(MESSAGE_TYPES.CHILD_READY, {
-                    status: 'ready',
-                    version: VERSION,
-                    session: SessionMirror.isAuthenticated(),
-                    timestamp: Date.now(),
-                    frameId: FRAME_ID
-                }, { requiresAck: false });
-
-                messagingClient.processQueue();
-
+            
+            if (!window.parent || window.parent === window) {
                 window.dispatchEvent(new CustomEvent('coreReady', {
                     detail: {
-                        authenticated: SessionMirror.isAuthenticated(),
-                        user: SessionMirror.getUser(),
-                        handshake: IframeHandshakeAuthority.getHandshakeInfo(),
-                        frameId: FRAME_ID,
-                        initDuration: Date.now() - initStartTime
+                        authenticated: false,
+                        standalone: true,
+                        user: null
                     }
                 }));
+                return;
+            }
 
-                return { success: true };
-            }, 3000);
+            await SessionMirror.init();
+
+            registerWithParent();
+
+            loadCachedData();
+
+            StatusIndicator.show('READY');
+
+            window.dispatchEvent(new CustomEvent('coreReady', {
+                detail: {
+                    authenticated: SessionMirror.isAuthenticated(),
+                    user: SessionMirror.getUser(),
+                    frameId: FRAME_ID,
+                    registered: registrationSent
+                }
+            }));
+
+            messagingClient.processQueue();
 
         } catch (error) {
             DiagnosticsAgent.recordError(error, 'Init.fatal');
-            isInitialized = true;
-            StartupGovernor.transitionTo('DEGRADED', 'init-fatal');
+            StatusIndicator.show('FAILED');
 
             window.dispatchEvent(new CustomEvent('coreReady', {
                 detail: {
                     authenticated: false,
                     user: null,
                     fallback: true,
-                    error: error.message,
-                    initDuration: Date.now() - initStartTime
+                    error: error.message
                 }
             }));
         }
     }
 
     // =============================================
-    // DATA MANAGEMENT (PRESERVED)
+    // DATA MANAGEMENT
     // =============================================
     function loadCachedData() {
         try {
@@ -3758,9 +2238,7 @@
 
     async function loadCoreData() {
         try {
-            if (!SessionMirror.isAuthenticated()) {
-                return false;
-            }
+            if (!SessionMirror.isAuthenticated()) return false;
 
             const chatsData = await APIClient.fetchWithFallback('/api/chats', {}, []);
             if (chatsData && Array.isArray(chatsData)) {
@@ -3781,14 +2259,7 @@
     }
 
     // =============================================
-    // HEALTH MONITORING
-    // =============================================
-    function getHealthStatus() {
-        return IframeAuthority.getHealth();
-    }
-
-    // =============================================
-    // EXPORTED FUNCTIONS (PRESERVED)
+    // EXPORTED FUNCTIONS
     // =============================================
     function setCurrentUser(user) { currentUser = user; }
     function setCurrentChat(chat) { currentChat = chat; }
@@ -3838,18 +2309,18 @@
     }
 
     function requestSessionUpdate() {
-        return IframeSessionClient.requestSession(true);
+        return SessionClient.requestSession(true);
     }
 
     function initChildSession() {
         return new Promise((resolve) => {
-            if (isSessionReceived && currentUser) {
-                resolve({ user: currentUser, sessionData });
+            if (SessionMirror.isAuthenticated() && currentUser) {
+                resolve({ user: currentUser, sessionData: SessionMirror.getState() });
             } else {
                 const checkInterval = setInterval(() => {
-                    if (isSessionReceived && currentUser) {
+                    if (SessionMirror.isAuthenticated() && currentUser) {
                         clearInterval(checkInterval);
-                        resolve({ user: currentUser, sessionData });
+                        resolve({ user: currentUser, sessionData: SessionMirror.getState() });
                     }
                 }, 100);
 
@@ -3965,9 +2436,9 @@
     }
 
     async function sendMessage(content, type = 'text', options = {}) {
-        if (!currentChat) {
-            return false;
-        }
+        if (!currentChat) return false;
+
+        StatusIndicator.show('SENDING');
 
         const messageData = {
             id: SecurityUtils.generateMessageId(),
@@ -3977,11 +2448,32 @@
             type,
             timestamp: new Date().toISOString(),
             status: 'sending',
+            reason: null,
             frameId: FRAME_ID,
             ...options
         };
 
         messages.push(messageData);
+
+        const handleStatusChange = (event) => {
+            const updatedMessage = event.detail.message;
+            if (updatedMessage.id === messageData.id) {
+                const idx = messages.findIndex(m => m.id === updatedMessage.id);
+                if (idx !== -1) {
+                    messages[idx] = updatedMessage;
+                    
+                    window.dispatchEvent(new CustomEvent('messagesUpdated', {
+                        detail: { messages }
+                    }));
+                    
+                    if (updatedMessage.status === 'failed' && updatedMessage.reason) {
+                        showStatusMessage(`❌ Message failed: ${updatedMessage.reason}`);
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('messageStatusChanged', handleStatusChange, { once: true });
 
         if (SessionMirror.isAuthenticated()) {
             const result = await APIClient.request('/api/messages/send', {
@@ -3993,6 +2485,14 @@
                 const idx = messages.findIndex(m => m.id === messageData.id);
                 if (idx !== -1) {
                     messages[idx] = { ...result, status: 'sent' };
+                    
+                    const sendResult = await messagingClient.send(MESSAGE_TYPES.SEND_MESSAGE, messages[idx]);
+                    
+                    if (!sendResult.success) {
+                        messages[idx].status = 'failed';
+                        messages[idx].reason = sendResult.reason || 'Message delivery failed';
+                        showStatusMessage(`❌ ${messages[idx].reason}`);
+                    }
                 }
 
                 const chatIdx = chats.findIndex(c => c.id === currentChat.id);
@@ -4004,19 +2504,27 @@
 
                 SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
 
+                StatusIndicator.show('SUCCESS');
+
                 return true;
             }
 
             const idx = messages.findIndex(m => m.id === messageData.id);
             if (idx !== -1) {
                 messages[idx].status = 'failed';
+                messages[idx].reason = 'Server rejected message';
+                showStatusMessage(`❌ Server rejected message`);
             }
+
+            StatusIndicator.show('FAILED');
 
             return false;
         }
 
         offlineQueue.push(messageData);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
+
+        StatusIndicator.show('SUCCESS');
 
         return true;
     }
@@ -4503,16 +3011,12 @@
         return true;
     }
 
-    function initializeParentCoordination() {
-        return initialize();
-    }
-
     function isCoreReady() {
-        return isInitialized;
+        return true;
     }
 
     function getConnectionHealth() {
-        return getHealthStatus();
+        return messagingClient.getHealth();
     }
 
     function showMessageActions(message, x, y) {
@@ -4882,10 +3386,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         window.dispatchEvent(new CustomEvent('openThread', {
             detail: { messageId }
         }));
-    }
-
-    async function loadThreadMessages(messageId) {
-        return true;
     }
 
     function showChatInfo(chat) {
@@ -5333,8 +3833,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     function retryConnection() {
-        IframeHandshakeAuthority.reset();
-        initialize();
     }
 
     function renderMessages() {
@@ -5417,6 +3915,9 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         return false;
     }
 
+    // =============================================
+    // START INITIALIZATION
+    // =============================================
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             setTimeout(initialize, 100);
@@ -5438,7 +3939,24 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
     });
 
+    // =============================================
+    // EXPORT
+    // =============================================
     const messagesCore = {
+        // Core exports
+        VERSION,
+        MESSAGE_TYPES,
+        LOCAL_STORAGE_KEYS,
+        SOURCE_IFRAME,
+        FRAME_ID,
+        
+        // Status
+        StatusIndicator,
+        
+        // Lifecycle
+        MessageLifecycle,
+        
+        // State
         currentUser, currentChat, currentFriend, messages, chats, contacts,
         isRecording, mediaRecorder, recordingTimer, recordingStartTime,
         typingTimeout, isTyping, selectedMessage, currentThread, chatThemes,
@@ -5447,15 +3965,8 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         offlineQueue, messageDrafts, silentReactionsEnabled, readOnlyMode,
         currentAttachment, searchResults, currentSearchIndex, multiSendSelectedChats,
         recordingCancelTimeout, dragStartY, isDraggingToCancel,
-        isParentReady, isSessionReceived, isInitialized, sessionData, sessionValid,
-        sessionAdapter, handshakeState, connectionHealth,
 
-        MESSAGE_TYPES,
-        LOCAL_STORAGE_KEYS,
-        VERSION,
-        SOURCE_CHILD,
-        FRAME_ID,
-
+        // Setters
         setCurrentUser, setCurrentChat, setCurrentFriend, setMessages, setChats, setContacts,
         setIsRecording, setMediaRecorder, setRecordingTimer, setRecordingStartTime,
         setTypingTimeout, setIsTyping, setSelectedMessage, setCurrentThread,
@@ -5467,93 +3978,180 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         setMultiSendSelectedChats, setRecordingCancelTimeout, setDragStartY,
         setIsDraggingToCancel,
 
-        parentConnection: SessionMirror,
-        getCurrentSession, requestSessionUpdate, initChildSession,
-
-        initializeParentCoordination,
+        // Session & Communication
+        SessionMirror,
+        ParentDetector,
+        SessionClient,
+        messagingClient,
+        MessageTransport,
+        
+        getCurrentSession,
+        requestSessionUpdate,
+        initChildSession,
         isCoreReady,
         getConnectionHealth,
-
         sendToParent,
-
-        apiRequest, fetchData,
-
-        getData, updateData, loadCoreData,
-
-        validateMessageStructure, validateMessagePayload, validateMessageBeforeSend,
-        validateData, validateSessionData,
-
-        loadContacts, loadChats, loadMessages,
-        openChat, loadChatByFriendId, createLocalChat,
-        sendMessage, sendMessageWithOptions, sendToMultipleChats,
-        editMessage, saveEditedMessage, cancelEditMessage, deleteMessage,
-        markChatAsRead, addReaction,
-        toggleBlockUser, toggleArchiveChat, toggleReadOnly, clearChatHistory,
+        
+        // API
+        apiRequest,
+        fetchData,
+        APIClient,
+        
+        // Data management
+        getData,
+        updateData,
+        loadCoreData,
+        loadContacts,
+        loadChats,
+        loadMessages,
+        openChat,
+        loadChatByFriendId,
+        createLocalChat,
+        sendMessage,
+        sendMessageWithOptions,
+        sendToMultipleChats,
+        editMessage,
+        saveEditedMessage,
+        cancelEditMessage,
+        deleteMessage,
+        markChatAsRead,
+        addReaction,
+        toggleBlockUser,
+        toggleArchiveChat,
+        toggleReadOnly,
+        clearChatHistory,
         voteInPoll,
 
-        showStatusMessage, hideStatusMessage,
-        formatMessageText, formatTime, formatDate, formatDateTime, formatFileSize,
-        escapeHtml, escapeRegex, preserveFormatting, sanitizePayload,
+        // Validation
+        validateMessageStructure,
+        validateMessagePayload,
+        validateMessageBeforeSend,
+        validateData,
+        validateSessionData,
 
-        showMessageActions, closeMessageActions, handleMessageAction,
-        showForwardMessage, toggleStarMessage, showMessageInfo, showReportModal, submitReport,
-
-        initEmojiPicker, toggleEmojiPicker, closeEmojiPickerOnClickOutside,
-
-        toggleFormattingToolbar, closeFormattingToolbarOnClickOutside, applyFormatting,
-
-        toggleAttachmentOptions, closeAttachmentOptionsOnClickOutside, handleAttachment,
-        createNote, selectImage, selectVideo, selectFile, shareLocation, createPoll,
-        showAttachmentPreview, removeAttachment,
-
-        openThread, loadThreadMessages, showChatInfo,
-
-        loadChatThemes, applyChatTheme,
-
-        loadUserSettings, loadMessageDrafts, saveMessageDraft, loadMessageDraft,
-        updateDraftBadge, loadScheduledMessages, loadOfflineQueue, updateScheduleBadge,
-
-        setupScrollDetection, updateJumpButtonVisibility, jumpToLatest,
-        searchInChat, highlightText, highlightSearchResults, removeSearchHighlights,
-        navigateToSearchResult, scrollToMessage,
-
-        startRecording, stopRecording, cancelRecording,
-
-        startBackgroundSync, playNotificationSound,
-        checkScheduledMessages, checkOfflineQueue,
-        loadMultiSendChats, updateMultiSendSelection,
-
-        saveUIState, getUserFromURL, openChatPanel,
-
-        showReconnectState, hideReconnectState, retryConnection,
-
-        renderMessages, renderChatsList, renderContactsList, markMessageAsViewed,
-
-        initializeAudioWaveforms, viewMedia, playVideo, playAudio, downloadFile,
-        openLocation, cleanupAudioPlayers,
-
-        syncChatList, updateUnreadCounts, updateTypingIndicator,
-
-        // NEW EXPORTS
+        // Utilities
+        showStatusMessage,
+        hideStatusMessage,
+        formatMessageText,
+        formatTime,
+        formatDate,
+        formatDateTime,
+        formatFileSize,
+        escapeHtml,
+        escapeRegex,
+        preserveFormatting,
+        sanitizePayload,
         SecurityUtils,
         SafeStorage,
+
+        // Message actions
+        showMessageActions,
+        closeMessageActions,
+        handleMessageAction,
+        showForwardMessage,
+        toggleStarMessage,
+        showMessageInfo,
+        showReportModal,
+        submitReport,
+
+        // Emoji picker
+        initEmojiPicker,
+        toggleEmojiPicker,
+        closeEmojiPickerOnClickOutside,
+
+        // Formatting
+        toggleFormattingToolbar,
+        closeFormattingToolbarOnClickOutside,
+        applyFormatting,
+
+        // Attachments
+        toggleAttachmentOptions,
+        closeAttachmentOptionsOnClickOutside,
+        handleAttachment,
+        createNote,
+        selectImage,
+        selectVideo,
+        selectFile,
+        shareLocation,
+        createPoll,
+        showAttachmentPreview,
+        removeAttachment,
+
+        // Threads
+        openThread,
+        showChatInfo,
+
+        // Themes & Settings
+        loadChatThemes,
+        applyChatTheme,
+        loadUserSettings,
+        loadMessageDrafts,
+        saveMessageDraft,
+        loadMessageDraft,
+        updateDraftBadge,
+        loadScheduledMessages,
+        loadOfflineQueue,
+        updateScheduleBadge,
+
+        // Scrolling & Search
+        setupScrollDetection,
+        updateJumpButtonVisibility,
+        jumpToLatest,
+        searchInChat,
+        highlightText,
+        highlightSearchResults,
+        removeSearchHighlights,
+        navigateToSearchResult,
+        scrollToMessage,
+
+        // Recording
+        startRecording,
+        stopRecording,
+        cancelRecording,
+
+        // Background
+        startBackgroundSync,
+        playNotificationSound,
+        checkScheduledMessages,
+        checkOfflineQueue,
+        loadMultiSendChats,
+        updateMultiSendSelection,
+        saveUIState,
+        getUserFromURL,
+        openChatPanel,
+
+        // Recovery
+        showReconnectState,
+        hideReconnectState,
+        retryConnection,
+
+        // Rendering triggers
+        renderMessages,
+        renderChatsList,
+        renderContactsList,
+        markMessageAsViewed,
+
+        // Media
+        initializeAudioWaveforms,
+        viewMedia,
+        playVideo,
+        playAudio,
+        downloadFile,
+        openLocation,
+        cleanupAudioPlayers,
+
+        // Sync
+        syncChatList,
+        updateUnreadCounts,
+        updateTypingIndicator,
+
+        // Diagnostics
         DiagnosticsAgent,
-        ParentDetector,
-        IframeHandshakeAuthority,
-        SessionMirror,
-        IframeSessionClient,
-        CompatibilityBridge,
-        RecoveryManager,
-        CircuitBreaker,
-        getHealthStatus,
-        messagingClient,
+        getHealthStatus: getConnectionHealth,
         
-        // NEW - Enhanced modules
-        IframeEnvironment,
-        StartupGovernor,
-        IframeTransport,
-        IframeAuthority,
-        safeFetch
+        // Registration
+        registerWithParent,
+        registrationSent: () => registrationSent
     };
 
     window.messagesCore = messagesCore;
@@ -5561,7 +4159,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     if (window.location.hash === '#debug' || localStorage.getItem('kynecta_debug') === 'true') {
         window.__IFRAME_DEBUG__ = true;
         DiagnosticsAgent.enabled = true;
-        DiagnosticsAgent.debugMode = true;
     }
 
     if (typeof module !== 'undefined' && module.exports) {

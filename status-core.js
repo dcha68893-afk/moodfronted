@@ -1,11 +1,129 @@
 // =============================================
-// STATUS SYSTEM - CENTRALIZED TOKEN ACCESS - CORE
-// HARDENED ENHANCED VERSION v5.0 - PARENT INTEGRATION
-// WITH IFRAME AUTHORITY, STARTUP GOVERNOR & RESILIENCE ENGINE
-// COMPLETE RELIABILITY OVERHAUL - PRESERVES ALL EXISTING FEATURES
+// STATUS SYSTEM - PASSIVE IFRAME MODULE
+// HARDENED ENHANCED VERSION v5.4 - CLEAN CONSOLE LOGGING
+// SINGLE-INSTANCE STATUS MESSAGES, NO REPETITION
+// ALL EXISTING FEATURES PRESERVED - BACKGROUND OPERATIONS ONLY
 // =============================================
-// EXPORT CONTRACT: ALL SYMBOLS REQUIRED BY status-ui.js
+
 // =============================================
+// CLEAN CONSOLE LOGGING - SINGLE INSTANCE, NO SPAM
+// =============================================
+const DEBUG = true;
+
+// Status tracking - ensures each state shows only once
+const _statusState = {
+    initShown: false,
+    sendingShown: new Set(),
+    waitingShown: new Set(),
+    successShown: new Set(),
+    failedShown: new Set(),
+    readyShown: false,
+    warningShown: new Set(),
+    disconnectedShown: false,
+    lastStatus: null
+};
+
+function logStatus(type, message, data = null) {
+    const now = Date.now();
+    const emoji = {
+        'INIT': '🚀',
+        'SENDING': '📤',
+        'WAITING': '⏳',
+        'SUCCESS': '✅',
+        'FAILED': '❌',
+        'READY': '🔵',
+        'WARNING': '⚠️',
+        'DISCONNECTED': '🔴'
+    }[type] || '📋';
+    
+    // Check if this status should be shown (first time only)
+    let shouldShow = false;
+    
+    switch(type) {
+        case 'INIT':
+            shouldShow = !_statusState.initShown;
+            if (shouldShow) _statusState.initShown = true;
+            break;
+        case 'SENDING':
+            if (!_statusState.sendingShown.has(message)) {
+                _statusState.sendingShown.add(message);
+                shouldShow = true;
+            }
+            break;
+        case 'WAITING':
+            if (!_statusState.waitingShown.has(message)) {
+                _statusState.waitingShown.add(message);
+                shouldShow = true;
+            }
+            break;
+        case 'SUCCESS':
+            if (!_statusState.successShown.has(message)) {
+                _statusState.successShown.add(message);
+                shouldShow = true;
+            }
+            break;
+        case 'FAILED':
+            if (!_statusState.failedShown.has(message)) {
+                _statusState.failedShown.add(message);
+                shouldShow = true;
+            }
+            break;
+        case 'READY':
+            shouldShow = !_statusState.readyShown;
+            if (shouldShow) _statusState.readyShown = true;
+            break;
+        case 'WARNING':
+            if (!_statusState.warningShown.has(message)) {
+                _statusState.warningShown.add(message);
+                shouldShow = true;
+            }
+            break;
+        case 'DISCONNECTED':
+            shouldShow = !_statusState.disconnectedShown;
+            if (shouldShow) _statusState.disconnectedShown = true;
+            break;
+    }
+    
+    if (shouldShow && DEBUG) {
+        console.log(`%c[STATUS] ${emoji} ${type}${message ? ': ' + message : ''}`, 
+            type === 'FAILED' || type === 'DISCONNECTED' ? 'color: #ff3b30; font-weight: bold;' :
+            type === 'SUCCESS' || type === 'READY' ? 'color: #34c759; font-weight: bold;' :
+            type === 'WARNING' ? 'color: #ff9500; font-weight: bold;' :
+            type === 'SENDING' || type === 'WAITING' ? 'color: #0084ff; font-weight: bold;' :
+            'color: #5856d6; font-weight: bold;'
+        );
+        
+        // Update last status
+        _statusState.lastStatus = { type, message, timestamp: now };
+    }
+}
+
+// Legacy debug functions - now using clean status logging
+function debugLog(...args) {
+    // Only log in development and only first occurrence
+    if (DEBUG && window.location.hostname === 'localhost') {
+        const key = args[0];
+        if (!window._debugCache) window._debugCache = new Set();
+        const cacheKey = key.substring(0, 50);
+        if (!window._debugCache.has(cacheKey)) {
+            window._debugCache.add(cacheKey);
+            console.log('[STATUS-CORE]', ...args);
+            setTimeout(() => window._debugCache.delete(cacheKey), 5000);
+        }
+    }
+}
+
+function debugError(...args) {
+    if (DEBUG) {
+        console.error('[STATUS-CORE ERROR]', ...args);
+    }
+}
+
+function debugWarn(...args) {
+    if (DEBUG) {
+        console.warn('[STATUS-CORE WARN]', ...args);
+    }
+}
 
 // =============================================
 // ENVIRONMENT AUTO-DETECTION SYSTEM (ENHANCED)
@@ -114,14 +232,11 @@ const IframeEnvironment = {
             else if (this.isProduction) this.type = 'PRODUCTION';
             else this.type = 'UNKNOWN';
             
-            // Silent log - only once
-            if (!window.__ENV_LOGGED__) {
-                window.__ENV_LOGGED__ = true;
-                console.log(`[Environment] Type: ${this.type}`);
-            }
+            logStatus('INIT', `Environment: ${this.type}`);
             
             return this.type;
         } catch (e) {
+            debugError('Environment detection failed:', e);
             this.type = 'UNKNOWN';
             return this.type;
         }
@@ -147,10 +262,10 @@ const IframeEnvironment = {
             case 'LOCAL_DEV':
                 return {
                     ...baseConfig,
-                    handshakeTimeout: 10000,
+                    handshakeTimeout: 5000,
                     heartbeatInterval: 30000,
-                    maxRetries: 5,
-                    maxRecoveryAttempts: 5,
+                    maxRetries: 3,
+                    maxRecoveryAttempts: 3,
                     originChecks: 'relaxed',
                     crypto: 'disabled',
                     compatibilityMode: true,
@@ -160,9 +275,9 @@ const IframeEnvironment = {
             case 'RENDER_HOSTED':
                 return {
                     ...baseConfig,
-                    handshakeTimeout: 15000,
+                    handshakeTimeout: 8000,
                     heartbeatInterval: 25000,
-                    maxRetries: 7,
+                    maxRetries: 5,
                     maxRecoveryAttempts: 4,
                     originChecks: 'strict',
                     crypto: 'enabled',
@@ -173,9 +288,9 @@ const IframeEnvironment = {
             case 'VPN_NETWORK':
                 return {
                     ...baseConfig,
-                    handshakeTimeout: 30000,
+                    handshakeTimeout: 15000,
                     heartbeatInterval: 45000,
-                    maxRetries: 10,
+                    maxRetries: 7,
                     maxRecoveryAttempts: 5,
                     originChecks: 'standard',
                     crypto: 'enabled',
@@ -188,7 +303,7 @@ const IframeEnvironment = {
             case 'PRODUCTION':
                 return {
                     ...baseConfig,
-                    handshakeTimeout: 10000,
+                    handshakeTimeout: 5000,
                     heartbeatInterval: 20000,
                     maxRetries: 3,
                     maxRecoveryAttempts: 2,
@@ -297,7 +412,7 @@ const IframeEnvironment = {
     },
     
     logEnvironment() {
-        // Silent - already logged once
+        // Silent - already logged once with INIT
     }
 };
 
@@ -305,88 +420,20 @@ const IframeEnvironment = {
 IframeEnvironment.detect();
 
 // =============================================
-// FIX 1 — Robust Parent Handshake with Guard
+// FIX 1 — REMOVED CONFLICTING HANDSHAKE SYSTEM
 // =============================================
-if (!window.__STATUS_HANDSHAKE_INITIALIZED__) {
-    window.__STATUS_HANDSHAKE_INITIALIZED__ = true;
-
-    let handshakeAttempts = 0;
-    const maxAttempts = 5;
-
-    function initiateHandshake() {
-        if (handshakeAttempts >= maxAttempts) return;
-
-        handshakeAttempts++;
-
-        try {
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: "CHILD_HANDSHAKE",
-                    source: "status-core",
-                    handshakeId: `handshake_${Date.now()}_${handshakeAttempts}`,
-                    timestamp: Date.now()
-                }, "*");
-            }
-        } catch (e) {
-            // Silent fail
-        }
-    }
-
-    // Only set interval if not already set
-    if (!window.__HANDSHAKE_INTERVAL__) {
-        window.__HANDSHAKE_INTERVAL__ = setInterval(() => {
-            if (window.__PARENT_ACK_RECEIVED__) {
-                clearInterval(window.__HANDSHAKE_INTERVAL__);
-                window.__HANDSHAKE_INTERVAL__ = null;
-            } else {
-                initiateHandshake();
-            }
-        }, 2000);
-    }
-
-    // Add message listener if not already added
-    if (!window.__HANDSHAKE_LISTENER_ADDED__) {
-        window.__HANDSHAKE_LISTENER_ADDED__ = true;
-        
-        window.addEventListener("message", (event) => {
-            if (!event.data) return;
-
-            if (event.data.type === "PARENT_ACK") {
-                window.__PARENT_ACK_RECEIVED__ = true;
-                
-                // Update state if available
-                if (typeof state !== 'undefined') {
-                    state.parentDetected = true;
-                    state.handshakeState = 'handshake_acked';
-                }
-                
-                if (typeof IframeAuthority !== 'undefined') {
-                    IframeAuthority.parentDetected = true;
-                }
-                
-                // Clear interval
-                if (window.__HANDSHAKE_INTERVAL__) {
-                    clearInterval(window.__HANDSHAKE_INTERVAL__);
-                    window.__HANDSHAKE_INTERVAL__ = null;
-                }
-            }
-        });
-    }
-
-    // Start initial handshake
-    initiateHandshake();
-}
 
 // =============================================
-// FIX 2 — Fetch Failure Safe Handling
+// FIX 2 — Fetch Failure Safe Handling (Enhanced)
 // =============================================
 async function safeFetch(url, options = {}) {
     // Check if we should attempt fetch
     if (!navigator.onLine) {
+        logStatus('WARNING', 'Network offline');
         return { success: false, message: "Network offline", offline: true };
     }
     
-    // Track attempts to prevent console spam
+    // Track attempts but don't suppress errors completely
     const fetchKey = `fetch_${url}`;
     if (!window.__FETCH_ATTEMPTS__) window.__FETCH_ATTEMPTS__ = {};
     
@@ -412,9 +459,9 @@ async function safeFetch(url, options = {}) {
         // Count attempts
         window.__FETCH_ATTEMPTS__[fetchKey] = (window.__FETCH_ATTEMPTS__[fetchKey] || 0) + 1;
         
-        // Only log first 3 attempts, then be silent
-        if (window.__FETCH_ATTEMPTS__[fetchKey] <= 3) {
-            console.error("status fetch failed:", error.message);
+        // Only log first attempt failure
+        if (window.__FETCH_ATTEMPTS__[fetchKey] === 1) {
+            logStatus('FAILED', `Fetch failed: ${error.message}`);
         }
         
         return { success: false, message: "Network issue", error: error.message };
@@ -425,7 +472,7 @@ async function safeFetch(url, options = {}) {
 // COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY
 // =============================================
 const CompatibilityBridge = {
-    version: '5.0',
+    version: '5.4',
     legacyMode: false,
     adapters: new Map(),
     transforms: new Map(),
@@ -436,7 +483,7 @@ const CompatibilityBridge = {
         this.registerAdapters();
         this.registerTransforms();
         this.registerFallbacks();
-        // Silent initialization
+        debugLog('CompatibilityBridge initialized, legacyMode:', this.legacyMode);
         return this;
     },
     
@@ -624,81 +671,7 @@ const CompatibilityBridge = {
 const isStandaloneMode = !window.parent || window.parent === window || !document.referrer;
 
 if (isStandaloneMode) {
-    // Silent standalone mode - no console warning
-    
-    // Override TransportAgent.send to be no-op in standalone mode
-    const originalSend = TransportAgent?.send;
-    if (typeof TransportAgent !== 'undefined') {
-        TransportAgent.send = function(type, payload = {}, options = {}) {
-            if (type === 'PING' || type === 'HEARTBEAT') {
-                return Promise.resolve({ success: true, standalone: true });
-            }
-            
-            if (options.requiresAck) {
-                if (type === 'CHILD_READY' || type === 'HANDSHAKE_REQUEST' || type === 'SESSION_SYNC') {
-                    setTimeout(() => {
-                        const mockResponse = {
-                            type: type === 'CHILD_READY' ? 'PARENT_READY' : 
-                                  type === 'HANDSHAKE_REQUEST' ? 'HANDSHAKE_ACK' : 'SESSION_SYNC',
-                            inResponseTo: options.messageId,
-                            payload: {
-                                session: {
-                                    user: { id: 'guest', displayName: 'Guest User' },
-                                    token: 'standalone-token',
-                                    permissions: ['guest', 'view_statuses']
-                                }
-                            }
-                        };
-                        
-                        if (typeof receiveFromParent !== 'undefined') {
-                            receiveFromParent({ data: mockResponse, origin: window.location.origin });
-                        }
-                    }, 100);
-                    
-                    return new Promise((resolve) => {
-                        setTimeout(() => resolve({ success: true, standalone: true }), 200);
-                    });
-                }
-            }
-            
-            return Promise.resolve({ success: true, standalone: true });
-        };
-    }
-    
-    // Override startEnhancedHeartbeat
-    if (typeof startEnhancedHeartbeat !== 'undefined') {
-        const originalHeartbeat = startEnhancedHeartbeat;
-        startEnhancedHeartbeat = function() {
-            // Silent - heartbeat disabled
-            return;
-        };
-    }
-    
-    // Mark as handshake complete
-    setTimeout(() => {
-        if (typeof state !== 'undefined') {
-            state.parentDetected = true;
-            state.handshakeComplete = true;
-            state.handshakeState = 'active';
-            state.sessionActive = true;
-            state.isGuestMode = false;
-            state.sessionMirror = {
-                validated: true,
-                user: { id: 'guest', displayName: 'Guest User' },
-                token: 'standalone-token',
-                permissions: ['guest', 'view_statuses']
-            };
-        }
-        
-        if (typeof isTokenReady !== 'undefined') {
-            isTokenReady = true;
-            if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-                triggerTokenReadyCallbacks();
-            }
-        }
-        
-        // Silent activation
-    }, 500);
+    debugLog('Running in standalone mode (no parent iframe)');
 }
 
 // =============================================
@@ -740,6 +713,7 @@ const IframeAuthority = {
         this.validateSecurityContext();
         this.addTrustedDomain(this.backendDomain);
         this.addTrustedDomain(this.frontendDomain);
+        debugLog('IframeAuthority initialized');
         return this;
     },
     
@@ -750,6 +724,7 @@ const IframeAuthority = {
                 try {
                     this.parentOrigin = new URL(document.referrer).origin;
                     this.addTrustedDomain(this.parentOrigin);
+                    debugLog('Parent detected from referrer:', this.parentOrigin);
                 } catch {}
             }
         } catch (e) {
@@ -837,7 +812,7 @@ const DiagnosticsAgent = {
     
     enable() {
         this.enabled = true;
-        // Silent enable
+        debugLog('Diagnostics enabled');
     },
     
     disable() {
@@ -864,10 +839,10 @@ const DiagnosticsAgent = {
         
         if (level === 'error') {
             this.metrics.errors++;
-            // Silent - no console
+            logStatus('FAILED', `${module}: ${message}`);
         } else if (level === 'warn') {
             this.metrics.warnings++;
-            // Silent - no console
+            logStatus('WARNING', `${module}: ${message}`);
         }
     },
     
@@ -996,10 +971,6 @@ function log(level, module, message, data = null) {
                 DiagnosticsAgent.warn(module, message, data);
                 setTimeout(() => warningCache.delete(key), 30000);
             }
-        } else if (level === LOG_LEVEL.DEBUG) {
-            DiagnosticsAgent.debug(module, message, data);
-        } else {
-            DiagnosticsAgent.info(module, message, data);
         }
     } catch (e) {}
 }
@@ -1017,6 +988,7 @@ const SafeStorage = {
     initialize() {
         this.checkAvailability();
         this.calculateUsage();
+        debugLog('SafeStorage initialized, available:', this.storageAvailable, 'type:', this.storageType);
         return this;
     },
     
@@ -1202,7 +1174,13 @@ const StartupGovernor = {
         const oldState = this.state;
         this.state = newState;
         
-        // Silent transition - no logging
+        if (newState === 'ACTIVE') {
+            logStatus('READY', 'System active');
+        } else if (newState === 'DEGRADED') {
+            logStatus('WARNING', 'System degraded');
+        } else if (newState === 'RECOVERING') {
+            logStatus('WARNING', 'Recovering...');
+        }
         
         this.stateChangeListeners.forEach(listener => {
             try {
@@ -1239,6 +1217,7 @@ const StartupGovernor = {
         this.handshakeAttempted = true;
         this.handshakeStartTime = Date.now();
         DiagnosticsAgent.increment('handshakeAttempts');
+        logStatus('WAITING', 'Handshake started');
         
         return true;
     },
@@ -1248,6 +1227,7 @@ const StartupGovernor = {
         this.handshakeCompleted = true;
         this.handshakeEndTime = Date.now();
         DiagnosticsAgent.increment('handshakeSuccess');
+        logStatus('SUCCESS', 'Handshake completed');
     },
     
     activate() {
@@ -1257,23 +1237,26 @@ const StartupGovernor = {
     
     degrade(reason) {
         this.transition('DEGRADED');
-        // Silent degrade
+        logStatus('WARNING', reason || 'System degraded');
     },
     
     recover() {
         this.transition('RECOVERING');
         this.recoveryAttempts++;
         DiagnosticsAgent.increment('recoveryAttempts');
+        logStatus('WARNING', 'Recovering, attempt ' + this.recoveryAttempts);
     },
     
     recoverySucceeded() {
         DiagnosticsAgent.increment('recoverySuccess');
         this.activate();
+        logStatus('SUCCESS', 'Recovery succeeded');
     },
     
     recoveryFailed() {
         DiagnosticsAgent.increment('recoveryFailures');
         this.degrade('Recovery failed');
+        logStatus('FAILED', 'Recovery failed');
     },
     
     isActive() {
@@ -1294,6 +1277,7 @@ const StartupGovernor = {
     
     incrementRetry() {
         this.handshakeRetries++;
+        logStatus('WAITING', `Handshake retry ${this.handshakeRetries}/${this.maxHandshakeRetries}`);
     },
     
     resetRetries() {
@@ -1330,7 +1314,7 @@ const OriginTrustAdapter = {
         this.setTrustLevelFromEnvironment();
         this.addTrustedOrigin(this.backendDomain);
         this.addTrustedOrigin(this.frontendDomain);
-        
+        debugLog('OriginTrustAdapter initialized, trustLevel:', this.trustLevel);
         return this;
     },
     
@@ -1640,6 +1624,7 @@ const ReliabilityEngine = {
     },
     
     initialize() {
+        debugLog('ReliabilityEngine initialized');
         return this;
     },
     
@@ -1661,6 +1646,8 @@ const ReliabilityEngine = {
             this.stats.sent++;
             
             if (enhancedMessage.requiresAck) {
+                logStatus('SENDING', message.type || 'Message');
+                
                 const timer = setTimeout(() => {
                     if (this.pendingAcks.has(messageId)) {
                         const handler = this.pendingAcks.get(messageId);
@@ -1669,6 +1656,7 @@ const ReliabilityEngine = {
                             this.retry(messageId, enhancedMessage, handler);
                         } else {
                             this.stats.timedout++;
+                            logStatus('FAILED', `${message.type || 'Message'} - ACK timeout`);
                             handler.reject(new Error('ACK timeout'));
                             this.pendingAcks.delete(messageId);
                         }
@@ -1699,6 +1687,7 @@ const ReliabilityEngine = {
                     this.queueForRetry(enhancedMessage, resolve, reject);
                 } else {
                     this.stats.failed++;
+                    logStatus('FAILED', `${message.type || 'Message'} - ${error.message}`);
                     reject(error);
                 }
             }
@@ -1801,6 +1790,7 @@ const ReliabilityEngine = {
         const handler = this.pendingAcks.get(messageId);
         if (handler) {
             clearTimeout(handler.timer);
+            logStatus('SUCCESS', handler.message.type || 'Message');
             handler.resolve({ success: true, messageId, ack: true });
             this.pendingAcks.delete(messageId);
             this.stats.received++;
@@ -1891,7 +1881,8 @@ const MESSAGE_TYPES = {
     HIGHLIGHT_UPDATE: 'HIGHLIGHT_UPDATE',
     HIGHLIGHT_DELETE: 'HIGHLIGHT_DELETE',
     HIGHLIGHT_ADD_STATUS: 'HIGHLIGHT_ADD_STATUS',
-    HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS'
+    HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS',
+    IFRAME_REGISTERED: 'IFRAME_REGISTERED'
 };
 
 // =============================================
@@ -1907,6 +1898,7 @@ const RecoveryManager = {
     
     initialize() {
         this.registerStrategies();
+        debugLog('RecoveryManager initialized');
         return this;
     },
     
@@ -1960,6 +1952,7 @@ const RecoveryManager = {
         } catch (error) {
             this.recoveryInProgress = false;
             StartupGovernor.recoveryFailed();
+            logStatus('FAILED', `Recovery error: ${error.message}`);
             
             return { success: false, error: error.message };
         }
@@ -2153,6 +2146,7 @@ const IframeHandshakeAuthority = {
     
     initialize() {
         this.reset();
+        debugLog('IframeHandshakeAuthority initialized');
         return this;
     },
     
@@ -2184,6 +2178,7 @@ const IframeHandshakeAuthority = {
         
         // Check if already complete
         if (typeof state !== 'undefined' && state.handshakeComplete) {
+            logStatus('SUCCESS', 'Handshake already complete (cached)');
             return { success: true, cached: true };
         }
         
@@ -2265,7 +2260,7 @@ const IframeHandshakeAuthority = {
             frameId: IframeAuthority.id,
             instanceId: IframeAuthority.instanceId,
             timestamp: Date.now(),
-            protocolVersion: '5.0',
+            protocolVersion: '5.4',
             module: 'status',
             environment: IframeEnvironment.type,
             capabilities: IframeEnvironment.getCapabilities(),
@@ -2299,7 +2294,9 @@ const IframeHandshakeAuthority = {
                     state.handshakeState = 'child_ready_sent';
                 }
             }
-        } catch (error) {}
+        } catch (error) {
+            debugError('Failed to send CHILD_READY:', error);
+        }
     },
     
     waitForParentReady() {
@@ -2311,6 +2308,7 @@ const IframeHandshakeAuthority = {
             
             const timeout = setTimeout(() => {
                 if (!this.parentReadyReceived) {
+                    // Still resolve - parent might not send PARENT_READY
                     resolve();
                 }
             }, IframeEnvironment.isVPNNetwork ? 6000 : 3000);
@@ -2348,7 +2346,7 @@ const IframeHandshakeAuthority = {
         const payload = {
             messageId: this.handshakeId,
             timestamp: Date.now(),
-            protocolVersion: '5.0',
+            protocolVersion: '5.4',
             module: 'status',
             frameId: IframeAuthority.id,
             instanceId: IframeAuthority.instanceId,
@@ -2378,7 +2376,6 @@ const IframeHandshakeAuthority = {
                 if (typeof state !== 'undefined') {
                     state.handshakeState = 'handshake_sent';
                 }
-                
                 return response;
             }
         } catch (error) {
@@ -2393,6 +2390,7 @@ const IframeHandshakeAuthority = {
                     if (this.retries > 0) {
                         reject(new Error('HANDSHAKE_ACK timeout'));
                     } else {
+                        // Still resolve - might be legacy parent
                         resolve();
                     }
                 }
@@ -2456,7 +2454,9 @@ const IframeHandshakeAuthority = {
                     state.handshakeState = 'session_requested';
                 }
             }
-        } catch (error) {}
+        } catch (error) {
+            debugError('Failed to request SESSION_SYNC:', error);
+        }
     },
     
     waitForSessionSync() {
@@ -2540,7 +2540,9 @@ const IframeHandshakeAuthority = {
                     });
                 }
             }
-        } catch (error) {}
+        } catch (error) {
+            debugError('Capability negotiation failed:', error);
+        }
     },
     
     async validateOrigin() {
@@ -2572,12 +2574,15 @@ const IframeHandshakeAuthority = {
                     }
                 }
             }
-        } catch (error) {}
+        } catch (error) {
+            debugError('Origin validation failed:', error);
+        }
     },
     
     completeHandshake() {
         this.status = 'complete';
         this.endTime = Date.now();
+        logStatus('SUCCESS', 'Handshake completed');
         
         if (typeof state !== 'undefined') {
             state.handshakeComplete = true;
@@ -2596,7 +2601,7 @@ const IframeHandshakeAuthority = {
             this.resolve({ 
                 success: true, 
                 session: typeof getSessionMirror !== 'undefined' ? getSessionMirror() : null,
-                protocolVersion: '5.0',
+                protocolVersion: '5.4',
                 capabilities: typeof IframeAuthority !== 'undefined' ? Array.from(IframeAuthority.parentCapabilities) : []
             });
         }
@@ -2620,6 +2625,11 @@ const IframeHandshakeAuthority = {
         if (typeof requestParentConfig !== 'undefined') {
             requestParentConfig();
         }
+        
+        // Dispatch event for UI
+        document.dispatchEvent(new CustomEvent('handshakeComplete', {
+            detail: { timestamp: Date.now() }
+        }));
     },
     
     handleHandshakeError(error) {
@@ -2643,7 +2653,7 @@ const IframeHandshakeAuthority = {
                 this.startHandshakeSequence();
             }, delay);
         } else {
-            // Max retries exceeded, enable guest mode
+            logStatus('WARNING', 'Handshake failed, using guest mode');
             
             if (typeof state !== 'undefined' && state.sessionMirror?.validated) {
                 if (typeof activateSessionFromMirror !== 'undefined') {
@@ -2664,17 +2674,107 @@ const IframeHandshakeAuthority = {
                 StartupGovernor.degrade('Handshake failed, using fallback');
             }
             
-            if (this.reject) {
-                this.reject(error);
+            // Still resolve with guest mode instead of rejecting
+            if (this.resolve) {
+                this.resolve({ 
+                    success: true, 
+                    guestMode: true,
+                    session: { 
+                        user: { id: 'guest', displayName: 'Guest', isGuest: true },
+                        permissions: ['guest', 'view_statuses']
+                    }
+                });
             }
             
             // Attempt recovery
             if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
                 RecoveryManager.recover('handshake', { error });
             }
+            
+            // Dispatch event for UI to know we're in guest mode
+            document.dispatchEvent(new CustomEvent('guestModeEnabled', {
+                detail: { timestamp: Date.now() }
+            }));
         }
     }
 }.initialize();
+
+// =============================================
+// PASSIVE REGISTRATION - ONCE ONLY
+// =============================================
+let statusRegistered = false;
+let lastStatusRegister = 0;
+
+function registerStatusModule() {
+    if (statusRegistered) return;
+    
+    const now = Date.now();
+    if (now - lastStatusRegister < 3000) return;
+    
+    lastStatusRegister = now;
+    
+    try {
+        if (window.parent && window.parent !== window) {
+            const message = {
+                source: 'IFRAME',
+                app: 'chat-system',
+                version: '2.0',
+                type: MESSAGE_TYPES.IFRAME_REGISTERED,
+                module: 'status',
+                frameId: IframeAuthority.id,
+                instanceId: IframeAuthority.instanceId,
+                timestamp: now
+            };
+            
+            window.parent.postMessage(message, window.location.origin);
+            statusRegistered = true;
+        }
+    } catch (error) {
+        debugError('Failed to register status module:', error);
+    }
+}
+
+window.addEventListener('load', registerStatusModule);
+
+// =============================================
+// TOLERANT HEARTBEAT SYSTEM
+// =============================================
+function handleHeartbeatMiss() {
+    state.heartbeatFailures++;
+    
+    if (state.heartbeatFailures < state.maxHeartbeatFailures) {
+        return;
+    }
+    
+    logStatus('WARNING', 'Heartbeat missed, refreshing');
+    refreshStatuses();
+}
+
+function resetHeartbeat() {
+    state.heartbeatFailures = 0;
+}
+
+function refreshStatuses() {
+    if (!isAuthenticated()) return;
+    
+    secureApiCall('/api/statuses')
+        .then(response => {
+            if (response && response.statuses) {
+                statuses = response.statuses;
+                statuses = filterStatusesByPrivacy(statuses);
+                statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                resetHeartbeat();
+                
+                document.dispatchEvent(new CustomEvent('statusUpdate', {
+                    detail: { type: 'refresh', statuses }
+                }));
+            }
+        })
+        .catch(error => {
+            debugError('Failed to refresh statuses:', error);
+        });
+}
 
 // =============================================
 // GLOBAL STATE - MODULE SCOPED (PRESERVED)
@@ -2764,12 +2864,11 @@ const state = {
     isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
     offlineModeEnabled: false,
     
-    // Heartbeat tracking
-    heartbeatInterval: null,
+    // Heartbeat tracking - TOLERANT
+    heartbeatFailures: 0,
+    maxHeartbeatFailures: 3,
     lastHeartbeatSent: null,
     lastHeartbeatReceived: null,
-    heartbeatMissed: 0,
-    maxMissedHeartbeats: 3,
     
     listeners: new Set(),
     intervals: new Set(),
@@ -2803,7 +2902,7 @@ const state = {
     handshakeRetries: 0,
     maxHandshakeRetries: IframeEnvironment.getConfig().maxRetries,
     
-    protocolVersion: '5.0',
+    protocolVersion: '5.4',
     parentProtocolVersion: null,
     
     diagnosticsEnabled: false,
@@ -2814,7 +2913,7 @@ const state = {
 // IFRAME TRANSPORT - CENTRALIZED COMMUNICATION LAYER
 // =============================================
 const IframeTransport = {
-    version: '5.0',
+    version: '5.4',
     messageQueue: [],
     isProcessing: false,
     retryQueue: new Map(),
@@ -2834,7 +2933,29 @@ const IframeTransport = {
     keepalive: IframeEnvironment.getConfig().keepalive,
     
     initialize() {
+        debugLog('IframeTransport initialized');
         return this;
+    },
+    
+    // Adapt message for parent's expected format
+    adaptForParent(message) {
+        const adapted = {
+            source: 'IFRAME',
+            app: 'chat-system',
+            version: '2.0',
+            type: message.type,
+            messageId: message.messageId,
+            timestamp: message.timestamp,
+            frameId: message.frameId,
+            instanceId: message.instanceId,
+            payload: message.payload,
+            requiresAck: message.requiresAck,
+            ...(message.token ? { token: message.token } : {}),
+            ...(message.inResponseTo ? { inResponseTo: message.inResponseTo } : {}),
+            ...(message.sequence ? { sequence: message.sequence } : {})
+        };
+        
+        return adapted;
     },
     
     send(type, payload = {}, options = {}) {
@@ -2843,17 +2964,14 @@ const IframeTransport = {
                 if (!IframeAuthority.parentDetected && !options.bypassParentCheck) {
                     if (options.offlineQueue) {
                         this.queueOffline(type, payload, options, resolve, reject);
-                    } else {
-                        reject(new Error('Parent not detected'));
                     }
-                    return;
                 }
                 
                 const messageId = `msg_${Date.now()}_${++this.messageCounter}_${Math.random().toString(36).substr(2, 6)}`;
                 const timestamp = Date.now();
                 
                 const message = {
-                    protocol: options.protocol || 'KYN-5.0',
+                    protocol: 'KYN-5.4',
                     version: this.version,
                     messageId,
                     type,
@@ -2878,6 +2996,10 @@ const IframeTransport = {
                     message.legacy = true;
                 }
                 
+                if (options.inResponseTo) {
+                    message.inResponseTo = options.inResponseTo;
+                }
+                
                 if (message.requiresAck) {
                     const timeout = options.timeout || (IframeEnvironment.isVPNNetwork ? 15000 : 10000);
                     
@@ -2888,6 +3010,7 @@ const IframeTransport = {
                             if (message.retryCount < message.maxRetries) {
                                 this.retryMessage(message, options, handler);
                             } else {
+                                logStatus('FAILED', `${type} - ACK timeout`);
                                 handler.reject(new Error('ACK timeout'));
                                 this.pendingAcks.delete(messageId);
                             }
@@ -2904,9 +3027,11 @@ const IframeTransport = {
                     });
                 }
                 
-                // Send via postMessage
+                // Send via postMessage with adaptation for parent
                 if (window.parent && window.parent !== window) {
-                    window.parent.postMessage(message, '*');
+                    // Adapt message for parent's expected format
+                    const parentMessage = this.adaptForParent(message);
+                    window.parent.postMessage(parentMessage, window.location.origin);
                     DiagnosticsAgent.increment('messagesSent');
                     
                     if (!message.requiresAck) {
@@ -3017,6 +3142,7 @@ const IframeTransport = {
         const handler = this.pendingAcks.get(messageId);
         if (handler) {
             clearTimeout(handler.timer);
+            logStatus('SUCCESS', handler.message.type);
             handler.resolve({ success: true, messageId, ack: true });
             this.pendingAcks.delete(messageId);
         }
@@ -3061,7 +3187,7 @@ const IframeTransport = {
                 }
             }, { requiresAck: false, silent: true });
             
-            // Check for missed heartbeats
+            // Check for missed heartbeats - TOLERANT
             if (this.lastHeartbeatReceived) {
                 const timeSinceResponse = Date.now() - this.lastHeartbeatReceived;
                 if (timeSinceResponse > IframeEnvironment.getConfig().heartbeatInterval * 2) {
@@ -3069,6 +3195,7 @@ const IframeTransport = {
                     
                     if (this.heartbeatMissed >= this.maxMissedHeartbeats) {
                         this.connectionStatus = 'degraded';
+                        logStatus('WARNING', `Heartbeat missed ${this.heartbeatMissed} times`);
                         
                         if (typeof StartupGovernor !== 'undefined') {
                             StartupGovernor.degrade('Heartbeat missed');
@@ -3146,7 +3273,7 @@ const NavigationGuard = {
         this.setupBeforeUnload();
         this.setupHistoryTracking();
         this.setupNavigationListeners();
-        
+        debugLog('NavigationGuard initialized');
         return this;
     },
     
@@ -3307,7 +3434,7 @@ function createErrorBoundary(fn, featureName, fallback = null) {
         try {
             return await fn(...args);
         } catch (error) {
-            DiagnosticsAgent.error('ErrorBoundary', `${featureName}: ${error.message}`, error);
+            logStatus('FAILED', `${featureName}: ${error.message}`);
             
             if (typeof state !== 'undefined' && state.disabledFeatures) {
                 state.disabledFeatures.add(featureName);
@@ -3353,6 +3480,7 @@ const CIRCUIT_BREAKER = {
     recordFailure(service) {
         this.failures[service] = (this.failures[service] || 0) + 1;
         this.lastFailure[service] = Date.now();
+        logStatus('WARNING', `Circuit failure for ${service}: ${this.failures[service]}`);
     },
     
     recordSuccess(service) {
@@ -3375,6 +3503,7 @@ const MessageFirewall = {
     
     init() {
         this.registerValidators();
+        debugLog('MessageFirewall initialized');
         return this;
     },
     
@@ -3473,6 +3602,10 @@ const MessageFirewall = {
         
         this.validators.set('RECOVERY_RESPONSE', (msg) => {
             return msg.payload && msg.payload.success !== undefined;
+        });
+        
+        this.validators.set('IFRAME_REGISTERED', (msg) => {
+            return msg.payload && msg.payload.module === 'status';
         });
     },
     
@@ -3690,7 +3823,7 @@ function signMessage(message) {
 // =============================================
 function formatCanonicalMessage(type, payload = {}, options = {}) {
     const message = {
-        protocol: options.protocol || 'KYN-5.0',
+        protocol: options.protocol || 'KYN-5.4',
         messageId: options.messageId || generateMessageId(),
         type: type,
         source: options.source || 'iframe',
@@ -3775,6 +3908,7 @@ function removeMessageHandler(type, handler) {
     if (index !== -1) handlers.splice(index, 1);
 }
 
+// Enhanced receiveFromParent to handle parent messages correctly
 const receiveFromParent = createErrorBoundary(async function(event) {
     try {
         // Update online status
@@ -3804,6 +3938,8 @@ const receiveFromParent = createErrorBoundary(async function(event) {
         if (typeof state !== 'undefined' && !state.securityContext.parentOrigin) {
             state.securityContext.parentOrigin = event.origin;
             OriginTrustAdapter.setParentOrigin(event.origin);
+            IframeAuthority.parentDetected = true;
+            state.parentDetected = true;
         }
         
         // Update parent protocol version
@@ -3843,7 +3979,7 @@ const receiveFromParent = createErrorBoundary(async function(event) {
         if (message.type === MESSAGE_TYPES.PONG) {
             if (typeof state !== 'undefined') {
                 state.lastHeartbeatReceived = Date.now();
-                state.heartbeatMissed = 0;
+                state.heartbeatFailures = 0;
             }
             
             if (typeof IframeTransport !== 'undefined') {
@@ -3857,6 +3993,20 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             if (typeof state !== 'undefined') {
                 state.pageActivated = true;
             }
+            
+            // Trigger data refresh when page becomes active
+            if (typeof loadFreshDataInBackground !== 'undefined') {
+                setTimeout(() => {
+                    loadFreshDataInBackground();
+                }, 100);
+            }
+            
+            // Dispatch event for UI to refresh
+            document.dispatchEvent(new CustomEvent('pageActivated', {
+                detail: { timestamp: Date.now() }
+            }));
+            
+            return;
         }
         
         // Handle PARENT_READY
@@ -3889,10 +4039,15 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             
             const sessionData = message.payload;
             
-            // Update session mirror
+            // Update session mirror with actual data
             if (sessionData.token || sessionData.user) {
                 if (typeof updateSessionMirror !== 'undefined') {
                     updateSessionMirror(sessionData, 'session_sync');
+                }
+                
+                // If token is 'present' but we have the actual token, use it
+                if (sessionData.token === 'present' && sessionData.actualToken) {
+                    sessionData.token = sessionData.actualToken;
                 }
             }
             
@@ -3933,11 +4088,16 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.activate();
             }
+            
+            // Dispatch session ready event
+            document.dispatchEvent(new CustomEvent('sessionReady', {
+                detail: { session: sessionData }
+            }));
         }
         
         // Handle SESSION_ACK
         if (message.type === MESSAGE_TYPES.SESSION_ACK) {
-            // Silent
+            // No action needed
         }
         
         // Handle PING
@@ -4015,6 +4175,11 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             }
         }
         
+        // Handle IFRAME_REGISTERED
+        if (message.type === MESSAGE_TYPES.IFRAME_REGISTERED) {
+            // No action needed
+        }
+        
         // Handle legacy STATUS_ACK
         if (message.type === 'STATUS_ACK' && message.inResponseTo) {
             const ackHandler = state.pendingAcks.get(message.inResponseTo);
@@ -4037,7 +4202,7 @@ const receiveFromParent = createErrorBoundary(async function(event) {
         }
         
     } catch (e) {
-        DiagnosticsAgent.error('Receive', e.message, e);
+        logStatus('FAILED', `receiveFromParent: ${e.message}`);
         
         // Attempt recovery for critical errors
         if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
@@ -4157,6 +4322,7 @@ const SessionClient = {
     initialize() {
         this.loadCachedSession();
         this.setupRefreshTimer();
+        debugLog('SessionClient initialized');
         return this;
     },
     
@@ -4222,6 +4388,7 @@ const SessionClient = {
                 
                 this.cacheSession();
                 this.notifyListeners('refreshed', this.session);
+                logStatus('SUCCESS', 'Session refreshed');
                 
                 return this.session;
             }
@@ -4358,8 +4525,14 @@ function updateSessionMirror(sessionData, source = 'parent') {
         
         // Update token if provided
         if (sessionData.token && typeof sessionData.token === 'string') {
-            state.sessionMirror.token = sessionData.token;
-            state.token = sessionData.token;
+            // Handle 'present' placeholder - if we have actual token, use it
+            if (sessionData.token === 'present' && sessionData.actualToken) {
+                state.sessionMirror.token = sessionData.actualToken;
+                state.token = sessionData.actualToken;
+            } else {
+                state.sessionMirror.token = sessionData.token;
+                state.token = sessionData.token;
+            }
         }
         
         // Update refresh token if provided
@@ -4439,7 +4612,7 @@ function updateSessionMirror(sessionData, source = 'parent') {
         
         return false;
     } catch (error) {
-        DiagnosticsAgent.error('Session', 'updateSessionMirror error', error);
+        logStatus('FAILED', `updateSessionMirror: ${error.message}`);
         return false;
     }
 }
@@ -4460,7 +4633,7 @@ function isSessionMirrorValid() {
 }
 
 // =============================================
-// ENHANCED HEARTBEAT SYSTEM
+// ENHANCED HEARTBEAT SYSTEM - TOLERANT
 // =============================================
 function startEnhancedHeartbeat() {
     if (state.heartbeatInterval) {
@@ -4492,19 +4665,19 @@ function startEnhancedHeartbeat() {
                 }
             }, { requiresAck: false, silent: true });
             
-            // Check for missed heartbeats
+            // Check for missed heartbeats - TOLERANT
             if (state.lastHeartbeatReceived) {
                 const timeSinceLastResponse = Date.now() - state.lastHeartbeatReceived;
                 const heartbeatThreshold = IframeEnvironment.isVPNNetwork ? 60000 : 45000;
                 
                 if (timeSinceLastResponse > heartbeatThreshold) {
-                    state.heartbeatMissed++;
+                    state.heartbeatFailures++;
                     
-                    if (state.heartbeatMissed >= state.maxMissedHeartbeats) {
-                        // Trigger recovery
-                        if (typeof RecoveryManager !== 'undefined') {
-                            RecoveryManager.recover('connection');
-                        }
+                    if (state.heartbeatFailures >= state.maxHeartbeatFailures) {
+                        logStatus('WARNING', 'Connection degraded');
+                        
+                        // Attempt soft refresh instead of hard recovery
+                        refreshStatuses();
                     }
                 }
             }
@@ -4529,14 +4702,14 @@ async function triggerConnectionRecovery() {
             frameId: state.frameId,
             instanceId: state.instanceId,
             metrics: {
-                heartbeatMissed: state.heartbeatMissed,
+                heartbeatMissed: state.heartbeatFailures,
                 lastHeartbeatSent: state.lastHeartbeatSent,
                 lastHeartbeatReceived: state.lastHeartbeatReceived
             }
         }, { requiresAck: true, timeout: 10000 });
         
         if (response && response.payload && response.payload.success) {
-            state.heartbeatMissed = 0;
+            state.heartbeatFailures = 0;
         }
     } catch (error) {
         // If recovery fails, attempt re-handshake
@@ -4560,7 +4733,7 @@ async function reestablishConnection() {
         const result = await HandshakeClient.execute({ maxRetries: 3 });
         
         if (result && result.success) {
-            state.heartbeatMissed = 0;
+            state.heartbeatFailures = 0;
             
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.activate();
@@ -4569,15 +4742,11 @@ async function reestablishConnection() {
     } catch (error) {
         // Enable offline mode
         state.offlineModeEnabled = true;
-        if (typeof isOfflineMode !== 'undefined') {
-            isOfflineMode = true;
-        }
         
         if (typeof StartupGovernor !== 'undefined') {
             StartupGovernor.degrade('Connection lost');
         }
         
-        // Show offline UI
         document.dispatchEvent(new CustomEvent('connectionLost', {
             detail: { message: 'Connection lost. Using offline mode.' }
         }));
@@ -4599,7 +4768,9 @@ async function requestParentConfig() {
         if (response && response.payload && response.payload.config) {
             applyParentConfig(response.payload.config);
         }
-    } catch (error) {}
+    } catch (error) {
+        debugError('Failed to request parent config:', error);
+    }
 }
 
 function applyParentConfig(config) {
@@ -4659,6 +4830,7 @@ async function refreshToken() {
             }
             
             SafeStorage.set(UNIFIED_TOKEN_KEY, state.token);
+            logStatus('SUCCESS', 'Token refreshed');
             
             return state.token;
         }
@@ -4784,7 +4956,7 @@ async function preflightStage() {
         
         return { success: true };
     } catch (error) {
-        DiagnosticsAgent.error('Init', `Preflight failed: ${error.message}`, error);
+        logStatus('FAILED', `Preflight failed: ${error.message}`);
         return { success: false, fallback: true };
     }
 }
@@ -4802,7 +4974,7 @@ async function dependencyCheckStage() {
         state.dependenciesLoaded = true;
         return { success: true };
     } catch (error) {
-        DiagnosticsAgent.error('Init', `Dependency check failed: ${error.message}`, error);
+        logStatus('FAILED', `Dependency check failed: ${error.message}`);
         state.dependenciesLoaded = false;
         return { success: false, fallback: true };
     }
@@ -4833,7 +5005,7 @@ async function handshakeStage(options = {}) {
             return { success: true };
         }
     } catch (error) {
-        DiagnosticsAgent.error('Init', `Handshake failed: ${error.message}`, error);
+        logStatus('FAILED', `Handshake failed: ${error.message}`);
     }
     
     state.handshakeComplete = false;
@@ -4897,7 +5069,7 @@ async function sessionSyncStage(timeout = 5000) {
             return { success: true, guestMode: false, user: state.user };
         }
     } catch (error) {
-        DiagnosticsAgent.error('Init', `Session sync failed: ${error.message}`, error);
+        logStatus('FAILED', `Session sync failed: ${error.message}`);
     }
     
     if (state.sessionMirror.validated) {
@@ -4938,7 +5110,7 @@ async function serviceInitStage() {
         
         return { success: true };
     } catch (error) {
-        DiagnosticsAgent.error('Init', `Service init failed: ${error.message}`, error);
+        logStatus('FAILED', `Service init failed: ${error.message}`);
         return { success: false, fallback: true };
     }
 }
@@ -4993,10 +5165,11 @@ const initializeCore = createErrorBoundary(async function(options = {}) {
         const result = readyStage();
         
         StartupGovernor.releaseLock();
+        
         return result;
         
     } catch (error) {
-        DiagnosticsAgent.error('Core', `Initialization failed: ${error.message}`, error);
+        logStatus('FAILED', `Core initialization: ${error.message}`);
         
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
@@ -5044,6 +5217,11 @@ function enableGuestMode() {
         validated: false,
         guestMode: true
     };
+    
+    // Dispatch event for UI
+    document.dispatchEvent(new CustomEvent('guestModeEnabled', {
+        detail: { timestamp: Date.now() }
+    }));
 }
 
 function loadCachedSession() {
@@ -5065,7 +5243,7 @@ function loadCachedSession() {
             }
         }
     } catch (error) {
-        DiagnosticsAgent.error('Session', `Failed to load cached session: ${error.message}`, error);
+        debugError('Failed to load cached session:', error);
     }
     return null;
 }
@@ -5129,7 +5307,7 @@ const shutdownCore = createErrorBoundary(async function() {
         }
         
     } catch (error) {
-        DiagnosticsAgent.error('Core', `Shutdown error: ${error.message}`, error);
+        logStatus('FAILED', `Shutdown error: ${error.message}`);
     } finally {
         state.shutdownInProgress = false;
     }
@@ -5145,7 +5323,7 @@ addMessageHandler(MESSAGE_TYPES.STATUS, (message) => {
     }));
 });
 addMessageHandler(MESSAGE_TYPES.ERROR, (message) => {
-    DiagnosticsAgent.error('Parent', 'Error from parent', message.payload);
+    logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
 });
 addMessageHandler(MESSAGE_TYPES.DATA, (message) => {
     document.dispatchEvent(new CustomEvent('coreData', {
@@ -5204,12 +5382,25 @@ addMessageHandler(MESSAGE_TYPES.API_ERROR, (message) => {
 // Enhanced handlers
 addMessageHandler(MESSAGE_TYPES.PONG, (message) => {
     state.lastHeartbeatReceived = Date.now();
-    state.heartbeatMissed = 0;
+    state.heartbeatFailures = 0;
     IframeTransport.handlePong();
 });
 
+// PAGE_ACTIVATED handler
 addMessageHandler(MESSAGE_TYPES.PAGE_ACTIVATED, (message) => {
     state.pageActivated = true;
+    
+    // Trigger data refresh when page becomes active
+    if (typeof loadFreshDataInBackground !== 'undefined') {
+        setTimeout(() => {
+            loadFreshDataInBackground();
+        }, 100);
+    }
+    
+    // Dispatch event for UI to refresh
+    document.dispatchEvent(new CustomEvent('pageActivated', {
+        detail: { timestamp: Date.now() }
+    }));
 });
 
 addMessageHandler(MESSAGE_TYPES.NAVIGATE, (message) => {
@@ -5259,6 +5450,12 @@ addMessageHandler(MESSAGE_TYPES.RECOVERY_RESPONSE, (message) => {
     }
 });
 
+addMessageHandler(MESSAGE_TYPES.IFRAME_REGISTERED, (message) => {
+    if (message.payload && message.payload.module === 'status') {
+        // Acknowledgment received
+    }
+});
+
 // =============================================
 // FEATURE ISOLATION SYSTEM
 // =============================================
@@ -5272,7 +5469,7 @@ function registerFeature(name, implementation) {
         state.features.set(name, wrappedImplementation);
         return true;
     } catch (e) {
-        DiagnosticsAgent.error('Feature', `Registration failed ${name}: ${e.message}`, e);
+        logStatus('FAILED', `Feature registration failed: ${name} - ${e.message}`);
         return false;
     }
 }
@@ -5294,7 +5491,7 @@ function executeFeature(name, ...args) {
         
         return feature(...args);
     } catch (error) {
-        DiagnosticsAgent.error('Feature', `Execution failed ${name}: ${error.message}`, error);
+        logStatus('FAILED', `Feature execution failed: ${name} - ${error.message}`);
         state.disabledFeatures.add(name);
         return null;
     }
@@ -5370,7 +5567,7 @@ function getHealthMetrics() {
         messageCacheSize: state.messageCache.size,
         lastHeartbeat: state.lastHeartbeatSent,
         lastHeartbeatReceived: state.lastHeartbeatReceived,
-        heartbeatMissed: state.heartbeatMissed,
+        heartbeatFailures: state.heartbeatFailures,
         isOnline: state.isOnline,
         offlineModeEnabled: state.offlineModeEnabled,
         parentCapabilities: Array.from(state.parentCapabilities),
@@ -5456,7 +5653,7 @@ function initializeParentCoordination() {
         startSecureHandshake();
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'initializeParentCoordination error', error);
+        logStatus('FAILED', `Parent coordination: ${error.message}`);
         handleParentUnavailable();
     }
 }
@@ -5520,15 +5717,21 @@ function handleEnhancedParentMessage(event) {
                 break;
             case MESSAGE_TYPES.PONG:
                 state.lastHeartbeatReceived = Date.now();
-                state.heartbeatMissed = 0;
+                state.heartbeatFailures = 0;
                 IframeTransport.handlePong();
                 break;
             case MESSAGE_TYPES.PAGE_ACTIVATED:
                 parentCoordinator.handshakeState = 'active';
+                // Trigger data refresh
+                if (typeof loadFreshDataInBackground !== 'undefined') {
+                    setTimeout(() => {
+                        loadFreshDataInBackground();
+                    }, 100);
+                }
                 break;
         }
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'handleEnhancedParentMessage error', error);
+        logStatus('FAILED', `handleEnhancedParentMessage: ${error.message}`);
     }
 }
 
@@ -5543,7 +5746,7 @@ function startSecureHandshake() {
         requestSessionFromParent();
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'startSecureHandshake error', error);
+        logStatus('FAILED', `Secure handshake: ${error.message}`);
     }
 }
 
@@ -5562,12 +5765,12 @@ function sendChildReadyMessage() {
             environment: IframeEnvironment.type
         };
         
-        window.parent.postMessage(message, '*');
+        window.parent.postMessage(message, window.location.origin);
         parentCoordinator.childReadySent = true;
         state.childReadySent = true;
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'sendChildReadyMessage error', error);
+        logStatus('FAILED', `sendChildReadyMessage: ${error.message}`);
     }
 }
 
@@ -5592,7 +5795,7 @@ function requestSessionFromParent() {
             environment: IframeEnvironment.type
         };
         
-        window.parent.postMessage(message, '*');
+        window.parent.postMessage(message, window.location.origin);
         
         const timeoutMs = IframeEnvironment.isVPNNetwork ? 10000 : 5000;
         
@@ -5609,7 +5812,7 @@ function requestSessionFromParent() {
         }, timeoutMs);
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'requestSessionFromParent error', error);
+        logStatus('FAILED', `requestSessionFromParent: ${error.message}`);
         parentCoordinator.handshakeInProgress = false;
         handleSessionFailed();
     }
@@ -5656,7 +5859,7 @@ function handleSecureSessionData(message) {
         }
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'handleSecureSessionData error', error);
+        logStatus('FAILED', `handleSecureSessionData: ${error.message}`);
         parentCoordinator.handshakeInProgress = false;
         clearTimeout(parentCoordinator.handshakeTimeout);
     }
@@ -5669,7 +5872,7 @@ function bindUIAfterSession() {
         }
         updateUIBasedOnAuth();
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'bindUIAfterSession error', error);
+        logStatus('FAILED', `bindUIAfterSession: ${error.message}`);
     }
 }
 
@@ -5679,7 +5882,7 @@ function updateUIBasedOnAuth() {
             detail: { user: currentUser }
         }));
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'updateUIBasedOnAuth error', error);
+        logStatus('FAILED', `updateUIBasedOnAuth: ${error.message}`);
     }
 }
 
@@ -5698,10 +5901,10 @@ function sendSecureResponseToParent(type, data = {}) {
             }
         });
         
-        window.parent.postMessage(message, '*');
+        window.parent.postMessage(message, window.location.origin);
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'sendSecureResponseToParent error', error);
+        logStatus('FAILED', `sendSecureResponseToParent: ${error.message}`);
     }
 }
 
@@ -5735,7 +5938,7 @@ function clearSecureHandshake() {
         parentCoordinator.sessionRequestSent = false;
         parentCoordinator.handshakeRetries = 0;
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'clearSecureHandshake error', error);
+        logStatus('FAILED', `clearSecureHandshake: ${error.message}`);
     }
 }
 
@@ -5773,7 +5976,7 @@ function handleSessionData(sessionData) {
         startBackgroundInitializationWithSession();
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'handleSessionData error', error);
+        logStatus('FAILED', `handleSessionData: ${error.message}`);
         sendToParent(MESSAGE_TYPES.ERROR, {
             error: 'SESSION_PROCESSING_ERROR',
             message: error.message
@@ -5801,7 +6004,7 @@ function handleSessionUpdate(updateData) {
         updateSessionMirror(updateData, 'session_update');
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'handleSessionUpdate error', error);
+        logStatus('FAILED', `handleSessionUpdate: ${error.message}`);
     }
 }
 
@@ -5852,7 +6055,7 @@ function handleLogout(logoutData) {
         });
         
     } catch (error) {
-        DiagnosticsAgent.error('Parent', 'handleLogout error', error);
+        logStatus('FAILED', `handleLogout: ${error.message}`);
     }
 }
 
@@ -5866,7 +6069,6 @@ function handleParentUnavailable() {
     }
     
     state.offlineModeEnabled = true;
-    if (typeof isOfflineMode !== 'undefined') isOfflineMode = true;
     
     if (typeof StartupGovernor !== 'undefined') {
         StartupGovernor.degrade('Parent unavailable');
@@ -5895,11 +6097,11 @@ function startBackgroundInitializationWithSession() {
                     });
                 }
             } catch (error) {
-                DiagnosticsAgent.error('Background', 'startBackgroundInitializationWithSession error', error);
+                logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
             }
         }, 1000);
     } catch (error) {
-        DiagnosticsAgent.error('Background', 'startBackgroundInitializationWithSession error', error);
+        logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
     }
 }
 
@@ -5946,7 +6148,7 @@ async function makeParentApiRequest(endpoint, options = {}) {
                 }
             });
             
-            window.parent.postMessage(message, '*');
+            window.parent.postMessage(message, window.location.origin);
             
             const timeoutMs = IframeEnvironment.isVPNNetwork ? 60000 : 30000;
             
@@ -5970,7 +6172,7 @@ function handleApiResponse(responseData) {
 }
 
 function handleApiError(errorData) {
-    DiagnosticsAgent.error('API', 'API Error', errorData);
+    logStatus('FAILED', `API Error: ${errorData.error || 'Unknown error'}`);
 }
 
 function handleAuthValidated(data) {
@@ -5984,7 +6186,7 @@ function handleAuthValidated(data) {
             }
         }
     } catch (error) {
-        DiagnosticsAgent.error('Auth', 'handleAuthValidated error', error);
+        logStatus('FAILED', `handleAuthValidated: ${error.message}`);
     }
 }
 
@@ -6034,14 +6236,12 @@ function waitForTokenReady() {
                     }
                     setTimeout(checkToken, 100);
                 } catch (error) {
-                    DiagnosticsAgent.error('Token', 'waitForTokenReady.checkToken error', error);
                     resolve(false);
                 }
             };
             
             checkToken();
         } catch (error) {
-            DiagnosticsAgent.error('Token', 'waitForTokenReady error', error);
             resolve(false);
         }
     });
@@ -6055,7 +6255,7 @@ function onTokenReady(callback) {
             tokenReadyCallbacks.push(callback);
         }
     } catch (error) {
-        DiagnosticsAgent.error('Token', 'onTokenReady error', error);
+        logStatus('FAILED', `onTokenReady: ${error.message}`);
     }
 }
 
@@ -6066,11 +6266,11 @@ function triggerTokenReadyCallbacks() {
             try {
                 callback();
             } catch (error) {
-                DiagnosticsAgent.error('Token', 'triggerTokenReadyCallbacks callback error', error);
+                logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
             }
         }
     } catch (error) {
-        DiagnosticsAgent.error('Token', 'triggerTokenReadyCallbacks error', error);
+        logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
     }
 }
 
@@ -6105,7 +6305,6 @@ function getUnifiedToken() {
         
         return null;
     } catch (error) {
-        DiagnosticsAgent.error('Token', 'getUnifiedToken error', error);
         return null;
     }
 }
@@ -6134,7 +6333,6 @@ function migrateLegacyTokens() {
         
         return null;
     } catch (error) {
-        DiagnosticsAgent.error('Token', 'migrateLegacyTokens error', error);
         return null;
     }
 }
@@ -6146,7 +6344,6 @@ function isAuthenticated() {
         if (state.sessionActive && !state.isGuestMode) return true;
         return getUnifiedToken() !== null;
     } catch (error) {
-        DiagnosticsAgent.error('Auth', 'isAuthenticated error', error);
         return false;
     }
 }
@@ -6159,7 +6356,6 @@ async function queueApiRequest(requestFunction) {
             pendingApiRequests.push({ requestFunction, resolve, reject });
             if (!apiCheckInterval) startTokenReadinessCheck();
         } catch (error) {
-            DiagnosticsAgent.error('API', 'queueApiRequest error', error);
             reject(error);
         }
     });
@@ -6172,12 +6368,11 @@ function processPendingApiRequests() {
             try {
                 requestFunction().then(resolve).catch(reject);
             } catch (error) {
-                DiagnosticsAgent.error('API', 'processPendingApiRequests error', error);
                 reject(error);
             }
         }
     } catch (error) {
-        DiagnosticsAgent.error('API', 'processPendingApiRequests error', error);
+        logStatus('FAILED', `processPendingApiRequests: ${error.message}`);
     }
 }
 
@@ -6202,14 +6397,11 @@ function startTokenReadinessCheck() {
                 } else if (checkCount >= maxChecks) {
                     clearInterval(apiCheckInterval);
                     apiCheckInterval = null;
-                    DiagnosticsAgent.error('Token', 'startTokenReadinessCheck timeout');
                 }
-            } catch (error) {
-                DiagnosticsAgent.error('Token', 'startTokenReadinessCheck.interval error', error);
-            }
+            } catch (error) {}
         }, 100);
     } catch (error) {
-        DiagnosticsAgent.error('Token', 'startTokenReadinessCheck error', error);
+        logStatus('FAILED', `startTokenReadinessCheck: ${error.message}`);
     }
 }
 
@@ -6260,7 +6452,6 @@ const secureApiCall = createErrorBoundary(async function(endpoint, options = {})
         
         if (isAuthError) {
             state.offlineModeEnabled = true;
-            if (typeof isOfflineMode !== 'undefined') isOfflineMode = true;
             handleAuthError('Authentication failed. Using offline mode.');
             
             // Try to refresh token
@@ -6476,7 +6667,7 @@ function initializeUIWithCachedData() {
         }
         
     } catch (error) {
-        DiagnosticsAgent.error('UI', 'initializeUIWithCachedData error', error);
+        logStatus('FAILED', `initializeUIWithCachedData: ${error.message}`);
     }
 }
 
@@ -6488,9 +6679,7 @@ function loadUserFromCache() {
                 currentUser = userData;
             }
         }
-    } catch (error) {
-        DiagnosticsAgent.error('UI', 'loadUserFromCache error', error);
-    }
+    } catch (error) {}
 }
 
 function loadCachedDataInstantly() {
@@ -6555,9 +6744,7 @@ function loadCachedDataInstantly() {
             try { lastPostDate = new Date(lastPostDateData); } catch { lastPostDate = null; }
         }
         
-    } catch (error) {
-        DiagnosticsAgent.error('UI', 'loadCachedDataInstantly error', error);
-    }
+    } catch (error) {}
 }
 
 // =============================================
@@ -6579,9 +6766,7 @@ async function startBackgroundInitialization() {
                         frameId: state.frameId
                     });
                 }
-            } catch (error) {
-                DiagnosticsAgent.error('Background', 'startBackgroundInitialization.onTokenReady error', error);
-            }
+            } catch (error) {}
         });
         
         if (getUnifiedToken() || parentCoordinator.handshakeComplete || state.token || state.sessionMirror.validated) {
@@ -6596,14 +6781,10 @@ async function startBackgroundInitialization() {
                         frameId: state.frameId
                     });
                 }
-            } catch (error) {
-                DiagnosticsAgent.error('Background', 'startBackgroundInitialization.immediate error', error);
-            }
+            } catch (error) {}
         }
         
-    } catch (error) {
-        DiagnosticsAgent.error('Background', 'startBackgroundInitialization error', error);
-    }
+    } catch (error) {}
 }
 
 async function loadFreshDataInBackground() {
@@ -6614,9 +6795,7 @@ async function loadFreshDataInBackground() {
         loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
         loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
         await Promise.allSettled(loadPromises);
-    } catch (error) {
-        DiagnosticsAgent.error('Background', 'loadFreshDataInBackground error', error);
-    }
+    } catch (error) {}
 }
 
 async function safeApiOperation(operation) {
@@ -6624,7 +6803,6 @@ async function safeApiOperation(operation) {
         if (!isAuthenticated()) throw new Error('Not authenticated');
         return await operation();
     } catch (error) {
-        DiagnosticsAgent.error('API', 'safeApiOperation error', error);
         return null;
     }
 }
@@ -6681,7 +6859,7 @@ async function loadUserDataInBackground() {
 }
 
 // =============================================
-// BOOTSTRAP APPLICATION - ALIASED AS bootstrapApplication FOR COMPATIBILITY
+// BOOTSTRAP APPLICATION
 // =============================================
 async function bootstrapApp() {
     try {
@@ -6699,7 +6877,7 @@ async function bootstrapApp() {
         
         return true;
     } catch (error) {
-        DiagnosticsAgent.error('Bootstrap', 'bootstrapApp error', error);
+        logStatus('FAILED', `bootstrapApp: ${error.message}`);
         return false;
     }
 }
@@ -6730,9 +6908,7 @@ function handleAuthError(message) {
                 StartupGovernor.degrade('Auth error');
             }
         }
-    } catch (error) {
-        DiagnosticsAgent.error('Auth', 'handleAuthError error', error);
-    }
+    } catch (error) {}
 }
 
 async function initializeStatusSystem() {
@@ -6794,9 +6970,7 @@ async function loadInitialData() {
         }));
         
         await Promise.allSettled(loadPromises);
-        
     } catch (error) {
-        DiagnosticsAgent.error('Init', 'loadInitialData error', error);
         throw error;
     }
 }
@@ -6825,7 +6999,6 @@ function filterStatusesByPrivacy(statuses) {
             }
         });
     } catch (error) {
-        DiagnosticsAgent.error('Status', 'filterStatusesByPrivacy error', error);
         return [];
     }
 }
@@ -6843,7 +7016,6 @@ function getStatusPreviewText(status) {
         }
         return 'Status';
     } catch (error) {
-        DiagnosticsAgent.error('Status', 'getStatusPreviewText error', error);
         return 'Status';
     }
 }
@@ -6867,7 +7039,6 @@ function filterStatusesByType(type) {
                 return statuses;
         }
     } catch (error) {
-        DiagnosticsAgent.error('Status', 'filterStatusesByType error', error);
         return [];
     }
 }
@@ -6885,7 +7056,6 @@ function getEmptyStateMessage() {
         }
         return 'Be the first to post a status!';
     } catch (error) {
-        DiagnosticsAgent.error('Status', 'getEmptyStateMessage error', error);
         return 'No statuses available';
     }
 }
@@ -7049,7 +7219,6 @@ function sanitizeStatusData(statusData) {
         
         return sanitized;
     } catch (error) {
-        DiagnosticsAgent.error('Status', 'sanitizeStatusData error', error);
         return statusData;
     }
 }
@@ -7103,9 +7272,7 @@ function updateStreakCounter() {
         }
         
         SafeStorage.set(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'updateStreakCounter error', error);
-    }
+    } catch (error) {}
 }
 
 const scheduleStatus = createErrorBoundary(async function(statusData, scheduleTime) {
@@ -7140,7 +7307,6 @@ function saveDraft(statusData) {
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
         return { success: true };
     } catch (error) {
-        DiagnosticsAgent.error('Draft', 'saveDraft error', error);
         throw error;
     }
 }
@@ -7185,9 +7351,7 @@ function initializeUserStatusTracking() {
         
         isTrackingInitialized = true;
         
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'initializeUserStatusTracking error', error);
-    }
+    } catch (error) {}
 }
 
 function setupNetworkDetection() {
@@ -7216,9 +7380,7 @@ function setupNetworkDetection() {
         
         activityEventHandlers.push({ element: window, type: 'online', handler: handleNetworkChange });
         activityEventHandlers.push({ element: window, type: 'offline', handler: handleNetworkChange });
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'setupNetworkDetection error', error);
-    }
+    } catch (error) {}
 }
 
 function setupActivityTracking() {
@@ -7243,9 +7405,7 @@ function setupActivityTracking() {
             document.addEventListener(eventType, updateActivity);
             activityEventHandlers.push({ element: document, type: eventType, handler: updateActivity });
         });
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'setupActivityTracking error', error);
-    }
+    } catch (error) {}
 }
 
 function handleOnlineStatus() {
@@ -7267,9 +7427,7 @@ function handleOnlineStatus() {
         if (!parentCoordinator.handshakeComplete && RecoveryManager.canRecover()) {
             HandshakeClient.execute().catch(() => {});
         }
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'handleOnlineStatus error', error);
-    }
+    } catch (error) {}
 }
 
 function handleOfflineStatus() {
@@ -7284,14 +7442,13 @@ function handleOfflineStatus() {
         if (!state.offlineModeEnabled) {
             state.offlineModeEnabled = true;
             isOfflineMode = true;
+            logStatus('WARNING', 'Offline mode enabled');
             
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.degrade('Offline');
             }
         }
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'handleOfflineStatus error', error);
-    }
+    } catch (error) {}
 }
 
 function sendUserActive() {
@@ -7304,9 +7461,7 @@ function sendUserActive() {
                 frameId: state.frameId
             }, { silent: true });
         }
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'sendUserActive error', error);
-    }
+    } catch (error) {}
 }
 
 function sendUserInactive() {
@@ -7320,9 +7475,7 @@ function sendUserInactive() {
                 frameId: state.frameId
             }, { silent: true });
         }
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'sendUserInactive error', error);
-    }
+    } catch (error) {}
 }
 
 async function updateUserStatus() {
@@ -7358,14 +7511,10 @@ async function updateUserStatus() {
                     method: 'POST',
                     body: JSON.stringify({ status: status, lastSeen: new Date().toISOString() })
                 });
-            } catch (apiError) {
-                DiagnosticsAgent.error('Status', 'updateUserStatus.api error', apiError);
-            }
+            } catch (apiError) {}
         }
         
-    } catch (error) {
-        DiagnosticsAgent.error('Status', 'updateUserStatus error', error);
-    }
+    } catch (error) {}
 }
 
 async function syncPendingData() {
@@ -7380,9 +7529,7 @@ async function syncPendingData() {
                 pendingReactions = pendingReactions.filter(r => 
                     !(r.statusId === reaction.statusId && r.reaction === reaction.reaction)
                 );
-            } catch (error) {
-                DiagnosticsAgent.error('Sync', 'syncPendingData.reaction error', error);
-            }
+            } catch (error) {}
         }
         
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
@@ -7394,17 +7541,13 @@ async function syncPendingData() {
                     method: 'POST',
                     body: JSON.stringify(statusData)
                 });
-            } catch (error) {
-                DiagnosticsAgent.error('Sync', 'syncPendingData.offline error', error);
-            }
+            } catch (error) {}
         }
         
         SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
         await loadFreshDataInBackground();
         
-    } catch (error) {
-        DiagnosticsAgent.error('Sync', 'syncPendingData error', error);
-    }
+    } catch (error) {}
 }
 
 // =============================================
@@ -7418,7 +7561,6 @@ function escapeHtml(text) {
         div.textContent = text;
         return div.innerHTML;
     } catch (error) {
-        DiagnosticsAgent.error('Util', 'escapeHtml error', error);
         return text || '';
     }
 }
@@ -7442,7 +7584,6 @@ function formatTimeAgo(date) {
         if (diffDays < 7) return `${diffDays}d ago`;
         return `${Math.floor(diffDays / 7)}w ago`;
     } catch (error) {
-        DiagnosticsAgent.error('Util', 'formatTimeAgo error', error);
         return 'Unknown';
     }
 }
@@ -7467,7 +7608,6 @@ async function retryOperation(operation, maxRetries = 3) {
         
         throw lastError;
     } catch (error) {
-        DiagnosticsAgent.error('Util', 'retryOperation error', error);
         throw error;
     }
 }
@@ -7494,7 +7634,6 @@ function generateSampleMoodData() {
         sampleData.sort((a, b) => a.timestamp - b.timestamp);
         return sampleData;
     } catch (error) {
-        DiagnosticsAgent.error('Util', 'generateSampleMoodData error', error);
         return [];
     }
 }
@@ -7516,7 +7655,7 @@ function safeLogError(module, functionName, error, data = null) {
         errorLogCounts[errorKey]++;
         
         if (errorLogCounts[errorKey] <= maxErrorLogs) {
-            DiagnosticsAgent.warn(module, `${functionName} error: ${error?.message || error}`);
+            logStatus('FAILED', `${module}: ${functionName} - ${error?.message || error}`);
         }
         
         if (functionName.includes('get') || functionName.includes('load')) {
@@ -7667,8 +7806,6 @@ function updateLocalStateWithSession(sessionData) {
     try {
         if (!sessionData) return false;
         
-        DiagnosticsAgent.info('Session', 'Updating local state with session data');
-        
         // Update currentUser
         if (sessionData.user) {
             currentUser = sessionData.user;
@@ -7718,7 +7855,7 @@ function updateLocalStateWithSession(sessionData) {
         
         return true;
     } catch (error) {
-        DiagnosticsAgent.error('Session', 'updateLocalStateWithSession error', error);
+        logStatus('FAILED', `updateLocalStateWithSession: ${error.message}`);
         return false;
     }
 }
@@ -7823,7 +7960,6 @@ function detectSandbox() {
         
         return false;
     } catch (error) {
-        DiagnosticsAgent.warn('Sandbox', 'Error detecting sandbox', error);
         return true; // Assume sandboxed on error
     }
 }
@@ -7901,7 +8037,7 @@ let _ERROR_CACHE_ = new Set();
 function logOnce(level, msg) {
     if (_ERROR_CACHE_.has(msg)) return;
     _ERROR_CACHE_.add(msg);
-    DiagnosticsAgent.log(level, 'StatusCore', msg);
+    logStatus(level === 'error' ? 'FAILED' : 'WARNING', msg);
 }
 
 async function safeInit() {
@@ -7978,13 +8114,13 @@ function notifyParentReady() {
                 page: location.pathname,
                 module: 'status-core',
                 timestamp: Date.now(),
-                version: '5.0',
+                version: '5.4',
                 protocolVersion: state.protocolVersion,
                 frameId: state.frameId,
                 environment: IframeEnvironment.type
             });
             
-            window.parent.postMessage(message, '*');
+            window.parent.postMessage(message, window.location.origin);
             
             _HANDSHAKE_RETRIES_++;
         } catch (error) {
@@ -7999,7 +8135,7 @@ function initPageCore() {
             safeInit().catch(error => {
                 safeLogError('Status', 'initPageCore.safeInit', error);
             });
-        }, 50);
+        }, 10);
     } catch (error) {
         safeLogError('Status', 'initPageCore', error);
     }
@@ -8183,6 +8319,7 @@ if (typeof window !== 'undefined') {
         if (window.location.search.includes('debug=true')) {
             enableDiagnostics();
         }
+        
     } catch (error) {
         safeLogError('Status', 'globalExposure', error);
     }
@@ -8379,7 +8516,8 @@ export {
     SafeStorage,
     
     // Safe fetch
-    safeFetch
+    safeFetch,
+     logStatus
 };
 
 // =============================================
@@ -8391,4 +8529,4 @@ if (typeof window !== 'undefined' && !state.initialized) {
     }, 10);
 }
 
-// Silent initialization - no console log
+logStatus('READY', 'Status core initialized');

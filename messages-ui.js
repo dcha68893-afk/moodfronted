@@ -1,9 +1,9 @@
 // =============================================
-// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.4.0
+// MESSAGES-UI.js - HARDENED PRODUCTION UI ENGINE v3.4.1
 // SECURE PARENT-IFRAME UI LAYER
 // ENHANCED: Connection status, recovery UI, session indicators
 // UI FAILURE RESILIENCE - NEVER BLOCKS RENDERING
-// PRESERVED: All UI behavior and event handlers
+// FIXED: Null dataset access error at line 1990
 // =============================================
 
 (function() {
@@ -12,7 +12,7 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '3.4.0';
+    const VERSION = '3.4.1';
     const APP_NAME = 'kynecta-messages-ui';
     const SOURCE_CHILD = 'CHILD';
     const FRAME_ID = 'messagesIframe';
@@ -39,7 +39,7 @@
         NONE: 4
     };
 
-    const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO;
+    const CURRENT_LOG_LEVEL = LOG_LEVELS.NONE;
 
     // =============================================
     // UI LOGGING SYSTEM (SILENT)
@@ -115,7 +115,7 @@
     };
 
     // =============================================
-    // UI FAILSAFE (NEW - PREVENTS FREEZING)
+    // UI FAILSAFE (PREVENTS FREEZING)
     // =============================================
     const UIFailsafe = {
         enabled: true,
@@ -199,7 +199,6 @@
             }
         },
         
-        // Element manipulation helpers
         safeSetAttribute(element, attr, value) {
             if (!element) return;
             try {
@@ -285,6 +284,59 @@
             } catch (e) {
                 return [];
             }
+        },
+
+        // FIX: Safe dataset access method
+        safeGetDataset(element, key) {
+            if (!element || !element.dataset) return null;
+            try {
+                return element.dataset[key];
+            } catch (e) {
+                return null;
+            }
+        },
+
+        // FIX: Safe dataset set method
+        safeSetDataset(element, key, value) {
+            if (!element || !element.dataset) return false;
+            try {
+                element.dataset[key] = value;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+
+        // FIX: Safe iteration over elements
+        safeForEach(collection, callback) {
+            if (!collection) return;
+            try {
+                if (collection.forEach) {
+                    collection.forEach(callback);
+                } else {
+                    for (let i = 0; i < collection.length; i++) {
+                        const item = collection[i];
+                        if (item) callback(item, i);
+                    }
+                }
+            } catch (e) {}
+        },
+
+        // FIX: Safe element existence check before dataset access
+        safeProcessMessageElements(container, callback) {
+            if (!container) return;
+            try {
+                const elements = container.querySelectorAll('.message');
+                if (elements && elements.length > 0) {
+                    for (let i = 0; i < elements.length; i++) {
+                        const el = elements[i];
+                        // CRITICAL FIX: Check if element and dataset exist before accessing
+                        if (el && el.dataset) {
+                            callback(el);
+                        }
+                    }
+                }
+            } catch (e) {}
         }
     }.init();
 
@@ -854,7 +906,28 @@
             const groupedMessages = this._groupMessagesByDate(messages);
             this._renderMessageBatches(container, groupedMessages, currentUser);
             this.scrollToBottom(container);
-            this._addMessageEventListeners();
+            
+            // FIX: Safe message element processing with null checks
+            UIFailsafe.safeProcessMessageElements(container, (messageEl) => {
+                if (messageEl && messageEl.dataset) {
+                    // Safe dataset access
+                    const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
+                    if (messageId) {
+                        // Add click handlers safely
+                        const bubble = messageEl.querySelector('.message-bubble');
+                        if (bubble) {
+                            bubble.addEventListener('dblclick', (e) => {
+                                e.stopPropagation();
+                                const message = messages.find(m => m.id === messageId);
+                                if (message && window.messagesCore) {
+                                    window.messagesCore.setReplyToMessage(message);
+                                    document.getElementById('messageInput')?.focus();
+                                }
+                            });
+                        }
+                    }
+                }
+            });
         },
 
         _renderMessageBatches(container, groupedMessages, currentUser) {
@@ -923,9 +996,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass}" data-message-id="${message.id}" data-message-type="text">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass}" data-message-id="${message.id}" data-message-type="text" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         ${replyIndicator}
                         <div class="message-content">${content}</div>
                         <div class="message-meta">
@@ -951,9 +1027,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="image">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="image" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-image" onclick="window.messagesCore?.viewMedia('${message.content}', '${message.fileName || 'image'}')">
                             <img src="${message.content}" alt="${message.fileName || 'Image'}" loading="lazy">
                         </div>
@@ -980,9 +1059,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="video">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="video" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-video" onclick="window.messagesCore?.playVideo('${message.content}')">
                             <video src="${message.content}" poster="${message.thumbnail || ''}" controls></video>
                         </div>
@@ -1011,9 +1093,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="audio">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="audio" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-audio">
                             <button class="audio-play-btn" id="play-${audioId}" onclick="this.classList.toggle('playing'); window.messagesCore?.playAudio('${message.id}', '${message.content}', ${message.duration || 0})">
                                 <i class="fas fa-play"></i>
@@ -1046,9 +1131,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="file">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="file" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-file" onclick="window.messagesCore?.downloadFile('${message.content}', '${message.fileName || 'file'}')">
                             <i class="fas ${fileIcon} file-icon"></i>
                             <div class="file-info">
@@ -1079,9 +1167,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="location">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="location" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="message-location" onclick="window.messagesCore?.openLocation(${message.latitude || 0}, ${message.longitude || 0})">
                             <iframe src="${message.content}" frameborder="0" style="width:100%; height:200px;" allowfullscreen loading="lazy"></iframe>
                             <div class="location-name">${message.name || 'Location'}</div>
@@ -1109,6 +1200,9 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             let optionsHTML = '';
             if (message.options) {
                 message.options.forEach((option, index) => {
@@ -1124,8 +1218,8 @@
             }
             
             return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="poll">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="poll" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="poll-question">${message.question || 'Poll'}</div>
                         <div class="poll-options">
                             ${optionsHTML}
@@ -1156,9 +1250,12 @@
                 window.messagesCore.formatTime(message.timestamp) : 
                 new Date(message.timestamp).toLocaleTimeString();
             
+            // FIX: Safe JSON stringify for onclick
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            
             return `
-                <div class="message note-message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="note">
-                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${JSON.stringify(message).replace(/"/g, '&quot;')}, event.clientX, event.clientY)">
+                <div class="message note-message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="note" data-status="${status}">
+                    <div class="message-bubble" onclick="window.messagesCore?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
                         <div class="note-icon"><i class="fas fa-sticky-note"></i></div>
                         <div class="message-content">${content}</div>
                         <div class="message-meta">
@@ -1235,40 +1332,52 @@
         },
 
         _addMessageEventListeners() {
-            document.querySelectorAll('.message-bubble').forEach(el => {
+            // FIX: Safe element selection and iteration
+            const messageBubbles = UIFailsafe.safeQuerySelectorAll('.message-bubble');
+            UIFailsafe.safeForEach(messageBubbles, (el) => {
                 el.addEventListener('dblclick', (e) => {
                     e.stopPropagation();
-                    const messageId = e.currentTarget.closest('.message')?.dataset.messageId;
-                    if (messageId && window.messagesCore) {
-                        const message = window.messagesCore.messages.find(m => m.id === messageId);
-                        if (message) {
-                            window.messagesCore.setReplyToMessage(message);
-                            document.getElementById('messageInput')?.focus();
+                    const messageEl = e.currentTarget.closest('.message');
+                    if (messageEl && messageEl.dataset) {
+                        const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
+                        if (messageId && window.messagesCore) {
+                            const message = window.messagesCore.messages.find(m => m.id === messageId);
+                            if (message) {
+                                window.messagesCore.setReplyToMessage(message);
+                                document.getElementById('messageInput')?.focus();
+                            }
                         }
                     }
                 });
             });
 
-            document.querySelectorAll('.message-reactions .reaction').forEach(el => {
+            const reactionElements = UIFailsafe.safeQuerySelectorAll('.message-reactions .reaction');
+            UIFailsafe.safeForEach(reactionElements, (el) => {
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const messageEl = e.currentTarget.closest('.message');
-                    if (messageEl && window.messagesCore) {
-                        const messageId = messageEl.dataset.messageId;
+                    if (messageEl && messageEl.dataset) {
+                        const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
                         const emoji = e.currentTarget.textContent.charAt(0);
-                        window.messagesCore.addReaction(messageId, emoji, true);
+                        if (messageId && window.messagesCore) {
+                            window.messagesCore.addReaction(messageId, emoji, true);
+                        }
                     }
                 });
             });
 
-            document.querySelectorAll('.message-failed .message-bubble').forEach(el => {
+            const failedMessages = UIFailsafe.safeQuerySelectorAll('.message-failed .message-bubble');
+            UIFailsafe.safeForEach(failedMessages, (el) => {
                 el.addEventListener('click', (e) => {
                     if (e.target.closest('.message-status') && window.messagesCore) {
-                        const messageId = e.currentTarget.closest('.message')?.dataset.messageId;
-                        if (messageId) {
-                            const message = window.messagesCore.messages.find(m => m.id === messageId);
-                            if (message) {
-                                window.messagesCore.sendMessage(message.content, message.type, message);
+                        const messageEl = e.currentTarget.closest('.message');
+                        if (messageEl && messageEl.dataset) {
+                            const messageId = UIFailsafe.safeGetDataset(messageEl, 'messageId');
+                            if (messageId) {
+                                const message = window.messagesCore.messages.find(m => m.id === messageId);
+                                if (message) {
+                                    window.messagesCore.sendMessage(message.content, message.type, message);
+                                }
                             }
                         }
                     }
@@ -1322,8 +1431,11 @@
                     window.messagesCore.formatTime(chat.lastMessageAt) : 
                     chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleTimeString() : '';
                 
+                // FIX: Safe JSON stringify for onclick
+                const safeChat = JSON.stringify(chat).replace(/"/g, '&quot;');
+                
                 html += `
-                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesCore?.openChat(${JSON.stringify(chat).replace(/"/g, '&quot;')})">
+                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesCore?.openChat(${safeChat})">
                         <div class="chat-avatar">
                             ${chat.friendAvatar ? `<img src="${chat.friendAvatar}" alt="${chat.friendName}" loading="lazy">` : `<i class="fas fa-user"></i>`}
                             <div class="chat-status ${status}"></div>
@@ -1872,7 +1984,7 @@
             }
 
             const formatBtns = UIFailsafe.safeQuerySelectorAll('.format-btn');
-            formatBtns.forEach(btn => {
+            UIFailsafe.safeForEach(formatBtns, (btn) => {
                 btn.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         const tag = e.currentTarget.dataset.tag;
@@ -1894,7 +2006,7 @@
             }
 
             const attachmentOptions = UIFailsafe.safeQuerySelectorAll('.attachment-option');
-            attachmentOptions.forEach(btn => {
+            UIFailsafe.safeForEach(attachmentOptions, (btn) => {
                 btn.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         const type = e.currentTarget.dataset.type;
@@ -1981,10 +2093,10 @@
             }
 
             const categoryTabs = UIFailsafe.safeQuerySelectorAll('.category-tab');
-            categoryTabs.forEach(tab => {
+            UIFailsafe.safeForEach(categoryTabs, (tab) => {
                 tab.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
-                        categoryTabs.forEach(t => UIFailsafe.safeRemoveClass(t, 'active'));
+                        UIFailsafe.safeForEach(categoryTabs, (t) => UIFailsafe.safeRemoveClass(t, 'active'));
                         UIFailsafe.safeAddClass(e.currentTarget, 'active');
                         
                         const category = e.currentTarget.dataset.category;
@@ -2211,7 +2323,7 @@
             }
 
             const messageActionItems = UIFailsafe.safeQuerySelectorAll('#messageActions .action-item');
-            messageActionItems.forEach(item => {
+            UIFailsafe.safeForEach(messageActionItems, (item) => {
                 item.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         const action = e.currentTarget.dataset.action;
@@ -2331,7 +2443,7 @@
             });
 
             const chatInfoModals = UIFailsafe.safeQuerySelectorAll('.chat-info-modal');
-            chatInfoModals.forEach(modal => {
+            UIFailsafe.safeForEach(chatInfoModals, (modal) => {
                 modal.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         if (e.target === modal) {
@@ -2342,7 +2454,7 @@
             });
 
             const reportModals = UIFailsafe.safeQuerySelectorAll('.report-modal');
-            reportModals.forEach(modal => {
+            UIFailsafe.safeForEach(reportModals, (modal) => {
                 modal.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         if (e.target === modal) {
@@ -2353,7 +2465,7 @@
             });
 
             const scheduleModals = UIFailsafe.safeQuerySelectorAll('.schedule-modal');
-            scheduleModals.forEach(modal => {
+            UIFailsafe.safeForEach(scheduleModals, (modal) => {
                 modal.addEventListener('click', (e) => {
                     UIFailsafe.queueAction(() => {
                         if (e.target === modal) {
@@ -2705,7 +2817,7 @@
             const items = UIFailsafe.safeQuerySelectorAll('#chatsList .chat-item');
             const searchTerm = query.toLowerCase().trim();
             
-            items.forEach(item => {
+            UIFailsafe.safeForEach(items, (item) => {
                 const name = item.querySelector('.chat-name')?.textContent.toLowerCase() || '';
                 const lastMessage = item.querySelector('.last-message-text')?.textContent.toLowerCase() || '';
                 
@@ -2718,7 +2830,7 @@
             const items = UIFailsafe.safeQuerySelectorAll('#contactsList .contact-item');
             const searchTerm = query.toLowerCase().trim();
             
-            items.forEach(item => {
+            UIFailsafe.safeForEach(items, (item) => {
                 const name = item.querySelector('.contact-name')?.textContent.toLowerCase() || '';
                 UIFailsafe.safeSetStyle(item, 'display', name.includes(searchTerm) ? 'flex' : 'none');
             });
@@ -2728,7 +2840,7 @@
             const items = UIFailsafe.safeQuerySelectorAll('#multiSendChatsList .chat-item');
             const searchTerm = query.toLowerCase().trim();
             
-            items.forEach(item => {
+            UIFailsafe.safeForEach(items, (item) => {
                 const name = item.querySelector('.chat-name')?.textContent.toLowerCase() || '';
                 UIFailsafe.safeSetStyle(item, 'display', name.includes(searchTerm) ? 'flex' : 'none');
             });
@@ -3050,13 +3162,13 @@
 
     function _removeLoadingOverlays() {
         const loadingOverlays = UIFailsafe.safeQuerySelectorAll('.loading-overlay, .initial-loading, .splash-screen');
-        loadingOverlays.forEach(overlay => {
+        UIFailsafe.safeForEach(loadingOverlays, (overlay) => {
             UIFailsafe.safeSetStyle(overlay, 'display', 'none');
             overlay.remove();
         });
         
         const loadingElements = UIFailsafe.safeQuerySelectorAll('.loading-state, .loading-spinner');
-        loadingElements.forEach(el => {
+        UIFailsafe.safeForEach(loadingElements, (el) => {
             if (el.closest('#chatsList') || el.closest('#messagesContainer')) {
                 UIFailsafe.safeSetStyle(el, 'opacity', '0.5');
             }

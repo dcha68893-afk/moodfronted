@@ -1681,54 +1681,10 @@
                     if (retryBtn) {
                         retryBtn.style.display = 'block';
                     }
-                    
-                    // Show in handshake container but not as console noise
-                    const handshakeContainer = document.getElementById('handshakeStatus');
-                    if (handshakeContainer) {
-                        handshakeContainer.innerHTML = `
-                            <div class="handshake-status failed">
-                                <i class="fas fa-exclamation-triangle"></i>
-                                <span>Connection failed</span>
-                                <button class="btn-text" onclick="document.getElementById('retryHandshakeBtn')?.click()">
-                                    <i class="fas fa-redo"></i> Retry
-                                </button>
-                            </div>
-                        `;
-                    }
                 } else if (e.detail.status === 'connected') {
                     const retryBtn = document.getElementById('retryHandshakeBtn');
                     if (retryBtn) {
                         retryBtn.style.display = 'none';
-                    }
-                    
-                    const handshakeContainer = document.getElementById('handshakeStatus');
-                    if (handshakeContainer) {
-                        handshakeContainer.innerHTML = `
-                            <div class="handshake-status connected">
-                                <i class="fas fa-check-circle"></i>
-                                <span>Connected</span>
-                            </div>
-                        `;
-                    }
-                } else if (e.detail.status === 'connecting') {
-                    const handshakeContainer = document.getElementById('handshakeStatus');
-                    if (handshakeContainer) {
-                        handshakeContainer.innerHTML = `
-                            <div class="handshake-status connecting">
-                                <i class="fas fa-circle-notch fa-spin"></i>
-                                <span>Connecting...</span>
-                            </div>
-                        `;
-                    }
-                } else if (e.detail.status === 'reconnecting') {
-                    const handshakeContainer = document.getElementById('handshakeStatus');
-                    if (handshakeContainer) {
-                        handshakeContainer.innerHTML = `
-                            <div class="handshake-status connecting">
-                                <i class="fas fa-sync-alt fa-spin"></i>
-                                <span>Reconnecting...</span>
-                            </div>
-                        `;
                     }
                 }
             }
@@ -2506,8 +2462,8 @@
                 </div>
             </div>
             
-            <!-- Handshake Status Container (will be populated by JS) -->
-            <div class="handshake-status-container" id="handshakeStatus"></div>
+            <!-- Handshake Status Container (hidden - background only) -->
+            <div class="handshake-status-container" id="handshakeStatus" style="display: none;"></div>
             
             <!-- Connection Status (hidden by default) -->
             <div class="connection-status online" id="connectionStatus" style="display: none;">
@@ -2757,7 +2713,7 @@
     </div>
     
     <!-- Diagnostic Button (visible only in development) -->
-    <button class="diagnostic-btn" id="diagnosticBtn" title="Show Diagnostics">
+    <button class="diagnostic-btn" id="diagnosticBtn" title="Show Diagnostics" style="display: none;">
         <i class="fas fa-bug"></i>
     </button>
     
@@ -2770,5 +2726,16 @@
     <div class="recovery-progress" id="recoveryProgress" style="display: none;">
         <div class="progress-bar" style="width: 0%;"></div>
     </div>
+
+    <!-- Navigation Guard Indicator (hidden by default) -->
+    <div class="navigation-guard" id="navigationGuard" style="display: none;">
+        <i class="fas fa-sync-alt fa-spin"></i>
+        <span>Operation in progress. Please wait...</span>
+    </div>
+
+    <!-- ============================================= -->
+    <!-- ENHANCED CONSOLE LOGGING - NO ON-SCREEN MESSAGES -->
+    <!-- All connection status now only appears in console -->
+    <!-- ============================================= -->
 </body>
 </html>

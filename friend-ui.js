@@ -5,8 +5,7 @@
 // =============================================
 
 // =============================================
-// [1] IMPORT VERIFICATION - Strict validation
-// All imports verified against friend-core.js exports
+// [1] IMPORT VERIFICATION - Fixed for missing exports
 // =============================================
 
 import {
@@ -45,16 +44,15 @@ import {
 
     // KYN Protocol State
     kynState,
-    HandshakeClient,
-    SessionClient,
+    // HandshakeClient is now null in core - we'll handle gracefully
+    // RecoveryManager is now null in core
     HeartbeatClient,
     DiagnosticsAgent,
-    StartupGovernor,
+    // StartupGovernor is now null in core
     IframeEnvironment,
-    RecoveryManager,
+    // RecoveryManager is now null in core
     TransportAgent,
     CompatibilityBridge,
-    IframeHandshakeAuthority,
     IframeSessionClient,
     IframeTransport,
     ReliabilityEngine,
@@ -125,6 +123,7 @@ import {
     toggleCamera,
     toggleFlash,
     generateUniqueQRCode,
+    validateQRCodeData,
 
     // Mutual Friends
     showMutualFriends,
@@ -143,6 +142,11 @@ import {
     checkMobile
 
 } from './friend-core.js';
+
+// Handle missing exports gracefully
+const HandshakeClient = null;
+const RecoveryManager = null;
+const StartupGovernor = null;
 
 // =============================================
 // [2] IMMEDIATE DOM ELEMENT REFERENCES
@@ -453,10 +457,15 @@ export const DOM = domElements;
             const userId = this.dataset.userId;
             const qrData = this.dataset.qrData ? JSON.parse(this.dataset.qrData) : null;
 
+            // Validate QR data if present
             if (qrData && qrData.userId) {
-                await sendFriendRequest(qrData.userId);
-                if (domElements.friendRequestModal) {
-                    domElements.friendRequestModal.classList.remove('active');
+                if (validateQRCodeData && validateQRCodeData(qrData)) {
+                    await sendFriendRequest(qrData.userId);
+                    if (domElements.friendRequestModal) {
+                        domElements.friendRequestModal.classList.remove('active');
+                    }
+                } else {
+                    showNotification('Invalid or expired QR code', 'error');
                 }
             } else if (userId) {
                 await acceptFriendRequestOnline(null, userId);
@@ -530,7 +539,8 @@ export const DOM = domElements;
             e.stopPropagation();
             hideAuthError();
             if (ParentCoordinator?.state?.parentDetected) {
-                ParentCoordinator.attemptParentReconnection();
+                // Just request session again, no recovery
+                IframeSessionClient.request();
             } else {
                 enhancedInitialize();
             }
@@ -1036,7 +1046,8 @@ export const RenderPipeline = {
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
                 overlay.classList.remove('active');
-                if (RecoveryManager) RecoveryManager.attempt('full');
+                // Just request session again, no recovery
+                IframeSessionClient.request();
             });
         }
     },
@@ -1269,6 +1280,7 @@ export const CoreIntegration = {
     },
 
     setupKYNEvents() {
+        // These events may not exist in new passive core, but we'll listen anyway
         this.subscribe('kynHandshakeComplete', (event) => {
             this._showOnce('handshake_complete', 'KYN handshake complete', 'debug');
             UIState.updateConnectionState('connected', event.detail);
@@ -3501,7 +3513,8 @@ function setupRetryButtons() {
 
         const retryConnectionBtn = e.target.closest('.retry-connection-btn');
         if (retryConnectionBtn) {
-            if (RecoveryManager) RecoveryManager.attempt('full');
+            // Just request session again, no recovery
+            IframeSessionClient.request();
             const overlay = document.getElementById('connectionOverlay');
             if (overlay) overlay.classList.remove('active');
             return;
@@ -3528,8 +3541,6 @@ setInterval(() => {
         UIState.updateConnectionState('connected');
     } else if (kynState && kynState.compatibilityMode) {
         UIState.updateConnectionState('degraded');
-    } else if (StartupGovernor && StartupGovernor.state.phase === 'RECOVERING') {
-        UIState.updateConnectionState('recovering');
     } else if (kynState && !kynState.handshakeCompleted && !kynState.compatibilityMode) {
         UIState.updateConnectionState('connecting');
     }
@@ -3542,7 +3553,7 @@ setInterval(() => {
 // Set up health checks
 setInterval(() => {
     if (kynState && kynState.handshakeCompleted && SessionClient && SessionClient.isValid()) {
-        if (RecoveryManager) RecoveryManager.checkHealth();
+        // Just check health, no recovery
     }
 }, 30000);
 
@@ -3578,7 +3589,7 @@ window.addEventListener('beforeunload', () => {
 // =============================================
 // END OF UI MODULE
 // Version: 2.5.2
-// ✅ Immediate event binding - CRITICAL FIX
+// ✅ Fixed missing exports from friend-core.js
 // ✅ All buttons now work immediately
 // ✅ No console noise - warnings appear once
 // ✅ All clicks/navigation work during background processes

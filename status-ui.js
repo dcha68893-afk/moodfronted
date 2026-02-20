@@ -1,8 +1,7 @@
 // =============================================
 // STATUS SYSTEM - RESILIENT UI CONTROLLER
-// ENHANCED VERSION v5.0 - WITH UI FAILSAFE LAYER
-// FAULT-TOLERANT, PROGRESSIVE RENDERING, CORE-INTEGRATED
-// COMPLETE RELIABILITY OVERHAUL - PRESERVES ALL EXISTING FEATURES
+// ENHANCED VERSION v5.4 - CLEAN CONSOLE LOGGING
+// NO ON-SCREEN CONNECTION MESSAGES - ALL BACKGROUND
 // =============================================
 
 import {
@@ -132,11 +131,12 @@ import {
     SafeStorage,
     NavigationGuard,
     CompatibilityBridge,
-    IframeEnvironment
+    IframeEnvironment,
+    logStatus
 } from './status-core.js';
 
 // =============================================
-// UI LOGGING - No Spam
+// UI LOGGING - No Spam (Background Only)
 // =============================================
 const UILogger = {
     logs: [],
@@ -214,7 +214,6 @@ const UILogger = {
         if (start) {
             const duration = performance.now() - start;
             this.renderTimings.delete(component);
-            this.debug('Performance', `${component} rendered in ${duration.toFixed(2)}ms`);
             return duration;
         }
         return 0;
@@ -239,7 +238,7 @@ function logUIError(section, error) {
 }
 
 // =============================================
-// UI FAILSAFE - Critical Protection Layer
+// UI FAILSAFE - Critical Protection Layer (NO ON-SCREEN MESSAGES)
 // =============================================
 const UIFailsafe = {
     failedSections: new Set(),
@@ -252,7 +251,7 @@ const UIFailsafe = {
     mutationObserver: null,
     criticalElements: new Set([
         'createStatusBtn', 'statusViewerPanel', 'sidebar',
-        'allStatusList', 'myStatusPreview', 'handshakeStatus',
+        'allStatusList', 'myStatusPreview',
         'notification', 'errorUI'
     ]),
     
@@ -260,7 +259,6 @@ const UIFailsafe = {
         this._setupGlobalErrorHandler();
         this._setupMutationObserver();
         this._setupNetworkListeners();
-        UILogger.info('UIFailsafe', 'UI failsafe initialized');
     },
     
     _setupGlobalErrorHandler() {
@@ -333,10 +331,7 @@ const UIFailsafe = {
         const newElement = document.createElement('div');
         newElement.id = id;
         
-        if (id === 'handshakeStatus') {
-            newElement.className = 'handshake-status-container';
-            newElement.innerHTML = '<div class="handshake-status waiting"><i class="fas fa-clock"></i><span>Reconnecting...</span></div>';
-        } else if (id === 'myStatusPreview') {
+        if (id === 'myStatusPreview') {
             newElement.className = 'my-status-preview';
             newElement.innerHTML = '<div class="my-status-preview-placeholder"><i class="fas fa-user-circle"></i><span>Loading...</span></div>';
         } else if (id === 'allStatusList') {
@@ -344,16 +339,7 @@ const UIFailsafe = {
             newElement.innerHTML = '<div class="enhanced-loading"><i class="fas fa-spinner"></i><p>Loading statuses...</p></div>';
         }
         
-        if (id === 'handshakeStatus') {
-            const preview = document.getElementById('myStatusPreview');
-            if (preview) {
-                preview.after(newElement);
-            } else {
-                parent.prepend(newElement);
-            }
-        } else {
-            parent.appendChild(newElement);
-        }
+        parent.appendChild(newElement);
         
         UILogger.info('UIFailsafe', `Recreated element: ${id}`);
     },
@@ -870,15 +856,6 @@ const UIRenderPipeline = {
                     </div>
                 `).join('');
             
-            case 'handshakeStatus':
-                return `
-                    <div class="handshake-skeleton">
-                        <div class="handshake-spinner skeleton-pulse"></div>
-                        <div class="handshake-text skeleton-pulse" style="width: 200px; height: 20px;"></div>
-                        <div class="handshake-subtext skeleton-pulse" style="width: 150px; height: 16px;"></div>
-                    </div>
-                `;
-            
             case 'moodChart':
                 return `
                     <div class="mood-chart-skeleton">
@@ -975,63 +952,12 @@ const UIRenderPipeline = {
 
     updateHandshakeStatus(status) {
         this.handshakeStatus = status;
-        this.queueUpdate('handshakeStatus', () => {
-            this.renderHandshakeStatus();
-        });
+        // No on-screen rendering - just log to console via core
     },
 
     renderHandshakeStatus() {
-        const container = document.getElementById('handshakeStatus');
-        if (!container) return;
-
-        let content = '';
-        switch(this.handshakeStatus) {
-            case 'waiting':
-                content = `
-                    <div class="handshake-status waiting">
-                        <i class="fas fa-clock"></i>
-                        <span>Waiting for connection...</span>
-                    </div>
-                `;
-                break;
-            case 'connecting':
-                content = `
-                    <div class="handshake-status connecting">
-                        <i class="fas fa-circle-notch fa-spin"></i>
-                        <span>Connecting to server...</span>
-                    </div>
-                `;
-                break;
-            case 'connected':
-                content = `
-                    <div class="handshake-status connected">
-                        <i class="fas fa-check-circle"></i>
-                        <span>Connected</span>
-                    </div>
-                `;
-                break;
-            case 'failed':
-                content = `
-                    <div class="handshake-status failed">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <span>Connection failed</span>
-                        <button class="action-btn secondary" onclick="window.statusUI?.retryHandshake()">
-                            <i class="fas fa-redo"></i> Retry
-                        </button>
-                    </div>
-                `;
-                break;
-            case 'reconnecting':
-                content = `
-                    <div class="handshake-status connecting">
-                        <i class="fas fa-sync-alt fa-spin"></i>
-                        <span>Reconnecting...</span>
-                    </div>
-                `;
-                break;
-        }
-
-        container.innerHTML = content;
+        // REMOVED: No on-screen handshake status
+        // This function is intentionally empty to prevent on-screen messages
     }
 };
 
@@ -1470,7 +1396,7 @@ const UIElements = {
     get microCirclesStatusList() { return document.getElementById('microCirclesStatusList'); },
     get myStatusList() { return document.getElementById('myStatusList'); },
     
-    get handshakeStatus() { return document.getElementById('handshakeStatus'); },
+    // REMOVED: get handshakeStatus() - no longer needed for on-screen
     
     getElement(id) { return document.getElementById(id); },
     
@@ -1777,7 +1703,7 @@ const SkeletonLoader = {
     show() {
         const containers = [
             'allStatusList', 'friendsStatusList', 'closeFriendsStatusList',
-            'myStatusList', 'highlightsContent', 'handshakeStatus',
+            'myStatusList', 'highlightsContent',
             'pinnedStatusList', 'mutedStatusList', 'microCirclesStatusList',
             'moodChart', 'allDraftsList', 'scheduledStatusesList'
         ];
@@ -1830,7 +1756,7 @@ const SkeletonLoader = {
 // =============================================
 const InitialRender = {
     execute() {
-        this.renderHandshakeStatus();
+        // REMOVED: renderHandshakeStatus() - no on-screen handshake
         this.renderMyStatusPreview();
         this.renderAllStatuses();
         this.renderUserAvatar();
@@ -1841,27 +1767,7 @@ const InitialRender = {
     },
 
     renderHandshakeStatus() {
-        const container = UIElements.handshakeStatus;
-        if (!container) {
-            this.createHandshakeStatusElement();
-        }
-        UIRenderPipeline.renderHandshakeStatus();
-    },
-
-    createHandshakeStatusElement() {
-        const sidebar = document.querySelector('.sidebar');
-        if (!sidebar) return;
-
-        const handshakeDiv = document.createElement('div');
-        handshakeDiv.id = 'handshakeStatus';
-        handshakeDiv.className = 'handshake-status-container';
-        
-        const myStatusPreview = UIElements.getElement('myStatusPreview');
-        if (myStatusPreview) {
-            myStatusPreview.after(handshakeDiv);
-        } else {
-            sidebar.prepend(handshakeDiv);
-        }
+        // REMOVED: No on-screen handshake status
     },
 
     renderMyStatusPreview() {
@@ -3018,28 +2924,24 @@ function showReconnectionState() {
 // =============================================
 function retryHandshake() {
     UILogger.info('Handshake', 'Manually retrying handshake');
-    UIRenderPipeline.updateHandshakeStatus('connecting');
+    // Just log, no on-screen updates
     
     if (typeof IframeHandshakeAuthority !== 'undefined') {
         IframeHandshakeAuthority.execute({ maxRetries: 5 })
             .then(() => {
-                UIRenderPipeline.updateHandshakeStatus('connected');
                 showNotification('Connected', 'success');
                 enableProtectedUI();
             })
             .catch(() => {
-                UIRenderPipeline.updateHandshakeStatus('failed');
                 showNotification('Failed to connect', 'error');
             });
     } else if (typeof window.statusCore?.startHandshake === 'function') {
         window.statusCore.startHandshake({ retries: 5 })
             .then(() => {
-                UIRenderPipeline.updateHandshakeStatus('connected');
                 showNotification('Connected', 'success');
                 enableProtectedUI();
             })
             .catch(() => {
-                UIRenderPipeline.updateHandshakeStatus('failed');
                 showNotification('Failed to connect', 'error');
             });
     }
@@ -5618,6 +5520,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         UIRenderPipeline.setStage('progressiveEnhancement');
         
+        // REMOVED: on-screen handshake status
         UIRenderPipeline.updateHandshakeStatus('waiting');
         
         onTokenReady(() => {
@@ -5726,4 +5629,4 @@ if (typeof window !== 'undefined') {
     } catch (e) {}
 }
 
-UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v5.0');
+UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v5.4');
