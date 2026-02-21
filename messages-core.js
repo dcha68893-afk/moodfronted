@@ -1,17 +1,40 @@
 // =============================================
-// MESSAGES-CORE.js - PASSIVE IFRAME MODULE v3.5.1
+// MESSAGES-CORE.js - PASSIVE IFRAME MODULE v3.5.2
 // PARENT-CONTROLLED LIFECYCLE
-// NO INDEPENDENT HANDSHAKE - NO RETRY LOOPS - NO RECOVERY
-// WITH MESSAGE LIFECYCLE STATE & VISIBLE FAILURES
+// WITH AUTO-DETECTION FOR LOCAL/RENDER ENVIRONMENTS
+// MINIMIZED CONSOLE NOISE - CLEAR FAILURE REASONS
 // =============================================
 
 (function() {
     'use strict';
 
     // =============================================
+    // ENVIRONMENT DETECTION
+    // =============================================
+    const ENV = {
+        isLocal: window.location.hostname === 'localhost' || 
+                 window.location.hostname === '127.0.0.1',
+        isRender: window.location.hostname.includes('.onrender.com'),
+        getApiBaseUrl: function() {
+            if (this.isLocal) {
+                return 'http://localhost:4000';  // Local backend
+            } else if (this.isRender) {
+                // Extract base domain from current location
+                const parts = window.location.hostname.split('.');
+                if (parts.length >= 3) {
+                    // For subdomains like messages-app.onrender.com
+                    return `https://${parts.slice(-3).join('.')}`;
+                }
+                return 'https://api.onrender.com';  // Fallback
+            }
+            return '';  // Same-origin
+        }
+    };
+
+    // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '3.5.1';
+    const VERSION = '3.5.2';
     const APP_NAME = 'kynecta-messages';
     const SOURCE_IFRAME = 'iframe';
     const FRAME_ID = 'messagesIframe';
@@ -78,6 +101,7 @@
         MESSAGE_QUEUE: 'kynecta_message_queue'
     };
 
+    // Set log level based on environment
     const LOG_LEVELS = {
         DEBUG: 0,
         INFO: 1,
@@ -86,7 +110,8 @@
         NONE: 4
     };
 
-    const CURRENT_LOG_LEVEL = LOG_LEVELS.NONE;
+    // Only show logs in development
+    const CURRENT_LOG_LEVEL = ENV.isLocal ? LOG_LEVELS.ERROR : LOG_LEVELS.NONE;
 
     // Heartbeat configuration
     const HEARTBEAT = {
@@ -100,33 +125,33 @@
     let registrationSent = false;
     let parentReady = false;
     let parentOrigin = window.location.origin;
+    let apiBaseUrl = ENV.getApiBaseUrl();
 
     // =============================================
-    // STATUS INDICATOR - SINGLE STATUS, NO REPEATS
+    // MINIMAL STATUS INDICATOR - ONLY SHOW ON FAILURE
     // =============================================
     const StatusIndicator = {
         currentStatus: null,
         statusMap: {
-            'INIT': '🚀',
-            'SENDING': '📤',
-            'WAITING': '⏳',
-            'SUCCESS': '✅',
             'FAILED': '❌',
-            'READY': '🔵',
             'WARNING': '⚠️',
             'DISCONNECTED': '🔴'
         },
         
-        show(status) {
+        show(status, reason = '') {
             if (!this.statusMap[status]) return;
             if (this.currentStatus === status) return;
             
             this.currentStatus = status;
             const emoji = this.statusMap[status];
-            console.log(`${emoji} ${status} ${emoji}`);
+            
+            // Only log failures
+            if (status === 'FAILED' || status === 'DISCONNECTED') {
+                console.log(`${emoji} ${status}${reason ? ': ' + reason : ''}`);
+            }
             
             window.dispatchEvent(new CustomEvent('statusChange', {
-                detail: { status, emoji }
+                detail: { status, emoji, reason }
             }));
         },
         
@@ -134,9 +159,6 @@
             this.currentStatus = null;
         }
     };
-
-    // Show INIT once at start
-    StatusIndicator.show('INIT');
 
     // =============================================
     // SAFE STORAGE LAYER
@@ -157,41 +179,26 @@
                 localStorage.setItem(testKey, 'test');
                 localStorage.removeItem(testKey);
                 this.storageAvailable = true;
-                
-                try {
-                    const bigTest = 'x'.repeat(1024 * 1024);
-                    localStorage.setItem('_quota_test_', bigTest);
-                    localStorage.removeItem('_quota_test_');
-                } catch (quotaError) {
-                    this.quotaExceeded = true;
-                }
             } catch (e) {
                 this.storageAvailable = false;
             }
         },
         
         get(key, fallback = null) {
-            if (this.storageAvailable && !this.quotaExceeded) {
+            if (this.storageAvailable) {
                 try {
                     const value = localStorage.getItem(key);
                     if (value !== null) return value;
                 } catch (e) {}
             }
-            
-            if (this.memoryStore.has(key)) {
-                return this.memoryStore.get(key);
-            }
-            
-            return fallback;
+            return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
         },
         
         set(key, value) {
             this.memoryStore.set(key, value);
-            
-            if (this.storageAvailable && !this.quotaExceeded) {
+            if (this.storageAvailable) {
                 try {
                     localStorage.setItem(key, String(value));
-                    return true;
                 } catch (e) {
                     if (e.name === 'QuotaExceededError') {
                         this.quotaExceeded = true;
@@ -203,9 +210,7 @@
         
         remove(key) {
             if (this.storageAvailable) {
-                try {
-                    localStorage.removeItem(key);
-                } catch (e) {}
+                try { localStorage.removeItem(key); } catch (e) {}
             }
             this.memoryStore.delete(key);
         },
@@ -213,7 +218,6 @@
         getJSON(key, fallback = null) {
             const value = this.get(key, null);
             if (!value) return fallback;
-            
             try {
                 return JSON.parse(value);
             } catch (e) {
@@ -231,9 +235,7 @@
         
         clear() {
             if (this.storageAvailable) {
-                try {
-                    localStorage.clear();
-                } catch (e) {}
+                try { localStorage.clear(); } catch (e) {}
             }
             this.memoryStore.clear();
         }
@@ -272,9 +274,7 @@
         },
 
         validateMessageStructure(data) {
-            if (!data || typeof data !== 'object') return false;
-            if (!data.type || typeof data.type !== 'string') return false;
-            return true;
+            return !!(data && typeof data === 'object' && data.type && typeof data.type === 'string');
         },
 
         generateMessageId() {
@@ -360,12 +360,9 @@
             if (this.replayCache.size > this.maxReplayEntries) {
                 const oldest = now - this.replayWindow;
                 for (const [id, time] of this.replayCache) {
-                    if (time < oldest) {
-                        this.replayCache.delete(id);
-                    }
+                    if (time < oldest) this.replayCache.delete(id);
                 }
             }
-            
             return false;
         },
 
@@ -378,10 +375,10 @@
     SecurityUtils.initOriginTrust();
 
     // =============================================
-    // DIAGNOSTICS AGENT
+    // MINIMAL DIAGNOSTICS AGENT
     // =============================================
     const DiagnosticsAgent = {
-        enabled: false,
+        enabled: ENV.isLocal,
         metrics: {
             messagesSent: 0,
             messagesReceived: 0,
@@ -470,7 +467,7 @@
     };
 
     // =============================================
-    // SILENT LOGGER
+    // SILENT LOGGER - ONLY ERRORS IN PRODUCTION
     // =============================================
     const Logger = {
         logCache: new Map(),
@@ -531,6 +528,7 @@
 
         error(module, message, data = null) {
             if (!this._shouldLog(LOG_LEVELS.ERROR, message)) return;
+            console.error(`[${module}] ${message}`, data || '');
         }
     };
 
@@ -539,7 +537,7 @@
     // =============================================
     const MessageLifecycle = {
         TIMEOUT_DURATION: 7000,
-        MAX_RETRIES: 2,
+        MAX_RETRIES: 1,  // Reduced retries to minimize noise
         pendingMessages: new Map(),
 
         createMessage(messageData) {
@@ -583,21 +581,21 @@
 
             const message = pending.message;
             
+            // Determine failure reason
             if (!SessionMirror || !SessionMirror.isAuthenticated()) {
-                message.reason = "Session not available";
+                message.reason = "No session";
             } else if (!navigator.onLine) {
-                message.reason = "No internet connection";
+                message.reason = "Offline";
             } else if (!ParentDetector || !ParentDetector.isReady) {
-                message.reason = "Connection not established";
+                message.reason = "Parent unavailable";
             } else {
-                message.reason = "Recipient not responding";
+                message.reason = "No response";
             }
 
             if (message.retryCount < this.MAX_RETRIES) {
                 message.retryCount++;
                 message.status = "sending";
                 message.reason = null;
-                
                 clearTimeout(message.timeoutRef);
                 
                 try {
@@ -610,11 +608,11 @@
             }
 
             message.status = "failed";
-            if (!message.reason) {
-                message.reason = "Message delivery failed after retries";
-            }
-            
             clearTimeout(message.timeoutRef);
+            
+            // Show failure reason
+            StatusIndicator.show('FAILED', message.reason);
+            
             this.updateMessageUI(message);
             this.pendingMessages.delete(messageId);
         },
@@ -632,20 +630,20 @@
 
         isReadyToSend() {
             if (!SessionMirror || !SessionMirror.isAuthenticated()) {
-                return { ready: false, reason: "Session not initialized" };
+                return { ready: false, reason: "No session" };
             }
             if (!ParentDetector || !ParentDetector.isReady) {
-                return { ready: false, reason: "Connection not ready" };
+                return { ready: false, reason: "Parent not ready" };
             }
             if (!navigator.onLine) {
-                return { ready: false, reason: "No internet connection" };
+                return { ready: false, reason: "Offline" };
             }
             return { ready: true };
         }
     };
 
     // =============================================
-    // MESSAGE TRANSPORT LAYER - WITH LIFECYCLE
+    // MESSAGE TRANSPORT LAYER
     // =============================================
     const MessageTransport = {
         pendingAcks: new Map(),
@@ -674,6 +672,7 @@
                     payload
                 };
                 MessageLifecycle.updateMessageUI(failedMessage);
+                StatusIndicator.show('FAILED', readyCheck.reason);
                 return Promise.resolve({ 
                     success: false, 
                     error: readyCheck.reason,
@@ -738,8 +737,6 @@
         _sendWithAck(message, targetOrigin, resolve, isRetry = false) {
             const messageId = message.messageId;
             
-            StatusIndicator.show('SENDING');
-            
             const timer = setTimeout(() => {
                 const pending = this.pendingAcks.get(messageId);
                 if (pending) {
@@ -750,13 +747,12 @@
                         MessageLifecycle.handleTimeout(messageId);
                     }
                     
-                    StatusIndicator.show('FAILED');
                     resolve({ 
                         success: false, 
                         error: 'timeout', 
                         messageId,
                         status: 'failed',
-                        reason: 'Recipient not responding'
+                        reason: 'No response'
                     });
                 }
             }, MessageLifecycle.TIMEOUT_DURATION);
@@ -790,7 +786,7 @@
                     error: 'queue_full', 
                     messageId: message.messageId,
                     status: 'failed',
-                    reason: 'Message queue full'
+                    reason: 'Queue full'
                 });
                 return;
             }
@@ -817,8 +813,6 @@
                 clearTimeout(pending.timer);
                 this.pendingAcks.delete(originalId);
                 this.outboundMessages.delete(originalId);
-                
-                StatusIndicator.show('SUCCESS');
                 
                 pending.resolve({ 
                     success: true, 
@@ -1017,9 +1011,6 @@
         },
 
         send(type, payload = {}, options = {}) {
-            if (options.requiresAck !== false) {
-                StatusIndicator.show('SENDING');
-            }
             return this.transport.send(type, payload, options);
         },
 
@@ -1041,9 +1032,7 @@
     // =============================================
     function registerWithParent() {
         if (registrationSent) return;
-        if (!window.parent || window.parent === window) {
-            return;
-        }
+        if (!window.parent || window.parent === window) return;
 
         registrationSent = true;
         parentOrigin = window.location.origin;
@@ -1069,7 +1058,7 @@
         pingInterval: null,
         lastPong: 0,
         listeners: new Set(),
-        pingIntervalMs: 15000,
+        pingIntervalMs: 30000,  // Increased to reduce noise
         connectionQuality: 'unknown',
         lastPingTime: 0,
         heartbeatEnabled: true,
@@ -1088,10 +1077,8 @@
             
             this.isReady = hasParent && canPostMessage;
             
-            if (this.isReady) {
-                StatusIndicator.show('READY');
-                this._notifyListeners();
-            } else {
+            if (!this.isReady && !this.lastDisconnectTime) {
+                this.lastDisconnectTime = Date.now();
                 StatusIndicator.show('DISCONNECTED');
             }
         },
@@ -1142,7 +1129,6 @@
             
             if (!this.isReady) {
                 this.isReady = true;
-                StatusIndicator.show('READY');
                 this._notifyListeners();
             }
             
@@ -1159,7 +1145,6 @@
             
             if (!this.isReady) {
                 this.isReady = true;
-                StatusIndicator.show('READY');
                 this._notifyListeners();
             }
             
@@ -1567,7 +1552,7 @@
     const SessionClient = {
         syncInProgress: false,
         lastSyncTime: 0,
-        syncInterval: 60000,
+        syncInterval: 120000,  // Increased to 2 minutes
         syncTimer: null,
         pendingSessionRequests: new Map(),
         expiryCheckTimer: null,
@@ -1601,7 +1586,6 @@
             
             const now = Date.now();
             if (!force && now - this.lastSyncTime < this.syncInterval) return false;
-            
             if (!window.parent || window.parent === window) return false;
 
             this.syncInProgress = true;
@@ -1619,10 +1603,7 @@
                     { requiresAck: true, timeout: 5000 }
                 );
 
-                if (result.success) {
-                    this.lastSyncTime = now;
-                }
-
+                if (result.success) this.lastSyncTime = now;
                 return result.success;
             } catch (error) {
                 return false;
@@ -1633,7 +1614,6 @@
 
         handleSessionData(message) {
             const payload = message.payload;
-            
             if (!payload) return false;
 
             const requestId = payload.requestId || message.messageId;
@@ -1823,7 +1803,6 @@
                     case MESSAGE_TYPES.PARENT_READY:
                         parentReady = true;
                         ParentDetector.isReady = true;
-                        StatusIndicator.show('READY');
                         ParentDetector._notifyListeners();
                         SecurityUtils.allowedOrigins.add(event.origin);
                         return;
@@ -1994,11 +1973,11 @@
     }
 
     // =============================================
-    // API CLIENT
+    // API CLIENT - FIXED WITH PROPER ENDPOINT DETECTION
     // =============================================
     const APIClient = {
         pendingRequests: new Map(),
-        baseUrl: '',
+        baseUrl: apiBaseUrl,
         defaultTimeout: 30000,
 
         setBaseUrl(url) {
@@ -2009,7 +1988,11 @@
             try {
                 if (!endpoint || typeof endpoint !== 'string') return null;
 
-                if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) return null;
+                // Normalize endpoint
+                if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+                    // External URLs not allowed for security
+                    return null;
+                }
 
                 if (!endpoint.startsWith('/api/')) {
                     endpoint = '/api/' + endpoint.replace(/^\/+/, '');
@@ -2029,24 +2012,27 @@
                     headers['Authorization'] = `Bearer ${token}`;
                 }
 
+                // Try parent first if available
                 if (ParentDetector.isReady && options.useParent !== false) {
-                    return this._requestViaParent(endpoint, options, requestId);
+                    return this._requestViaParent(endpoint, options, requestId, headers);
                 }
 
+                // Fallback to direct API call
                 return this._requestDirect(endpoint, options, headers, requestId);
             } catch (error) {
+                Logger.error('APIClient', `Request failed: ${error.message}`);
                 return null;
             }
         },
 
-        async _requestViaParent(endpoint, options, requestId) {
+        async _requestViaParent(endpoint, options, requestId, headers) {
             return new Promise((resolve) => {
                 const timeout = options.timeout || this.defaultTimeout;
                 
                 const timer = setTimeout(() => {
                     if (this.pendingRequests.has(requestId)) {
                         this.pendingRequests.delete(requestId);
-                        this._requestDirect(endpoint, options, null, requestId).then(resolve);
+                        this._requestDirect(endpoint, options, headers, requestId).then(resolve);
                     }
                 }, timeout);
 
@@ -2065,13 +2051,24 @@
                 ).catch(() => {
                     clearTimeout(timer);
                     this.pendingRequests.delete(requestId);
-                    this._requestDirect(endpoint, options, null, requestId).then(resolve);
+                    this._requestDirect(endpoint, options, headers, requestId).then(resolve);
                 });
             });
         },
 
         async _requestDirect(endpoint, options, headers, requestId) {
             try {
+                // Build full URL
+                let url = endpoint;
+                if (this.baseUrl && !endpoint.startsWith('http')) {
+                    url = this.baseUrl + endpoint;
+                }
+
+                // Don't try to call API if no baseUrl (standalone mode)
+                if (!url.startsWith('http')) {
+                    return { error: 'No API endpoint configured', offline: true };
+                }
+
                 const fetchOptions = {
                     method: options.method || 'GET',
                     headers: headers || {
@@ -2081,7 +2078,7 @@
                         'X-Frame-ID': FRAME_ID
                     },
                     credentials: 'same-origin',
-                    mode: 'same-origin',
+                    mode: 'cors',
                     cache: 'no-cache',
                     signal: options.signal
                 };
@@ -2092,16 +2089,62 @@
                         : JSON.stringify(SecurityUtils.sanitizePayload(options.body));
                 }
 
-                return await safeFetch(this.baseUrl + endpoint, fetchOptions);
+                const response = await fetch(url, fetchOptions);
+                
+                if (!response.ok) {
+                    // Don't log 404s as errors in production
+                    if (CURRENT_LOG_LEVEL <= LOG_LEVELS.ERROR && response.status !== 404) {
+                        Logger.error('APIClient', `HTTP ${response.status}: ${endpoint}`);
+                    }
+                    
+                    // Return structured error
+                    return { 
+                        error: `HTTP ${response.status}`, 
+                        status: response.status,
+                        offline: response.status === 404,
+                        endpoint 
+                    };
+                }
+
+                return await response.json();
             } catch (error) {
-                DiagnosticsAgent.recordError(error, `API.${endpoint}`);
-                return null;
+                // Silent fail for network errors
+                return { error: 'Network error', offline: true, endpoint };
             }
         },
 
         async fetchWithFallback(endpoint, options = {}, fallback = null) {
             const result = await this.request(endpoint, options);
-            return result !== null && !result.error ? result : fallback;
+            
+            // If we got a 404 or network error and have fallback data, use it
+            if (result && (result.error || result.offline)) {
+                // Try to get from cache
+                const cacheKey = `api_cache_${endpoint.replace(/\//g, '_')}`;
+                const cached = SafeStorage.getJSON(cacheKey);
+                if (cached) {
+                    DiagnosticsAgent.increment('cacheHits');
+                    return cached;
+                }
+                
+                DiagnosticsAgent.increment('cacheMisses');
+                
+                // Use provided fallback
+                if (fallback !== null) return fallback;
+                
+                // Return empty array/object based on endpoint
+                if (endpoint.includes('/chats') || endpoint.includes('/contacts') || endpoint.includes('/messages')) {
+                    return [];
+                }
+                return fallback;
+            }
+            
+            // Cache successful responses
+            if (result && !result.error) {
+                const cacheKey = `api_cache_${endpoint.replace(/\//g, '_')}`;
+                SafeStorage.setJSON(cacheKey, result);
+            }
+            
+            return result;
         },
 
         handleParentResponse(payload) {
@@ -2170,7 +2213,12 @@
     // =============================================
     async function initialize() {
         try {
-            DiagnosticsAgent.init(window.location.hostname === 'localhost' || window.__IFRAME_DEBUG__);
+            DiagnosticsAgent.init(ENV.isLocal || window.__IFRAME_DEBUG__);
+            
+            // Log only once on startup in development
+            if (ENV.isLocal) {
+                console.log(`🚀 Messages Core v${VERSION} [${ENV.isRender ? 'RENDER' : 'LOCAL'}]`);
+            }
             
             if (!window.parent || window.parent === window) {
                 window.dispatchEvent(new CustomEvent('coreReady', {
@@ -2189,8 +2237,6 @@
 
             loadCachedData();
 
-            StatusIndicator.show('READY');
-
             window.dispatchEvent(new CustomEvent('coreReady', {
                 detail: {
                     authenticated: SessionMirror.isAuthenticated(),
@@ -2204,7 +2250,7 @@
 
         } catch (error) {
             DiagnosticsAgent.recordError(error, 'Init.fatal');
-            StatusIndicator.show('FAILED');
+            StatusIndicator.show('FAILED', error.message);
 
             window.dispatchEvent(new CustomEvent('coreReady', {
                 detail: {
@@ -2240,14 +2286,15 @@
         try {
             if (!SessionMirror.isAuthenticated()) return false;
 
+            // Use fetchWithFallback which handles 404s gracefully
             const chatsData = await APIClient.fetchWithFallback('/api/chats', {}, []);
-            if (chatsData && Array.isArray(chatsData)) {
+            if (Array.isArray(chatsData)) {
                 chats = chatsData;
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
             }
 
             const contactsData = await APIClient.fetchWithFallback('/api/contacts', {}, []);
-            if (contactsData && Array.isArray(contactsData)) {
+            if (Array.isArray(contactsData)) {
                 contacts = contactsData;
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CONTACTS_CACHE, contacts);
             }
@@ -2370,7 +2417,7 @@
         if (!targetChat) return [];
 
         const data = await APIClient.fetchWithFallback(`/api/messages/${targetChat}`, {}, []);
-        if (data && Array.isArray(data)) {
+        if (Array.isArray(data)) {
             messages = data;
             SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${targetChat}`, messages);
         }
@@ -2404,7 +2451,7 @@
             body: JSON.stringify({ friendId })
         });
 
-        if (newChat) {
+        if (newChat && !newChat.error) {
             chats.unshift(newChat);
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
             await openChat(newChat);
@@ -2438,8 +2485,6 @@
     async function sendMessage(content, type = 'text', options = {}) {
         if (!currentChat) return false;
 
-        StatusIndicator.show('SENDING');
-
         const messageData = {
             id: SecurityUtils.generateMessageId(),
             chatId: currentChat.id,
@@ -2455,6 +2500,7 @@
 
         messages.push(messageData);
 
+        // Listen for status changes
         const handleStatusChange = (event) => {
             const updatedMessage = event.detail.message;
             if (updatedMessage.id === messageData.id) {
@@ -2481,7 +2527,7 @@
                 body: JSON.stringify(messageData)
             });
 
-            if (result) {
+            if (result && !result.error) {
                 const idx = messages.findIndex(m => m.id === messageData.id);
                 if (idx !== -1) {
                     messages[idx] = { ...result, status: 'sent' };
@@ -2490,7 +2536,7 @@
                     
                     if (!sendResult.success) {
                         messages[idx].status = 'failed';
-                        messages[idx].reason = sendResult.reason || 'Message delivery failed';
+                        messages[idx].reason = sendResult.reason || 'Failed';
                         showStatusMessage(`❌ ${messages[idx].reason}`);
                     }
                 }
@@ -2504,28 +2550,21 @@
 
                 SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
 
-                StatusIndicator.show('SUCCESS');
-
                 return true;
             }
 
             const idx = messages.findIndex(m => m.id === messageData.id);
             if (idx !== -1) {
                 messages[idx].status = 'failed';
-                messages[idx].reason = 'Server rejected message';
-                showStatusMessage(`❌ Server rejected message`);
+                messages[idx].reason = 'Server rejected';
+                showStatusMessage(`❌ Server rejected`);
             }
-
-            StatusIndicator.show('FAILED');
 
             return false;
         }
 
         offlineQueue.push(messageData);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
-
-        StatusIndicator.show('SUCCESS');
-
         return true;
     }
 
@@ -2534,8 +2573,7 @@
     }
 
     async function sendToMultipleChats(content, chatIds) {
-        if (!content && !currentAttachment) return 0;
-        if (!chatIds || chatIds.length === 0) return 0;
+        if ((!content && !currentAttachment) || !chatIds?.length) return 0;
 
         let successCount = 0;
 
@@ -2551,7 +2589,7 @@
                 })
             });
 
-            if (result) successCount++;
+            if (result && !result.error) successCount++;
         }
 
         return successCount;
@@ -2565,7 +2603,7 @@
             body: JSON.stringify({ messageId, content: newContent })
         });
 
-        if (result) {
+        if (result && !result.error) {
             const idx = messages.findIndex(m => m.id === messageId);
             if (idx !== -1) {
                 messages[idx].content = SecurityUtils.escapeHtml(newContent);
@@ -2599,7 +2637,7 @@
                 body: JSON.stringify({ messageId })
             });
 
-            if (result) {
+            if (result && !result.error) {
                 const idx = messages.findIndex(m => m.id === messageId);
                 if (idx !== -1) {
                     messages[idx].deleted = true;
@@ -2627,7 +2665,7 @@
             body: JSON.stringify({ chatId })
         });
 
-        if (result) {
+        if (result && !result.error) {
             const idx = chats.findIndex(c => c.id === chatId);
             if (idx !== -1) {
                 chats[idx].unreadCount = 0;
@@ -2666,7 +2704,6 @@
         }
 
         SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-
         return userIndex > -1 ? 'removed' : 'added';
     }
 
@@ -2778,7 +2815,6 @@
         poll.userVote = optionIndex;
 
         SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-
         return true;
     }
 
@@ -2975,9 +3011,7 @@
     }
 
     function validateSessionData(data) {
-        if (!data || typeof data !== 'object') return false;
-        if (!data.user && !data.token && !data.mode) return false;
-        return true;
+        return !!(data && typeof data === 'object' && (data.user || data.token || data.mode));
     }
 
     function getData(type) {
@@ -3210,7 +3244,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     async function createNote() {
         const input = document.getElementById('messageInput');
         const content = input?.value?.trim() || 'Note';
-
         return await sendMessageWithOptions(content, { isNote: true });
     }
 
@@ -3767,7 +3800,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
                 body: JSON.stringify(message)
             });
 
-            if (!result) {
+            if (!result || result.error) {
                 failedMessages.push(message);
             }
         }
@@ -3833,6 +3866,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     function retryConnection() {
+        // Will be handled by parent detector
     }
 
     function renderMessages() {

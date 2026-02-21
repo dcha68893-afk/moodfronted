@@ -2,12 +2,8 @@
 // ==================== RESILIENT UI CONTROLLER ====================
 // Version: 3.2.0
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v3.0.0
+// Dependencies: calls-core.js v3.2.0
 // Security: XSS protected, input sanitized, CSP compliant
-// UPDATES: v3.2.0 - Integrated with IframeEnvironment, OriginSecurity, SafeStorage,
-//                    IframeTransport, StartupGovernor, IframeHandshakeAuthority,
-//                    IframeSessionClient, ReliabilityEngine, RecoveryManager,
-//                    MultiModuleCoordinator, UIFailsafe, NavigationGuard
 // ===============================================================
 
 (function() {
@@ -103,7 +99,53 @@
         return false;
     }
 
-    const legacyAPI = (window.parent && window.parent.API) ? window.parent.API : null;
+    // ==================== WAIT FOR CORE READY ====================
+    let coreReady = false;
+    
+    function waitForCoreReady(timeout = 10000) {
+        return new Promise((resolve, reject) => {
+            if (coreReady) {
+                resolve(true);
+                return;
+            }
+            
+            if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
+                coreReady = true;
+                resolve(true);
+                return;
+            }
+            
+            const timeoutId = setTimeout(() => {
+                window.removeEventListener('core.ready', readyHandler);
+                if (window.callsCore && window.callsCore.waitForReady) {
+                    window.callsCore.waitForReady(timeout).then(resolve).catch(() => {
+                        logOnce('warn', 'Core ready timeout, proceeding with fallback');
+                        resolve(false);
+                    });
+                } else {
+                    logOnce('warn', 'Core ready timeout, proceeding with fallback');
+                    resolve(false);
+                }
+            }, timeout);
+            
+            const readyHandler = () => {
+                clearTimeout(timeoutId);
+                window.removeEventListener('core.ready', readyHandler);
+                coreReady = true;
+                resolve(true);
+            };
+            
+            window.addEventListener('core.ready', readyHandler);
+            
+            // Also check if core already has ready event
+            if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
+                clearTimeout(timeoutId);
+                window.removeEventListener('core.ready', readyHandler);
+                coreReady = true;
+                resolve(true);
+            }
+        });
+    }
 
     // ==================== IMPORTS FROM CORE ====================
     let core;
@@ -115,14 +157,6 @@
         if (DEBUG) {
             logOnce('warn', 'Waiting for core to load...');
         }
-        
-        const checkCore = setInterval(() => {
-            if (window.callsCore) {
-                core = window.callsCore;
-                clearInterval(checkCore);
-                initializeUISystem();
-            }
-        }, 100);
     }
 
     const {
@@ -312,7 +346,6 @@
         MessageIdGenerator = {
             generateId: () => Date.now() + '-' + Math.random().toString(36).substring(2, 8)
         },
-        // Enhanced core modules from v3.0.0
         MessageBridge,
         HandshakeClient,
         SessionClient,
@@ -324,7 +357,6 @@
         EnvironmentDetector,
         OriginAdapter,
         MESSAGE_TYPES,
-        // New v3.0.0 modules
         IframeEnvironment,
         OriginSecurity,
         SafeStorage,
@@ -334,207 +366,14 @@
         ReliabilityEngine,
         MultiModuleCoordinator,
         UIFailsafe,
-        NavigationGuard
+        NavigationGuard,
+        APICore
     } = core;
 
     // ==================== DEFERRED INITIALIZATION GATES ====================
     let parentReady = false;
     let sessionReady = false;
     let handshakeComplete = false;
-    
-    const initGatePromise = new Promise((resolve) => {
-        const checkGate = () => {
-            if (parentReady && sessionReady) {
-                resolve();
-            }
-        };
-        const interval = setInterval(checkGate, 100);
-        
-        let timeoutMs = 10000;
-        if (IframeEnvironment && IframeEnvironment.getTimeouts) {
-            const timeouts = IframeEnvironment.getTimeouts();
-            timeoutMs = timeouts.session * 2 || 10000;
-        }
-        
-        setTimeout(() => {
-            clearInterval(interval);
-            if (DEBUG) {
-                logOnce('warn', 'Init gate timeout, proceeding in fallback mode');
-            }
-            parentReady = true;
-            sessionReady = true;
-            resolve();
-        }, timeoutMs);
-    });
-
-    // ==================== HANDSHAKE RETRY ====================
-    async function performHandshakeWithRetry(maxRetries = 5) {
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                sendToParent('HANDSHAKE_REQUEST', { 
-                    attempt: i + 1,
-                    module: CURRENT_MODULE_NAME
-                });
-                
-                let timeout = 8000;
-                if (IframeEnvironment && IframeEnvironment.getTimeouts) {
-                    const timeouts = IframeEnvironment.getTimeouts();
-                    timeout = timeouts.handshake || 8000;
-                }
-                
-                const response = await new Promise((resolve, reject) => {
-                    const timeoutId = setTimeout(() => reject(new Error('Handshake timeout')), timeout * Math.pow(2, i));
-                    
-                    const handler = (event) => {
-                        if (OriginSecurity && !OriginSecurity.validateEvent(event)) return;
-                        if (OriginAdapter && !OriginAdapter.validateEvent(event)) return;
-                        
-                        const data = event.data;
-                        if (!data || typeof data !== 'object') return;
-                        
-                        if (data.type === 'HANDSHAKE_ACK' || data.type === 'ACK') {
-                            clearTimeout(timeoutId);
-                            window.removeEventListener('message', handler);
-                            resolve(data);
-                        }
-                    };
-                    
-                    window.addEventListener('message', handler);
-                });
-                
-                if (response && (response.payload?.success || response.success)) {
-                    handshakeComplete = true;
-                    parentReady = true;
-                    return true;
-                }
-            } catch (e) {
-                if (DEBUG) {
-                    logOnce('warn', `Handshake attempt ${i + 1} failed:`, e);
-                }
-            }
-            
-            let delay = 1000 * Math.pow(2, i);
-            if (IframeEnvironment && IframeEnvironment.isVPNNetwork && IframeEnvironment.isVPNNetwork()) {
-                delay *= 1.5;
-            }
-            
-            if (i < maxRetries - 1) {
-                await new Promise(r => setTimeout(r, delay));
-            }
-        }
-        return false;
-    }
-
-    // ==================== API CALL GUARD ====================
-    async function waitForReady(timeout = 5000) {
-        const start = Date.now();
-        while (!parentReady || !sessionReady) {
-            if (Date.now() - start > timeout) {
-                throw new Error('Ready timeout');
-            }
-            await new Promise(r => setTimeout(r, 50));
-        }
-    }
-
-    // ==================== PARENT MESSAGE LISTENER ====================
-    function onParentMessage(event) {
-        // Validate origin using both adapters for compatibility
-        if (OriginSecurity && !OriginSecurity.validateEvent(event)) {
-            if (DEBUG) {
-                logOnce('warn', 'Invalid origin (OriginSecurity):', event.origin);
-            }
-            return;
-        }
-        
-        if (OriginAdapter && !OriginAdapter.validateEvent(event)) {
-            if (DEBUG) {
-                logOnce('warn', 'Invalid origin (OriginAdapter):', event.origin);
-            }
-            return;
-        }
-        
-        const data = event.data;
-        if (!data || typeof data !== 'object') return;
-        if (!data.type || typeof data.type !== 'string') return;
-        
-        try {
-            switch (data.type) {
-                case 'PARENT_READY':
-                    parentReady = true;
-                    if (DEBUG) logOnce('info', 'Parent ready');
-                    sendToParent('CHILD_ACK', { status: 'ready' });
-                    break;
-                    
-                case 'SESSION_UPDATE':
-                case 'SESSION_SYNC':
-                    if (data.payload || data.data) {
-                        const sessionData = data.payload || data.data;
-                        if (sessionData.token) {
-                            window.__CHILD_SESSION__.token = sessionData.token;
-                        }
-                        if (sessionData.userId || sessionData.user?.id) {
-                            window.__CHILD_SESSION__.userId = sessionData.userId || sessionData.user?.id;
-                        }
-                        if (sessionData.expires || sessionData.expiry) {
-                            window.__CHILD_SESSION__.expires = sessionData.expires || sessionData.expiry;
-                        }
-                        sessionReady = true;
-                        if (DEBUG) logOnce('info', 'Session updated');
-                        
-                        sendToParent('SESSION_ACK', { 
-                            success: true,
-                            timestamp: Date.now()
-                        });
-                    }
-                    break;
-                    
-                case 'HANDSHAKE_ACK':
-                    handshakeComplete = true;
-                    parentReady = true;
-                    if (data.payload && data.payload.session) {
-                        window.__CHILD_SESSION__ = {
-                            ...window.__CHILD_SESSION__,
-                            ...data.payload.session
-                        };
-                        sessionReady = true;
-                    }
-                    if (DEBUG) logOnce('info', 'Handshake complete');
-                    break;
-                    
-                case 'SESSION_ACK':
-                    if (DEBUG) logOnce('info', 'Session ACK received');
-                    sessionReady = true;
-                    break;
-                    
-                case 'PING':
-                    sendToParent('PONG', {
-                        requestId: data.payload?.requestId,
-                        timestamp: Date.now()
-                    });
-                    break;
-                    
-                case 'PONG':
-                    break;
-                    
-                case 'PAGE_ACTIVATED':
-                    if (DEBUG) logOnce('info', 'Parent page activated');
-                    break;
-                    
-                case 'NAVIGATE':
-                    if (DEBUG) logOnce('info', 'Parent navigation:', data.payload);
-                    break;
-                    
-                default:
-                    break;
-            }
-        } catch (error) {
-            if (DEBUG) {
-                logOnce('error', 'Error handling parent message:', error);
-            }
-        }
-    }
-
-    window.addEventListener('message', onParentMessage, false);
 
     // ==================== UI STATE MANAGEMENT ====================
     const UIState = {
@@ -582,7 +421,49 @@
             currentDepth: 0
         },
         
-        initialized: false
+        initialized: false,
+        
+        // UI-specific state
+        selectedMood: 'neutral',
+        selectedIntention: 'quick',
+        currentCallCategory: 'all',
+        currentNewCallTab: 'contacts',
+        selectedContacts: [],
+        selectedGroupContacts: [],
+        groupCallOption: null,
+        callLink: null,
+        
+        // Media state
+        localStream: null,
+        remoteStreams: new Map(),
+        screenStream: null,
+        isMuted: false,
+        isVideoOff: false,
+        isScreenSharing: false,
+        isSpeakerOn: true,
+        currentFocusMode: false,
+        
+        // Call state
+        callStartTime: null,
+        callDurationInterval: null,
+        activeCallId: null,
+        callType: null,
+        callParticipants: [],
+        
+        // Chat state
+        chatMessages: [],
+        unreadChatCount: 0,
+        
+        // Polls state
+        activePolls: [],
+        pollResults: [],
+        
+        // Notes state
+        sharedNotes: [],
+        privateNotes: {},
+        
+        // Relationship insights
+        relationshipData: null
     };
 
     // ==================== DOM ELEMENTS CACHE ====================
@@ -663,6 +544,7 @@
                 contactSearch: '#contactSearch',
                 groupContactSearch: '#groupContactSearch',
                 contactsList: '#contactsList',
+                groupContactsList: '#groupContactsList',
                 contactsLoading: '#contactsLoading',
                 callsLoading: '#callsLoading',
                 startVoiceCallBtn: '#startVoiceCallBtn',
@@ -718,6 +600,8 @@
                 missedCallsSection: '#missedCallsSection',
                 groupCallsSection: '#groupCallsSection',
                 allCallsList: '#allCallsList',
+                missedCallsList: '#missedCallsList',
+                groupCallsList: '#groupCallsList',
                 
                 pipCloseBtn: '#pipCloseBtn',
                 pipContainer: '#pipContainer',
@@ -726,7 +610,14 @@
                 apiStatusIndicator: '#apiStatusIndicator',
                 apiStatusText: '#apiStatusText',
                 offlineBanner: '#offlineBanner',
-                notificationArea: '#notificationArea'
+                notificationArea: '#notificationArea',
+                
+                debugToggle: '#debugToggle',
+                debugPanel: '#debugPanel',
+                envBadge: '#envBadge',
+                envText: '#envText',
+                recoveryIndicator: '#recoveryIndicator',
+                recoveryMessage: '#recoveryMessage'
             };
             
             Object.entries(selectors).forEach(([key, selector]) => {
@@ -1580,6 +1471,10 @@
                 
                 elements.contactsList.innerHTML = html;
                 
+                if (elements.groupContactsList) {
+                    elements.groupContactsList.innerHTML = html.replace(/contact-checkbox/g, 'group-contact').replace(/id="contact-/g, 'id="group-contact-');
+                }
+                
                 if (elements.contactsLoading) {
                     elements.contactsLoading.style.display = 'none';
                 }
@@ -1799,6 +1694,17 @@
             if (IframeSessionClient && typeof IframeSessionClient.addListener === 'function') {
                 IframeSessionClient.addListener(this.handleSessionEvent.bind(this));
             }
+            
+            // Listen for core.ready event
+            window.addEventListener('core.ready', this.handleCoreReady.bind(this));
+        },
+        
+        handleCoreReady: function(event) {
+            logOnce('success', 'Core ready event received');
+            coreReady = true;
+            parentReady = true;
+            sessionReady = true;
+            RenderingPipeline.updateSyncIndicator();
         },
         
         handleHandshakeEvent: function(event, data) {
@@ -2990,12 +2896,25 @@
                 elements.newCallModal.classList.add('active');
                 UIState.activeModals.add('newCallModal');
                 
-                if (AppState?.contacts?.length === 0 && window.callAPI) {
-                    if (typeof window.callAPI.fetchContacts === 'function') {
-                        window.callAPI.fetchContacts();
-                    }
-                } else if (window.callAPI && typeof window.callAPI.renderContacts === 'function') {
-                    window.callAPI.renderContacts(AppState?.contacts || []);
+                // Fetch fresh contacts from core API
+                if (APICore && APICore.isReady && APICore.isReady()) {
+                    APICore.get('/api/contacts', {}, { allowFallback: true })
+                        .then(contacts => {
+                            if (contacts && Array.isArray(contacts)) {
+                                AppState.contacts = contacts;
+                                RenderingPipeline.renderContactsList(contacts);
+                            }
+                        })
+                        .catch(() => {
+                            // Use cached contacts if available
+                            if (AppState?.contacts?.length > 0) {
+                                RenderingPipeline.renderContactsList(AppState.contacts);
+                            }
+                        });
+                } else if (AppState?.contacts?.length > 0) {
+                    RenderingPipeline.renderContactsList(AppState.contacts);
+                } else if (window.callAPI && typeof window.callAPI.fetchContacts === 'function') {
+                    window.callAPI.fetchContacts();
                 }
                 
                 UIEventHandlers.switchNewCallTab('contacts');
@@ -3058,10 +2977,31 @@
             }
             
             option.classList.add('selected');
+            UIState.groupCallOption = option.id;
             
             if (elements.startGroupCallBtn) {
                 elements.startGroupCallBtn.disabled = false;
             }
+        },
+        
+        getSelectedContacts: function() {
+            const selected = [];
+            document.querySelectorAll('.contact-checkbox:checked').forEach(checkbox => {
+                const contactId = checkbox.id.replace('contact-', '');
+                const contact = AppState?.contacts?.find(c => c.id === contactId);
+                if (contact) selected.push(contact);
+            });
+            return selected;
+        },
+        
+        getSelectedGroupContacts: function() {
+            const selected = [];
+            document.querySelectorAll('.group-contact:checked').forEach(checkbox => {
+                const contactId = checkbox.id.replace('group-contact-', '');
+                const contact = AppState?.contacts?.find(c => c.id === contactId);
+                if (contact) selected.push(contact);
+            });
+            return selected;
         },
         
         startVoiceCall: function() {
@@ -3070,32 +3010,6 @@
         
         startVideoCall: function() {
             this.startCallGeneric('video');
-        },
-        
-        startGroupCall: function() {
-            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('groupCalls')) return;
-            
-            const selectedContacts = this.getSelectedGroupContacts();
-            const groupOption = document.querySelector('.option-item.selected');
-            
-            if (selectedContacts.length < 2) {
-                showNotification('Please select at least 2 contacts for group call', 'warning');
-                return;
-            }
-            
-            if (!groupOption) {
-                showNotification('Please select a group call option', 'warning');
-                return;
-            }
-            
-            const isInstant = groupOption.id === 'instantGroupOption';
-            
-            if (isInstant) {
-                this.startCall('video', selectedContacts);
-                UIEventHandlers.closeNewCallModal();
-            } else {
-                this.scheduleGroupCall(selectedContacts);
-            }
         },
         
         startCallGeneric: function(type) {
@@ -3124,24 +3038,30 @@
             UIEventHandlers.closeNewCallModal();
         },
         
-        getSelectedContacts: function() {
-            const selected = [];
-            document.querySelectorAll('.contact-checkbox:checked').forEach(checkbox => {
-                const contactId = checkbox.id.replace('contact-', '');
-                const contact = AppState?.contacts?.find(c => c.id === contactId);
-                if (contact) selected.push(contact);
-            });
-            return selected;
-        },
-        
-        getSelectedGroupContacts: function() {
-            const selected = [];
-            document.querySelectorAll('.group-contact:checked').forEach(checkbox => {
-                const contactId = checkbox.id.replace('group-contact-', '');
-                const contact = AppState?.contacts?.find(c => c.id === contactId);
-                if (contact) selected.push(contact);
-            });
-            return selected;
+        startGroupCall: function() {
+            if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('groupCalls')) return;
+            
+            const selectedContacts = this.getSelectedGroupContacts();
+            const groupOption = UIState.groupCallOption;
+            
+            if (selectedContacts.length < 2) {
+                showNotification('Please select at least 2 contacts for group call', 'warning');
+                return;
+            }
+            
+            if (!groupOption) {
+                showNotification('Please select a group call option', 'warning');
+                return;
+            }
+            
+            const isInstant = groupOption === 'instantGroupOption';
+            
+            if (isInstant) {
+                this.startCall('video', selectedContacts);
+                UIEventHandlers.closeNewCallModal();
+            } else {
+                this.scheduleGroupCall(selectedContacts);
+            }
         },
         
         startCall: function(type, participants) {
@@ -3169,6 +3089,10 @@
                         AppState.isInCall = true;
                     }
                     
+                    UIState.activeCallId = callId;
+                    UIState.callType = type;
+                    UIState.callParticipants = participants;
+                    
                     this.showCallUI();
                     this.startCallTimer();
                     
@@ -3192,6 +3116,11 @@
                         AppState.isInCall = true;
                     }
                     
+                    UIState.localStream = stream;
+                    UIState.callType = type;
+                    UIState.callParticipants = participants;
+                    UIState.activeCallId = 'call-' + Date.now();
+                    
                     this.showCallUI();
                     this.startCallTimer();
                     this.initializeCallFeatures();
@@ -3207,19 +3136,19 @@
             if (elements.sidebar) elements.sidebar.style.display = 'none';
             if (elements.callContainer) elements.callContainer.classList.add('active');
             
-            const participantNames = AppState?.callParticipants?.map(p => p.name).join(', ') || 'Call';
+            const participantNames = UIState.callParticipants?.map(p => p.name).join(', ') || 'Call';
             if (elements.callWithName) elements.callWithName.textContent = SecuritySanitizer.sanitizeString(participantNames);
             if (elements.callStatusText) elements.callStatusText.textContent = 'In call';
             
-            const icon = AppState?.callType === 'video' ? 'fa-video' : 'fa-phone';
+            const icon = UIState.callType === 'video' ? 'fa-video' : 'fa-phone';
             if (elements.callTypeIcon) elements.callTypeIcon.innerHTML = `<i class="fas ${icon}"></i>`;
             
             if (AppState?.settings?.emotionalContext) {
                 if (typeof updateMoodIndicator === 'function') {
-                    updateMoodIndicator(AppState.currentMood || 'neutral');
+                    updateMoodIndicator(UIState.selectedMood || 'neutral');
                 }
                 if (typeof updateIntentionIndicator === 'function') {
-                    updateIntentionIndicator(AppState.currentIntention || 'quick');
+                    updateIntentionIndicator(UIState.selectedIntention || 'quick');
                 }
             }
             
@@ -3236,23 +3165,26 @@
             if (!AppState) return;
             
             AppState.callStartTime = Date.now();
+            UIState.callStartTime = Date.now();
             
             if (AppState.callDurationInterval) {
                 clearInterval(AppState.callDurationInterval);
             }
             
             AppState.callDurationInterval = setInterval(() => {
-                if (!AppState.callStartTime || !elements.callDuration) return;
+                if (!UIState.callStartTime || !elements.callDuration) return;
                 
-                const elapsed = Math.floor((Date.now() - AppState.callStartTime) / 1000);
+                const elapsed = Math.floor((Date.now() - UIState.callStartTime) / 1000);
                 const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
                 const seconds = (elapsed % 60).toString().padStart(2, '0');
                 elements.callDuration.textContent = `${minutes}:${seconds}`;
             }, 1000);
+            
+            UIState.callDurationInterval = AppState.callDurationInterval;
         },
         
         initializeCallFeatures: function() {
-            if (AppState?.localStream && AppState?.callType === 'video' && elements.videoGrid) {
+            if (UIState.localStream && UIState.callType === 'video' && elements.videoGrid) {
                 const container = elements.videoGrid;
                 container.innerHTML = '';
                 
@@ -3265,7 +3197,7 @@
                 video.autoplay = true;
                 video.playsInline = true;
                 video.muted = true;
-                video.srcObject = AppState.localStream;
+                video.srcObject = UIState.localStream;
                 
                 const overlay = document.createElement('div');
                 overlay.className = 'video-overlay';
@@ -3293,54 +3225,54 @@
         },
         
         toggleMute: function() {
-            if (!AppState?.localStream || !elements.muteBtn) return;
+            if (!UIState.localStream || !elements.muteBtn) return;
             
-            const audioTracks = AppState.localStream.getAudioTracks();
+            const audioTracks = UIState.localStream.getAudioTracks();
             if (audioTracks.length > 0) {
-                AppState.isMuted = !AppState.isMuted;
+                UIState.isMuted = !UIState.isMuted;
                 audioTracks.forEach(track => {
-                    track.enabled = !AppState.isMuted;
+                    track.enabled = !UIState.isMuted;
                 });
                 
                 const icon = elements.muteBtn.querySelector('i');
                 if (icon) {
-                    icon.className = AppState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+                    icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
                 }
-                elements.muteBtn.title = AppState.isMuted ? 'Unmute' : 'Mute';
+                elements.muteBtn.title = UIState.isMuted ? 'Unmute' : 'Mute';
                 
-                showNotification(AppState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
+                showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
             }
         },
         
         toggleVideo: function() {
-            if (!AppState?.localStream || !elements.videoBtn) return;
+            if (!UIState.localStream || !elements.videoBtn) return;
             
-            const videoTracks = AppState.localStream.getVideoTracks();
+            const videoTracks = UIState.localStream.getVideoTracks();
             if (videoTracks.length > 0) {
-                AppState.isVideoOff = !AppState.isVideoOff;
+                UIState.isVideoOff = !UIState.isVideoOff;
                 videoTracks.forEach(track => {
-                    track.enabled = !AppState.isVideoOff;
+                    track.enabled = !UIState.isVideoOff;
                 });
                 
                 const icon = elements.videoBtn.querySelector('i');
                 if (icon) {
-                    icon.className = AppState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
+                    icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
                 }
-                elements.videoBtn.title = AppState.isVideoOff ? 'Turn Video On' : 'Turn Video Off';
+                elements.videoBtn.title = UIState.isVideoOff ? 'Turn Video On' : 'Turn Video Off';
                 
                 const localVideo = elements.videoGrid?.querySelector('.video-container[data-id="local"]');
                 if (localVideo) {
-                    localVideo.style.display = AppState.isVideoOff ? 'none' : 'block';
+                    localVideo.style.display = UIState.isVideoOff ? 'none' : 'block';
                 }
                 
-                showNotification(AppState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+                showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
             }
         },
         
         toggleScreenShare: function() {
             if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('screenSharing')) return;
             
-            if (AppState?.isScreenSharing) {
+            if (UIState.isScreenSharing) {
                 this.stopScreenShare();
             } else {
                 this.startScreenShare();
@@ -3355,6 +3287,9 @@
             
             navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
                 .then(stream => {
+                    UIState.screenStream = stream;
+                    UIState.isScreenSharing = true;
+                    
                     if (AppState) {
                         AppState.screenStream = stream;
                         AppState.isScreenSharing = true;
@@ -3368,10 +3303,10 @@
                     const videoTrack = stream.getVideoTracks()[0];
                     
                     const localVideo = elements.videoGrid?.querySelector('.video-container[data-id="local"] video');
-                    if (localVideo && AppState?.localStream) {
+                    if (localVideo && UIState.localStream) {
                         const newStream = new MediaStream();
                         newStream.addTrack(videoTrack);
-                        const audioTrack = AppState.localStream.getAudioTracks()[0];
+                        const audioTrack = UIState.localStream.getAudioTracks()[0];
                         if (audioTrack) newStream.addTrack(audioTrack);
                         
                         localVideo.srcObject = newStream;
@@ -3392,16 +3327,21 @@
         },
         
         stopScreenShare: function() {
-            if (!AppState?.screenStream) return;
+            if (!UIState.screenStream) return;
             
-            AppState.screenStream.getTracks().forEach(track => track.stop());
-            AppState.screenStream = null;
-            AppState.isScreenSharing = false;
+            UIState.screenStream.getTracks().forEach(track => track.stop());
+            UIState.screenStream = null;
+            UIState.isScreenSharing = false;
             
-            if (AppState.localStream) {
+            if (AppState) {
+                AppState.screenStream = null;
+                AppState.isScreenSharing = false;
+            }
+            
+            if (UIState.localStream) {
                 const localVideo = elements.videoGrid?.querySelector('.video-container[data-id="local"] video');
                 if (localVideo) {
-                    localVideo.srcObject = AppState.localStream;
+                    localVideo.srcObject = UIState.localStream;
                 }
             }
             
@@ -3416,54 +3356,64 @@
         toggleSpeaker: function() {
             if (!elements.speakerBtn) return;
             
-            if (!AppState) AppState = {};
-            AppState.isSpeakerOn = !AppState.isSpeakerOn;
+            UIState.isSpeakerOn = !UIState.isSpeakerOn;
             
             const icon = elements.speakerBtn.querySelector('i');
             if (icon) {
-                icon.className = AppState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
+                icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
             }
-            elements.speakerBtn.title = AppState.isSpeakerOn ? 'Switch to Headphones' : 'Switch to Speaker';
+            elements.speakerBtn.title = UIState.isSpeakerOn ? 'Switch to Headphones' : 'Switch to Speaker';
             
-            showNotification(`Switched to ${AppState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
+            showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones'}`, 'info');
         },
         
         endCall: function() {
-            if (!AppState?.isInCall) return;
+            if (!AppState?.isInCall && !UIState.activeCallId) return;
             
             if (confirm('End the call?')) {
-                if (AppState.localStream) {
-                    AppState.localStream.getTracks().forEach(track => track.stop());
-                    AppState.localStream = null;
+                if (UIState.localStream) {
+                    UIState.localStream.getTracks().forEach(track => track.stop());
+                    UIState.localStream = null;
                 }
                 
-                if (AppState.screenStream) {
-                    AppState.screenStream.getTracks().forEach(track => track.stop());
-                    AppState.screenStream = null;
+                if (UIState.screenStream) {
+                    UIState.screenStream.getTracks().forEach(track => track.stop());
+                    UIState.screenStream = null;
                 }
                 
                 if (window.callCore && typeof window.callCore.endCall === 'function') {
-                    window.callCore.endCall(AppState.activeCallId).catch(() => {});
+                    window.callCore.endCall(UIState.activeCallId).catch(() => {});
                 }
                 
-                if (AppState.callDurationInterval) {
+                if (UIState.callDurationInterval) {
+                    clearInterval(UIState.callDurationInterval);
+                    UIState.callDurationInterval = null;
+                }
+                
+                if (AppState?.callDurationInterval) {
                     clearInterval(AppState.callDurationInterval);
                     AppState.callDurationInterval = null;
                 }
                 
-                const callDuration = AppState.callStartTime ? 
-                    Math.floor((Date.now() - AppState.callStartTime) / 1000) : 0;
+                const callDuration = UIState.callStartTime ? 
+                    Math.floor((Date.now() - UIState.callStartTime) / 1000) : 0;
                 
-                AppState.isInCall = false;
-                AppState.activeCallId = null;
-                AppState.callParticipants = [];
-                AppState.callStartTime = null;
+                if (AppState) {
+                    AppState.isInCall = false;
+                    AppState.activeCallId = null;
+                    AppState.callParticipants = [];
+                    AppState.callStartTime = null;
+                }
+                
+                UIState.activeCallId = null;
+                UIState.callParticipants = [];
+                UIState.callStartTime = null;
                 
                 if (elements.callContainer) elements.callContainer.classList.remove('active');
                 if (elements.sidebar) elements.sidebar.style.display = 'flex';
                 if (elements.focusModeBtn) elements.focusModeBtn.style.display = 'none';
                 
-                if (AppState.currentFocusMode) {
+                if (UIState.currentFocusMode) {
                     this.disableFocusMode();
                 }
                 
@@ -3494,7 +3444,7 @@
                 
                 document.querySelectorAll('.mood-option').forEach(option => {
                     option.classList.remove('selected');
-                    if (option.dataset.mood === (AppState?.currentMood || 'neutral')) {
+                    if (option.dataset.mood === UIState.selectedMood) {
                         option.classList.add('selected');
                     }
                 });
@@ -3511,13 +3461,14 @@
         selectMoodOption: function(e) {
             document.querySelectorAll('.mood-option').forEach(opt => opt.classList.remove('selected'));
             e.currentTarget.classList.add('selected');
+            UIState.selectedMood = e.currentTarget.dataset.mood;
         },
         
         setMood: function() {
             const selectedOption = document.querySelector('.mood-option.selected');
-            if (selectedOption && AppState) {
+            if (selectedOption) {
                 const newMood = selectedOption.dataset.mood;
-                AppState.currentMood = newMood;
+                UIState.selectedMood = newMood;
                 
                 try {
                     if (SafeStorage && typeof SafeStorage.set === 'function') {
@@ -3531,7 +3482,7 @@
                     updateMoodIndicator(newMood);
                 }
                 
-                if (AppState.isInCall) {
+                if (AppState?.isInCall) {
                     sendToParent('MOOD_UPDATE', { mood: newMood, timestamp: Date.now() });
                 }
                 
@@ -3547,7 +3498,7 @@
                 
                 document.querySelectorAll('.intention-option').forEach(option => {
                     option.classList.remove('selected');
-                    if (option.dataset.intention === (AppState?.currentIntention || 'quick')) {
+                    if (option.dataset.intention === UIState.selectedIntention) {
                         option.classList.add('selected');
                     }
                 });
@@ -3564,13 +3515,14 @@
         selectIntentionOption: function(e) {
             document.querySelectorAll('.intention-option').forEach(opt => opt.classList.remove('selected'));
             e.currentTarget.classList.add('selected');
+            UIState.selectedIntention = e.currentTarget.dataset.intention;
         },
         
         setIntention: function() {
             const selectedOption = document.querySelector('.intention-option.selected');
-            if (selectedOption && AppState) {
+            if (selectedOption) {
                 const newIntention = selectedOption.dataset.intention;
-                AppState.currentIntention = newIntention;
+                UIState.selectedIntention = newIntention;
                 
                 try {
                     if (SafeStorage && typeof SafeStorage.set === 'function') {
@@ -3584,7 +3536,7 @@
                     updateIntentionIndicator(newIntention);
                 }
                 
-                if (AppState.isInCall) {
+                if (AppState?.isInCall) {
                     sendToParent('INTENTION_UPDATE', { intention: newIntention, timestamp: Date.now() });
                 }
                 
@@ -3594,7 +3546,7 @@
         },
         
         toggleFocusMode: function() {
-            if (AppState?.currentFocusMode) {
+            if (UIState.currentFocusMode) {
                 this.disableFocusMode();
             } else {
                 this.enableFocusMode();
@@ -3602,7 +3554,7 @@
         },
         
         enableFocusMode: function() {
-            if (AppState) AppState.currentFocusMode = true;
+            UIState.currentFocusMode = true;
             if (elements.appContainer) elements.appContainer.classList.add('focus-mode');
             if (elements.focusModeBtn) {
                 elements.focusModeBtn.classList.add('active');
@@ -3612,7 +3564,7 @@
         },
         
         disableFocusMode: function() {
-            if (AppState) AppState.currentFocusMode = false;
+            UIState.currentFocusMode = false;
             if (elements.appContainer) elements.appContainer.classList.remove('focus-mode');
             if (elements.focusModeBtn) {
                 elements.focusModeBtn.classList.remove('active');
@@ -3621,12 +3573,12 @@
         },
         
         showPrivateNotesModal: function() {
-            if (!elements.privateNotesModal || !AppState?.callParticipants?.length) {
+            if (!elements.privateNotesModal || !UIState.callParticipants?.length) {
                 this.showCallSummary();
                 return;
             }
             
-            const lastContact = AppState.callParticipants[0];
+            const lastContact = UIState.callParticipants[0];
             
             if (lastContact) {
                 if (elements.privateNotesTitle) {
@@ -3658,7 +3610,7 @@
         
         savePrivateNotes: function() {
             const notes = elements.privateNotesTextarea?.value.trim() || '';
-            const lastContact = AppState?.callParticipants?.[0];
+            const lastContact = UIState.callParticipants?.[0];
             
             if (lastContact && notes) {
                 this.savePrivateNotesToStorage(lastContact.id, notes);
@@ -3685,7 +3637,7 @@
                 allNotes[contactId] = {
                     notes: notes,
                     timestamp: new Date().toISOString(),
-                    callId: AppState?.activeCallId
+                    callId: UIState.activeCallId
                 };
                 
                 if (SafeStorage && typeof SafeStorage.set === 'function') {
@@ -3693,6 +3645,8 @@
                 } else {
                     localStorage.setItem('privateCallNotes', JSON.stringify(allNotes));
                 }
+                
+                UIState.privateNotes[contactId] = allNotes[contactId];
             } catch (error) {
                 UILogger.error('Error saving private notes', error);
             }
@@ -3716,8 +3670,8 @@
         showCallSummary: function() {
             if (!elements.callSummaryModal) return;
             
-            const callDuration = AppState?.callStartTime ? 
-                Math.floor((Date.now() - AppState.callStartTime) / 1000) : 0;
+            const callDuration = UIState.callStartTime ? 
+                Math.floor((Date.now() - UIState.callStartTime) / 1000) : 0;
             
             const minutes = Math.floor(callDuration / 60);
             const seconds = callDuration % 60;
@@ -3731,12 +3685,11 @@
             }
             
             if (elements.summaryType) {
-                elements.summaryType.textContent = AppState?.callType === 'video' ? 'Video Call' : 'Voice Call';
+                elements.summaryType.textContent = UIState.callType === 'video' ? 'Video Call' : 'Voice Call';
             }
             
             if (elements.summaryMood) {
-                elements.summaryMood.textContent = (AppState?.currentMood || 'neutral').charAt(0).toUpperCase() + 
-                                                    (AppState?.currentMood || 'neutral').slice(1);
+                elements.summaryMood.textContent = UIState.selectedMood.charAt(0).toUpperCase() + UIState.selectedMood.slice(1);
             }
             
             if (elements.summaryIntention) {
@@ -3747,11 +3700,11 @@
                     checkin: 'Check-in',
                     work: 'Work/Business'
                 };
-                elements.summaryIntention.textContent = intentionMap[AppState?.currentIntention || 'quick'] || 'Quick Chat';
+                elements.summaryIntention.textContent = intentionMap[UIState.selectedIntention] || 'Quick Chat';
             }
             
             if (elements.summaryParticipants) {
-                elements.summaryParticipants.textContent = (AppState?.callParticipants?.length || 0) + 1;
+                elements.summaryParticipants.textContent = (UIState.callParticipants?.length || 0) + 1;
             }
             
             elements.callSummaryModal.classList.add('active');
@@ -3805,11 +3758,16 @@
             
             requestMediaPermissionsFn(callType)
                 .then(stream => {
+                    UIState.localStream = stream;
+                    UIState.callType = callType;
+                    UIState.callParticipants = [simulatedParticipant];
+                    UIState.activeCallId = 'call-' + Date.now();
+                    
                     if (AppState) {
                         AppState.localStream = stream;
                         AppState.callType = callType;
                         AppState.callParticipants = [simulatedParticipant];
-                        AppState.activeCallId = 'call-' + Date.now();
+                        AppState.activeCallId = UIState.activeCallId;
                         AppState.isInCall = true;
                     }
                     
@@ -3837,6 +3795,8 @@
             const baseUrl = window.location.origin + window.location.pathname;
             const callUrl = `${baseUrl}?call=${callId}&type=${type}`;
             
+            UIState.callLink = callUrl;
+            
             if (elements.callLinkInput) {
                 elements.callLinkInput.value = callUrl;
             }
@@ -3845,7 +3805,7 @@
         },
         
         copyCallLink: function() {
-            const link = elements.callLinkInput?.value;
+            const link = elements.callLinkInput?.value || UIState.callLink;
             
             if (!link) {
                 showNotification('Generate a call link first', 'warning');
@@ -3858,7 +3818,7 @@
         },
         
         shareCallLink: function() {
-            const link = elements.callLinkInput?.value;
+            const link = elements.callLinkInput?.value || UIState.callLink;
             
             if (!link) {
                 showNotification('Generate a call link first', 'warning');
@@ -3887,7 +3847,7 @@
         },
         
         switchCallCategory: function(category) {
-            if (AppState) AppState.currentCategory = category;
+            UIState.currentCallCategory = category;
             
             document.querySelectorAll('.category-btn').forEach(btn => {
                 btn.classList.remove('active');
@@ -3910,6 +3870,8 @@
         },
         
         switchNewCallTab: function(tabId) {
+            UIState.currentNewCallTab = tabId;
+            
             document.querySelectorAll('.new-call-tab').forEach(tab => {
                 tab.classList.remove('active');
                 if (tab.dataset.tab === tabId) {
@@ -3997,7 +3959,7 @@
         },
         
         sendReaction: function(e) {
-            if (!AppState?.isInCall) {
+            if (!AppState?.isInCall && !UIState.activeCallId) {
                 showNotification('Join a call to send reactions', 'info');
                 return;
             }
@@ -4076,17 +4038,16 @@
     // ==================== UI PANEL HANDLERS ====================
     const UIPanelHandlers = {
         openParticipantsPanel: function() {
-            if (!AppState?.isInCall) {
+            if (!AppState?.isInCall && !UIState.activeCallId) {
                 showNotification('Join a call to see participants', 'info');
                 return;
             }
             
             this.createParticipantsPanel();
-            showNotification('Participants panel opened', 'info');
         },
         
         openChatPanel: function() {
-            if (!AppState?.isInCall) {
+            if (!AppState?.isInCall && !UIState.activeCallId) {
                 showNotification('Join a call to use chat', 'info');
                 return;
             }
@@ -4097,23 +4058,21 @@
             }
             
             this.createChatPanel();
-            showNotification('Chat panel opened', 'info');
         },
         
         openWhiteboardPanel: function() {
             if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('whiteboard')) return;
             
-            if (!AppState?.isInCall) {
+            if (!AppState?.isInCall && !UIState.activeCallId) {
                 showNotification('Join a call to use whiteboard', 'info');
                 return;
             }
             
             this.createWhiteboardPanel();
-            showNotification('Whiteboard opened', 'info');
         },
         
         openNotesPanel: function() {
-            if (!AppState?.isInCall) {
+            if (!AppState?.isInCall && !UIState.activeCallId) {
                 showNotification('Join a call to use notes', 'info');
                 return;
             }
@@ -4124,13 +4083,12 @@
             }
             
             this.createNotesPanel();
-            showNotification('Notes panel opened', 'info');
         },
         
         openPollsPanel: function() {
             if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('polls')) return;
             
-            if (!AppState?.isInCall) {
+            if (!AppState?.isInCall && !UIState.activeCallId) {
                 showNotification('Join a call to create polls', 'info');
                 return;
             }
@@ -4141,14 +4099,12 @@
             }
             
             this.createPollsPanel();
-            showNotification('Polls panel opened', 'info');
         },
         
         openRelationshipPanel: function() {
             if (typeof checkPremiumFeature === 'function' && !checkPremiumFeature('relationshipInsights')) return;
             
             this.createRelationshipPanel();
-            showNotification('Relationship insights opened', 'info');
         },
         
         createParticipantsPanel: function() {
@@ -4158,7 +4114,7 @@
             const panel = document.createElement('div');
             panel.className = 'feature-panel participants-panel';
             
-            const participants = AppState?.callParticipants || [];
+            const participants = UIState.callParticipants || AppState?.callParticipants || [];
             const participantCount = participants.length + 1;
             
             let participantsHtml = '';
@@ -4256,6 +4212,18 @@
                 const message = chatInput.value.trim();
                 if (message && typeof sendChatMessage === 'function') {
                     sendChatMessage(message);
+                    
+                    // Add message to UI
+                    const msgEl = document.createElement('div');
+                    msgEl.className = 'chat-message self';
+                    msgEl.innerHTML = `
+                        <div class="message-sender">You</div>
+                        <div class="message-content">${SecuritySanitizer.sanitizeString(message)}</div>
+                        <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    `;
+                    panel.querySelector('.chat-messages').appendChild(msgEl);
+                    panel.querySelector('.chat-messages').scrollTop = panel.querySelector('.chat-messages').scrollHeight;
+                    
                     chatInput.value = '';
                 }
             });
@@ -4265,6 +4233,18 @@
                     const message = chatInput.value.trim();
                     if (message && typeof sendChatMessage === 'function') {
                         sendChatMessage(message);
+                        
+                        // Add message to UI
+                        const msgEl = document.createElement('div');
+                        msgEl.className = 'chat-message self';
+                        msgEl.innerHTML = `
+                            <div class="message-sender">You</div>
+                            <div class="message-content">${SecuritySanitizer.sanitizeString(message)}</div>
+                            <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        `;
+                        panel.querySelector('.chat-messages').appendChild(msgEl);
+                        panel.querySelector('.chat-messages').scrollTop = panel.querySelector('.chat-messages').scrollHeight;
+                        
                         chatInput.value = '';
                     }
                 }
@@ -4329,17 +4309,65 @@
                 initializeWhiteboard(panel.querySelector('.whiteboard-canvas'));
             }
             
-            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
-                panel.remove();
-                UIState.activePanels.delete('whiteboardPanel');
+            // Basic whiteboard functionality
+            const canvas = panel.querySelector('.whiteboard-canvas');
+            const ctx = canvas.getContext('2d');
+            let drawing = false;
+            let currentTool = 'pen';
+            let currentColor = '#ff3b30';
+            let currentSize = 3;
+            
+            canvas.addEventListener('mousedown', (e) => {
+                drawing = true;
+                ctx.beginPath();
+                ctx.moveTo(e.offsetX, e.offsetY);
+            });
+            
+            canvas.addEventListener('mousemove', (e) => {
+                if (!drawing) return;
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = currentSize;
+                ctx.lineTo(e.offsetX, e.offsetY);
+                ctx.stroke();
+            });
+            
+            canvas.addEventListener('mouseup', () => {
+                drawing = false;
+            });
+            
+            canvas.addEventListener('mouseleave', () => {
+                drawing = false;
+            });
+            
+            panel.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    panel.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentTool = btn.dataset.tool;
+                });
+            });
+            
+            panel.querySelectorAll('.tool-color').forEach(colorBtn => {
+                colorBtn.addEventListener('click', () => {
+                    panel.querySelectorAll('.tool-color').forEach(c => c.classList.remove('selected'));
+                    colorBtn.classList.add('selected');
+                    currentColor = colorBtn.dataset.color;
+                });
+            });
+            
+            panel.querySelector('.tool-size-slider').addEventListener('input', (e) => {
+                currentSize = parseInt(e.target.value);
             });
             
             panel.querySelector('#clearWhiteboard').addEventListener('click', () => {
                 if (confirm('Clear the entire whiteboard?')) {
-                    const canvas = panel.querySelector('.whiteboard-canvas');
-                    const ctx = canvas.getContext('2d');
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                 }
+            });
+            
+            panel.querySelector('.panel-close-btn').addEventListener('click', () => {
+                panel.remove();
+                UIState.activePanels.delete('whiteboardPanel');
             });
             
             UIState.activePanels.add('whiteboardPanel');
@@ -4512,10 +4540,23 @@
                 });
             });
             
+            // Add option button
+            panel.querySelector('.add-option-btn').addEventListener('click', () => {
+                const optionsContainer = panel.querySelector('.poll-options');
+                const newInput = document.createElement('input');
+                newInput.type = 'text';
+                newInput.className = 'poll-option-input';
+                newInput.placeholder = `Option ${optionsContainer.children.length + 1}`;
+                optionsContainer.insertBefore(newInput, panel.querySelector('.add-option-btn'));
+            });
+            
             panel.querySelector('.create-poll-btn').addEventListener('click', () => {
                 const question = panel.querySelector('.poll-question-input').value;
                 if (question.trim()) {
                     showNotification('Poll created successfully!', 'success');
+                    
+                    // Switch to active polls tab
+                    panel.querySelector('[data-tab="active"]').click();
                 }
             });
             
@@ -4741,28 +4782,13 @@
             logOnce('info', 'Initializing UI system');
         }
         
-        let maxRetries = 5;
-        if (IframeEnvironment && typeof IframeEnvironment.getMaxRetries === 'function') {
-            maxRetries = IframeEnvironment.getMaxRetries();
-        } else if (EnvironmentDetector && typeof EnvironmentDetector.getMaxRetries === 'function') {
-            maxRetries = EnvironmentDetector.getMaxRetries();
+        // Wait for core to be ready
+        const coreReady = await waitForCoreReady(10000);
+        if (coreReady) {
+            logOnce('success', 'Core is ready, proceeding with UI initialization');
+        } else {
+            logOnce('warn', 'Core not ready, initializing UI with fallback');
         }
-        
-        performHandshakeWithRetry(maxRetries).then(success => {
-            if (success) {
-                if (DEBUG) {
-                    logOnce('info', 'Handshake completed successfully');
-                }
-            } else {
-                if (DEBUG) {
-                    logOnce('warn', 'Handshake failed, entering fallback mode');
-                }
-                parentReady = true;
-                sessionReady = true;
-            }
-        });
-        
-        await initGatePromise;
         
         cacheElements();
         await RenderingPipeline.execute();
@@ -4956,25 +4982,18 @@
         }),
         getDiagnostics: () => UIDiagnostics.getReport(),
         getEnvironment: () => IframeEnvironment ? IframeEnvironment.getFullReport() : 
-                             (EnvironmentDetector ? EnvironmentDetector.getFullReport() : null)
+                             (EnvironmentDetector ? EnvironmentDetector.getFullReport() : null),
+        getUIState: () => ({ ...UIState })
     };
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            initializeUISystem().catch(error => {
-                if (DEBUG) {
-                    logOnce('error', 'Auto-initialization failed', error);
-                }
-                RenderingPipeline.skeleton();
-            });
-        });
-    } else {
+    // Auto-initialize after core is ready
+    waitForCoreReady(10000).then(() => {
         initializeUISystem().catch(error => {
             if (DEBUG) {
                 logOnce('error', 'Auto-initialization failed', error);
             }
             RenderingPipeline.skeleton();
         });
-    }
+    });
 
 })();

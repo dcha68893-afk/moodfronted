@@ -4577,6 +4577,7 @@ const iframeAuthority = new IframeAuthority();
 // Ensure messenger is available globally for backward compatibility
 let messenger = iframeAuthority.reliabilityEngine;
 window._messenger = messenger; // For debugging
+
 // =============================================
 // MODULE 14: IFRAME MESSENGER (Original - Enhanced)
 // =============================================
@@ -6584,7 +6585,35 @@ export function logOnce(type, msg, error = null) {
 // =============================================
 
 // Initialize in order
+const environmentDetector = new EnvironmentDetector();
+const reliabilityEngine = new ReliabilityEngine(environmentDetector);
+const startupGovernor = new StartupGovernor(environmentDetector, reliabilityEngine);
+const handshake = new HandshakeAuthority(environmentDetector, reliabilityEngine);
+const sessionAdapter = new SessionClient(environmentDetector, reliabilityEngine);
+const transport = new TransportLayer(environmentDetector, reliabilityEngine);
+const recovery = new RecoveryManager(environmentDetector, reliabilityEngine, handshake, sessionAdapter, transport);
+const diagnostics = new DiagnosticsAgent(environmentDetector);
+const compatibility = new CompatibilityBridge();
+const securityHardener = new SecurityHardener(environmentDetector);
+const uiFailsafe = new UIFailsafe();
+const navigationGuard = new NavigationGuard();
 
+const logger = new StructuredLogger();
+const resourceManager = new ResourceManager();
+const sandbox = new FeatureSandbox(logger);
+const errorHandler = new GlobalErrorHandler(logger, diagnostics);
+const depManager = new DependencyManager();
+depManager.setLogger(logger);
+
+const messaging = new IframeMessenger(environmentDetector);
+const originTrustAdapter = new OriginTrustAdapter(environmentDetector);
+const router = new MessageRouter(messaging, sessionAdapter, environmentDetector, logger, sandbox, compatibility);
+
+const pipeline = new InitializationPipeline(
+    depManager, sessionAdapter, messaging, router, logger, sandbox, 
+    errorHandler, resourceManager, handshake, transport, recovery, 
+    diagnostics, environmentDetector, startupGovernor, originTrustAdapter
+);
 
 // =============================================
 // EXPORTED CORE FUNCTIONS

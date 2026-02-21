@@ -1,6 +1,6 @@
-// api.core.js - RESILIENT API GATEWAY - HARDENED BOOTSTRAP READINESS
-// Version: 22.2.4 - FIXED PLAIN TEXT RESPONSE HANDLING FOR LOGIN
-// Date: 2024-01-22
+// api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
+// Version: 23.0.0 - Production-ready with HTTPS enforcement, auto-detection, and fallback mechanisms
+// Date: 2024-06-15
 
 // ============================================================================
 // MODULE-LEVEL DECLARATIONS (MUST BE OUTSIDE IIFE FOR EXPORTS)
@@ -306,7 +306,55 @@ function safeJsonParse(value, fallback = null) {
 }
 
 // ============================================================================
-// IIFE - ALL IMPLEMENTATION GOES INSIDE HERE
+// URL SECURITY VALIDATION - PREVENT UNSAFE ENDPOINT ACCESS
+// ============================================================================
+function isValidEndpoint(url, baseUrl) {
+    try {
+        // If it's a relative URL, it's safe
+        if (url.startsWith('/')) {
+            // Check for directory traversal attempts
+            if (url.includes('..') || url.includes('./') || url.includes('.\\')) {
+                console.warn('[API-SECURITY] Directory traversal attempt blocked:', url);
+                return false;
+            }
+            return true;
+        }
+        
+        // If it's an absolute URL, ensure it's within our base domain
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            const urlObj = new URL(url);
+            const baseObj = new URL(baseUrl);
+            
+            // Check if it's the same origin
+            if (urlObj.origin === baseObj.origin) {
+                return true;
+            }
+            
+            // Check if it's a subdomain of our base domain
+            if (urlObj.hostname.endsWith(baseObj.hostname) && baseObj.hostname !== urlObj.hostname) {
+                return true;
+            }
+            
+            // Check if it's localhost in development
+            if (isDevelopment() && (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1')) {
+                return true;
+            }
+            
+            console.warn('[API-SECURITY] Cross-origin request blocked:', url);
+            return false;
+        }
+        
+        // Invalid URL format
+        console.warn('[API-SECURITY] Invalid URL format blocked:', url);
+        return false;
+    } catch (error) {
+        console.warn('[API-SECURITY] URL validation error:', error.message);
+        return false;
+    }
+}
+
+// ============================================================================
+// ENVIRONMENT DETECTION - ENHANCED FOR MULTIPLE ENVIRONMENTS
 // ============================================================================
 (function(global) {
     "use strict";
@@ -321,8 +369,8 @@ function safeJsonParse(value, fallback = null) {
     // ============================================================================
     // CRITICAL: DUPLICATE LOADING PREVENTION - ENHANCED
     // ============================================================================
-    if (root.__API_CORE_LOADED_V22) {
-        console.log('[API-CORE] Already loaded v22, skipping initialization');
+    if (root.__API_CORE_LOADED_V23) {
+        console.log('[API-CORE] Already loaded v23, skipping initialization');
         
         // Ensure core object exists with all required properties
         if (!root.__API_CORE) {
@@ -331,7 +379,7 @@ function safeJsonParse(value, fallback = null) {
         
         // Ensure all required properties exist
         const requiredProps = {
-            version: '22.2.4',
+            version: '23.0.0',
             initialized: true,
             ready: Promise.resolve(true),
             secureApiFetch: root.__API_CORE.secureApiFetch || function() { return Promise.resolve({}); },
@@ -360,7 +408,7 @@ function safeJsonParse(value, fallback = null) {
         
         return;
     }
-    root.__API_CORE_LOADED_V22 = true;
+    root.__API_CORE_LOADED_V23 = true;
     
     // ============================================================================
     // GLOBAL REGISTRATION - MUST EXIST IMMEDIATELY
@@ -402,7 +450,7 @@ function safeJsonParse(value, fallback = null) {
     // REQUIRED EXPOSED PROPERTIES - MUST ALL EXIST
     // ============================================================================
     const requiredProperties = {
-        version: '22.2.4',
+        version: '23.0.0',
         initialized: false,
         ready: _readyPromise,
         secureApiFetch: null,
@@ -451,7 +499,7 @@ function safeJsonParse(value, fallback = null) {
     Object.assign(root.__API_CORE, requiredProperties);
     
     // ============================================================================
-    // LEGACY COMPATIBILITY LAYER
+    // LEGACY COMPATIBILITY LAYER - PRESERVE ALL EXISTING FUNCTIONALITY
     // ============================================================================
     
     // Ensure window.api.core exists with minimal safe surface
@@ -459,7 +507,7 @@ function safeJsonParse(value, fallback = null) {
     if (!root.api.core) {
         root.api.core = {
             __initializing: true,
-            __version: '22.2.4'
+            __version: '23.0.0'
         };
     }
     
@@ -513,7 +561,7 @@ function safeJsonParse(value, fallback = null) {
     };
     
     // ============================================================================
-    // SECTION 1: ENVIRONMENT CONFIGURATION - COMPLETE BASE URL CONTROL
+    // SECTION 1: ENVIRONMENT CONFIGURATION - ENHANCED AUTO-DETECTION
     // ============================================================================
     
     // Assign values to module-level variables (not redeclare them)
@@ -527,6 +575,7 @@ function safeJsonParse(value, fallback = null) {
         LOCAL: 'local'
     };
     
+    // Base URLs for different environments
     BASE_URLS = {
         [ENVIRONMENTS.PRODUCTION]: 'https://moodchat-fy56.onrender.com',
         [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:4000',
@@ -537,34 +586,47 @@ function safeJsonParse(value, fallback = null) {
         [ENVIRONMENTS.AUTO]: null
     };
     
+    // Enhanced environment detection rules
     ENVIRONMENT_DETECTION_RULES = [
         { pattern: /render\.com|onrender\.com|moodchat-fy56/i, env: ENVIRONMENTS.PRODUCTION },
         { pattern: /staging|stage/i, env: ENVIRONMENTS.STAGING },
         { pattern: /demo|testdrive/i, env: ENVIRONMENTS.DEMO },
         { pattern: /test|testing/i, env: ENVIRONMENTS.TEST },
         { pattern: /localhost|127\.0\.0\.1|::1/i, env: ENVIRONMENTS.LOCAL },
-        { pattern: /192\.168\.|10\.0\.|172\.(1[6-9]|2[0-9]|3[0-1])\./i, env: ENVIRONMENTS.DEVELOPMENT }
+        { pattern: /192\.168\.|10\.0\.|172\.(1[6-9]|2[0-9]|3[0-1])\./i, env: ENVIRONMENTS.DEVELOPMENT },
+        { pattern: /dev\.|development\./i, env: ENVIRONMENTS.DEVELOPMENT }
     ];
     
     CURRENT_ENVIRONMENT = ENVIRONMENTS.AUTO;
     ACTIVE_BASE_URL = null;
     
-    
     /**
      * Detect environment based on window.location with enhanced rules
+     * @returns {string} Detected environment
      */
     detectEnvironment = function() {
         try {
             const hostname = root.location.hostname;
             const port = root.location.port;
             const href = root.location.href;
+            const protocol = root.location.protocol;
             
+            // SECURITY: Enforce HTTPS in production-like environments
+            if (protocol !== 'https:' && 
+                !hostname.includes('localhost') && 
+                !hostname.includes('127.0.0.1') &&
+                !hostname.includes('::1')) {
+                console.warn('[ENV] Non-HTTPS connection detected in non-local environment');
+            }
+            
+            // Check each detection rule
             for (const rule of ENVIRONMENT_DETECTION_RULES) {
                 if (rule.pattern.test(hostname) || rule.pattern.test(href)) {
                     return rule.env;
                 }
             }
             
+            // Development ports detection
             if (port === '3000' || port === '3001' || port === '4000' || 
                 port === '8080' || port === '5500' || port === '5173' || 
                 port === '5174' || port === '5175' || port === '4200' || 
@@ -572,6 +634,7 @@ function safeJsonParse(value, fallback = null) {
                 return ENVIRONMENTS.DEVELOPMENT;
             }
             
+            // Subdomain-based detection
             if (hostname.startsWith('dev.') || hostname.startsWith('development.')) {
                 return ENVIRONMENTS.DEVELOPMENT;
             }
@@ -582,6 +645,7 @@ function safeJsonParse(value, fallback = null) {
                 return ENVIRONMENTS.DEMO;
             }
             
+            // Default to production for unknown environments
             return ENVIRONMENTS.PRODUCTION;
             
         } catch (error) {
@@ -592,6 +656,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Set environment manually with validation
+     * @param {string} env - Environment to set
+     * @returns {boolean} Success status
      */
     setEnvironment = function(env) {
         try {
@@ -599,10 +665,20 @@ function safeJsonParse(value, fallback = null) {
             
             const envString = env.toString().toLowerCase();
             
+            // Direct match with predefined environments
             if (Object.values(ENVIRONMENTS).includes(envString)) {
                 CURRENT_ENVIRONMENT = envString;
                 ACTIVE_BASE_URL = BASE_URLS[envString] || determineBackendUrl();
                 
+                // SECURITY: Enforce HTTPS in production
+                if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+                    ACTIVE_BASE_URL && 
+                    !ACTIVE_BASE_URL.startsWith('https://')) {
+                    console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
+                    ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
+                }
+                
+                // Dispatch environment change event
                 root.dispatchEvent(new CustomEvent('environment-changed', {
                     detail: {
                         environment: CURRENT_ENVIRONMENT,
@@ -614,6 +690,7 @@ function safeJsonParse(value, fallback = null) {
                 return true;
             }
             
+            // Fuzzy matching for common environment names
             if (envString.includes('prod')) {
                 CURRENT_ENVIRONMENT = ENVIRONMENTS.PRODUCTION;
             } else if (envString.includes('dev')) {
@@ -632,6 +709,14 @@ function safeJsonParse(value, fallback = null) {
             
             ACTIVE_BASE_URL = BASE_URLS[CURRENT_ENVIRONMENT] || determineBackendUrl();
             
+            // SECURITY: Enforce HTTPS in production
+            if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+                ACTIVE_BASE_URL && 
+                !ACTIVE_BASE_URL.startsWith('https://')) {
+                ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
+            }
+            
+            // Dispatch environment change event
             root.dispatchEvent(new CustomEvent('environment-changed', {
                 detail: {
                     environment: CURRENT_ENVIRONMENT,
@@ -650,6 +735,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Get current environment
+     * @returns {string} Current environment
      */
     getEnvironment = function() {
         return CURRENT_ENVIRONMENT;
@@ -657,6 +743,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Get environment display name (user-friendly)
+     * @returns {string} Display name
      */
     getEnvironmentDisplayName = function() {
         const envMap = {
@@ -674,6 +761,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if current environment is production
+     * @returns {boolean} True if production
      */
     isProduction = function() {
         return CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION;
@@ -681,6 +769,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if current environment is development
+     * @returns {boolean} True if development
      */
     isDevelopment = function() {
         return CURRENT_ENVIRONMENT === ENVIRONMENTS.DEVELOPMENT || 
@@ -689,6 +778,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if current environment is demo
+     * @returns {boolean} True if demo
      */
     isDemo = function() {
         return CURRENT_ENVIRONMENT === ENVIRONMENTS.DEMO;
@@ -696,6 +786,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if current environment is localhost
+     * @returns {boolean} True if localhost
      */
     isLocalhost = function() {
         try {
@@ -711,6 +802,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if current environment is Render deployment
+     * @returns {boolean} True if Render deployment
      */
     isRenderDeployment = function() {
         try {
@@ -725,6 +817,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Get base URL for current environment with fallback chain
+     * @returns {string} Base URL
      */
     getBaseUrl = function() {
         try {
@@ -754,16 +847,26 @@ function safeJsonParse(value, fallback = null) {
                 }
             }
             
+            // SECURITY: Enforce HTTPS in production
+            if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+                ACTIVE_BASE_URL && 
+                !ACTIVE_BASE_URL.startsWith('https://')) {
+                ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
+            }
+            
             return ACTIVE_BASE_URL;
             
         } catch (error) {
             console.error('[ENV] Get base URL error:', error);
+            // Safe fallback
             return 'https://moodchat-fy56.onrender.com';
         }
     };
     
     /**
      * Set base URL manually with validation
+     * @param {string} url - Base URL to set
+     * @returns {boolean} Success status
      */
     setBaseUrl = function(url) {
         try {
@@ -775,6 +878,12 @@ function safeJsonParse(value, fallback = null) {
             if (!url.startsWith('http://') && !url.startsWith('https://')) {
                 console.error('[ENV] URL must start with http:// or https://');
                 return false;
+            }
+            
+            // SECURITY: Enforce HTTPS in production
+            if (isProduction() && !url.startsWith('https://')) {
+                console.warn('[ENV] Production environment requires HTTPS - upgrading URL');
+                url = url.replace('http://', 'https://');
             }
             
             ACTIVE_BASE_URL = url;
@@ -797,6 +906,7 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Determine backend URL with enhanced detection
+     * @returns {string} Backend URL
      */
     determineBackendUrl = function() {
         try {
@@ -828,6 +938,13 @@ function safeJsonParse(value, fallback = null) {
                         ACTIVE_BASE_URL += ':4000';
                     }
                 }
+            }
+            
+            // SECURITY: Enforce HTTPS in production
+            if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
+                ACTIVE_BASE_URL && 
+                !ACTIVE_BASE_URL.startsWith('https://')) {
+                ACTIVE_BASE_URL = ACTIVE_BASE_URL.replace('http://', 'https://');
             }
             
             return ACTIVE_BASE_URL;
@@ -946,6 +1063,10 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Normalize any error to standard KnectaError format
+     * @param {*} error - Error to normalize
+     * @param {string} defaultMessage - Default message
+     * @param {number} defaultStatus - Default status code
+     * @returns {KnectaError} Normalized error
      */
     normalizeError = function(error, defaultMessage = 'An error occurred', defaultStatus = 500) {
         try {
@@ -1065,6 +1186,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if value is ApiError/KnectaError
+     * @param {*} value - Value to check
+     * @returns {boolean} True if API error
      */
     isApiError = function(value) {
         return value instanceof KnectaError || 
@@ -1074,6 +1197,11 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Create error with specific code and status
+     * @param {string} message - Error message
+     * @param {number} status - HTTP status code
+     * @param {string} code - Error code
+     * @param {*} data - Additional data
+     * @returns {KnectaError} Created error
      */
     createError = function(message, status = 500, code = 'CUSTOM_ERROR', data = null) {
         return new KnectaError(message, status, code, data);
@@ -1081,6 +1209,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Format error message for display
+     * @param {*} error - Error to format
+     * @returns {string} Formatted error message
      */
     formatErrorMessage = function(error) {
         const normalized = normalizeError(error);
@@ -1108,6 +1238,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Get HTTP status code from error
+     * @param {*} error - Error to check
+     * @returns {number} HTTP status code
      */
     getErrorStatusCode = function(error) {
         const normalized = normalizeError(error, '', 500);
@@ -1116,6 +1248,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Get error code from error
+     * @param {*} error - Error to check
+     * @returns {string} Error code
      */
     getErrorCode = function(error) {
         const normalized = normalizeError(error);
@@ -1124,6 +1258,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if error is network error
+     * @param {*} error - Error to check
+     * @returns {boolean} True if network error
      */
     isNetworkError = function(error) {
         const normalized = normalizeError(error);
@@ -1135,6 +1271,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if error is timeout error
+     * @param {*} error - Error to check
+     * @returns {boolean} True if timeout error
      */
     isTimeoutError = function(error) {
         const normalized = normalizeError(error);
@@ -1145,6 +1283,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if error is authentication error
+     * @param {*} error - Error to check
+     * @returns {boolean} True if auth error
      */
     isAuthError = function(error) {
         const normalized = normalizeError(error);
@@ -1160,6 +1300,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if error is server error (5xx)
+     * @param {*} error - Error to check
+     * @returns {boolean} True if server error
      */
     isServerError = function(error) {
         const normalized = normalizeError(error);
@@ -1168,6 +1310,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if error is client error (4xx)
+     * @param {*} error - Error to check
+     * @returns {boolean} True if client error
      */
     isClientError = function(error) {
         const normalized = normalizeError(error);
@@ -1176,6 +1320,8 @@ function safeJsonParse(value, fallback = null) {
     
     /**
      * Check if error is rate limit error
+     * @param {*} error - Error to check
+     * @returns {boolean} True if rate limit error
      */
     isRateLimitError = function(error) {
         const normalized = normalizeError(error);
@@ -1185,18 +1331,22 @@ function safeJsonParse(value, fallback = null) {
     };
     
     // ============================================================================
-    // SECTION 3: SECURE TOKEN STORAGE - COMPLETE ENCRYPTION & PROTECTION
+    // SECTION 3: SECURE TOKEN STORAGE - ENHANCED ENCRYPTION & PROTECTION
     // ============================================================================
     
     /**
-     * SecureStorage - Encrypted localStorage wrapper
+     * SecureStorage - Encrypted localStorage wrapper with enhanced security
      */
     SecureStorage = {
-        _encryptionKey: 'moodchat_secure_v22_2024',
-        _prefix: 'sc_v22_',
-        _version: '22.0.0',
+        _encryptionKey: 'moodchat_secure_v23_2024',
+        _prefix: 'sc_v23_',
+        _version: '23.0.0',
         _salt: Math.random().toString(36).substring(2, 15),
         
+        /**
+         * XOR encryption with salt (simple but effective for client-side)
+         * @private
+         */
         _xorEncrypt: function(text, key) {
             try {
                 if (!text) return text;
@@ -1212,7 +1362,7 @@ function safeJsonParse(value, fallback = null) {
                 }
                 
                 const encrypted = btoa(result);
-                return `v22:${this._salt.substring(0, 8)}:${encrypted}`;
+                return `v23:${this._salt.substring(0, 8)}:${encrypted}`;
                 
             } catch (e) {
                 console.error('[SECURE-STORAGE] Encryption error:', e);
@@ -1220,11 +1370,15 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * XOR decryption with salt
+         * @private
+         */
         _xorDecrypt: function(encrypted, key) {
             try {
                 if (!encrypted || typeof encrypted !== 'string') return encrypted;
                 
-                if (encrypted.startsWith('v22:')) {
+                if (encrypted.startsWith('v23:')) {
                     const parts = encrypted.split(':');
                     if (parts.length >= 3) {
                         const salt = parts[1];
@@ -1265,6 +1419,13 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Set item in secure storage
+         * @param {string} key - Storage key
+         * @param {*} value - Value to store
+         * @param {boolean} encrypt - Whether to encrypt
+         * @returns {boolean} Success status
+         */
         setItem: function(key, value, encrypt = true) {
             try {
                 const storageKey = this._prefix + key;
@@ -1276,6 +1437,7 @@ function safeJsonParse(value, fallback = null) {
                 
                 localStorage.setItem(storageKey, storageValue);
                 
+                // Dispatch storage event for cross-tab synchronization
                 root.dispatchEvent(new StorageEvent('storage', {
                     key: storageKey,
                     newValue: storageValue,
@@ -1292,6 +1454,13 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get item from secure storage
+         * @param {string} key - Storage key
+         * @param {boolean} decrypt - Whether to decrypt
+         * @param {boolean} parseJSON - Whether to parse JSON
+         * @returns {*} Retrieved value
+         */
         getItem: function(key, decrypt = true, parseJSON = false) {
             try {
                 const storageKey = this._prefix + key;
@@ -1319,6 +1488,11 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Remove item from secure storage
+         * @param {string} key - Storage key
+         * @returns {boolean} Success status
+         */
         removeItem: function(key) {
             try {
                 localStorage.removeItem(this._prefix + key);
@@ -1329,6 +1503,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Clear all secure storage items
+         * @returns {boolean} Success status
+         */
         clear: function() {
             try {
                 const keysToRemove = [];
@@ -1350,10 +1528,19 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Check if item exists in secure storage
+         * @param {string} key - Storage key
+         * @returns {boolean} True if exists
+         */
         hasItem: function(key) {
             return localStorage.getItem(this._prefix + key) !== null;
         },
         
+        /**
+         * Get all secure storage keys
+         * @returns {string[]} Array of keys
+         */
         keys: function() {
             const keys = [];
             
@@ -1367,6 +1554,10 @@ function safeJsonParse(value, fallback = null) {
             return keys;
         },
         
+        /**
+         * Get approximate storage size in bytes
+         * @returns {number} Size in bytes
+         */
         getSize: function() {
             let size = 0;
             
@@ -1383,7 +1574,7 @@ function safeJsonParse(value, fallback = null) {
     };
     
     /**
-     * TokenManager - Complete centralized token management with security
+     * TokenManager - Complete centralized token management with enhanced security
      */
     TokenManager = {
         TOKEN_KEY: 'USER_TOKEN',
@@ -1394,6 +1585,14 @@ function safeJsonParse(value, fallback = null) {
         DEFAULT_EXPIRY: 3600,
         REFRESH_THRESHOLD: 300,
         
+        /**
+         * Set authentication token with optional refresh token and expiry
+         * @param {string} token - JWT token
+         * @param {string} refreshToken - Refresh token
+         * @param {number} expiresIn - Expiry time in seconds
+         * @param {string} tokenType - Token type (Bearer, etc.)
+         * @returns {boolean} Success status
+         */
         setToken: function(token, refreshToken = null, expiresIn = this.DEFAULT_EXPIRY, tokenType = 'Bearer') {
             try {
                 if (!token || typeof token !== 'string') {
@@ -1403,10 +1602,16 @@ function safeJsonParse(value, fallback = null) {
                 
                 const sanitizedToken = this._sanitizeToken(token);
                 
+                // SECURITY: Validate token format
+                if (!this._validateTokenFormat(sanitizedToken)) {
+                    console.warn('[TOKEN-MANAGER] Token format validation warning - continuing anyway');
+                }
+                
                 SecureStorage.setItem(this.TOKEN_KEY, sanitizedToken, true);
                 
                 if (refreshToken) {
-                    SecureStorage.setItem(this.REFRESH_TOKEN_KEY, refreshToken, true);
+                    const sanitizedRefreshToken = this._sanitizeToken(refreshToken);
+                    SecureStorage.setItem(this.REFRESH_TOKEN_KEY, sanitizedRefreshToken, true);
                 }
                 
                 const expiryTime = Date.now() + (expiresIn * 1000);
@@ -1418,6 +1623,7 @@ function safeJsonParse(value, fallback = null) {
                     updateGlobalAccessToken();
                 }
                 
+                // Dispatch token stored event
                 root.dispatchEvent(new CustomEvent('token-stored', {
                     detail: {
                         timestamp: new Date().toISOString(),
@@ -1434,6 +1640,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get current authentication token
+         * @returns {string|null} Token or null
+         */
         getToken: function() {
             try {
                 const token = SecureStorage.getItem(this.TOKEN_KEY, true, false);
@@ -1453,6 +1663,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get refresh token
+         * @returns {string|null} Refresh token or null
+         */
         getRefreshToken: function() {
             try {
                 return SecureStorage.getItem(this.REFRESH_TOKEN_KEY, true, false);
@@ -1462,6 +1676,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Clear all token data
+         * @returns {boolean} Success status
+         */
         clearToken: function() {
             try {
                 SecureStorage.removeItem(this.TOKEN_KEY);
@@ -1470,6 +1688,7 @@ function safeJsonParse(value, fallback = null) {
                 localStorage.removeItem(this.TOKEN_CREATED_KEY);
                 localStorage.removeItem(this.TOKEN_TYPE_KEY);
                 
+                // Dispatch token cleared event
                 root.dispatchEvent(new CustomEvent('token-cleared', {
                     detail: { timestamp: new Date().toISOString() }
                 }));
@@ -1482,6 +1701,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Check if token is expired
+         * @returns {boolean} True if expired
+         */
         isTokenExpired: function() {
             try {
                 const expiryStr = localStorage.getItem(this.TOKEN_EXPIRY_KEY);
@@ -1496,6 +1719,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get token expiry timestamp
+         * @returns {number|null} Expiry timestamp or null
+         */
         getTokenExpiry: function() {
             try {
                 const expiryStr = localStorage.getItem(this.TOKEN_EXPIRY_KEY);
@@ -1506,6 +1733,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get token creation timestamp
+         * @returns {number|null} Creation timestamp or null
+         */
         getTokenCreated: function() {
             try {
                 const createdStr = localStorage.getItem(this.TOKEN_CREATED_KEY);
@@ -1515,6 +1746,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get token type
+         * @returns {string} Token type (default: Bearer)
+         */
         getTokenType: function() {
             try {
                 return localStorage.getItem(this.TOKEN_TYPE_KEY) || 'Bearer';
@@ -1523,6 +1758,13 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Set token with specific expiry timestamp
+         * @param {string} token - JWT token
+         * @param {number} expiryTimestamp - Expiry timestamp
+         * @param {string} refreshToken - Refresh token
+         * @returns {boolean} Success status
+         */
         setTokenWithExpiry: function(token, expiryTimestamp, refreshToken = null) {
             try {
                 const expiresIn = Math.max(1, Math.floor((expiryTimestamp - Date.now()) / 1000));
@@ -1533,6 +1775,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Check if token should be refreshed
+         * @returns {boolean} True if refresh needed
+         */
         shouldRefreshToken: function() {
             try {
                 const expiry = this.getTokenExpiry();
@@ -1546,21 +1792,39 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Validate token format (JWT structure)
+         * @private
+         * @param {string} token - Token to validate
+         * @returns {boolean} True if valid format
+         */
         _validateTokenFormat: function(token) {
             if (!token || typeof token !== 'string') return false;
             
+            // Check JWT format (header.payload.signature)
             const parts = token.split('.');
             if (parts.length === 3) {
                 try {
+                    // Try to decode header and payload (base64)
                     const header = JSON.parse(atob(parts[0]));
                     const payload = JSON.parse(atob(parts[1]));
                     return !!(header && payload);
-                } catch (e) {}
+                } catch (e) {
+                    // Not a valid JWT, but might be another token format
+                    return token.length > 20;
+                }
             }
             
+            // Not a JWT, but might be valid (e.g., opaque token)
             return token.length > 20;
         },
         
+        /**
+         * Sanitize token by removing whitespace and control characters
+         * @private
+         * @param {string} token - Token to sanitize
+         * @returns {string} Sanitized token
+         */
         _sanitizeToken: function(token) {
             if (!token) return token;
             
@@ -1571,6 +1835,10 @@ function safeJsonParse(value, fallback = null) {
                 .replace(/\s+/g, '');
         },
         
+        /**
+         * Clear expired tokens if they exist
+         * @returns {boolean} True if tokens were cleared
+         */
         clearExpiredTokens: function() {
             try {
                 if (this.isTokenExpired()) {
@@ -1584,6 +1852,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Migrate tokens from legacy storage formats
+         * @returns {boolean} True if migration occurred
+         */
         migrateLegacyTokens: function() {
             try {
                 const legacyKeys = [
@@ -1605,6 +1877,7 @@ function safeJsonParse(value, fallback = null) {
                     }
                 }
                 
+                // Check authUser object
                 try {
                     const authUserStr = localStorage.getItem('authUser');
                     if (authUserStr) {
@@ -1626,6 +1899,7 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    // Token utility functions
     encryptToken = function(token) {
         SecureStorage.setItem('temp_token', token, true);
         return true;
@@ -1675,6 +1949,10 @@ function safeJsonParse(value, fallback = null) {
         return TokenManager._sanitizeToken(token);
     };
     
+    /**
+     * Refresh token if needed
+     * @returns {Promise<Object>} Refresh result
+     */
     refreshTokenIfNeeded = async function() {
         try {
             const currentToken = TokenManager.getToken();
@@ -1749,13 +2027,13 @@ function safeJsonParse(value, fallback = null) {
     };
     
     // ============================================================================
-    // SECTION 4: CACHE MANAGEMENT - COMPLETE IMPLEMENTATION
+    // SECTION 4: CACHE MANAGEMENT - ENHANCED IMPLEMENTATION
     // ============================================================================
     
     CacheManager = {
         _memoryCache: new Map(),
         _persistentCache: null,
-        _defaultTTL: 300000,
+        _defaultTTL: 300000, // 5 minutes
         _maxItems: 200,
         _stats: {
             hits: 0,
@@ -1765,6 +2043,10 @@ function safeJsonParse(value, fallback = null) {
             prunes: 0
         },
         
+        /**
+         * Initialize cache manager
+         * @returns {boolean} Success status
+         */
         init: function() {
             try {
                 this._loadFromStorage();
@@ -1776,10 +2058,17 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get item from cache
+         * @param {string} key - Cache key
+         * @param {Object} options - Options
+         * @returns {*} Cached data or null
+         */
         get: function(key, options = {}) {
             try {
                 const cacheKey = this._getCacheKey(key);
                 
+                // Check memory cache first
                 if (this._memoryCache.has(cacheKey)) {
                     const item = this._memoryCache.get(cacheKey);
                     
@@ -1791,6 +2080,7 @@ function safeJsonParse(value, fallback = null) {
                     }
                 }
                 
+                // Check persistent cache if enabled
                 if (options.usePersistent !== false) {
                     try {
                         const persistentStr = localStorage.getItem(`cache_${cacheKey}`);
@@ -1817,6 +2107,14 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Set item in cache
+         * @param {string} key - Cache key
+         * @param {*} data - Data to cache
+         * @param {number} ttl - Time to live in ms
+         * @param {Object} options - Options
+         * @returns {boolean} Success status
+         */
         set: function(key, data, ttl = this._defaultTTL, options = {}) {
             try {
                 const cacheKey = this._getCacheKey(key);
@@ -1826,11 +2124,12 @@ function safeJsonParse(value, fallback = null) {
                     data,
                     expiresAt,
                     timestamp: Date.now(),
-                    version: '22.0.0'
+                    version: '23.0.0'
                 };
                 
                 this._memoryCache.set(cacheKey, cacheItem);
                 
+                // Store in persistent cache if enabled
                 if (options.usePersistent !== false) {
                     try {
                         localStorage.setItem(`cache_${cacheKey}`, JSON.stringify(cacheItem));
@@ -1844,6 +2143,7 @@ function safeJsonParse(value, fallback = null) {
                     }
                 }
                 
+                // Prune if memory cache exceeds limit
                 if (this._memoryCache.size > this._maxItems) {
                     this._pruneMemoryCache();
                 }
@@ -1857,6 +2157,11 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Delete item from cache
+         * @param {string} key - Cache key
+         * @returns {boolean} True if deleted
+         */
         delete: function(key) {
             try {
                 const cacheKey = this._getCacheKey(key);
@@ -1879,6 +2184,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Clear all cache
+         * @returns {boolean} Success status
+         */
         clear: function() {
             try {
                 this._memoryCache.clear();
@@ -1909,6 +2218,12 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Generate cache key
+         * @private
+         * @param {string} key - Original key
+         * @returns {string} Normalized cache key
+         */
         _getCacheKey: function(key) {
             return String(key)
                 .toLowerCase()
@@ -1917,6 +2232,10 @@ function safeJsonParse(value, fallback = null) {
                 .replace(/^_|_$/g, '');
         },
         
+        /**
+         * Load cache from persistent storage
+         * @private
+         */
         _loadFromStorage: function() {
             try {
                 for (let i = 0; i < localStorage.length; i++) {
@@ -1943,6 +2262,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Prune memory cache (remove expired and oldest items)
+         * @private
+         */
         _pruneMemoryCache: function() {
             try {
                 const now = Date.now();
@@ -1971,6 +2294,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Prune persistent cache (remove oldest 20%)
+         * @private
+         */
         _prunePersistentCache: function() {
             try {
                 const cacheItems = [];
@@ -2000,12 +2327,20 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Start prune interval
+         * @private
+         */
         _startPruneInterval: function() {
             setInterval(() => {
                 this._pruneMemoryCache();
-            }, 60000);
+            }, 60000); // Prune every minute
         },
         
+        /**
+         * Get cache statistics
+         * @returns {Object} Cache stats
+         */
         getStats: function() {
             const hitRate = this._stats.hits + this._stats.misses > 0
                 ? (this._stats.hits / (this._stats.hits + this._stats.misses) * 100).toFixed(2)
@@ -2020,6 +2355,11 @@ function safeJsonParse(value, fallback = null) {
             };
         },
         
+        /**
+         * Estimate memory usage
+         * @private
+         * @returns {number} Estimated memory usage in bytes
+         */
         _getMemoryUsage: function() {
             try {
                 let size = 0;
@@ -2047,7 +2387,7 @@ function safeJsonParse(value, fallback = null) {
     CacheManager.init();
     
     // ============================================================================
-    // SECTION 5: REQUEST QUEUE - ENHANCED FOR DEPENDENCY WAITING
+    // SECTION 5: REQUEST QUEUE - ENHANCED FOR DEPENDENCY WAITING AND FALLBACK
     // ============================================================================
     
     RequestQueue = {
@@ -2071,6 +2411,12 @@ function safeJsonParse(value, fallback = null) {
             tokenReady: false
         },
         
+        /**
+         * Add request to queue
+         * @param {Function} requestFn - Request function
+         * @param {Object} options - Options
+         * @returns {Promise} Promise that resolves with request result
+         */
         add: function(requestFn, options = {}) {
             return new Promise((resolve, reject) => {
                 try {
@@ -2112,6 +2458,12 @@ function safeJsonParse(value, fallback = null) {
             });
         },
         
+        /**
+         * Check if request can be processed
+         * @private
+         * @param {Object} request - Request object
+         * @returns {boolean} True if can process
+         */
         _canProcessRequest: function(request) {
             // Check if dependencies are satisfied
             if (request.requiresAuth) {
@@ -2129,6 +2481,10 @@ function safeJsonParse(value, fallback = null) {
             return true;
         },
         
+        /**
+         * Process queue
+         * @private
+         */
         _process: async function() {
             if (this._isProcessing || this._isPaused || this._queue.length === 0) {
                 return;
@@ -2164,6 +2520,11 @@ function safeJsonParse(value, fallback = null) {
             this._isProcessing = false;
         },
         
+        /**
+         * Execute request
+         * @private
+         * @param {Object} request - Request object
+         */
         async _executeRequest(request) {
             try {
                 const result = await request.fn();
@@ -2216,21 +2577,39 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Generate unique request ID
+         * @private
+         * @returns {string} Request ID
+         */
         _generateRequestId: function() {
             return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         },
         
+        /**
+         * Pause queue processing
+         * @returns {boolean} Success status
+         */
         pause: function() {
             this._isPaused = true;
             return true;
         },
         
+        /**
+         * Resume queue processing
+         * @returns {boolean} Success status
+         */
         resume: function() {
             this._isPaused = false;
             this._process();
             return true;
         },
         
+        /**
+         * Clear queue
+         * @param {boolean} rejectAll - Whether to reject all pending requests
+         * @returns {boolean} Success status
+         */
         clear: function(rejectAll = false) {
             if (rejectAll) {
                 const error = new KnectaError('Queue cleared', 0, 'QUEUE_CLEARED');
@@ -2244,6 +2623,10 @@ function safeJsonParse(value, fallback = null) {
             return true;
         },
         
+        /**
+         * Get queue status
+         * @returns {Object} Queue status
+         */
         getStatus: function() {
             return {
                 queueLength: this._queue.length,
@@ -2261,6 +2644,11 @@ function safeJsonParse(value, fallback = null) {
             };
         },
         
+        /**
+         * Set maximum concurrent requests
+         * @param {number} max - Maximum concurrent
+         * @returns {boolean} Success status
+         */
         setMaxConcurrent: function(max) {
             if (max > 0 && max <= 10) {
                 this._maxConcurrent = max;
@@ -2269,6 +2657,11 @@ function safeJsonParse(value, fallback = null) {
             return false;
         },
         
+        /**
+         * Set maximum queue size
+         * @param {number} max - Maximum queue size
+         * @returns {boolean} Success status
+         */
         setMaxQueueSize: function(max) {
             if (max > 0) {
                 this._maxQueueSize = max;
@@ -2277,6 +2670,12 @@ function safeJsonParse(value, fallback = null) {
             return false;
         },
         
+        /**
+         * Update dependency status
+         * @param {string} dependency - Dependency name
+         * @param {boolean} status - Dependency status
+         * @returns {boolean} Success status
+         */
         updateDependency: function(dependency, status) {
             if (this._dependencies.hasOwnProperty(dependency)) {
                 this._dependencies[dependency] = status;
@@ -2295,17 +2694,22 @@ function safeJsonParse(value, fallback = null) {
     resumeQueue = RequestQueue.resume.bind(RequestQueue);
     
     // ============================================================================
-    // SECTION 6: FETCH WRAPPER - ENHANCED WITH SILENT RETRY
+    // SECTION 6: FETCH WRAPPER - ENHANCED WITH SECURITY AND FALLBACK
     // ============================================================================
     
-    const DEFAULT_TIMEOUT = 30000;
+    const DEFAULT_TIMEOUT = 30000; // 30 seconds
     const DEFAULT_RETRIES = 3;
     const DEFAULT_RETRY_DELAY = 1000;
-    const DEFAULT_CACHE_TTL = 300000;
-    const MAX_RETRY_DELAY = 30000;
+    const DEFAULT_CACHE_TTL = 300000; // 5 minutes
+    const MAX_RETRY_DELAY = 30000; // 30 seconds
     
     const abortControllers = new Map();
     
+    /**
+     * Create abort controller for request
+     * @param {string} requestId - Request ID
+     * @returns {AbortController} Abort controller
+     */
     createAbortController = function(requestId) {
         const controller = new AbortController();
         if (requestId) {
@@ -2314,6 +2718,11 @@ function safeJsonParse(value, fallback = null) {
         return controller;
     };
     
+    /**
+     * Abort specific request
+     * @param {string} requestId - Request ID
+     * @returns {boolean} True if aborted
+     */
     abortRequest = function(requestId) {
         const controller = abortControllers.get(requestId);
         if (controller) {
@@ -2324,6 +2733,10 @@ function safeJsonParse(value, fallback = null) {
         return false;
     };
     
+    /**
+     * Abort all requests
+     * @returns {boolean} True if aborted
+     */
     abortAllRequests = function() {
         abortControllers.forEach((controller, requestId) => {
             controller.abort();
@@ -2332,6 +2745,13 @@ function safeJsonParse(value, fallback = null) {
         return true;
     };
     
+    /**
+     * Request with abort capability
+     * @param {string} url - Request URL
+     * @param {Object} options - Fetch options
+     * @param {number} timeout - Timeout in ms
+     * @returns {Promise<Response>} Fetch response
+     */
     requestWithAbort = async function(url, options = {}, timeout = DEFAULT_TIMEOUT) {
         const requestId = options.requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const controller = createAbortController(requestId);
@@ -2369,10 +2789,25 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Fetch with timeout
+     * @param {string} url - Request URL
+     * @param {Object} options - Fetch options
+     * @param {number} timeout - Timeout in ms
+     * @returns {Promise<Response>} Fetch response
+     */
     fetchWithTimeout = async function(url, options = {}, timeout = DEFAULT_TIMEOUT) {
         return requestWithAbort(url, options, timeout);
     };
     
+    /**
+     * Fetch with retry
+     * @param {string} url - Request URL
+     * @param {Object} options - Fetch options
+     * @param {number} retries - Number of retries
+     * @param {boolean} backoff - Whether to use exponential backoff
+     * @returns {Promise<Response>} Fetch response
+     */
     fetchWithRetry = async function(url, options = {}, retries = DEFAULT_RETRIES, backoff = true) {
         let lastError;
         let attempt = 0;
@@ -2385,6 +2820,7 @@ function safeJsonParse(value, fallback = null) {
             try {
                 const response = await fetchWithTimeout(url, options);
                 
+                // Don't retry client errors (4xx) except 429 (rate limit)
                 if (response.status >= 400 && response.status < 500 && response.status !== 429) {
                     return response;
                 }
@@ -2393,6 +2829,7 @@ function safeJsonParse(value, fallback = null) {
                     return response;
                 }
                 
+                // Rate limit handling with Retry-After header
                 if (response.status === 429) {
                     const retryAfter = response.headers.get('Retry-After');
                     let delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 
@@ -2438,6 +2875,14 @@ function safeJsonParse(value, fallback = null) {
         );
     };
     
+    /**
+     * Fetch with cache
+     * @param {string} url - Request URL
+     * @param {Object} options - Fetch options
+     * @param {number} ttl - Cache TTL in ms
+     * @param {boolean} forceRefresh - Force refresh cache
+     * @returns {Promise<Object>} Response with cache info
+     */
     fetchWithCache = async function(url, options = {}, ttl = DEFAULT_CACHE_TTL, forceRefresh = false) {
         const method = options.method || 'GET';
         
@@ -2501,6 +2946,7 @@ function safeJsonParse(value, fallback = null) {
             }
             
         } catch (error) {
+            // Return stale cache if available
             const cached = CacheManager.get(cacheKey);
             if (cached) {
                 return {
@@ -2523,6 +2969,13 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Fetch with fallback URLs
+     * @param {string} primaryUrl - Primary URL
+     * @param {string[]} fallbackUrls - Fallback URLs
+     * @param {Object} options - Fetch options
+     * @returns {Promise<Object>} Response with fallback info
+     */
     fetchWithFallback = async function(primaryUrl, fallbackUrls = [], options = {}) {
         const urls = [primaryUrl, ...fallbackUrls];
         const errors = [];
@@ -2545,6 +2998,7 @@ function safeJsonParse(value, fallback = null) {
                     };
                 }
                 
+                // Don't fallback for client errors (4xx) except 429
                 if (i === 0 && response.status >= 400 && response.status < 500 && response.status !== 429) {
                     throw new KnectaError(
                         response.statusText || `HTTP ${response.status}`,
@@ -2584,6 +3038,7 @@ function safeJsonParse(value, fallback = null) {
         );
     };
     
+    // Public endpoints that don't require authentication
     const PUBLIC_ENDPOINTS = [
         '/api/status', '/status', '/health', '/api/health',
         '/api/auth/login', '/auth/login',
@@ -2595,6 +3050,7 @@ function safeJsonParse(value, fallback = null) {
         '/api/auth/verify', '/auth/verify'
     ];
     
+    // Authentication endpoints (may or may not require auth)
     const AUTH_ENDPOINTS = [
         '/api/auth/login', '/auth/login',
         '/api/auth/register', '/auth/register',
@@ -2605,6 +3061,11 @@ function safeJsonParse(value, fallback = null) {
         '/api/auth/verify', '/auth/verify'
     ];
     
+    /**
+     * Check if endpoint is public (no auth required)
+     * @param {string} endpoint - API endpoint
+     * @returns {boolean} True if public
+     */
     isPublicEndpoint = function(endpoint) {
         if (!endpoint || typeof endpoint !== 'string') return false;
         
@@ -2617,6 +3078,11 @@ function safeJsonParse(value, fallback = null) {
         );
     };
     
+    /**
+     * Check if endpoint is auth-related
+     * @param {string} endpoint - API endpoint
+     * @returns {boolean} True if auth endpoint
+     */
     isAuthEndpoint = function(endpoint) {
         if (!endpoint || typeof endpoint !== 'string') return false;
         
@@ -2629,6 +3095,11 @@ function safeJsonParse(value, fallback = null) {
         );
     };
     
+    /**
+     * Check if endpoint is status/health endpoint
+     * @param {string} endpoint - API endpoint
+     * @returns {boolean} True if status endpoint
+     */
     isStatusEndpoint = function(endpoint) {
         if (!endpoint || typeof endpoint !== 'string') return false;
         
@@ -2645,12 +3116,18 @@ function safeJsonParse(value, fallback = null) {
     };
     
     // ============================================================================
-    // CORE: secureApiFetch - ENHANCED WITH QUEUEING AND DEPENDENCY WAITING
+    // CORE: secureApiFetch - ENHANCED WITH SECURITY, QUEUEING, AND FALLBACK
     // ============================================================================
     
+    /**
+     * Secure API fetch with comprehensive security and error handling
+     * @param {string} url - Endpoint or full URL
+     * @param {Object} options - Request options
+     * @returns {Promise<Object>} Normalized response
+     */
     secureApiFetch = async function(url, options = {}) {
         try {
-            // Handle endpoint string
+            // Validate endpoint
             if (url === 'GET' || url === 'POST' || url === 'PUT' || 
                 url === 'PATCH' || url === 'DELETE' || url === 'HEAD' ||
                 url === 'OPTIONS') {
@@ -2686,6 +3163,7 @@ function safeJsonParse(value, fallback = null) {
                 });
             }
             
+            // Build full URL
             let fullUrl;
             let endpointPath;
             
@@ -2705,8 +3183,26 @@ function safeJsonParse(value, fallback = null) {
                 endpointPath = cleanEndpoint;
             }
             
+            // SECURITY: Validate endpoint to prevent unsafe access
+            const baseUrl = getBaseUrl();
+            if (!isValidEndpoint(fullUrl, baseUrl)) {
+                throw new KnectaError(
+                    'Invalid or unsafe endpoint',
+                    403,
+                    'SECURITY_VIOLATION',
+                    { url: fullUrl, baseUrl }
+                );
+            }
+            
+            // SECURITY: Enforce HTTPS in production
+            if (isProduction() && fullUrl.startsWith('http://')) {
+                console.warn('[API-SECURITY] Upgrading HTTP to HTTPS in production');
+                fullUrl = fullUrl.replace('http://', 'https://');
+            }
+            
             const method = (options.method || 'GET').toUpperCase();
             
+            // Prepare fetch options
             const fetchOptions = {
                 method,
                 headers: {
@@ -2726,6 +3222,7 @@ function safeJsonParse(value, fallback = null) {
             
             const skipAuth = options.auth === false || isPublic || isAuth || isStatus;
             
+            // Add authentication headers if needed
             if (!skipAuth) {
                 if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
                     await refreshTokenIfNeeded();
@@ -2740,6 +3237,7 @@ function safeJsonParse(value, fallback = null) {
                 }
             }
             
+            // Handle request body
             if (options.body) {
                 if (options.body instanceof FormData) {
                     fetchOptions.body = options.body;
@@ -2760,62 +3258,77 @@ function safeJsonParse(value, fallback = null) {
                 }
             }
             
+            // Execute request with appropriate strategy
             let response;
             const requestStartTime = Date.now();
             
-            if (options.useFallback && options.fallbackUrls) {
-                response = await fetchWithFallback(fullUrl, options.fallbackUrls, fetchOptions);
-            } else if (options.cache !== false && method === 'GET' && !options.skipCache) {
-                response = await fetchWithCache(
-                    fullUrl, 
-                    fetchOptions, 
-                    options.ttl || DEFAULT_CACHE_TTL, 
-                    options.forceRefresh || false
-                );
-            } else {
-                response = await fetchWithRetry(
-                    fullUrl, 
-                    fetchOptions, 
-                    options.retries || DEFAULT_RETRIES, 
-                    options.backoff !== false
-                );
+            try {
+                if (options.useFallback && options.fallbackUrls) {
+                    response = await fetchWithFallback(fullUrl, options.fallbackUrls, fetchOptions);
+                } else if (options.cache !== false && method === 'GET' && !options.skipCache) {
+                    response = await fetchWithCache(
+                        fullUrl, 
+                        fetchOptions, 
+                        options.ttl || DEFAULT_CACHE_TTL, 
+                        options.forceRefresh || false
+                    );
+                } else {
+                    response = await fetchWithRetry(
+                        fullUrl, 
+                        fetchOptions, 
+                        options.retries || DEFAULT_RETRIES, 
+                        options.backoff !== false
+                    );
+                }
+            } catch (fetchError) {
+                // Handle fetch errors gracefully
+                console.warn('[API] Fetch error:', fetchError.message);
+                
+                // Return fallback response
+                return {
+                    ok: false,
+                    success: false,
+                    status: 0,
+                    statusText: fetchError.message || 'Network error',
+                    data: {
+                        message: fetchError.message || 'Network error',
+                        code: fetchError.code || 'NETWORK_ERROR',
+                        error: normalizeError(fetchError).toJSON()
+                    },
+                    error: normalizeError(fetchError),
+                    url: fullUrl,
+                    method: method,
+                    timestamp: Date.now(),
+                    fromFallback: true
+                };
             }
             
             const requestDuration = Date.now() - requestStartTime;
             
-            // HARDENED: Safe JSON parsing with ENHANCED SAFE PARSER UTILITY
+            // Parse response data
             let data = null;
             const contentType = response.headers.get('content-type');
             let responseText = null;
             
             try {
-                // Try to get response text first (always safe)
                 responseText = await response.text();
             } catch (textError) {
                 console.warn('[API] Failed to read response text', textError);
                 responseText = '';
             }
             
-            // FIX: Enhanced handling for plain text responses
-            // This is critical for login when backend returns plain text success messages or tokens
-            
-            // First, check if this is a login endpoint
+            // Enhanced handling for login endpoints
             const isLoginEndpoint = endpointPath.includes('/auth/login') || 
                                    endpointPath.includes('/login') ||
                                    (options && options._isLogin);
             
-            // Special handling for login endpoints - they might return plain text tokens
             if (isLoginEndpoint) {
-                // Try to parse as JSON first
                 let parsed = safeJsonParse(responseText, null);
                 
-                // If safeJsonParse returned null but we have text, it might be plain text success
                 if (parsed === null && responseText && typeof responseText === 'string') {
                     const trimmed = responseText.trim();
                     
-                    // Check if it looks like a JWT token
                     if (trimmed.length > 20 && (trimmed.includes('.') || /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed))) {
-                        // This is a plain text JWT token - success!
                         parsed = {
                             success: true,
                             token: trimmed,
@@ -2823,21 +3336,10 @@ function safeJsonParse(value, fallback = null) {
                             _fromPlainText: true
                         };
                         
-                        // Force response to be considered OK
                         if (!response.ok) {
-                            // Create a new response-like object
-                            const successResponse = {
-                                ok: true,
-                                status: 200,
-                                statusText: 'OK',
-                                headers: response.headers,
-                                url: response.url,
-                                data: parsed
-                            };
                             response = { ...response, ok: true, status: 200 };
                         }
                     } 
-                    // Check if it's a success message
                     else if (trimmed.toLowerCase().includes('success') || 
                              trimmed.toLowerCase().includes('welcome') ||
                              trimmed.toLowerCase().includes('logged in')) {
@@ -2847,7 +3349,6 @@ function safeJsonParse(value, fallback = null) {
                             _fromPlainText: true
                         };
                         
-                        // Force response to be considered OK
                         if (!response.ok) {
                             response = { ...response, ok: true, status: 200 };
                         }
@@ -2860,18 +3361,15 @@ function safeJsonParse(value, fallback = null) {
                     data = {};
                 }
             } else {
-                // For non-login endpoints, use safeJsonParse
                 if (contentType && contentType.includes('application/json')) {
                     data = safeJsonParse(responseText, {});
                     if (data === null || data === undefined) {
                         data = {};
                     }
                 } else {
-                    // Try to parse as JSON anyway (some servers lie about content-type)
                     data = safeJsonParse(responseText, null);
                     
                     if (data === null) {
-                        // Not JSON, use text as message
                         data = {
                             message: responseText || (response.ok ? 'Success' : 'Request failed'),
                             _contentType: contentType || 'unknown'
@@ -2888,9 +3386,8 @@ function safeJsonParse(value, fallback = null) {
                 data = { value: data };
             }
             
-            // Handle token extraction - enhanced for various formats
+            // Handle token extraction for successful responses
             if (response.ok && data) {
-                // Try to extract token from various possible locations
                 const token = data.token || 
                             data.accessToken || 
                             data.jwt || 
@@ -2898,7 +3395,6 @@ function safeJsonParse(value, fallback = null) {
                             (data.tokens && data.tokens.accessToken) ||
                             (data.data && data.data.token) ||
                             (data.data && data.data.accessToken) ||
-                            // For plain text responses that are actually tokens
                             (typeof data === 'string' && data.length > 20 ? data : null);
                 
                 if (token && TokenManager && TokenManager.setToken) {
@@ -2912,11 +3408,9 @@ function safeJsonParse(value, fallback = null) {
                     
                     TokenManager.setToken(token, refreshToken, expiresIn);
                     
-                    // Update token readiness
                     RequestQueue.updateDependency('tokenReady', true);
                 }
                 
-                // Extract user data
                 const user = data.user || 
                            (data.data && data.data.user) || 
                            (data.data && !data.data.token ? data.data : null);
@@ -2926,6 +3420,7 @@ function safeJsonParse(value, fallback = null) {
                 }
             }
             
+            // Build normalized response
             const normalizedResponse = {
                 ok: response.ok,
                 success: response.ok,
@@ -2953,6 +3448,7 @@ function safeJsonParse(value, fallback = null) {
                 }
             };
             
+            // Handle error responses
             if (!response.ok) {
                 const errorMessage = (data && (data.message || data.error)) || response.statusText || 'Request failed';
                 const errorCode = (data && data.code) || `HTTP_${response.status}`;
@@ -2988,6 +3484,7 @@ function safeJsonParse(value, fallback = null) {
                 return normalizedResponse;
             }
             
+            // Dispatch success event
             root.dispatchEvent(new CustomEvent('api-success', {
                 detail: {
                     endpoint: endpointPath,
@@ -3063,6 +3560,10 @@ function safeJsonParse(value, fallback = null) {
     getToken = getUserToken;
     setToken = setUserToken;
     
+    /**
+     * Get current user data
+     * @returns {Object|null} User data or null
+     */
     getCurrentUser = function() {
         try {
             if (root.currentUser) {
@@ -3098,6 +3599,12 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Set user data
+     * @param {Object} userData - User data
+     * @param {boolean} skipLegacy - Skip legacy storage
+     * @returns {boolean} Success status
+     */
     setUserData = function(userData, skipLegacy = false) {
         try {
             if (!userData || typeof userData !== 'object') {
@@ -3141,6 +3648,10 @@ function safeJsonParse(value, fallback = null) {
     getUserData = getCurrentUser;
     updateCurrentUser = setUserData;
     
+    /**
+     * Clear all authentication data
+     * @returns {boolean} Success status
+     */
     clearAllAuthData = function() {
         try {
             if (TokenManager) {
@@ -3179,6 +3690,10 @@ function safeJsonParse(value, fallback = null) {
         return Promise.resolve(true);
     };
     
+    /**
+     * Check if session is valid
+     * @returns {boolean} True if valid
+     */
     isSessionValid = function() {
         const token = TokenManager ? TokenManager.getToken() : null;
         const user = getCurrentUser();
@@ -3189,6 +3704,10 @@ function safeJsonParse(value, fallback = null) {
         return isSessionValid();
     };
     
+    /**
+     * Get session data
+     * @returns {Object} Session data
+     */
     getSession = function() {
         return {
             token: TokenManager ? TokenManager.getToken() : null,
@@ -3202,6 +3721,11 @@ function safeJsonParse(value, fallback = null) {
     
     getSessionData = getSession;
     
+    /**
+     * Set session data
+     * @param {Object} data - Session data
+     * @returns {boolean} Success status
+     */
     setSessionData = function(data) {
         try {
             if (data.token && TokenManager) {
@@ -3225,6 +3749,11 @@ function safeJsonParse(value, fallback = null) {
         return isSessionValid();
     };
     
+    /**
+     * Get authentication headers for endpoint
+     * @param {string} endpoint - API endpoint
+     * @returns {Object} Headers object
+     */
     getAuthHeaders = function(endpoint) {
         try {
             if (isPublicEndpoint(endpoint)) {
@@ -3257,6 +3786,12 @@ function safeJsonParse(value, fallback = null) {
     apiCall = secureRequest;
     callApi = secureRequest;
     
+    /**
+     * API GET request
+     * @param {string} endpoint - API endpoint
+     * @param {Object} params - Query parameters
+     * @returns {Promise<Object>} Response
+     */
     apiGet = async function(endpoint, params = {}) {
         let url = endpoint;
         if (params && Object.keys(params).length > 0) {
@@ -3266,14 +3801,31 @@ function safeJsonParse(value, fallback = null) {
         return secureRequest(url, { method: 'GET' });
     };
     
+    /**
+     * API POST request
+     * @param {string} endpoint - API endpoint
+     * @param {Object} data - Request body
+     * @returns {Promise<Object>} Response
+     */
     apiPost = async function(endpoint, data = {}) {
         return secureRequest(endpoint, { method: 'POST', body: data });
     };
     
+    /**
+     * API PUT request
+     * @param {string} endpoint - API endpoint
+     * @param {Object} data - Request body
+     * @returns {Promise<Object>} Response
+     */
     apiPut = async function(endpoint, data = {}) {
         return secureRequest(endpoint, { method: 'PUT', body: data });
     };
     
+    /**
+     * API DELETE request
+     * @param {string} endpoint - API endpoint
+     * @returns {Promise<Object>} Response
+     */
     apiDelete = async function(endpoint) {
         return secureRequest(endpoint, { method: 'DELETE' });
     };
@@ -3283,29 +3835,31 @@ function safeJsonParse(value, fallback = null) {
     };
     
     // ============================================================================
-    // SECTION 8: AUTHENTICATION FUNCTIONS - FIXED LOGIN
+    // SECTION 8: AUTHENTICATION FUNCTIONS - ENHANCED
     // ============================================================================
+    
+    /**
+     * Login user
+     * @param {Object} credentials - Login credentials
+     * @returns {Promise<Object>} Login response
+     */
     login = async function(credentials) {
         try {
-            // Mark this as a login request for special handling
             const response = await secureRequest('/api/auth/login', {
                 method: 'POST',
                 body: credentials,
                 auth: false,
                 cache: false,
-                _isLogin: true // Custom flag for special handling
+                _isLogin: true
             });
             
-            // Log the response for debugging
             console.log('[API-LOGIN] Raw response:', {
                 status: response.status,
                 ok: response.ok,
                 data: response.data
             });
             
-            // Handle successful login - even if response.ok is false but we have token
             if (response && response.data) {
-                // Check if we have a token in the response data
                 const token = response.data.token || 
                             response.data.accessToken || 
                             response.data.jwt ||
@@ -3314,48 +3868,41 @@ function safeJsonParse(value, fallback = null) {
                 if (token) {
                     console.log('[API-LOGIN] Token extracted successfully');
                     
-                    // If response.ok is false but we have a token, treat as success
                     if (!response.ok) {
                         response.ok = true;
                         response.success = true;
                         response.status = 200;
                     }
                     
-                    // Store token if TokenManager exists
                     if (TokenManager) {
                         const refreshToken = response.data.refreshToken || null;
                         const expiresIn = response.data.expiresIn || 3600;
                         TokenManager.setToken(token, refreshToken, expiresIn);
                         
-                        // Update dependency status
                         RequestQueue.updateDependency('tokenReady', true);
                     }
                     
-                    // Extract and store user data
                     const user = response.data.user || 
                                response.data.data || 
-                               (response.data._fromPlainText ? { id: 'user', email: credentials.identifier } : null);
+                               (response.data._fromPlainText ? { id: 'user', email: credentials.identifier || credentials.email } : null);
                     
                     if (user && setUserData) {
                         setUserData(user);
                     }
                     
-                    // Dispatch login event
                     root.dispatchEvent(new CustomEvent('user-logged-in', {
                         detail: {
-                            user: user || { email: credentials.identifier },
+                            user: user || { email: credentials.identifier || credentials.email },
                             timestamp: new Date().toISOString()
                         }
                     }));
                     
-                    root.__API_CORE.emit('user-logged-in', { user: user || { email: credentials.identifier } });
+                    root.__API_CORE.emit('user-logged-in', { user: user || { email: credentials.identifier || credentials.email } });
                 }
             }
             
-            // Handle plain text responses that might be errors
             if (response && response.data && typeof response.data === 'string') {
                 const trimmed = response.data.trim();
-                // If it's a plain text error but contains success indicators, treat as success
                 if (trimmed.toLowerCase().includes('success') || 
                     trimmed.toLowerCase().includes('welcome') ||
                     trimmed.toLowerCase().includes('logged in')) {
@@ -3366,7 +3913,6 @@ function safeJsonParse(value, fallback = null) {
                         response.status = 200;
                     }
                     
-                    // Try to extract any token-like string
                     const possibleToken = trimmed.match(/[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+/);
                     if (possibleToken && TokenManager) {
                         TokenManager.setToken(possibleToken[0], null, 3600);
@@ -3383,6 +3929,10 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Logout user
+     * @returns {Promise<Object>} Logout response
+     */
     logout = async function() {
         try {
             const token = TokenManager ? TokenManager.getToken() : null;
@@ -3398,7 +3948,6 @@ function safeJsonParse(value, fallback = null) {
         
         clearAllAuthData();
         
-        // Update dependency status
         RequestQueue.updateDependency('tokenReady', false);
         
         root.dispatchEvent(new CustomEvent('user-logged-out', {
@@ -3410,6 +3959,11 @@ function safeJsonParse(value, fallback = null) {
         return { success: true, message: 'Logged out successfully' };
     };
     
+    /**
+     * Register new user
+     * @param {Object} userData - Registration data
+     * @returns {Promise<Object>} Registration response
+     */
     register = async function(userData) {
         return secureRequest('/api/auth/register', {
             method: 'POST',
@@ -3419,6 +3973,11 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Forgot password
+     * @param {string} email - User email
+     * @returns {Promise<Object>} Response
+     */
     forgotPassword = async function(email) {
         return secureRequest('/api/auth/forgot', {
             method: 'POST',
@@ -3427,6 +3986,12 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Reset password
+     * @param {string} token - Reset token
+     * @param {string} newPassword - New password
+     * @returns {Promise<Object>} Response
+     */
     resetPassword = async function(token, newPassword) {
         return secureRequest('/api/auth/reset', {
             method: 'POST',
@@ -3435,6 +4000,10 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Refresh authentication token
+     * @returns {Promise<Object>} Refresh response
+     */
     refreshToken = async function() {
         const refreshTokenValue = TokenManager ? TokenManager.getRefreshToken() : null;
         
@@ -3462,6 +4031,10 @@ function safeJsonParse(value, fallback = null) {
         return response;
     };
     
+    /**
+     * Validate authentication
+     * @returns {Promise<boolean>} True if valid
+     */
     validateAuth = async function() {
         const token = TokenManager ? TokenManager.getToken() : null;
         
@@ -3499,12 +4072,19 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Update global access token reference
+     * @returns {string|null} Updated token
+     */
     updateGlobalAccessToken = function() {
         const token = TokenManager ? TokenManager.getToken() : null;
         root.__GLOBAL_TOKEN = token;
         return token;
     };
     
+    /**
+     * Handle unauthorized access
+     */
     handleUnauthorizedAccess = function() {
         if (localStorage.getItem('_auth_clearing_in_progress')) {
             return;
@@ -3514,7 +4094,6 @@ function safeJsonParse(value, fallback = null) {
         
         clearAllAuthData();
         
-        // Update dependency status
         RequestQueue.updateDependency('tokenReady', false);
         
         localStorage.removeItem('_auth_clearing_in_progress');
@@ -3533,6 +4112,10 @@ function safeJsonParse(value, fallback = null) {
     getApiBaseUrl = getBaseUrl;
     getBackendBaseUrl = getBaseUrl;
     
+    /**
+     * Initialize token system
+     * @returns {Object} Token and user info
+     */
     initializeTokenSystem = function() {
         if (migrateLegacyTokens) {
             migrateLegacyTokens();
@@ -3543,16 +4126,22 @@ function safeJsonParse(value, fallback = null) {
             updateGlobalAccessToken();
         }
         
-        // Update token readiness
         RequestQueue.updateDependency('tokenReady', !!token);
         
         return { token, user };
     };
     
     // ============================================================================
-    // SECTION 9: OPEN CHAT FUNCTIONS - COMPLETE IMPLEMENTATION
+    // SECTION 9: OPEN CHAT FUNCTIONS - PRESERVED WITH ENHANCEMENTS
     // ============================================================================
     
+    /**
+     * Open chat interface
+     * @param {string} userId - User ID
+     * @param {string} chatId - Chat ID
+     * @param {Object} options - Options
+     * @returns {Object} Result
+     */
     openChat = function(userId, chatId = null, options = {}) {
         try {
             if (!userId && !chatId && !(options && options.groupId)) {
@@ -3728,6 +4317,11 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Close chat
+     * @param {string} chatId - Chat ID
+     * @returns {Object} Result
+     */
     closeChat = function(chatId) {
         try {
             const closeEvent = new CustomEvent('close-chat', {
@@ -3753,6 +4347,11 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Minimize chat
+     * @param {string} chatId - Chat ID
+     * @returns {Object} Result
+     */
     minimizeChat = function(chatId) {
         try {
             const minimizeEvent = new CustomEvent('minimize-chat', {
@@ -3778,6 +4377,11 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Maximize chat
+     * @param {string} chatId - Chat ID
+     * @returns {Object} Result
+     */
     maximizeChat = function(chatId) {
         try {
             const maximizeEvent = new CustomEvent('maximize-chat', {
@@ -3803,6 +4407,13 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Send chat message
+     * @param {string} chatId - Chat ID
+     * @param {string} content - Message content
+     * @param {Object} options - Options
+     * @returns {Promise<Object>} Response
+     */
     sendChatMessage = async function(chatId, content, options = {}) {
         try {
             if (!chatId) {
@@ -3829,6 +4440,13 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Get chat history
+     * @param {string} chatId - Chat ID
+     * @param {number} limit - Message limit
+     * @param {string} before - Cursor for pagination
+     * @returns {Promise<Object>} Response
+     */
     getChatHistory = async function(chatId, limit = 50, before = null) {
         try {
             let url = `/api/chats/${chatId}/messages?limit=${limit}`;
@@ -3847,6 +4465,10 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Get unread message count
+     * @returns {Promise<Object>} Response
+     */
     getUnreadCount = async function() {
         try {
             const response = await secureRequest('/api/chats/unread', {
@@ -3862,6 +4484,11 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Mark chat as read
+     * @param {string} chatId - Chat ID
+     * @returns {Promise<Object>} Response
+     */
     markChatAsRead = async function(chatId) {
         try {
             if (!chatId) {
@@ -3956,6 +4583,13 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Show notification
+     * @param {string} message - Notification message
+     * @param {string} type - Notification type
+     * @param {number} duration - Duration in ms
+     * @returns {Object} Result
+     */
     showNotification = function(message, type = 'info', duration = 3000) {
         try {
             const id = `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -4080,6 +4714,12 @@ function safeJsonParse(value, fallback = null) {
         };
     };
     
+    /**
+     * Track analytics event
+     * @param {string} eventName - Event name
+     * @param {Object} eventData - Event data
+     * @returns {Object} Result
+     */
     trackEvent = function(eventName, eventData = {}) {
         console.log(`[EVENT] ${eventName}`, eventData);
         
@@ -4101,6 +4741,10 @@ function safeJsonParse(value, fallback = null) {
         };
     };
     
+    /**
+     * Generate sample mood data for testing
+     * @returns {Array} Sample mood data
+     */
     generateSampleMoodData = function() {
         const moods = ['happy', 'sad', 'excited', 'calm', 'anxious', 'tired', 'energetic', 'peaceful'];
         const activities = ['work', 'social', 'exercise', 'rest', 'entertainment', 'family', 'friends'];
@@ -4492,6 +5136,11 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Format time ago
+     * @param {string|Date} date - Date to format
+     * @returns {string} Formatted time
+     */
     formatTimeAgo = function(date) {
         if (!date) return 'Unknown';
         
@@ -4531,6 +5180,10 @@ function safeJsonParse(value, fallback = null) {
     // SECTION 21: UTILITY FUNCTIONS
     // ============================================================================
     
+    /**
+     * Check network status
+     * @returns {Promise<boolean>} True if network is available
+     */
     checkNetworkStatus = async function() {
         try {
             const baseUrl = getBaseUrl();
@@ -4554,6 +5207,13 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Debounce function
+     * @param {Function} func - Function to debounce
+     * @param {number} wait - Wait time in ms
+     * @param {boolean} immediate - Execute immediately
+     * @returns {Function} Debounced function
+     */
     debounce = function(func, wait, immediate = false) {
         let timeout;
         
@@ -4573,6 +5233,12 @@ function safeJsonParse(value, fallback = null) {
         };
     };
     
+    /**
+     * Throttle function
+     * @param {Function} func - Function to throttle
+     * @param {number} limit - Limit in ms
+     * @returns {Function} Throttled function
+     */
     throttle = function(func, limit) {
         let inThrottle;
         let lastFunc;
@@ -4602,10 +5268,20 @@ function safeJsonParse(value, fallback = null) {
         };
     };
     
+    /**
+     * Generate unique ID
+     * @returns {string} Unique ID
+     */
     generateId = function() {
         return `${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 4)}`;
     };
     
+    /**
+     * Format date
+     * @param {string|Date} date - Date to format
+     * @param {string} format - Format type
+     * @returns {string} Formatted date
+     */
     formatDate = function(date, format = 'short') {
         try {
             const d = new Date(date);
@@ -4637,6 +5313,12 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Format time
+     * @param {string|Date} date - Date to format
+     * @param {boolean} includeSeconds - Include seconds
+     * @returns {string} Formatted time
+     */
     formatTime = function(date, includeSeconds = false) {
         try {
             const d = new Date(date);
@@ -4655,6 +5337,11 @@ function safeJsonParse(value, fallback = null) {
         }
     };
     
+    /**
+     * Escape HTML special characters
+     * @param {string} text - Text to escape
+     * @returns {string} Escaped text
+     */
     escapeHtml = function(text) {
         if (text === null || text === undefined) return '';
         
@@ -4681,6 +5368,11 @@ function safeJsonParse(value, fallback = null) {
     const eventEmitter = {
         events: {},
         
+        /**
+         * Emit event
+         * @param {string} event - Event name
+         * @param {*} data - Event data
+         */
         emit(event, data) {
             try {
                 if (this.events[event]) {
@@ -4699,6 +5391,12 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Register event listener
+         * @param {string} event - Event name
+         * @param {Function} callback - Callback function
+         * @returns {Function} Unsubscribe function
+         */
         on(event, callback) {
             try {
                 if (!this.events[event]) {
@@ -4713,6 +5411,11 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Remove event listener
+         * @param {string} event - Event name
+         * @param {Function} callback - Callback function
+         */
         off(event, callback) {
             try {
                 if (this.events[event]) {
@@ -4727,6 +5430,12 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Register one-time event listener
+         * @param {string} event - Event name
+         * @param {Function} callback - Callback function
+         * @returns {Function} Unsubscribe function
+         */
         once(event, callback) {
             try {
                 const onceWrapper = (data) => {
@@ -4743,6 +5452,10 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Clear all listeners for an event
+         * @param {string} event - Event name (optional)
+         */
         clear(event) {
             try {
                 if (event) {
@@ -4755,6 +5468,11 @@ function safeJsonParse(value, fallback = null) {
             }
         },
         
+        /**
+         * Get listener count for an event
+         * @param {string} event - Event name
+         * @returns {number} Listener count
+         */
         listeners(event) {
             return this.events[event]?.length || 0;
         }
@@ -4766,7 +5484,7 @@ function safeJsonParse(value, fallback = null) {
     once = eventEmitter.once.bind(eventEmitter);
     
     // ============================================================================
-    // SECTION 23: MULTI-IFRAME ORCHESTRATION - COMPLETE IMPLEMENTATION
+    // SECTION 23: MULTI-IFRAME ORCHESTRATION - ENHANCED
     // ============================================================================
     
     const ORCHESTRATION_STATE = {
@@ -4785,14 +5503,26 @@ function safeJsonParse(value, fallback = null) {
         ORCHESTRATION_STATE._readyResolve = resolve;
     });
     
+    /**
+     * Wait for core to be ready
+     * @returns {Promise} Ready promise
+     */
     waitForReady = function() {
         return ORCHESTRATION_STATE._readyPromise;
     };
     
+    /**
+     * Check if core is ready
+     * @returns {boolean} True if ready
+     */
     isCoreReady = function() {
         return ORCHESTRATION_STATE.coreReady;
     };
     
+    /**
+     * Get request queue status
+     * @returns {Object} Queue status
+     */
     getRequestQueueStatus = function() {
         return {
             queueLength: ORCHESTRATION_STATE.requestQueue.length,
@@ -4803,6 +5533,12 @@ function safeJsonParse(value, fallback = null) {
         };
     };
     
+    /**
+     * Register iframe
+     * @param {string} iframeId - Iframe ID
+     * @param {Window} iframeWindow - Iframe window object
+     * @returns {boolean} Success status
+     */
     registerIframe = function(iframeId, iframeWindow) {
         if (!ORCHESTRATION_STATE.iframes.has(iframeId)) {
             ORCHESTRATION_STATE.iframes.set(iframeId, {
@@ -4818,10 +5554,20 @@ function safeJsonParse(value, fallback = null) {
         return false;
     };
     
+    /**
+     * Unregister iframe
+     * @param {string} iframeId - Iframe ID
+     * @returns {boolean} Success status
+     */
     unregisterIframe = function(iframeId) {
         return ORCHESTRATION_STATE.iframes.delete(iframeId);
     };
     
+    /**
+     * Get iframe status
+     * @param {string} iframeId - Iframe ID
+     * @returns {Object} Iframe status
+     */
     getIframeStatus = function(iframeId) {
         const iframe = ORCHESTRATION_STATE.iframes.get(iframeId);
         
@@ -4838,6 +5584,11 @@ function safeJsonParse(value, fallback = null) {
         };
     };
     
+    /**
+     * Broadcast to all iframes
+     * @param {*} data - Data to broadcast
+     * @returns {Array} Results
+     */
     broadcastToAllIframes = function(data) {
         const results = [];
         
@@ -4862,6 +5613,12 @@ function safeJsonParse(value, fallback = null) {
         return results;
     };
     
+    /**
+     * Send message to specific iframe
+     * @param {string} iframeId - Iframe ID
+     * @param {*} data - Data to send
+     * @returns {Promise} Promise that resolves when sent
+     */
     sendToIframe = function(iframeId, data) {
         return new Promise((resolve, reject) => {
             try {
@@ -4901,6 +5658,12 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    /**
+     * Broadcast to parent window
+     * @param {string} event - Event name
+     * @param {*} data - Data to broadcast
+     * @returns {Promise} Promise that resolves when broadcast
+     */
     broadcastToParent = function(event, data) {
         return new Promise((resolve, reject) => {
             try {
@@ -4929,6 +5692,7 @@ function safeJsonParse(value, fallback = null) {
         });
     };
     
+    // Message handler for iframe communication
     root.addEventListener('message', (event) => {
         try {
             const { type, iframeId, data, requestId } = event.data || {};
@@ -4952,6 +5716,7 @@ function safeJsonParse(value, fallback = null) {
         }
     });
     
+    // Mark core as ready after initialization
     setTimeout(() => {
         ORCHESTRATION_STATE.coreReady = true;
         if (ORCHESTRATION_STATE._readyResolve) {
@@ -4967,8 +5732,8 @@ function safeJsonParse(value, fallback = null) {
     // ============================================================================
     
     ApiGateway = {
-        version: '22.2.4',
-        build: '2024-01-22',
+        version: '23.0.0',
+        build: '2024-06-15',
         
         env: {
             getCurrent: getEnvironment,
@@ -4999,7 +5764,8 @@ function safeJsonParse(value, fallback = null) {
             decrypt: decryptToken,
             migrateLegacy: migrateLegacyTokens,
             validateToken: validateTokenFormat,
-            sanitizeToken: sanitizeToken
+            sanitizeToken: sanitizeToken,
+            isValidEndpoint: isValidEndpoint
         },
         
         request: secureRequest,
@@ -5261,6 +6027,10 @@ function safeJsonParse(value, fallback = null) {
             return this.withRetry(endpoint, options, retries); 
         },
         
+        /**
+         * Get gateway status
+         * @returns {Object} Status object
+         */
         getStatus: function() {
             return {
                 version: this.version,
@@ -5307,12 +6077,12 @@ function safeJsonParse(value, fallback = null) {
     gateway = ApiGateway;
     
     // ============================================================================
-    // SECTION 25: INITIALIZE GATEWAY - COMPLETE WITH DEPENDENCY UPDATES
+    // SECTION 25: INITIALIZE GATEWAY - ENHANCED
     // ============================================================================
     
     initializeGateway = function(options = {}) {
         try {
-            console.log('[API-CORE] Initializing API Gateway v22.2.4');
+            console.log('[API-CORE] Initializing API Gateway v23.0.0');
             
             if (options.environment) {
                 setEnvironment(options.environment);
@@ -5320,7 +6090,6 @@ function safeJsonParse(value, fallback = null) {
                 CURRENT_ENVIRONMENT = detectEnvironment();
             }
             
-            // Update environment dependency
             RequestQueue.updateDependency('environment', true);
             
             if (options.baseUrl) {
@@ -5329,7 +6098,6 @@ function safeJsonParse(value, fallback = null) {
                 ACTIVE_BASE_URL = getBaseUrl();
             }
             
-            // Update config dependency
             RequestQueue.updateDependency('config', true);
             
             if (TokenManager && TokenManager.migrateLegacyTokens) {
@@ -5374,17 +6142,19 @@ function safeJsonParse(value, fallback = null) {
                 updateGlobalAccessToken();
             }
             
-            // Update bootstrap dependency
             RequestQueue.updateDependency('bootstrap', true);
             
             const readyEvent = new CustomEvent('api-gateway-ready', {
                 detail: {
-                    version: '22.2.4',
+                    version: '23.0.0',
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString(),
                     features: [
                         'base-url-control',
+                        'auto-environment-detection',
+                        'https-enforcement',
+                        'security-validation',
                         'fetch-wrapper',
                         'error-normalization',
                         'token-security',
@@ -5394,7 +6164,9 @@ function safeJsonParse(value, fallback = null) {
                         'chat-functions',
                         'iframe-orchestration',
                         'safe-json-parser',
-                        'enhanced-login-handling'
+                        'enhanced-login-handling',
+                        'fallback-mechanisms',
+                        'cross-device-compatibility'
                     ]
                 }
             });
@@ -5404,14 +6176,14 @@ function safeJsonParse(value, fallback = null) {
             console.log('[API-CORE] Initialized successfully', {
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '22.2.4'
+                version: '23.0.0'
             });
             
             return {
                 success: true,
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '22.2.4',
+                version: '23.0.0',
                 timestamp: new Date().toISOString()
             };
             
@@ -5472,24 +6244,28 @@ function safeJsonParse(value, fallback = null) {
     
     initializeGateway();
     
+    // Periodic token refresh
     setInterval(() => {
         if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
             refreshTokenIfNeeded().catch(() => {});
         }
     }, 60000);
     
+    // Periodic cache pruning
     setInterval(() => {
         if (CacheManager && CacheManager._pruneMemoryCache) {
             CacheManager._pruneMemoryCache();
         }
     }, 300000);
     
+    // Periodic network check
     setInterval(() => {
         if (navigator.onLine) {
             checkNetworkStatus().catch(() => {});
         }
     }, 30000);
     
+    // Expose to global scope
     root.ApiGateway = ApiGateway;
     root.gateway = ApiGateway;
     root.api = ApiGateway;
@@ -5510,7 +6286,7 @@ function safeJsonParse(value, fallback = null) {
     // CRITICAL: Update __API_CORE with all required properties
     // ============================================================================
     Object.assign(root.__API_CORE, {
-        version: '22.2.4',
+        version: '23.0.0',
         initialized: true,
         ready: _readyPromise,
         secureApiFetch: secureApiFetch,
@@ -5530,14 +6306,17 @@ function safeJsonParse(value, fallback = null) {
     root.api_core = root.api_core || root.__API_CORE;
     
     root.__API_GATEWAY = {
-        version: '22.2.4',
-        build: '2024-01-22',
+        version: '23.0.0',
+        build: '2024-06-15',
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
         initialized: true,
         timestamp: new Date().toISOString(),
         features: [
             'base-url-control',
+            'auto-environment-detection',
+            'https-enforcement',
+            'security-validation',
             'fetch-wrapper',
             'error-normalization',
             'token-security',
@@ -5547,7 +6326,9 @@ function safeJsonParse(value, fallback = null) {
             'chat-functions',
             'iframe-orchestration',
             'safe-json-parser',
-            'enhanced-login-handling'
+            'enhanced-login-handling',
+            'fallback-mechanisms',
+            'cross-device-compatibility'
         ]
     };
     
@@ -5555,7 +6336,7 @@ function safeJsonParse(value, fallback = null) {
     // FINAL READY RESOLUTION
     // ============================================================================
     
-    // CRITICAL: Ensure root.api.core exists BEFORE marking as initialized
+    // Ensure root.api.core exists BEFORE marking as initialized
     if (!root.api) root.api = {};
     
     // Get the ready promise from __API_CORE
@@ -5564,8 +6345,8 @@ function safeJsonParse(value, fallback = null) {
     if (!root.api.core) {
         root.api.core = {
             __initializing: false,
-            __version: '22.2.4',
-            ready: coreReadyPromise,  // Explicitly set as Promise
+            __version: '23.0.0',
+            ready: coreReadyPromise,
             waitFor: function() { 
                 return coreReadyPromise; 
             },
@@ -5582,7 +6363,7 @@ function safeJsonParse(value, fallback = null) {
                 return {
                     ready: root.__API_CORE ? root.__API_CORE.initialized === true : false,
                     initializing: false,
-                    version: '22.2.4'
+                    version: '23.0.0'
                 };
             },
             init: function() {
@@ -5606,7 +6387,7 @@ function safeJsonParse(value, fallback = null) {
             return {
                 ready: root.__API_CORE ? root.__API_CORE.initialized === true : false,
                 initializing: false,
-                version: '22.2.4'
+                version: '23.0.0'
             };
         };
         root.api.core.init = root.api.core.init || function() { return coreReadyPromise; };
@@ -5623,7 +6404,7 @@ function safeJsonParse(value, fallback = null) {
         _resolveReady({
             success: true,
             timestamp: new Date().toISOString(),
-            version: '22.2.4'
+            version: '23.0.0'
         });
     }
     
@@ -5631,7 +6412,7 @@ function safeJsonParse(value, fallback = null) {
     try {
         root.dispatchEvent(new CustomEvent('api-core-ready', {
             detail: {
-                version: '22.2.4',
+                version: '23.0.0',
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
                 timestamp: new Date().toISOString(),
@@ -5645,7 +6426,7 @@ function safeJsonParse(value, fallback = null) {
     if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
         try {
             root.__API_CORE.emit('ready', {
-                version: '22.2.4',
+                version: '23.0.0',
                 environment: CURRENT_ENVIRONMENT,
                 timestamp: new Date().toISOString()
             });
@@ -5657,12 +6438,12 @@ function safeJsonParse(value, fallback = null) {
     console.log('[API-CORE] Fully loaded and ready', {
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
-        version: '22.2.4',
+        version: '23.0.0',
         features: root.__API_GATEWAY ? root.__API_GATEWAY.features.length : 0
     });
     
     // ============================================================================
-    // INTEGRATION SELF-TESTS
+    // INTEGRATION SELF-TESTS - PRESERVED AND ENHANCED
     // ============================================================================
     try {
         console.log('[API-CORE] Running self-tests...');
@@ -5737,6 +6518,26 @@ function safeJsonParse(value, fallback = null) {
             }
         }
         
+        // Test 8: Security validation
+        const testUrls = [
+            ['/api/users/me', true],
+            ['/api/users/../config', false],
+            ['https://evil.com/api/steal', false],
+            ['https://moodchat-fy56.onrender.com/api/users', true],
+            ['http://localhost:4000/api/users', true]
+        ];
+        
+        let securityTestsPassed = 0;
+        testUrls.forEach(([url, expected]) => {
+            const result = isValidEndpoint(url, getBaseUrl());
+            if (result === expected) {
+                securityTestsPassed++;
+            } else {
+                console.warn(`[API-CORE] Security test failed for ${url}: expected ${expected}, got ${result}`);
+            }
+        });
+        console.log(`[API-CORE] Security tests: ${securityTestsPassed}/${testUrls.length} passed`);
+        
         console.log('[API-CORE] Self-tests completed');
     } catch (testError) {
         console.error('[API-CORE] Self-test error:', testError);
@@ -5747,7 +6548,7 @@ function safeJsonParse(value, fallback = null) {
         try {
             root.dispatchEvent(new CustomEvent('api-core-initialized', {
                 detail: {
-                    version: '22.2.4',
+                    version: '23.0.0',
                     timestamp: new Date().toISOString()
                 }
             }));
