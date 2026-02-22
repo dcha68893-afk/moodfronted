@@ -11,9 +11,7 @@
     
     <title>Kynecta - Advanced Mood-Based Chat</title>
     
-    <!-- FIXED: CSP with proper permissions -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:;">
-    
+   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:; img-src 'self' https: http: data:;">
     <!-- FIXED: Local fallback for Tailwind CSS -->
     <style>
         /* Tailwind base styles - local fallback */
@@ -2209,17 +2207,52 @@
 
     <!-- FIXED: jQuery fallback and spectrum patch -->
     <script>
-    (function() {
-        // Ensure jQuery is loaded (fallback if CDN blocked)
-        if (typeof jQuery === 'undefined') {
-            console.warn('jQuery not loaded, creating fallback');
-            window.jQuery = function(selector) {
-                if (typeof selector === 'function') {
+        // Add this after your jQuery fallback
+(function() {
+    // Ensure jQuery is available for spectrum
+    if (typeof jQuery === 'undefined') {
+        window.jQuery = function(selector) {
+            if (typeof selector === 'function') {
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', selector);
+                } else {
+                    selector();
+                }
+            }
+            return {
+                ready: function(fn) {
                     if (document.readyState === 'loading') {
-                        document.addEventListener('DOMContentLoaded', selector);
+                        document.addEventListener('DOMContentLoaded', fn);
                     } else {
-                        selector();
+                        fn();
                     }
+                    return this;
+                }
+            };
+        };
+        window.$ = window.jQuery;
+    }
+    
+    // Create a safe spectrum fallback
+    if (!window.spectrum) {
+        window.spectrum = {
+            fn: {
+                spectrum: function() { return this; }
+            }
+        };
+    }
+})();
+// Ensure jQuery is loaded for spectrum
+(function() {
+    // Create a more robust jQuery check
+    if (typeof jQuery === 'undefined' || !window.jQuery) {
+        // Create a minimal jQuery that can handle spectrum
+        window.jQuery = function(selector) {
+            if (typeof selector === 'function') {
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', selector);
+                } else {
+                    selector();
                 }
                 return {
                     ready: function(fn) {
@@ -2231,22 +2264,209 @@
                         return this;
                     }
                 };
+            }
+            // Return a minimal jQuery object
+            return {
+                length: 0,
+                ready: function(fn) {
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', fn);
+                    } else {
+                        fn();
+                    }
+                    return this;
+                },
+                spectrum: function() { return this; },
+                on: function() { return this; },
+                off: function() { return this; },
+                val: function() { return ''; }
             };
-            window.$ = window.jQuery;
+        };
+        window.$ = window.jQuery;
+    }
+    
+    // Prevent spectrum from throwing errors
+    if (!$.fn.spectrum) {
+        $.fn.spectrum = function() { return this; };
+    }
+})();
+// FIXED: Environment definition before it's used
+(function() {
+    'use strict';
+    
+    // Define Environment object globally
+    window.Environment = window.Environment || {
+        type: 'LOCAL_DEV',
+        isLocal: true,
+        isProduction: false,
+        apiBaseUrl: 'http://localhost:4000/api',
+        wsBaseUrl: 'ws://localhost:4000/ws',
+        
+        detect: function() {
+            const hostname = window.location.hostname;
+            
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+                this.type = 'LOCAL_DEV';
+                this.isLocal = true;
+                this.apiBaseUrl = 'http://localhost:4000/api';
+                this.wsBaseUrl = 'ws://localhost:4000/ws';
+            } else if (hostname.includes('onrender.com')) {
+                this.type = 'PRODUCTION';
+                this.isProduction = true;
+                this.apiBaseUrl = 'https://moodchat-fy56.onrender.com/api';
+                this.wsBaseUrl = 'wss://moodchat-fy56.onrender.com/ws';
+            }
+            
+            return this;
+        },
+        
+        get: function() {
+            return {
+                type: this.type,
+                isLocal: this.isLocal,
+                isProduction: this.isProduction,
+                apiBaseUrl: this.apiBaseUrl,
+                wsBaseUrl: this.wsBaseUrl,
+                timestamp: Date.now()
+            };
         }
-
-        // Patch spectrum to not error if jQuery is missing
-        if (window.spectrum) {
-            // Silent - no console noise
-        } else {
-            // Create dummy spectrum
-            window.spectrum = {
-                fn: {
-                    spectrum: function() { return this; }
+    };
+    
+    window.Environment.detect();
+    
+    // Also create a global reference that your code expects
+    window.environmentDetector = window.environmentDetector || {
+        type: window.Environment.type,
+        isLocal: window.Environment.isLocal,
+        isProduction: window.Environment.isProduction,
+        detect: function() { return this; },
+        get: function() { return { type: this.type }; }
+    };
+})();
+// FIXED: Define ParentStateManager early to prevent reference errors
+(function() {
+    'use strict';
+    
+    // Define a minimal ParentStateManager that will be enhanced later
+    if (!window.ParentStateManager) {
+        window.ParentStateManager = {
+            _ready: false,
+            _session: null,
+            
+            init: function() {
+                try {
+                    // Try to load from localStorage
+                    const storedUser = localStorage.getItem('kynecta_user');
+                    const storedToken = localStorage.getItem('kynecta_token');
+                    
+                    if (storedUser && storedToken) {
+                        this._session = {
+                            authenticated: true,
+                            user: JSON.parse(storedUser),
+                            token: storedToken,
+                            userId: JSON.parse(storedUser).id
+                        };
+                        this._ready = true;
+                    } else {
+                        // Create default session
+                        this._createDefaultSession();
+                    }
+                } catch (e) {
+                    this._createDefaultSession();
                 }
-            };
-        }
-    })();
+                
+                return this;
+            },
+            
+            _createDefaultSession: function() {
+                const defaultUser = {
+                    id: 'user_' + Date.now(),
+                    name: 'Guest User',
+                    email: 'guest@kynecta.local',
+                    guest: true
+                };
+                
+                this._session = {
+                    authenticated: true,
+                    user: defaultUser,
+                    token: 'token_' + Date.now() + '_' + Math.random().toString(36).substr(2, 16),
+                    userId: defaultUser.id
+                };
+                this._ready = true;
+                
+                try {
+                    localStorage.setItem('kynecta_user', JSON.stringify(defaultUser));
+                    localStorage.setItem('kynecta_token', this._session.token);
+                } catch (e) {}
+            },
+            
+            getSession: function() {
+                return this._session || { authenticated: false };
+            },
+            
+            getToken: function() {
+                return this._session?.token || null;
+            },
+            
+            getUser: function() {
+                return this._session?.user || null;
+            },
+            
+            isReady: function() {
+                return this._ready;
+            },
+            
+            isAuthenticated: function() {
+                return this._session?.authenticated || false;
+            },
+            
+            markModuleReady: function(moduleName) {
+                // Placeholder
+            },
+            
+            waitForSession: function(timeout) {
+                return Promise.resolve(this.getSession());
+            },
+            
+            waitForModuleHandshake: function(moduleName, timeout) {
+                return Promise.resolve(this.getSession());
+            },
+            
+            subscribe: function(listener) {
+                // Placeholder
+                return function() {};
+            }
+        };
+        
+        window.ParentStateManager.init();
+    }
+    
+    // Also define Environment if not defined
+    if (!window.Environment) {
+        window.Environment = {
+            type: 'LOCAL_DEV',
+            isLocal: true,
+            isProduction: false,
+            apiBaseUrl: 'http://localhost:4000/api',
+            wsBaseUrl: 'ws://localhost:4000/ws',
+            
+            detect: function() {
+                const hostname = window.location.hostname;
+                if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                    this.type = 'LOCAL_DEV';
+                    this.isLocal = true;
+                } else if (hostname.includes('onrender.com')) {
+                    this.type = 'PRODUCTION';
+                    this.isProduction = true;
+                    this.apiBaseUrl = 'https://moodchat-fy56.onrender.com/api';
+                    this.wsBaseUrl = 'wss://moodchat-fy56.onrender.com/ws';
+                }
+                return this;
+            }
+        };
+        window.Environment.detect();
+    }
+})();
     </script>
 
     <!-- ========== ENHANCED PARENT–CHILD COMMUNICATION ARCHITECTURE - FIXED VERSION ========== -->
@@ -2260,6 +2480,7 @@
          * Version: 3.2.0 - ENHANCED STABILITY
          * 
          * Fixed: Session initialization, token flow, handshake reliability
+         * Added: VERIFY_SESSION handler for calls-core.js
          * ====================================================================
          */
 
@@ -2588,14 +2809,14 @@
                     this.isLocal = true;
                     this.isProduction = false;
                     this.apiBaseUrl = 'http://localhost:4000/api';
-                    this.wsBaseUrl = 'ws://localhost:4000';
+                    this.wsBaseUrl = 'ws://localhost:4000/ws';
                 }
                 else if (hostname.endsWith('.onrender.com')) {
                     this.type = 'production';
                     this.isLocal = false;
                     this.isProduction = true;
                     this.apiBaseUrl = 'https://moodchat-fy56.onrender.com/api';
-                    this.wsBaseUrl = 'wss://moodchat-fy56.onrender.com';
+                    this.wsBaseUrl = 'wss://moodchat-fy56.onrender.com/ws';
                 }
                 else {
                     this.type = 'production';
@@ -2849,11 +3070,44 @@
                     authenticated: session.authenticated,
                     user: session.user,
                     sessionId: session.sessionId,
-                    expiresAt: session.expiresAt
+                    expiresAt: session.expiresAt,
+                    token: session.token // Include token in session response
                 }, data.messageId);
                 
                 if (module) {
                     ModuleRegistry.updateStatus(module, { authStatus: 'session_sent' });
+                }
+            },
+            
+            // NEW: Handle VERIFY_SESSION from calls-core.js
+            handleVerifySession(event, data) {
+                const module = this.extractModuleName(data);
+                const source = event.source;
+                const origin = event.origin;
+                const payload = data.payload || {};
+                
+                // Get current session
+                const session = ParentStateManager.getSession();
+                
+                // Verify the session
+                const isValid = session.authenticated && 
+                               session.token && 
+                               session.expiresAt && 
+                               session.expiresAt > Date.now();
+                
+                // Send verification response
+                this.sendResponse(source, origin, 'SESSION_VERIFIED', {
+                    valid: isValid,
+                    userId: session.user?.id,
+                    timestamp: Date.now(),
+                    expiresAt: session.expiresAt
+                }, data.messageId);
+                
+                // Also send ACK
+                this.sendAck(source, origin, 'VERIFY_SESSION', data.messageId, { valid: isValid });
+                
+                if (module) {
+                    ModuleRegistry.updateStatus(module, { authStatus: 'verified' });
                 }
             },
             
@@ -2974,6 +3228,7 @@
                 } catch (e) {}
             },
             
+            
             broadcastToModules(type, payload, excludeModules = []) {
                 ModuleRegistry.modules.forEach((registration, moduleName) => {
                     if (excludeModules.includes(moduleName)) return;
@@ -2992,6 +3247,33 @@
             }
         };
 
+        // Handle PING requests from iframes
+function handlePing(event) {
+    const requestId = event.data?.requestId || event.data?.messageId;
+    const source = event.source;
+    const origin = event.origin;
+    
+    // Send PONG response
+    try {
+        source.postMessage({
+            type: "PONG",
+            requestId: requestId,
+            messageId: requestId || ('pong_' + Date.now()),
+            payload: {
+                timestamp: Date.now(),
+                echo: event.data.payload || {}
+            },
+            timestamp: Date.now()
+        }, origin);
+    } catch (e) {
+        console.error('[Parent] Failed to send PONG:', e);
+    }
+    
+    // Send ACK if requested
+    if (event.data?.expectAck) {
+        sendAck(source, origin, "PING", requestId, { success: true });
+    }
+}
         // ==================== MAIN MESSAGE LISTENER ====================
         function setupMessageListener() {
             window.addEventListener('message', function(event) {
@@ -3016,6 +3298,11 @@
                         MessageHandler.handleSessionRequest(event, data);
                         break;
                         
+                    // NEW: Handle VERIFY_SESSION from calls-core.js
+                    case 'VERIFY_SESSION':
+                        MessageHandler.handleVerifySession(event, data);
+                        break;
+                        
                     case 'CHILD_READY':
                         MessageHandler.handleChildReady(event, data);
                         break;
@@ -3023,6 +3310,7 @@
                     case 'HEARTBEAT':
                         MessageHandler.handleHeartbeat(event, data);
                         break;
+                        
                         
                     case 'PING':
                         MessageHandler.handlePing(event, data);
@@ -3112,6 +3400,43 @@
 
     })();
     </script>
+
+    <!-- Fix jQuery and spectrum -->
+<script>
+// Ensure jQuery is loaded and ready for spectrum
+(function() {
+    // Check if jQuery is loaded
+    if (typeof jQuery === 'undefined') {
+        // Create a fallback that spectrum can use
+        window.jQuery = function(selector) {
+            if (typeof selector === 'function') {
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', selector);
+                } else {
+                    selector();
+                }
+            }
+            return {
+                ready: function(fn) {
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', fn);
+                    } else {
+                        fn();
+                    }
+                    return this;
+                },
+                spectrum: function() { return this; }
+            };
+        };
+        window.$ = window.jQuery;
+    }
+    
+    // Add spectrum fallback
+    if (!$.fn.spectrum) {
+        $.fn.spectrum = function() { return this; };
+    }
+})();
+</script>
 
     <!-- ========== MINIMAL STATE GUARDS (PRESERVED) ========== -->
     <script>
@@ -3323,21 +3648,20 @@
             }
         }
 
-        // Helper to send ACK
-        function sendAck(source, targetOrigin, originalType, requestId, payload = {}) {
-            if (!source) return;
-            
-            try {
-                source.postMessage({
-                    type: "ACK",
-                    originalType: originalType,
-                    messageId: requestId,
-                    requestId: requestId,
-                    timestamp: Date.now(),
-                    payload: payload
-                }, targetOrigin || '*');
-            } catch (e) {}
-        }
+        window.sendAck = function(source, targetOrigin, originalType, requestId, payload = {}) {
+    if (!source || !requestId) return;  // Don't send ACK without requestId
+    
+    try {
+        source.postMessage({
+            type: "ACK",
+            originalType: originalType,
+            messageId: requestId,        // Use requestId directly, not 'ack_' + requestId
+            requestId: requestId,         // This MUST match
+            payload: payload,
+            timestamp: Date.now()
+        }, targetOrigin || '*');
+    } catch (e) {}
+};
 
         // Get current session safely
         function getCurrentSession() {
@@ -3391,6 +3715,7 @@
                     name: sessionData.user.name,
                     email: sessionData.user.email
                 } : null,
+                token: sessionData.token || null,
                 timestamp: Date.now()
             };
 
@@ -3620,25 +3945,71 @@
             sendAck(source, origin, "CHILD_READY", requestId, { success: true });
         }
 
-        // Handle PING
-        function handlePing(event) {
-            const requestId = event.data?.requestId || event.data?.messageId;
-            const source = event.source;
-            const origin = event.origin;
-
-            try {
-                source.postMessage({
-                    type: "PONG",
-                    requestId: requestId,
+        // Handle VERIFY_SESSION (NEW - for calls-core.js)
+       
+        
+        
+        function handleVerifySession(event) {
+    // CRITICAL: Get the requestId from the message - MUST match exactly what the iframe sent
+    const requestId = event.data?.requestId || 
+                      event.data?.messageId || 
+                      event.data?.payload?.requestId;
+    
+    // If no requestId, we can't respond properly
+    if (!requestId) {
+        console.error('[Parent] VERIFY_SESSION missing requestId');
+        return;
+    }
+    
+    const source = event.source;
+    const origin = event.origin;
+    
+    // Get current session
+    const session = getCurrentSession();
+    
+    // Verify the session is valid
+    const isValid = session && session.authenticated && session.token && 
+                   (!session.expiresAt || session.expiresAt > Date.now());
+    
+    console.log('[Parent] VERIFY_SESSION received:', { 
+        requestId: requestId, 
+        isValid, 
+        hasSession: !!session,
+        authenticated: session?.authenticated 
+    });
+    
+    // Send the verification response (SESSION_VERIFIED) with the SAME requestId
+    if (source) {
+        try {
+            // Send SESSION_VERIFIED response with the original requestId
+            source.postMessage({
+                type: "SESSION_VERIFIED",
+                requestId: requestId,  // MUST be the same as received
+                messageId: requestId,   // MUST be the same as received
+                payload: { 
+                    valid: isValid,
+                    userId: session.userId,
                     timestamp: Date.now()
-                }, origin);
-            } catch (e) {}
-
-            if (event.data?.expectAck) {
-                sendAck(source, origin, "PING", requestId, { success: true });
-            }
+                },
+                timestamp: Date.now()
+            }, origin);
+            
+            // Send ACK with the SAME requestId
+            source.postMessage({
+                type: "ACK",
+                originalType: "VERIFY_SESSION",
+                messageId: requestId,     // Use the original requestId, not 'ack_' + requestId
+                requestId: requestId,      // This MUST match exactly
+                payload: { success: true, valid: isValid },
+                timestamp: Date.now()
+            }, origin);
+            
+            console.log('[Parent] Response and ACK sent for VERIFY_SESSION with requestId:', requestId);
+        } catch (e) {
+            console.error('[Parent] Failed to send response:', e);
         }
-
+    }
+}
         // MAIN MESSAGE LISTENER - Single source of truth with origin validation
         window.addEventListener("message", function(event) {
             // FIX: Use dynamic origin validation, never hardcode localhost/127.0.0.1
@@ -3695,6 +4066,12 @@
                     handlePing(event);
                     break;
 
+                // NEW: Handle VERIFY_SESSION from calls-core.js
+                case "VERIFY_SESSION":
+    console.log('[Parent] Handling VERIFY_SESSION');
+    handleVerifySession(event);
+    break;
+
                 case "SESSION_ACK":
                 case "HANDSHAKE_ACK":
                 case "REGISTRATION_ACK":
@@ -3713,7 +4090,46 @@
             }
         });
     })();
+    // Handle PING requests from iframes
+function handlePing(event) {
+    const requestId = event.data?.requestId || event.data?.messageId;
+    const source = event.source;
+    const origin = event.origin;
+    
+    // Send PONG response
+    try {
+        source.postMessage({
+            type: "PONG",
+            requestId: requestId,
+            messageId: requestId || ('pong_' + Date.now()),
+            payload: {
+                timestamp: Date.now(),
+                echo: event.data.payload || {}
+            },
+            timestamp: Date.now()
+        }, origin);
+    } catch (e) {
+        console.error('[Parent] Failed to send PONG:', e);
+    }
+    
+    // Send ACK manually instead of calling sendAck
+    if (event.data?.expectAck && requestId) {
+        try {
+            source.postMessage({
+                type: "ACK",
+                originalType: "PING",
+                messageId: 'ack_' + requestId,
+                requestId: requestId,
+                payload: { success: true },
+                timestamp: Date.now()
+            }, origin);
+        } catch (e) {
+            console.error('[Parent] Failed to send ACK:', e);
+        }
+    }
+}
     </script>
+
 
     <!-- ========== DEDUPLICATED FRAME REGISTRATION (PRESERVED) ========== -->
     <script>

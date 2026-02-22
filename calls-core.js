@@ -43,7 +43,7 @@ function logThrottled(errorType, message) {
                 this.isDevelopment = true;
                 this.isProduction = false;
                 this.apiEndpoint = 'http://localhost:4000/api';
-                this.wsEndpoint = 'ws://localhost:4000';
+                this.wsEndpoint = 'ws://localhost:4000/ws';
             }
             // Render hosting (production)
             else if (hostname.endsWith('.onrender.com')) {
@@ -51,7 +51,7 @@ function logThrottled(errorType, message) {
                 this.isDevelopment = false;
                 this.isProduction = true;
                 this.apiEndpoint = 'https://moodchat-fy56.onrender.com/api';
-                this.wsEndpoint = 'wss://moodchat-fy56.onrender.com';
+                this.wsEndpoint = 'wss://moodchat-fy56.onrender.com/ws';
             }
             // Default to production with HTTPS
             else {
@@ -1095,40 +1095,41 @@ function logThrottled(errorType, message) {
             return `${Date.now()}-${++this._messageId}-${Math.random().toString(36).substring(2, 9)}`;
         },
         
-        send: function(type, payload = {}, options = {}) {
-            return new Promise((resolve, reject) => {
-                try {
-                    const messageId = options.messageId || this._generateMessageId();
-                    const timestamp = options.timestamp || Date.now();
-                    const requireAck = options.requireAck !== false;
-                    const timeout = options.timeout || CONFIG.ACK_TIMEOUT;
-                    const priority = options.priority || 'normal';
-                    
-                    // Map message types to what parent expects
-                    let actualType = type;
-                    
-                    // CRITICAL FIX: Map our internal message types to what parent expects
-                    if (type === 'PARENT_SESSION_REQUEST') {
-                        actualType = 'REQUEST_SESSION';
-                    } else if (type === 'PARENT_TOKEN_REQUEST') {
-                        actualType = 'REQUEST_TOKEN';
-                    } else if (type === 'PARENT_SESSION_RESPONSE') {
-                        actualType = 'SESSION_RESPONSE';
-                    } else if (type === 'PARENT_TOKEN_RESPONSE') {
-                        actualType = 'TOKEN_RESPONSE';
-                    }
-                    
-                    const message = {
-                        protocol: CONFIG.PROTOCOL_VERSION,
-                        messageId,
-                        type: actualType,
-                        source: 'iframe',
-                        target: 'parent',
-                        timestamp,
-                        payload: payload || {},
-                        version: CONFIG.VERSION,
-                        requireAck
-                    };
+       send: function(type, payload = {}, options = {}) {
+    return new Promise((resolve, reject) => {
+        try {
+            const messageId = options.messageId || this._generateMessageId();
+            const timestamp = options.timestamp || Date.now();
+            const requireAck = options.requireAck !== false;
+            const timeout = options.timeout || CONFIG.ACK_TIMEOUT;
+            const priority = options.priority || 'normal';
+            
+            // Map message types to what parent expects
+            let actualType = type;
+            
+            // CRITICAL FIX: Map our internal message types to what parent expects
+            if (type === 'PARENT_SESSION_REQUEST') {
+                actualType = 'REQUEST_SESSION';
+            } else if (type === 'PARENT_TOKEN_REQUEST') {
+                actualType = 'REQUEST_TOKEN';
+            } else if (type === 'PARENT_SESSION_RESPONSE') {
+                actualType = 'SESSION_RESPONSE';
+            } else if (type === 'PARENT_TOKEN_RESPONSE') {
+                actualType = 'TOKEN_RESPONSE';
+            }
+            
+            const message = {
+                protocol: CONFIG.PROTOCOL_VERSION,
+                messageId: messageId,
+                requestId: messageId, // <-- ADD THIS LINE
+                type: actualType,
+                source: 'iframe',
+                target: 'parent',
+                timestamp,
+                payload: payload || {},
+                version: CONFIG.VERSION,
+                requireAck
+            };
                     
                     const queueItem = {
                         message,
@@ -1156,7 +1157,7 @@ function logThrottled(errorType, message) {
             });
         },
         
-        requestSessionFromParent: function() {
+     requestSessionFromParent: function() {
     if (this._sessionRequested) return;
     
     this._sessionRequested = true;
@@ -1169,29 +1170,54 @@ function logThrottled(errorType, message) {
         this._sessionRequested = false;
     }, 30000);
     
-    // Send REQUEST_SESSION (parent expects this)
-    this.send('REQUEST_SESSION', {
-        timestamp: Date.now(),
-        frameId: window.name || 'calls-iframe'
-    }, { requireAck: true, timeout: CONFIG.SESSION_SYNC_TIMEOUT })
-    .then(response => {
-        // Parent might respond with SESSION_RESPONSE or SESSION_DATA
-        if (response && response.payload) {
-            if (response.payload.session || response.payload.user) {
-                IframeSessionClient._handleSessionUpdate(response.payload);
+    // CRITICAL FIX: Generate messageId that parent can ACK
+    const messageId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    
+    // Use direct postMessage to ensure exact format
+    if (window.parent && window.parent !== window) {
+        try {
+            window.parent.postMessage({
+                type: 'REQUEST_SESSION',
+                messageId: messageId,
+                requestId: messageId,     // CRITICAL: Parent needs this for ACK
+                timestamp: Date.now(),
+                source: 'iframe',
+                frameId: window.name || 'calls-iframe',
+                payload: {
+                    timestamp: Date.now(),
+                    frameId: window.name || 'calls-iframe'
+                },
+                expectAck: true
+            }, '*');
+            
+            logOnce('sending', 'REQUEST_SESSION sent', { messageId: messageId });
+        } catch (e) {
+            logOnce('error', 'Failed to send REQUEST_SESSION', e);
+        }
+    }
+    
+    // Set up response handler
+    const responseHandler = (event) => {
+        if (!event.data) return;
+        
+        // Look for SESSION_RESPONSE or SESSION_DATA
+        if (event.data.type === 'SESSION_RESPONSE' || event.data.type === 'SESSION_DATA') {
+            const sessionData = event.data.payload || event.data.data;
+            if (sessionData && (sessionData.token || sessionData.user)) {
+                IframeSessionClient._handleSessionUpdate(sessionData);
             }
+            window.removeEventListener('message', responseHandler);
         }
-    })
-    .catch(() => {
-        if (DEBUG) {
-            logOnce('warn', 'Parent session request failed, will retry later');
-        }
-        setTimeout(() => {
-            this._sessionRequested = false;
-            this.requestSessionFromParent();
-        }, 5000);
-    });
+    };
+    
+    window.addEventListener('message', responseHandler);
+    
+    // Auto-cleanup after timeout
+    setTimeout(() => {
+        window.removeEventListener('message', responseHandler);
+    }, 10000);
 },
+
         requestTokenFromParent: function() {
     // Send REQUEST_TOKEN (parent expects this)
     return this.send('REQUEST_TOKEN', {
@@ -1209,62 +1235,61 @@ function logThrottled(errorType, message) {
         return response;
     });
 },
+    _processQueue: async function() {
+    if (this._processing) return;
+    if (this._queue.length === 0) return;
     
-        _processQueue: async function() {
-            if (this._processing) return;
-            if (this._queue.length === 0) return;
+    this._processing = true;
+    
+    while (this._queue.length > 0) {
+        const item = this._queue[0];
+        
+        if (!this._online) {
+            this._offlineQueue.push(item);
+            this._queue.shift();
+            continue;
+        }
+        
+        if (item.attempts >= this._maxRetries) {
+            logOnce('warn', `Max retries for ${item.message.type}`, { id: item.id });
+            item.reject(new Error('Max retries exceeded'));
+            this._queue.shift();
+            continue;
+        }
+        
+        try {
+            await this._sendMessage(item);
             
-            this._processing = true;
-            
-            while (this._queue.length > 0) {
-                const item = this._queue[0];
-                
-                if (!this._online) {
-                    this._offlineQueue.push(item);
-                    this._queue.shift();
-                    continue;
-                }
-                
-                if (item.attempts >= this._maxRetries) {
-                    logOnce('warn', `Max retries for ${item.message.type}`, { id: item.id });
-                    item.reject(new Error('Max retries exceeded'));
-                    this._queue.shift();
-                    continue;
-                }
-                
+            if (item.options.requireAck) {
                 try {
-                    await this._sendMessage(item);
-                    
-                    if (item.options.requireAck) {
-                        const ackReceived = await this._waitForAck(item.id, item.options.timeout || CONFIG.ACK_TIMEOUT);
-                        if (ackReceived) {
-                            item.resolve({ success: true, messageId: item.id, type: item.message.type });
-                        } else {
-                            throw new Error('ACK timeout');
-                        }
-                    } else {
-                        item.resolve({ success: true, messageId: item.id, type: item.message.type });
-                    }
-                    
-                    this._queue.shift();
-                    
-                } catch (error) {
-                    item.attempts++;
-                    
-                    let delay = this._backoffBase * Math.pow(2, item.attempts - 1);
-                    
-                    if (IframeEnvironment.isVPNNetwork()) {
-                        delay *= 1.5;
-                    }
-                    
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    
-                    this._queue.push(this._queue.shift());
+                    await this._waitForAck(item.id, item.options.timeout || CONFIG.ACK_TIMEOUT);
+                    item.resolve({ success: true, messageId: item.id, type: item.message.type });
+                } catch (ackError) {
+                    throw ackError;
                 }
+            } else {
+                item.resolve({ success: true, messageId: item.id, type: item.message.type });
             }
             
-            this._processing = false;
-        },
+            this._queue.shift();
+            
+        } catch (error) {
+            item.attempts++;
+            
+            let delay = this._backoffBase * Math.pow(2, item.attempts - 1);
+            
+            if (IframeEnvironment.isVPNNetwork()) {
+                delay *= 1.5;
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            this._queue.push(this._queue.shift());
+        }
+    }
+    
+    this._processing = false;
+},
         
         _sendMessage: function(item) {
             return new Promise((resolve, reject) => {
@@ -1302,22 +1327,29 @@ function logThrottled(errorType, message) {
                 }
             });
         },
-        
+
         _waitForAck: function(messageId, timeout) {
-            return new Promise((resolve) => {
-                const timer = setTimeout(() => {
-                    this._pendingAcks.delete(messageId);
-                    resolve(false);
-                }, timeout);
-                
-                this._pendingAcks.set(messageId, { timer, resolve: (success) => {
-                    clearTimeout(timer);
-                    resolve(success);
-                }});
-            });
-        },
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            this._pendingAcks.delete(messageId);
+            reject(new Error(`ACK timeout for message ${messageId}`));
+        }, timeout);
         
-        handleIncoming: function(event) {
+        this._pendingAcks.set(messageId, { 
+            timer, 
+            resolve: (success) => {
+                clearTimeout(timer);
+                resolve(success);
+            },
+            reject: (error) => {
+                clearTimeout(timer);
+                reject(error);
+            }
+        });
+    });
+},
+
+handleIncoming: function(event) {
     if (!OriginSecurity.validateEvent(event)) {
         if (DEBUG) {
             logOnce('warn', 'Message rejected - invalid origin', { origin: event.origin });
@@ -1329,15 +1361,31 @@ function logThrottled(errorType, message) {
     
     if (!message || typeof message !== 'object') return;
     
-    if (message.type === MESSAGE_TYPES.ACK) {
-        const ackId = message.payload?.ackId || message.ackId || message.requestId;
+    // Handle ACK messages
+    if (message.type === MESSAGE_TYPES.ACK || message.type === 'ACK') {
+        // Try multiple places to find the original message ID
+        const ackId = message.payload?.ackId || 
+                     message.ackId || 
+                     message.requestId || 
+                     message.messageId ||
+                     message.payload?.requestId;
+        
         if (ackId && this._pendingAcks.has(ackId)) {
             const pending = this._pendingAcks.get(ackId);
-            pending.resolve(true);
-            this._pendingAcks.delete(ackId);
-            
-            if (DEBUG) {
-                logOnce('info', `ACK received: ${ackId}`);
+            if (pending) {
+                clearTimeout(pending.timer);
+                // Check if the ACK indicates success
+                const success = message.payload?.success !== false;
+                if (success) {
+                    pending.resolve(true);
+                } else {
+                    pending.reject(new Error(message.payload?.error || 'ACK indicated failure'));
+                }
+                this._pendingAcks.delete(ackId);
+                
+                if (DEBUG) {
+                    logOnce('info', `ACK received for: ${ackId}`);
+                }
             }
         }
     }
@@ -1350,6 +1398,17 @@ function logThrottled(errorType, message) {
             this._sessionRequestTimer = null;
         }
         
+        // Check if this is a response to our request
+        const requestId = message.requestId || message.payload?.requestId;
+        if (requestId && this._pendingAcks.has(requestId)) {
+            const pending = this._pendingAcks.get(requestId);
+            if (pending) {
+                clearTimeout(pending.timer);
+                pending.resolve(true);
+                this._pendingAcks.delete(requestId);
+            }
+        }
+        
         if (message.payload) {
             // Parent sends SESSION_RESPONSE with user/token data
             IframeSessionClient._handleSessionUpdate(message.payload);
@@ -1358,6 +1417,17 @@ function logThrottled(errorType, message) {
     
     // Handle TOKEN_RESPONSE (parent sends this)
     if (message.type === 'TOKEN_RESPONSE') {
+        // Check if this is a response to our request
+        const requestId = message.requestId || message.payload?.requestId;
+        if (requestId && this._pendingAcks.has(requestId)) {
+            const pending = this._pendingAcks.get(requestId);
+            if (pending) {
+                clearTimeout(pending.timer);
+                pending.resolve(true);
+                this._pendingAcks.delete(requestId);
+            }
+        }
+        
         if (message.payload && message.payload.token) {
             IframeSessionClient._handleTokenUpdate(message.payload);
             
@@ -1376,6 +1446,17 @@ function logThrottled(errorType, message) {
     
     // Handle SESSION_VERIFIED (parent sends this for VERIFY_SESSION)
     if (message.type === 'SESSION_VERIFIED') {
+        // Check if this is a response to our VERIFY_SESSION request
+        const requestId = message.requestId || message.payload?.requestId;
+        if (requestId && this._pendingAcks.has(requestId)) {
+            const pending = this._pendingAcks.get(requestId);
+            if (pending) {
+                clearTimeout(pending.timer);
+                pending.resolve(true);
+                this._pendingAcks.delete(requestId);
+            }
+        }
+        
         if (message.payload) {
             // Update session validity if needed
             if (message.payload.valid) {
@@ -2843,7 +2924,7 @@ function logThrottled(errorType, message) {
             }
         },
         
-        _performHandshake: async function(maxAttempts, timeout) {
+            _performHandshake: async function(maxAttempts, timeout) {
     return new Promise((resolve, reject) => {
         let attempts = 0;
         let resolved = false;
@@ -2855,7 +2936,21 @@ function logThrottled(errorType, message) {
         const attemptHandshake = () => {
             attempts++;
             
-            this._sendChildReady();
+            // Generate a unique messageId
+            const messageId = 'hs_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+            
+            // Send CHILD_READY with the messageId
+            IframeTransport.send(MESSAGE_TYPES.CHILD_READY, {
+                ready: true,
+                version: CONFIG.VERSION,
+                protocol: CONFIG.PROTOCOL_VERSION,
+                environment: IframeEnvironment.detect(),
+                timestamp: Date.now()
+            }, { 
+                messageId: messageId,
+                requireAck: true,  // Request ACK
+                timeout: timeout 
+            }).catch(() => {}); // Ignore errors, we handle via timeout
             
             const handler = (event) => {
                 if (!OriginSecurity.validateEvent(event)) return;
@@ -2863,13 +2958,14 @@ function logThrottled(errorType, message) {
                 const message = event.data;
                 if (!message || typeof message !== 'object') return;
                 
-                // Consider handshake successful if we get ANY of these messages
+                // Look for any message that indicates handshake completion
                 if (message.type === MESSAGE_TYPES.PARENT_READY || 
                     message.type === MESSAGE_TYPES.HANDSHAKE_ACK ||
                     message.type === 'SESSION_RESPONSE' ||
                     message.type === 'SESSION_DATA' ||
                     message.type === 'SESSION_UPDATE' ||
-                    message.type === 'TOKEN_RESPONSE') {
+                    message.type === 'TOKEN_RESPONSE' ||
+                    message.type === 'ACK' && message.requestId === messageId) {
                     
                     clearTimeout(this._handshakeTimer);
                     window.removeEventListener('message', handler);
@@ -3183,18 +3279,25 @@ function logThrottled(errorType, message) {
             logOnce('warn-icon', 'Auth error, clearing session');
             this.clear();
         },
-        
+
         _handleVerifySession: function(data, messageId) {
-            const isValid = this.isValid();
-            
-            IframeTransport.send(MESSAGE_TYPES.VERIFY_SESSION, {
-                valid: isValid,
-                userId: this._userId,
-                expiresAt: this._expiresAt,
-                timestamp: Date.now()
-            }, { messageId, requireAck: false }).catch(() => {});
-        },
-        
+    const isValid = this.isValid();
+    
+    // Use the provided messageId from parent
+    const requestId = messageId || ('verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8));
+    
+    IframeTransport.send('VERIFY_SESSION', {  // Use string directly, not MESSAGE_TYPES.VERIFY_SESSION
+        valid: isValid,
+        userId: this._userId,
+        expiresAt: this._expiresAt,
+        timestamp: Date.now()
+    }, { 
+        messageId: requestId,
+        requireAck: true,  // Need ACK
+        priority: 'high'
+    }).catch(() => {});
+},
+
         _updateSession: function() {
             this._session = {
                 token: this._token,
