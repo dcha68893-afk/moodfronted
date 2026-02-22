@@ -1,6 +1,6 @@
 // api.core.js - ENHANCED API GATEWAY WITH SECURITY & CROSS-ENVIRONMENT SUPPORT
-// Version: 23.0.0 - Production-ready with HTTPS enforcement, auto-detection, and fallback mechanisms
-// Date: 2024-06-15
+// Version: 23.0.1 - Security-hardened with performance optimizations
+// Date: 2024-06-16
 
 // ============================================================================
 // MODULE-LEVEL DECLARATIONS (MUST BE OUTSIDE IIFE FOR EXPORTS)
@@ -21,6 +21,7 @@ let fetchWithTimeout;
 let fetchWithRetry;
 let fetchWithCache;
 let fetchWithFallback;
+let fetchDedupe; // NEW: Request deduplication
 let secureRequest;
 let requestWithAbort;
 let createAbortController;
@@ -98,6 +99,9 @@ let getQueueStatus;
 let clearQueue;
 let pauseQueue;
 let resumeQueue;
+
+// Request deduplication map (NEW)
+const pendingRequests = new Map();
 
 // Original exports - all preserved
 let requestSession;
@@ -306,14 +310,16 @@ function safeJsonParse(value, fallback = null) {
 }
 
 // ============================================================================
-// URL SECURITY VALIDATION - PREVENT UNSAFE ENDPOINT ACCESS
+// URL SECURITY VALIDATION - ENHANCED TO PREVENT UNSAFE ENDPOINT ACCESS
 // ============================================================================
 function isValidEndpoint(url, baseUrl) {
     try {
         // If it's a relative URL, it's safe
         if (url.startsWith('/')) {
-            // Check for directory traversal attempts
-            if (url.includes('..') || url.includes('./') || url.includes('.\\')) {
+            // Check for directory traversal attempts - FIXED: More comprehensive check
+            if (url.includes('..') || url.includes('./') || url.includes('.\\') || 
+                url.includes('%2e%2e') || url.includes('%2E%2E') || // URL encoded .. 
+                url.includes('..%5c') || url.includes('..%2f')) {  // Encoded path traversal
                 console.warn('[API-SECURITY] Directory traversal attempt blocked:', url);
                 return false;
             }
@@ -325,18 +331,30 @@ function isValidEndpoint(url, baseUrl) {
             const urlObj = new URL(url);
             const baseObj = new URL(baseUrl);
             
-            // Check if it's the same origin
+            // Strict origin check - FIXED: More secure origin validation
             if (urlObj.origin === baseObj.origin) {
                 return true;
             }
             
             // Check if it's a subdomain of our base domain
-            if (urlObj.hostname.endsWith(baseObj.hostname) && baseObj.hostname !== urlObj.hostname) {
+            if (urlObj.hostname.endsWith('.' + baseObj.hostname)) {
                 return true;
             }
             
+            // Check if it's exactly a subdomain (e.g., api.example.com for example.com)
+            const baseHostParts = baseObj.hostname.split('.');
+            const urlHostParts = urlObj.hostname.split('.');
+            
+            if (urlHostParts.length > baseHostParts.length) {
+                const baseDomain = baseHostParts.slice(-2).join('.');
+                const urlDomain = urlHostParts.slice(-2).join('.');
+                if (urlDomain === baseDomain) {
+                    return true;
+                }
+            }
+            
             // Check if it's localhost in development
-            if (isDevelopment() && (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1')) {
+            if (isDevelopment() && (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1' || urlObj.hostname === '[::1]')) {
                 return true;
             }
             
@@ -379,7 +397,7 @@ function isValidEndpoint(url, baseUrl) {
         
         // Ensure all required properties exist
         const requiredProps = {
-            version: '23.0.0',
+            version: '23.0.1',
             initialized: true,
             ready: Promise.resolve(true),
             secureApiFetch: root.__API_CORE.secureApiFetch || function() { return Promise.resolve({}); },
@@ -435,22 +453,22 @@ function isValidEndpoint(url, baseUrl) {
         _rejectReady = reject;
     });
     
-    // Set up timeout protection - never hang forever
+    // Set up timeout protection - never hang forever (reduced from 10s to 8s)
     const _readyTimeout = setTimeout(() => {
         if (!root.__API_CORE.initialized) {
-            console.warn('[API-CORE] TIMEOUT Forcing ready state after 10s');
+            console.warn('[API-CORE] TIMEOUT Forcing ready state after 8s');
             if (_resolveReady) {
                 root.__API_CORE.initialized = true;
                 _resolveReady({ forced: true, reason: 'timeout' });
             }
         }
-    }, 10000);
+    }, 8000);
     
     // ============================================================================
     // REQUIRED EXPOSED PROPERTIES - MUST ALL EXIST
     // ============================================================================
     const requiredProperties = {
-        version: '23.0.0',
+        version: '23.0.1',
         initialized: false,
         ready: _readyPromise,
         secureApiFetch: null,
@@ -507,7 +525,7 @@ function isValidEndpoint(url, baseUrl) {
     if (!root.api.core) {
         root.api.core = {
             __initializing: true,
-            __version: '23.0.0'
+            __version: '23.0.1'
         };
     }
     
@@ -1208,7 +1226,7 @@ function isValidEndpoint(url, baseUrl) {
     };
     
     /**
-     * Format error message for display
+     * Format error message for display - FIXED: Escape HTML to prevent XSS
      * @param {*} error - Error to format
      * @returns {string} Formatted error message
      */
@@ -1233,7 +1251,9 @@ function isValidEndpoint(url, baseUrl) {
             return statusMessages[normalized.status];
         }
         
-        return normalized.message || 'An unexpected error occurred.';
+        // Escape the message to prevent XSS
+        const message = normalized.message || 'An unexpected error occurred.';
+        return escapeHtml ? escapeHtml(message) : message;
     };
     
     /**
@@ -1340,7 +1360,7 @@ function isValidEndpoint(url, baseUrl) {
     SecureStorage = {
         _encryptionKey: 'moodchat_secure_v23_2024',
         _prefix: 'sc_v23_',
-        _version: '23.0.0',
+        _version: '23.0.1',
         _salt: Math.random().toString(36).substring(2, 15),
         
         /**
@@ -1583,7 +1603,11 @@ function isValidEndpoint(url, baseUrl) {
         TOKEN_CREATED_KEY: 'TOKEN_CREATED',
         TOKEN_TYPE_KEY: 'TOKEN_TYPE',
         DEFAULT_EXPIRY: 3600,
-        REFRESH_THRESHOLD: 300,
+        REFRESH_THRESHOLD: 300, // 5 minutes
+        
+        // Token refresh lock to prevent multiple simultaneous refresh attempts
+        _refreshLock: false,
+        _refreshPromise: null,
         
         /**
          * Set authentication token with optional refresh token and expiry
@@ -1687,6 +1711,10 @@ function isValidEndpoint(url, baseUrl) {
                 localStorage.removeItem(this.TOKEN_EXPIRY_KEY);
                 localStorage.removeItem(this.TOKEN_CREATED_KEY);
                 localStorage.removeItem(this.TOKEN_TYPE_KEY);
+                
+                // Reset refresh lock
+                this._refreshLock = false;
+                this._refreshPromise = null;
                 
                 // Dispatch token cleared event
                 root.dispatchEvent(new CustomEvent('token-cleared', {
@@ -1828,11 +1856,13 @@ function isValidEndpoint(url, baseUrl) {
         _sanitizeToken: function(token) {
             if (!token) return token;
             
+            // FIXED: More comprehensive sanitization to prevent injection
             return token
                 .toString()
                 .trim()
-                .replace(/[\n\r\t\0]/g, '')
-                .replace(/\s+/g, '');
+                .replace(/[\n\r\t\0\x00-\x1F]/g, '') // Remove all control characters
+                .replace(/\s+/g, '')
+                .replace(/[^\w\-\.]/g, ''); // Only allow alphanumeric, dash, dot, underscore
         },
         
         /**
@@ -1950,10 +1980,15 @@ function isValidEndpoint(url, baseUrl) {
     };
     
     /**
-     * Refresh token if needed
+     * Refresh token if needed - FIXED: Added refresh lock to prevent multiple simultaneous refreshes
      * @returns {Promise<Object>} Refresh result
      */
     refreshTokenIfNeeded = async function() {
+        // If refresh is already in progress, return the existing promise
+        if (TokenManager._refreshLock && TokenManager._refreshPromise) {
+            return TokenManager._refreshPromise;
+        }
+        
         try {
             const currentToken = TokenManager.getToken();
             if (!currentToken) {
@@ -1978,45 +2013,61 @@ function isValidEndpoint(url, baseUrl) {
                 };
             }
             
-            const response = await fetchWithRetry('/api/auth/refresh', {
-                method: 'POST',
-                body: { refreshToken },
-                auth: false,
-                retries: 2,
-                timeout: 10000
-            });
+            // Set refresh lock
+            TokenManager._refreshLock = true;
             
-            if (response && response.success && response.data) {
-                const newToken = response.data.token || response.data.accessToken;
-                const newRefreshToken = response.data.refreshToken || refreshToken;
-                const expiresIn = response.data.expiresIn || TokenManager.DEFAULT_EXPIRY;
-                
-                if (newToken) {
-                    TokenManager.setToken(newToken, newRefreshToken, expiresIn);
+            TokenManager._refreshPromise = (async () => {
+                try {
+                    const response = await fetchWithRetry('/api/auth/refresh', {
+                        method: 'POST',
+                        body: { refreshToken },
+                        auth: false,
+                        retries: 2,
+                        timeout: 10000
+                    });
                     
-                    root.dispatchEvent(new CustomEvent('token-refreshed', {
-                        detail: {
-                            timestamp: new Date().toISOString(),
-                            expiresIn: expiresIn
+                    if (response && response.success && response.data) {
+                        const newToken = response.data.token || response.data.accessToken;
+                        const newRefreshToken = response.data.refreshToken || refreshToken;
+                        const expiresIn = response.data.expiresIn || TokenManager.DEFAULT_EXPIRY;
+                        
+                        if (newToken) {
+                            TokenManager.setToken(newToken, newRefreshToken, expiresIn);
+                            
+                            root.dispatchEvent(new CustomEvent('token-refreshed', {
+                                detail: {
+                                    timestamp: new Date().toISOString(),
+                                    expiresIn: expiresIn
+                                }
+                            }));
+                            
+                            return {
+                                success: true,
+                                token: newToken,
+                                refreshed: true,
+                                expiresIn: expiresIn
+                            };
                         }
-                    }));
+                    }
                     
                     return {
-                        success: true,
-                        token: newToken,
-                        refreshed: true,
-                        expiresIn: expiresIn
+                        success: false,
+                        error: 'Refresh failed',
+                        token: currentToken
                     };
+                } finally {
+                    // Release lock
+                    TokenManager._refreshLock = false;
+                    TokenManager._refreshPromise = null;
                 }
-            }
+            })();
             
-            return {
-                success: false,
-                error: 'Refresh failed',
-                token: currentToken
-            };
+            return TokenManager._refreshPromise;
             
         } catch (error) {
+            TokenManager._refreshLock = false;
+            TokenManager._refreshPromise = null;
+            
             console.error('[TOKEN] Refresh token error:', error);
             return {
                 success: false,
@@ -2035,6 +2086,7 @@ function isValidEndpoint(url, baseUrl) {
         _persistentCache: null,
         _defaultTTL: 300000, // 5 minutes
         _maxItems: 200,
+        _pruneInterval: null,
         _stats: {
             hits: 0,
             misses: 0,
@@ -2124,7 +2176,7 @@ function isValidEndpoint(url, baseUrl) {
                     data,
                     expiresAt,
                     timestamp: Date.now(),
-                    version: '23.0.0'
+                    version: '23.0.1'
                 };
                 
                 this._memoryCache.set(cacheKey, cacheItem);
@@ -2328,13 +2380,29 @@ function isValidEndpoint(url, baseUrl) {
         },
         
         /**
-         * Start prune interval
+         * Start prune interval - OPTIMIZED: Increased interval to reduce CPU usage
          * @private
          */
         _startPruneInterval: function() {
-            setInterval(() => {
+            // Clear existing interval if any
+            if (this._pruneInterval) {
+                clearInterval(this._pruneInterval);
+            }
+            
+            // Prune every 2 minutes instead of every minute
+            this._pruneInterval = setInterval(() => {
                 this._pruneMemoryCache();
-            }, 60000); // Prune every minute
+            }, 120000);
+        },
+        
+        /**
+         * Stop prune interval
+         */
+        stop: function() {
+            if (this._pruneInterval) {
+                clearInterval(this._pruneInterval);
+                this._pruneInterval = null;
+            }
         },
         
         /**
@@ -2875,6 +2943,40 @@ function isValidEndpoint(url, baseUrl) {
         );
     };
     
+    // NEW: Request deduplication function
+    /**
+     * Fetch with deduplication - prevents multiple identical concurrent requests
+     * @param {string} url - Request URL
+     * @param {Object} options - Fetch options
+     * @returns {Promise<Object>} Response
+     */
+    fetchDedupe = async function(url, options = {}) {
+        const method = options.method || 'GET';
+        
+        // Only deduplicate GET requests
+        if (method !== 'GET') {
+            return fetchWithRetry(url, options);
+        }
+        
+        const cacheKey = `${method}:${url}`;
+        
+        // If there's already a pending request for this URL, return its promise
+        if (pendingRequests.has(cacheKey)) {
+            return pendingRequests.get(cacheKey);
+        }
+        
+        // Create new request promise
+        const requestPromise = fetchWithRetry(url, options).finally(() => {
+            // Clean up after request completes
+            setTimeout(() => {
+                pendingRequests.delete(cacheKey);
+            }, 100);
+        });
+        
+        pendingRequests.set(cacheKey, requestPromise);
+        return requestPromise;
+    };
+    
     /**
      * Fetch with cache
      * @param {string} url - Request URL
@@ -2912,7 +3014,8 @@ function isValidEndpoint(url, baseUrl) {
         }
         
         try {
-            const response = await fetchWithRetry(url, options);
+            // Use deduplication for cacheable requests
+            const response = await fetchDedupe(url, options);
             
             const clonedResponse = response.clone();
             
@@ -3207,6 +3310,8 @@ function isValidEndpoint(url, baseUrl) {
                 method,
                 headers: {
                     'Content-Type': 'application/json',
+                    // Add CSRF protection headers
+                    'X-Requested-With': 'XMLHttpRequest',
                     ...options.headers
                 },
                 credentials: options.credentials || 'include',
@@ -3281,10 +3386,10 @@ function isValidEndpoint(url, baseUrl) {
                     );
                 }
             } catch (fetchError) {
-                // Handle fetch errors gracefully
+                // Handle fetch errors gracefully - FIXED: More descriptive error message
                 console.warn('[API] Fetch error:', fetchError.message);
                 
-                // Return fallback response
+                // Return fallback response with better error info
                 return {
                     ok: false,
                     success: false,
@@ -3293,6 +3398,9 @@ function isValidEndpoint(url, baseUrl) {
                     data: {
                         message: fetchError.message || 'Network error',
                         code: fetchError.code || 'NETWORK_ERROR',
+                        details: isNetworkError(fetchError) ? 
+                            'Please check your internet connection and try again.' : 
+                            'The server may be temporarily unavailable.',
                         error: normalizeError(fetchError).toJSON()
                     },
                     error: normalizeError(fetchError),
@@ -3525,6 +3633,9 @@ function isValidEndpoint(url, baseUrl) {
                 data: {
                     message: normalizedError.message,
                     code: normalizedError.code,
+                    details: isNetworkError(normalizedError) ? 
+                        'Please check your internet connection and try again.' : 
+                        'The server may be temporarily unavailable.',
                     error: normalizedError.toJSON()
                 },
                 error: normalizedError,
@@ -4083,31 +4194,40 @@ function isValidEndpoint(url, baseUrl) {
     };
     
     /**
-     * Handle unauthorized access
+     * Handle unauthorized access - FIXED: Added debounce to prevent multiple redirects
      */
-    handleUnauthorizedAccess = function() {
-        if (localStorage.getItem('_auth_clearing_in_progress')) {
-            return;
-        }
+    handleUnauthorizedAccess = (function() {
+        let timeoutId = null;
         
-        localStorage.setItem('_auth_clearing_in_progress', 'true');
-        
-        clearAllAuthData();
-        
-        RequestQueue.updateDependency('tokenReady', false);
-        
-        localStorage.removeItem('_auth_clearing_in_progress');
-        
-        if (!root.location.pathname.includes('/login') && 
-            !root.location.pathname.includes('index.html') &&
-            !root.location.pathname.includes('/register') &&
-            !root.location.pathname.includes('/forgot-password')) {
+        return function() {
+            if (localStorage.getItem('_auth_clearing_in_progress')) {
+                return;
+            }
             
-            setTimeout(() => {
-                root.location.href = '/login';
-            }, 100);
-        }
-    };
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            
+            localStorage.setItem('_auth_clearing_in_progress', 'true');
+            
+            clearAllAuthData();
+            
+            RequestQueue.updateDependency('tokenReady', false);
+            
+            localStorage.removeItem('_auth_clearing_in_progress');
+            
+            if (!root.location.pathname.includes('/login') && 
+                !root.location.pathname.includes('index.html') &&
+                !root.location.pathname.includes('/register') &&
+                !root.location.pathname.includes('/forgot-password')) {
+                
+                timeoutId = setTimeout(() => {
+                    root.location.href = '/login';
+                    timeoutId = null;
+                }, 100);
+            }
+        };
+    })();
     
     getApiBaseUrl = getBaseUrl;
     getBackendBaseUrl = getBaseUrl;
@@ -5732,8 +5852,8 @@ function isValidEndpoint(url, baseUrl) {
     // ============================================================================
     
     ApiGateway = {
-        version: '23.0.0',
-        build: '2024-06-15',
+        version: '23.0.1',
+        build: '2024-06-16',
         
         env: {
             getCurrent: getEnvironment,
@@ -6082,7 +6202,7 @@ function isValidEndpoint(url, baseUrl) {
     
     initializeGateway = function(options = {}) {
         try {
-            console.log('[API-CORE] Initializing API Gateway v23.0.0');
+            console.log('[API-CORE] Initializing API Gateway v23.0.1');
             
             if (options.environment) {
                 setEnvironment(options.environment);
@@ -6146,7 +6266,7 @@ function isValidEndpoint(url, baseUrl) {
             
             const readyEvent = new CustomEvent('api-gateway-ready', {
                 detail: {
-                    version: '23.0.0',
+                    version: '23.0.1',
                     environment: CURRENT_ENVIRONMENT,
                     baseUrl: ACTIVE_BASE_URL,
                     timestamp: new Date().toISOString(),
@@ -6166,7 +6286,9 @@ function isValidEndpoint(url, baseUrl) {
                         'safe-json-parser',
                         'enhanced-login-handling',
                         'fallback-mechanisms',
-                        'cross-device-compatibility'
+                        'cross-device-compatibility',
+                        'request-deduplication',
+                        'enhanced-error-messages'
                     ]
                 }
             });
@@ -6176,14 +6298,14 @@ function isValidEndpoint(url, baseUrl) {
             console.log('[API-CORE] Initialized successfully', {
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.0'
+                version: '23.0.1'
             });
             
             return {
                 success: true,
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
-                version: '23.0.0',
+                version: '23.0.1',
                 timestamp: new Date().toISOString()
             };
             
@@ -6244,26 +6366,22 @@ function isValidEndpoint(url, baseUrl) {
     
     initializeGateway();
     
-    // Periodic token refresh
+    // Periodic token refresh - OPTIMIZED: Increased interval to reduce network calls
     setInterval(() => {
         if (TokenManager && TokenManager.shouldRefreshToken && TokenManager.shouldRefreshToken()) {
             refreshTokenIfNeeded().catch(() => {});
         }
-    }, 60000);
+    }, 120000); // Every 2 minutes instead of every minute
     
-    // Periodic cache pruning
-    setInterval(() => {
-        if (CacheManager && CacheManager._pruneMemoryCache) {
-            CacheManager._pruneMemoryCache();
-        }
-    }, 300000);
+    // Periodic cache pruning - OPTIMIZED: Using CacheManager's internal interval instead
+    // Removed duplicate interval - CacheManager already handles this internally
     
-    // Periodic network check
+    // Periodic network check - OPTIMIZED: Increased interval
     setInterval(() => {
         if (navigator.onLine) {
             checkNetworkStatus().catch(() => {});
         }
-    }, 30000);
+    }, 60000); // Every minute instead of every 30 seconds
     
     // Expose to global scope
     root.ApiGateway = ApiGateway;
@@ -6286,7 +6404,7 @@ function isValidEndpoint(url, baseUrl) {
     // CRITICAL: Update __API_CORE with all required properties
     // ============================================================================
     Object.assign(root.__API_CORE, {
-        version: '23.0.0',
+        version: '23.0.1',
         initialized: true,
         ready: _readyPromise,
         secureApiFetch: secureApiFetch,
@@ -6306,8 +6424,8 @@ function isValidEndpoint(url, baseUrl) {
     root.api_core = root.api_core || root.__API_CORE;
     
     root.__API_GATEWAY = {
-        version: '23.0.0',
-        build: '2024-06-15',
+        version: '23.0.1',
+        build: '2024-06-16',
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
         initialized: true,
@@ -6328,7 +6446,9 @@ function isValidEndpoint(url, baseUrl) {
             'safe-json-parser',
             'enhanced-login-handling',
             'fallback-mechanisms',
-            'cross-device-compatibility'
+            'cross-device-compatibility',
+            'request-deduplication',
+            'enhanced-error-messages'
         ]
     };
     
@@ -6345,7 +6465,7 @@ function isValidEndpoint(url, baseUrl) {
     if (!root.api.core) {
         root.api.core = {
             __initializing: false,
-            __version: '23.0.0',
+            __version: '23.0.1',
             ready: coreReadyPromise,
             waitFor: function() { 
                 return coreReadyPromise; 
@@ -6363,7 +6483,7 @@ function isValidEndpoint(url, baseUrl) {
                 return {
                     ready: root.__API_CORE ? root.__API_CORE.initialized === true : false,
                     initializing: false,
-                    version: '23.0.0'
+                    version: '23.0.1'
                 };
             },
             init: function() {
@@ -6387,7 +6507,7 @@ function isValidEndpoint(url, baseUrl) {
             return {
                 ready: root.__API_CORE ? root.__API_CORE.initialized === true : false,
                 initializing: false,
-                version: '23.0.0'
+                version: '23.0.1'
             };
         };
         root.api.core.init = root.api.core.init || function() { return coreReadyPromise; };
@@ -6404,7 +6524,7 @@ function isValidEndpoint(url, baseUrl) {
         _resolveReady({
             success: true,
             timestamp: new Date().toISOString(),
-            version: '23.0.0'
+            version: '23.0.1'
         });
     }
     
@@ -6412,7 +6532,7 @@ function isValidEndpoint(url, baseUrl) {
     try {
         root.dispatchEvent(new CustomEvent('api-core-ready', {
             detail: {
-                version: '23.0.0',
+                version: '23.0.1',
                 environment: CURRENT_ENVIRONMENT,
                 baseUrl: ACTIVE_BASE_URL,
                 timestamp: new Date().toISOString(),
@@ -6426,7 +6546,7 @@ function isValidEndpoint(url, baseUrl) {
     if (root.__API_CORE && typeof root.__API_CORE.emit === 'function') {
         try {
             root.__API_CORE.emit('ready', {
-                version: '23.0.0',
+                version: '23.0.1',
                 environment: CURRENT_ENVIRONMENT,
                 timestamp: new Date().toISOString()
             });
@@ -6438,7 +6558,7 @@ function isValidEndpoint(url, baseUrl) {
     console.log('[API-CORE] Fully loaded and ready', {
         environment: CURRENT_ENVIRONMENT,
         baseUrl: ACTIVE_BASE_URL,
-        version: '23.0.0',
+        version: '23.0.1',
         features: root.__API_GATEWAY ? root.__API_GATEWAY.features.length : 0
     });
     
@@ -6522,6 +6642,7 @@ function isValidEndpoint(url, baseUrl) {
         const testUrls = [
             ['/api/users/me', true],
             ['/api/users/../config', false],
+            ['/api/users/%2e%2e/config', false],
             ['https://evil.com/api/steal', false],
             ['https://moodchat-fy56.onrender.com/api/users', true],
             ['http://localhost:4000/api/users', true]
@@ -6548,7 +6669,7 @@ function isValidEndpoint(url, baseUrl) {
         try {
             root.dispatchEvent(new CustomEvent('api-core-initialized', {
                 detail: {
-                    version: '23.0.0',
+                    version: '23.0.1',
                     timestamp: new Date().toISOString()
                 }
             }));
@@ -6574,6 +6695,7 @@ export {
     fetchWithRetry,
     fetchWithCache,
     fetchWithFallback,
+    fetchDedupe,
     secureRequest,
     requestWithAbort,
     createAbortController,

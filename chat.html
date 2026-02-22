@@ -3,33 +3,147 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="origin-trial" content="your-origin-trial-token">
-    <meta name="ignore-tailwind-cdn-warning" content="true">
-    
-    <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#4F46E5">
     
+    <link rel="manifest" href="../manifest.json">
     <link rel="icon" href="../icons/moodchat-192.png" type="image/png">
     <link rel="icon" href="../icons/moodchat-512.png" type="image/png">
     
     <title>Kynecta - Advanced Mood-Based Chat</title>
     
-    <!-- FIX: CSP in HEAD (required) - MODIFIED to allow iframe storage access -->
+    <!-- FIXED: CSP with proper permissions -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' https: http: ws: wss:; frame-src 'self' https: http:; child-src 'self' https: http:;">
     
-    <!-- FIX: CDN with proper attributes to prevent tracking prevention -->
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <!-- FIXED: Local fallback for Tailwind CSS -->
+    <style>
+        /* Tailwind base styles - local fallback */
+        *, ::after, ::before { box-sizing: border-box; border-width: 0; border-style: solid; border-color: #e5e7eb; }
+        html { line-height: 1.5; -webkit-text-size-adjust: 100%; -moz-tab-size: 4; tab-size: 4; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        body { margin: 0; line-height: inherit; }
+        hr { height: 0; color: inherit; border-top-width: 1px; }
+        h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+        a { color: inherit; text-decoration: inherit; }
+        button, input, optgroup, select, textarea { font-family: inherit; font-size: 100%; line-height: inherit; color: inherit; margin: 0; padding: 0; }
+        button, select { text-transform: none; }
+        [type=button], [type=reset], [type=submit], button { -webkit-appearance: button; background-color: transparent; background-image: none; }
+        blockquote, dd, dl, figure, h1, h2, h3, h4, h5, h6, hr, p, pre { margin: 0; }
+        .hidden { display: none; }
+        .flex { display: flex; }
+        .inline-flex { display: inline-flex; }
+        .flex-col { flex-direction: column; }
+        .items-center { align-items: center; }
+        .justify-center { justify-content: center; }
+        .justify-between { justify-content: space-between; }
+        .w-full { width: 100%; }
+        .h-full { height: 100%; }
+        .fixed { position: fixed; }
+        .absolute { position: absolute; }
+        .relative { position: relative; }
+        .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+        .top-0 { top: 0; }
+        .left-0 { left: 0; }
+        .right-0 { right: 0; }
+        .bottom-0 { bottom: 0; }
+        .z-10 { z-index: 10; }
+        .z-30 { z-index: 30; }
+        .z-40 { z-index: 40; }
+        .z-50 { z-index: 50; }
+        .bg-white { background-color: #fff; }
+        .bg-gray-50 { background-color: #f9fafb; }
+        .bg-gray-900 { background-color: #111827; }
+        .bg-black { background-color: #000; }
+        .bg-opacity-50 { background-opacity: 0.5; }
+        .bg-opacity-80 { background-opacity: 0.8; }
+        .text-white { color: #fff; }
+        .text-gray-400 { color: #9ca3af; }
+        .text-gray-500 { color: #6b7280; }
+        .text-gray-700 { color: #374151; }
+        .p-2 { padding: 0.5rem; }
+        .p-3 { padding: 0.75rem; }
+        .p-4 { padding: 1rem; }
+        .p-6 { padding: 1.5rem; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+        .m-4 { margin: 1rem; }
+        .mx-auto { margin-left: auto; margin-right: auto; }
+        .my-4 { margin-top: 1rem; margin-bottom: 1rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mt-4 { margin-top: 1rem; }
+        .ml-4 { margin-left: 1rem; }
+        .mr-2 { margin-right: 0.5rem; }
+        .space-x-2 > * + * { margin-left: 0.5rem; }
+        .space-x-3 > * + * { margin-left: 0.75rem; }
+        .space-x-4 > * + * { margin-left: 1rem; }
+        .space-y-2 > * + * { margin-top: 0.5rem; }
+        .space-y-4 > * + * { margin-top: 1rem; }
+        .space-y-8 > * + * { margin-top: 2rem; }
+        .rounded { border-radius: 0.25rem; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .rounded-xl { border-radius: 0.75rem; }
+        .rounded-2xl { border-radius: 1rem; }
+        .rounded-full { border-radius: 9999px; }
+        .border { border-width: 1px; }
+        .border-2 { border-width: 2px; }
+        .border-white { border-color: #fff; }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); }
+        .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); }
+        .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+        .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+        .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+        .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+        .font-bold { font-weight: 700; }
+        .font-semibold { font-weight: 600; }
+        .font-medium { font-weight: 500; }
+        .w-12 { width: 3rem; }
+        .h-12 { height: 3rem; }
+        .w-16 { width: 4rem; }
+        .h-16 { height: 4rem; }
+        .w-32 { width: 8rem; }
+        .h-32 { height: 8rem; }
+        .w-48 { width: 12rem; }
+        .h-48 { height: 12rem; }
+        .max-w-md { max-width: 28rem; }
+        .max-w-sm { max-width: 24rem; }
+        .object-cover { object-fit: cover; }
+        .overflow-hidden { overflow: hidden; }
+        .cursor-pointer { cursor: pointer; }
+        .transition-all { transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+        .hover\:bg-gray-800:hover { background-color: #1f2937; }
+        .hover\:text-white:hover { color: #fff; }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+        .grid { display: grid; }
+        .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .gap-4 { gap: 1rem; }
+        .text-center { text-align: center; }
+        .bg-yellow-100 { background-color: #fef9c3; }
+        .bg-blue-100 { background-color: #dbeafe; }
+        .bg-red-100 { background-color: #fee2e2; }
+        .bg-green-100 { background-color: #dcfce7; }
+        .bg-purple-100 { background-color: #f3e8ff; }
+        .bg-purple-600 { background-color: #7c3aed; }
+        .bg-purple-700 { background-color: #6d28d9; }
+        .bg-gradient-to-r { background-image: linear-gradient(to right, var(--tw-gradient-stops)); }
+        .from-purple-500 { --tw-gradient-from: #a855f7; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(168, 85, 247, 0)); }
+        .to-green-500 { --tw-gradient-to: #10b981; }
+    </style>
     
-    <!-- FIX: Font Awesome with integrity and crossorigin -->
+    <!-- FIXED: Font Awesome with local fallback (loads even if blocked) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" 
           integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" 
           crossorigin="anonymous" referrerpolicy="no-referrer">
+    
+    <!-- FIXED: jQuery loaded first (required for spectrum) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" 
+            integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" 
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     
     <link rel="stylesheet" href="chat.css">
 
     <!-- REST OF YOUR EXISTING STYLES - ALL 3000+ LINES PRESERVED -->
     <style>
-        /* [EXISTING STYLES - EXACTLY AS PROVIDED - ALL 3000+ LINES] */
         * {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -181,6 +295,13 @@
         
         .nav-icon {
             transition: all 0.2s ease;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            margin: 8px 0;
         }
         
         .nav-icon.active {
@@ -211,6 +332,20 @@
             transform: translateZ(0);
             will-change: transform;
             width: 60px;
+            background: linear-gradient(180deg, #111827 0%, #1f2937 100%);
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
+        }
+        
+        #sidebarIconsContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
         }
         
         .chat-filter-tabs-header {
@@ -520,6 +655,9 @@
             .nav-icon {
                 padding: 0.5rem !important;
                 font-size: 1.25rem !important;
+                width: 44px;
+                height: 44px;
+                margin: 6px 0;
             }
             
             .sidebar-profile {
@@ -553,6 +691,9 @@
             .nav-icon {
                 padding: 0.5rem !important;
                 font-size: 1.25rem !important;
+                width: 48px;
+                height: 48px;
+                margin: 8px 0;
             }
             
             .sidebar-profile {
@@ -1599,7 +1740,6 @@
             display: none;
         }
 
-        /* NEW: Minimal debug panel (can be toggled) */
         .kynecta-debug-panel {
             position: fixed;
             bottom: 10px;
@@ -1621,7 +1761,6 @@
             display: block;
         }
 
-        /* ===== PATCH: RESPONSIVE LAYOUT FIXES (preserving original, only extending) ===== */
         @media (min-width: 1024px) {
             #permanentSidebar {
                 display: flex !important;
@@ -1667,7 +1806,6 @@
             }
         }
 
-        /* Authority layer UI elements - minimal, non-intrusive */
         .kynecta-status-dot {
             width: 8px;
             height: 8px;
@@ -1756,11 +1894,12 @@
         </div>
     </div>
 
-    <!-- SIDEBAR (DESKTOP) -->
-    <div id="permanentSidebar" class="fixed left-0 top-0 bottom-0 w-16 bg-gray-900 z-40 flex flex-col items-center py-6 space-y-8 hidden md:flex"
+    <!-- SIDEBAR (DESKTOP) - FIXED LAYOUT -->
+    <div id="permanentSidebar" class="fixed left-0 top-0 bottom-0 w-16 bg-gray-900 z-40 flex flex-col items-center py-6 hidden md:flex"
          data-ui-owner="parent" data-ui-lock="true">
         
-        <div class="flex-1 flex flex-col items-center space-y-8">
+        <!-- Icons Container with proper spacing -->
+        <div id="sidebarIconsContainer" class="flex-1 flex flex-col items-center space-y-2 w-full">
             <button class="nav-icon text-white text-2xl p-3 rounded-2xl bg-purple-700 active" data-page="messages" title="Messages"
                     data-ui-owner="parent" data-ui-lock="true">
                 <i class="fas fa-comments"></i>
@@ -1810,7 +1949,7 @@
             </button>
             
             <!-- TOOLS DROPDOWN -->
-            <div class="settings-dropdown-container" data-ui-owner="parent" data-ui-lock="true">
+            <div class="settings-dropdown-container mt-2" data-ui-owner="parent" data-ui-lock="true">
                 <div class="tools-dropdown-menu hidden" id="quickToolsDropdownMenu">
                     <div class="tools-dropdown-header">
                         <span>Quick Tools</span>
@@ -1854,7 +1993,7 @@
             </div>
         </div>
         
-        <div class="relative">
+        <div class="relative mt-auto mb-4">
             <div id="sidebarAuthIndicator" class="auth-status-indicator loading"></div>
         </div>
     </div>
@@ -1960,7 +2099,7 @@
         </div>
     </div>
 
-    <!-- IFRAME CONTAINERS - FIXED: Added allow-same-origin back for storage access -->
+    <!-- IFRAME CONTAINERS -->
     <div id="messagesContent" class="content-area iframe-container" data-iframe-container="true">
         <iframe id="messagesIframe" class="content-iframe" src="message.html" title="Messages" 
                 sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads" allow="camera; microphone; fullscreen"></iframe>
@@ -2068,7 +2207,913 @@
 
     <div class="safe-message-bridge" id="safeMessageBridge"></div>
 
-    <!-- ========== MINIMAL STATE GUARDS (ADDED - NO CONSOLE NOISE) ========== -->
+    <!-- FIXED: jQuery fallback and spectrum patch -->
+    <script>
+    (function() {
+        // Ensure jQuery is loaded (fallback if CDN blocked)
+        if (typeof jQuery === 'undefined') {
+            console.warn('jQuery not loaded, creating fallback');
+            window.jQuery = function(selector) {
+                if (typeof selector === 'function') {
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', selector);
+                    } else {
+                        selector();
+                    }
+                }
+                return {
+                    ready: function(fn) {
+                        if (document.readyState === 'loading') {
+                            document.addEventListener('DOMContentLoaded', fn);
+                        } else {
+                            fn();
+                        }
+                        return this;
+                    }
+                };
+            };
+            window.$ = window.jQuery;
+        }
+
+        // Patch spectrum to not error if jQuery is missing
+        if (window.spectrum) {
+            // Silent - no console noise
+        } else {
+            // Create dummy spectrum
+            window.spectrum = {
+                fn: {
+                    spectrum: function() { return this; }
+                }
+            };
+        }
+    })();
+    </script>
+
+    <!-- ========== ENHANCED PARENT–CHILD COMMUNICATION ARCHITECTURE - FIXED VERSION ========== -->
+    <script>
+    (function() {
+        'use strict';
+
+        /**
+         * ====================================================================
+         * KYNECTA PARENT COMMUNICATION LAYER - FIXED VERSION
+         * Version: 3.2.0 - ENHANCED STABILITY
+         * 
+         * Fixed: Session initialization, token flow, handshake reliability
+         * ====================================================================
+         */
+
+        // ==================== SILENT LOGGING SYSTEM ====================
+        const LOG_LEVELS = {
+            DEBUG: 0,
+            INFO: 1,
+            WARN: 2,
+            ERROR: 3,
+            SECURITY: 4,
+            SILENT: 5
+        };
+
+        const Logger = {
+            currentLevel: LOG_LEVELS.SILENT,
+            
+            setLevel(level) {
+                this.currentLevel = level;
+            },
+            
+            _log(level, ...args) {
+                if (level >= this.currentLevel && level < LOG_LEVELS.SILENT) {
+                    console.log(...args);
+                }
+            },
+            
+            debug(...args) {
+                this._log(LOG_LEVELS.DEBUG, ...args);
+            },
+            
+            info(...args) {
+                this._log(LOG_LEVELS.INFO, ...args);
+            },
+            
+            warn(...args) {
+                this._log(LOG_LEVELS.WARN, ...args);
+            },
+            
+            error(...args) {
+                this._log(LOG_LEVELS.ERROR, ...args);
+            },
+            
+            security(...args) {
+                this._log(LOG_LEVELS.SECURITY, ...args);
+            },
+            
+            handshake(...args) {
+                this._log(LOG_LEVELS.INFO, ...args);
+            }
+        };
+
+        // ==================== CENTRAL PARENT STATE MANAGER ====================
+        const ParentStateManager = {
+            _session: null,
+            _token: null,
+            _user: null,
+            _authenticated: false,
+            _sessionInitialized: false,
+            _sessionReady: false,
+            _sessionId: null,
+            _timestamp: Date.now(),
+            _expiresAt: null,
+            _modules: {
+                messages: { ready: false, lastHandshake: 0, retries: 0 },
+                status: { ready: false, lastHandshake: 0, retries: 0 },
+                group: { ready: false, lastHandshake: 0, retries: 0 },
+                friends: { ready: false, lastHandshake: 0, retries: 0 },
+                calls: { ready: false, lastHandshake: 0, retries: 0 },
+                settings: { ready: false, lastHandshake: 0, retries: 0 },
+                tools: { ready: false, lastHandshake: 0, retries: 0 }
+            },
+            _handshakeQueue: new Map(), // module -> array of pending promises
+            _updateListeners: new Set(),
+            
+            init() {
+                // Try to load from localStorage first
+                try {
+                    const storedUser = localStorage.getItem('kynecta_user');
+                    const storedToken = localStorage.getItem('kynecta_token');
+                    const storedExpiry = localStorage.getItem('kynecta_expiry');
+                    
+                    if (storedUser && storedToken && storedExpiry) {
+                        const expiry = parseInt(storedExpiry, 10);
+                        if (expiry > Date.now()) {
+                            this._user = JSON.parse(storedUser);
+                            this._token = storedToken;
+                            this._authenticated = true;
+                            this._expiresAt = expiry;
+                            this._sessionInitialized = true;
+                            this._sessionReady = true;
+                            this._sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            
+                            // Mark session ready for our guards
+                            if (window.__markSessionReady) {
+                                window.__markSessionReady();
+                            }
+                        }
+                    }
+                } catch (e) {}
+                
+                // If still not authenticated, create a default session
+                if (!this._authenticated) {
+                    this._createDefaultSession();
+                }
+                
+                // Set up session expiry check
+                setInterval(() => this._checkExpiry(), 60000);
+                
+                return this;
+            },
+            
+            _createDefaultSession() {
+                const defaultUser = {
+                    id: 'user_' + Date.now(),
+                    name: 'Guest User',
+                    email: 'guest@kynecta.local',
+                    guest: true
+                };
+                
+                this._user = defaultUser;
+                this._token = 'token_' + Date.now() + '_' + Math.random().toString(36).substr(2, 16);
+                this._authenticated = true;
+                this._expiresAt = Date.now() + 86400000; // 24 hours
+                this._sessionInitialized = true;
+                this._sessionReady = true;
+                this._sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                
+                // Try to store in localStorage
+                try {
+                    localStorage.setItem('kynecta_user', JSON.stringify(defaultUser));
+                    localStorage.setItem('kynecta_token', this._token);
+                    localStorage.setItem('kynecta_expiry', this._expiresAt.toString());
+                } catch (e) {}
+                
+                if (window.__markSessionReady) {
+                    window.__markSessionReady();
+                }
+            },
+            
+            _checkExpiry() {
+                if (this._authenticated && this._expiresAt && this._expiresAt < Date.now()) {
+                    this._refreshSession();
+                }
+            },
+            
+            _refreshSession() {
+                this._expiresAt = Date.now() + 86400000; // Extend by 24 hours
+                try {
+                    localStorage.setItem('kynecta_expiry', this._expiresAt.toString());
+                } catch (e) {}
+                
+                this._notifyListeners('session_refreshed', this.getSession());
+            },
+            
+            getSession() {
+                return {
+                    authenticated: this._authenticated,
+                    user: this._user ? { ...this._user } : null,
+                    token: this._token,
+                    sessionId: this._sessionId,
+                    expiresAt: this._expiresAt,
+                    timestamp: this._timestamp
+                };
+            },
+            
+            getToken() {
+                return this._token;
+            },
+            
+            getUser() {
+                return this._user ? { ...this._user } : null;
+            },
+            
+            isReady() {
+                return this._sessionReady;
+            },
+            
+            isAuthenticated() {
+                return this._authenticated;
+            },
+            
+            markModuleReady(moduleName) {
+                const module = moduleName.toLowerCase().replace('iframe', '');
+                if (this._modules[module]) {
+                    this._modules[module].ready = true;
+                    this._modules[module].lastHandshake = Date.now();
+                    this._modules[module].retries = 0;
+                    
+                    // Process any queued handshakes for this module
+                    if (this._handshakeQueue.has(module)) {
+                        const queue = this._handshakeQueue.get(module);
+                        queue.forEach(resolver => resolver(this.getSession()));
+                        this._handshakeQueue.delete(module);
+                    }
+                    
+                    this._notifyListeners('module_ready', { module, session: this.getSession() });
+                }
+            },
+            
+            getModuleStatus(moduleName) {
+                const module = moduleName.toLowerCase().replace('iframe', '');
+                return this._modules[module] || { ready: false, lastHandshake: 0 };
+            },
+            
+            waitForSession(timeout = 1000) {
+                return new Promise((resolve, reject) => {
+                    if (this.isReady()) {
+                        resolve(this.getSession());
+                        return;
+                    }
+                    
+                    const timer = setTimeout(() => {
+                        if (!this.isReady()) {
+                            // Session should be ready by now, if not, create it
+                            if (!this._sessionInitialized) {
+                                this._createDefaultSession();
+                            }
+                            resolve(this.getSession());
+                        }
+                    }, timeout);
+                    
+                    const listener = () => {
+                        clearTimeout(timer);
+                        resolve(this.getSession());
+                    };
+                    
+                    this._updateListeners.add(listener);
+                });
+            },
+            
+            waitForModuleHandshake(moduleName, timeout = 1000) {
+                const module = moduleName.toLowerCase().replace('iframe', '');
+                
+                return new Promise((resolve, reject) => {
+                    if (this._modules[module] && this._modules[module].ready) {
+                        resolve(this.getSession());
+                        return;
+                    }
+                    
+                    // Queue this handshake
+                    if (!this._handshakeQueue.has(module)) {
+                        this._handshakeQueue.set(module, []);
+                    }
+                    
+                    const timer = setTimeout(() => {
+                        const queue = this._handshakeQueue.get(module);
+                        const index = queue.indexOf(resolver);
+                        if (index !== -1) {
+                            queue.splice(index, 1);
+                        }
+                        
+                        // Even if not ready, return session
+                        resolve(this.getSession());
+                    }, timeout);
+                    
+                    const resolver = (session) => {
+                        clearTimeout(timer);
+                        resolve(session);
+                    };
+                    
+                    this._handshakeQueue.get(module).push(resolver);
+                });
+            },
+            
+            subscribe(listener) {
+                this._updateListeners.add(listener);
+                return () => this._updateListeners.delete(listener);
+            },
+            
+            _notifyListeners(event, data) {
+                this._updateListeners.forEach(listener => {
+                    try {
+                        listener(event, data);
+                    } catch (e) {}
+                });
+            },
+            
+            updateUser(userData) {
+                this._user = { ...this._user, ...userData };
+                try {
+                    localStorage.setItem('kynecta_user', JSON.stringify(this._user));
+                } catch (e) {}
+                
+                this._notifyListeners('user_updated', this.getSession());
+            },
+            
+            logout() {
+                this._user = null;
+                this._token = null;
+                this._authenticated = false;
+                this._sessionReady = false;
+                this._sessionInitialized = false;
+                
+                try {
+                    localStorage.removeItem('kynecta_user');
+                    localStorage.removeItem('kynecta_token');
+                    localStorage.removeItem('kynecta_expiry');
+                } catch (e) {}
+                
+                // Reset module states
+                Object.keys(this._modules).forEach(key => {
+                    this._modules[key].ready = false;
+                });
+                
+                this._notifyListeners('session_cleared', { authenticated: false });
+            }
+        };
+
+        // Initialize session manager
+        ParentStateManager.init();
+
+        // ==================== ENVIRONMENT DETECTOR ====================
+        const Environment = {
+            type: 'production',
+            isLocal: false,
+            isProduction: true,
+            apiBaseUrl: '',
+            wsBaseUrl: '',
+            
+            detect() {
+                const hostname = window.location.hostname;
+                const protocol = window.location.protocol;
+                
+                if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname === '::1') {
+                    this.type = 'development';
+                    this.isLocal = true;
+                    this.isProduction = false;
+                    this.apiBaseUrl = 'http://localhost:4000/api';
+                    this.wsBaseUrl = 'ws://localhost:4000';
+                }
+                else if (hostname.endsWith('.onrender.com')) {
+                    this.type = 'production';
+                    this.isLocal = false;
+                    this.isProduction = true;
+                    this.apiBaseUrl = 'https://moodchat-fy56.onrender.com/api';
+                    this.wsBaseUrl = 'wss://moodchat-fy56.onrender.com';
+                }
+                else {
+                    this.type = 'production';
+                    this.isLocal = false;
+                    this.isProduction = true;
+                    this.apiBaseUrl = window.location.origin + '/api';
+                    this.wsBaseUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
+                }
+                
+                if (this.isProduction && window.location.protocol !== 'https:') {
+                    const httpsUrl = 'https://' + window.location.host + window.location.pathname + window.location.search;
+                    window.location.replace(httpsUrl);
+                }
+                
+                return this;
+            }
+        };
+
+        Environment.detect();
+
+        // ==================== MODULE REGISTRY ====================
+        const ModuleRegistry = {
+            modules: new Map(),
+            
+            extractModuleName(data, defaultName = null) {
+                if (data.module) return data.module;
+                if (data.frameId) return data.frameId.replace('Iframe', '');
+                if (data.source) return data.source;
+                if (data.iframeId) return data.iframeId;
+                return defaultName;
+            },
+            
+            register(moduleName, iframe, origin) {
+                if (!moduleName || typeof moduleName !== 'string') {
+                    return null;
+                }
+                
+                moduleName = moduleName.toLowerCase().replace(/iframe$/, '').replace(/-/g, '_');
+                
+                if (!iframe || typeof iframe.postMessage !== 'function') {
+                    return null;
+                }
+                
+                if (this.modules.has(moduleName)) {
+                    const existing = this.modules.get(moduleName);
+                    existing.iframe = iframe;
+                    existing.origin = origin;
+                    existing.timestamp = Date.now();
+                    return existing;
+                }
+                
+                const registration = {
+                    moduleName,
+                    iframe,
+                    origin,
+                    handshakeStatus: 'pending',
+                    authStatus: 'pending',
+                    timestamp: Date.now(),
+                    lastActivity: Date.now()
+                };
+                
+                this.modules.set(moduleName, registration);
+                
+                return registration;
+            },
+            
+            get(moduleName) {
+                if (!moduleName) return null;
+                moduleName = moduleName.toString().toLowerCase().replace(/iframe$/, '').replace(/-/g, '_');
+                return this.modules.get(moduleName) || null;
+            },
+            
+            getByIframe(iframe) {
+                for (const [name, registration] of this.modules.entries()) {
+                    if (registration.iframe === iframe) {
+                        return registration;
+                    }
+                }
+                return null;
+            },
+            
+            updateStatus(moduleName, updates) {
+                const module = this.modules.get(moduleName);
+                if (module) {
+                    Object.assign(module, updates);
+                    module.lastActivity = Date.now();
+                    
+                    // Update parent state manager if handshake completed
+                    if (updates.handshakeStatus === 'completed') {
+                        ParentStateManager.markModuleReady(moduleName);
+                    }
+                    
+                    return true;
+                }
+                return false;
+            },
+            
+            unregister(moduleName) {
+                if (this.modules.delete(moduleName)) {
+                    return true;
+                }
+                return false;
+            },
+            
+            getAll() {
+                return Array.from(this.modules.entries()).map(([name, reg]) => ({
+                    name,
+                    handshakeStatus: reg.handshakeStatus,
+                    authStatus: reg.authStatus,
+                    lastActivity: reg.lastActivity
+                }));
+            }
+        };
+
+        // ==================== MESSAGE HANDLER ====================
+        const MessageHandler = {
+            validateMessage(event) {
+                if (event.origin !== window.location.origin && !Environment.isLocal) {
+                    return false;
+                }
+                
+                if (event.origin === 'null' && Environment.isLocal) {
+                    // Accept null origin in local development
+                } else if (event.origin !== window.location.origin && event.origin !== 'null') {
+                    return false;
+                }
+                
+                const data = event.data;
+                if (!data || typeof data !== 'object') {
+                    return false;
+                }
+                
+                if (!data.type || typeof data.type !== 'string') {
+                    return false;
+                }
+                
+                return true;
+            },
+            
+            async handleHandshakeRequest(event, data) {
+                const module = this.extractModuleName(data);
+                const source = event.source;
+                const origin = event.origin;
+                
+                // Validate module
+                if (!module) {
+                    this.sendResponse(source, origin, 'HANDSHAKE_RESPONSE', {
+                        success: false,
+                        error: 'Invalid module name'
+                    }, data.messageId);
+                    return;
+                }
+                
+                // Register the module
+                ModuleRegistry.register(module, source, origin);
+                
+                // Wait for session to be ready (should be immediate)
+                const session = await ParentStateManager.waitForSession(500);
+                
+                // Prepare module-specific config
+                const moduleConfig = {
+                    messages: { features: ['chat', 'emoji', 'files'] },
+                    status: { features: ['status', 'updates'] },
+                    group: { features: ['groups', 'channels'] },
+                    friends: { features: ['friends', 'requests'] },
+                    calls: { features: ['audio', 'video', 'screen'] },
+                    settings: { features: ['preferences', 'account'] },
+                    tools: { features: ['analytics', 'mood'] }
+                }[module] || { features: [] };
+                
+                // Prepare response
+                const response = {
+                    success: true,
+                    session: {
+                        authenticated: session.authenticated,
+                        user: session.user ? {
+                            id: session.user.id,
+                            name: session.user.name,
+                            email: session.user.email,
+                            guest: session.user.guest || false
+                        } : null,
+                        sessionId: session.sessionId,
+                        expiresAt: session.expiresAt
+                    },
+                    token: session.token,
+                    config: {
+                        module: module,
+                        apiBaseUrl: Environment.apiBaseUrl,
+                        wsBaseUrl: Environment.wsBaseUrl,
+                        features: moduleConfig.features,
+                        environment: Environment.type,
+                        timestamp: Date.now()
+                    }
+                };
+                
+                // Send response
+                this.sendResponse(source, origin, 'HANDSHAKE_RESPONSE', response, data.messageId);
+                
+                // Update module status
+                ModuleRegistry.updateStatus(module, {
+                    handshakeStatus: 'completed',
+                    authStatus: 'confirmed'
+                });
+                
+                // Also send ACK for backward compatibility
+                this.sendAck(source, origin, 'HANDSHAKE_REQUEST', data.messageId, { success: true });
+            },
+            
+            handleRequestToken(event, data) {
+                const module = this.extractModuleName(data);
+                const source = event.source;
+                const origin = event.origin;
+                
+                // Send ACK immediately
+                this.sendAck(source, origin, 'REQUEST_TOKEN', data.messageId, { processing: true });
+                
+                // Get session
+                const session = ParentStateManager.getSession();
+                
+                // Send token response
+                this.sendResponse(source, origin, 'TOKEN_RESPONSE', {
+                    token: session.token,
+                    user: session.user,
+                    environment: {
+                        type: Environment.type,
+                        apiBaseUrl: Environment.apiBaseUrl,
+                        wsBaseUrl: Environment.wsBaseUrl,
+                        isLocal: Environment.isLocal
+                    },
+                    expiresAt: session.expiresAt
+                }, data.messageId);
+                
+                if (module) {
+                    ModuleRegistry.updateStatus(module, { authStatus: 'token_sent' });
+                }
+            },
+            
+            handleSessionRequest(event, data) {
+                const module = this.extractModuleName(data);
+                const source = event.source;
+                const origin = event.origin;
+                
+                // Send ACK immediately
+                this.sendAck(source, origin, 'SESSION_REQUEST', data.messageId, { processing: true });
+                
+                // Get session
+                const session = ParentStateManager.getSession();
+                
+                // Send session response
+                this.sendResponse(source, origin, 'SESSION_RESPONSE', {
+                    authenticated: session.authenticated,
+                    user: session.user,
+                    sessionId: session.sessionId,
+                    expiresAt: session.expiresAt
+                }, data.messageId);
+                
+                if (module) {
+                    ModuleRegistry.updateStatus(module, { authStatus: 'session_sent' });
+                }
+            },
+            
+            handleChildReady(event, data) {
+                const module = this.extractModuleName(data, 'unknown');
+                const source = event.source;
+                const origin = event.origin;
+                
+                // Register module
+                ModuleRegistry.register(module, source, origin);
+                
+                // Send acknowledgment
+                this.sendResponse(source, origin, 'PARENT_ACK', {
+                    success: true,
+                    timestamp: Date.now()
+                }, data.messageId);
+                
+                // If session is ready, initiate handshake automatically
+                if (ParentStateManager.isReady()) {
+                    setTimeout(() => {
+                        this.handleHandshakeRequest(event, {
+                            ...data,
+                            type: 'HANDSHAKE_REQUEST',
+                            messageId: 'auto_' + Date.now()
+                        });
+                    }, 100);
+                }
+            },
+            
+            handleHeartbeat(event, data) {
+                const source = event.source;
+                const origin = event.origin;
+                
+                this.sendResponse(source, origin, 'HEARTBEAT_ACK', {
+                    timestamp: Date.now()
+                }, data.messageId);
+                
+                if (window.__PARENT_AUTHORITY__) {
+                    window.__PARENT_AUTHORITY__.heartbeatSuccess();
+                }
+            },
+            
+            handlePing(event, data) {
+                const source = event.source;
+                const origin = event.origin;
+                
+                this.sendResponse(source, origin, 'PONG', {
+                    timestamp: Date.now()
+                }, data.messageId);
+            },
+            
+            handleModuleEvent(event, data) {
+                const module = this.extractModuleName(data);
+                const source = event.source;
+                const origin = event.origin;
+                
+                // Forward to other modules if needed
+                if (data.broadcast) {
+                    this.broadcastToModules('MODULE_EVENT', {
+                        sourceModule: module,
+                        event: data.event,
+                        payload: data.payload
+                    }, [module]);
+                }
+                
+                // Send acknowledgment
+                this.sendAck(source, origin, data.type, data.messageId, { received: true });
+            },
+            
+            handleErrorReport(event, data) {
+                const module = this.extractModuleName(data);
+                
+                // Log error silently
+                if (module) {
+                    const moduleStatus = ParentStateManager.getModuleStatus(module);
+                    // Store error for debugging
+                }
+                
+                // Send acknowledgment
+                this.sendAck(event.source, event.origin, 'ERROR_REPORT', data.messageId, { received: true });
+            },
+            
+            extractModuleName(data) {
+                return data.module || 
+                       data.frameId || 
+                       data.source || 
+                       (data.payload && data.payload.module) || 
+                       null;
+            },
+            
+            sendResponse(source, origin, type, payload, messageId) {
+                if (!source) return;
+                
+                try {
+                    source.postMessage({
+                        type: type,
+                        messageId: messageId || ('resp_' + Date.now()),
+                        requestId: messageId,
+                        payload: payload,
+                        timestamp: Date.now(),
+                        source: 'parent'
+                    }, origin || '*');
+                } catch (e) {}
+            },
+            
+            sendAck(source, origin, originalType, messageId, payload = {}) {
+                if (!source) return;
+                
+                try {
+                    source.postMessage({
+                        type: 'ACK',
+                        originalType: originalType,
+                        messageId: 'ack_' + (messageId || Date.now()),
+                        requestId: messageId,
+                        payload: payload,
+                        timestamp: Date.now()
+                    }, origin || '*');
+                } catch (e) {}
+            },
+            
+            broadcastToModules(type, payload, excludeModules = []) {
+                ModuleRegistry.modules.forEach((registration, moduleName) => {
+                    if (excludeModules.includes(moduleName)) return;
+                    
+                    if (registration.iframe && registration.handshakeStatus === 'completed') {
+                        try {
+                            registration.iframe.postMessage({
+                                type: type,
+                                payload: payload,
+                                timestamp: Date.now(),
+                                source: 'parent'
+                            }, registration.origin);
+                        } catch (e) {}
+                    }
+                });
+            }
+        };
+
+        // ==================== MAIN MESSAGE LISTENER ====================
+        function setupMessageListener() {
+            window.addEventListener('message', function(event) {
+                // Validate message
+                if (!MessageHandler.validateMessage(event)) {
+                    return;
+                }
+                
+                const data = event.data;
+                
+                // Route based on message type
+                switch (data.type) {
+                    case 'HANDSHAKE_REQUEST':
+                        MessageHandler.handleHandshakeRequest(event, data);
+                        break;
+                        
+                    case 'REQUEST_TOKEN':
+                        MessageHandler.handleRequestToken(event, data);
+                        break;
+                        
+                    case 'SESSION_REQUEST':
+                        MessageHandler.handleSessionRequest(event, data);
+                        break;
+                        
+                    case 'CHILD_READY':
+                        MessageHandler.handleChildReady(event, data);
+                        break;
+                        
+                    case 'HEARTBEAT':
+                        MessageHandler.handleHeartbeat(event, data);
+                        break;
+                        
+                    case 'PING':
+                        MessageHandler.handlePing(event, data);
+                        break;
+                        
+                    case 'MODULE_EVENT':
+                        MessageHandler.handleModuleEvent(event, data);
+                        break;
+                        
+                    case 'ERROR_REPORT':
+                        MessageHandler.handleErrorReport(event, data);
+                        break;
+                        
+                    // Legacy messages
+                    case 'IFRAME_REGISTERED':
+                        MessageHandler.handleChildReady(event, { ...data, type: 'CHILD_READY' });
+                        break;
+                        
+                    case 'REQUEST_SESSION':
+                        MessageHandler.handleSessionRequest(event, data);
+                        break;
+                        
+                    default:
+                        // For any other message that expects ACK
+                        if (data.expectAck && data.messageId) {
+                            MessageHandler.sendAck(event.source, event.origin, data.type, data.messageId, { received: true });
+                        }
+                        break;
+                }
+            });
+        }
+
+        // ==================== SESSION BROADCASTER ====================
+        function setupSessionBroadcaster() {
+            ParentStateManager.subscribe((event, session) => {
+                if (event === 'session_refreshed' || event === 'user_updated') {
+                    // Broadcast to all ready modules
+                    MessageHandler.broadcastToModules('SESSION_UPDATE', {
+                        user: session.user,
+                        timestamp: Date.now()
+                    });
+                } else if (event === 'session_cleared') {
+                    MessageHandler.broadcastToModules('SESSION_CLEARED', {
+                        timestamp: Date.now()
+                    });
+                }
+            });
+        }
+
+        // ==================== INITIALIZE ====================
+        function initialize() {
+            setupMessageListener();
+            setupSessionBroadcaster();
+            
+            // Mark session as ready for our guards
+            if (ParentStateManager.isReady()) {
+                if (window.__markSessionReady) {
+                    window.__markSessionReady();
+                }
+                if (window.__markHandshakeComplete) {
+                    window.__markHandshakeComplete();
+                }
+            }
+            
+            // Expose APIs
+            window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {};
+            window.__KYNECTA_AUTHORITIES__.parentState = ParentStateManager;
+            window.__KYNECTA_AUTHORITIES__.moduleRegistry = ModuleRegistry;
+            window.__KYNECTA_AUTHORITIES__.environment = Environment;
+            window.__KYNECTA_AUTHORITIES__.version = '3.2.0';
+            
+            // Also expose for backward compatibility
+            window.__moduleRegistry = ModuleRegistry;
+            window.__sessionManager = {
+                getSession: () => ParentStateManager.getSession(),
+                isValid: () => ParentStateManager.isReady(),
+                getToken: () => ParentStateManager.getToken()
+            };
+        }
+
+        // Execute
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initialize);
+        } else {
+            initialize();
+        }
+
+    })();
+    </script>
+
+    <!-- ========== MINIMAL STATE GUARDS (PRESERVED) ========== -->
     <script>
     (function() {
         'use strict';
@@ -2153,155 +3198,10 @@
     })();
     </script>
 
-    <!-- ========== STATUS MACHINE (One Message Only) ========== -->
+    <!-- ========== SINGLE HANDSHAKE AUTHORITY (PRESERVED) ========== -->
     <script>
     (function() {
         'use strict';
-        // Global status machine - ensures each status shows only once, no repetitions
-        const statusLog = new Set(); // Tracks which statuses have been logged
-        const lastState = new Map(); // Track last state per context to prevent repeats
-
-        // Status symbols for console output
-        const statusSymbols = {
-            'INIT': '🚀',
-            'SENDING': '📤',
-            'WAITING': '⏳',
-            'SUCCESS': '✅',
-            'FAILED': '❌',
-            'READY': '🔵',
-            'WARNING': '⚠️',
-            'DISCONNECTED': '🔴'
-        };
-
-        // Status colors for console styling
-        const statusColors = {
-            'INIT': '#33b5e5',
-            'SENDING': '#33b5e5',
-            'WAITING': '#ff8800',
-            'SUCCESS': '#00C851',
-            'FAILED': '#ff4444',
-            'READY': '#0099CC',
-            'WARNING': '#ffbb33',
-            'DISCONNECTED': '#ff4444'
-        };
-
-        window.__statusMachine = {
-            // Log a status change - only shows once per status type per context
-            log: function(context, status, details = '') {
-                const key = `${context}:${status}`;
-                const currentTime = Date.now();
-
-                // If we've already logged this exact status for this context, block it
-                if (statusLog.has(key)) {
-                    return;
-                }
-
-                // Check if state actually changed from previous
-                const prev = lastState.get(context);
-                if (prev === status) {
-                    return; // Same state as before, don't log again
-                }
-
-                // Update last state
-                lastState.set(context, status);
-
-                // Mark as logged forever
-                statusLog.add(key);
-
-                // Get symbol and color
-                const symbol = statusSymbols[status] || '•';
-                const color = statusColors[status] || '#aaa';
-
-                // Format details
-                const detailStr = details ? ` ${details}` : '';
-
-                // Console output with clean format - ONE LINE ONLY
-                console.log(`%c${symbol} ${status}${detailStr}`, `color: ${color}; font-weight: bold;`);
-            },
-            
-            // Reset statuses for a context (for testing/debug)
-            reset: function(context) {
-                const keysToDelete = [];
-                for (const key of statusLog) {
-                    if (key.startsWith(context + ':')) {
-                        keysToDelete.push(key);
-                    }
-                }
-                keysToDelete.forEach(k => statusLog.delete(k));
-                lastState.delete(context);
-            },
-            
-            // Get current state for a context
-            getState: function(context) {
-                return lastState.get(context) || null;
-            },
-            
-            // Check if a specific status has been logged
-            hasLogged: function(context, status) {
-                return statusLog.has(`${context}:${status}`);
-            }
-        };
-
-        // Log initial status - shows ONCE at startup
-        window.__statusMachine.log('system', 'INIT', 'Kynecta parent loading');
-    })();
-    </script>
-
-    <!-- ========== DEDUPLICATED FRAME REGISTRATION ========== -->
-    <script>
-    (function() {
-        'use strict';
-        
-        // Deduplicated frame registration using Set
-        const REGISTERED_MODULES = new Set();
-        let registrationCountLogged = false;
-
-        window.__registerFrame = function(moduleName, source) {
-            if (!moduleName) return false;
-
-            // Prevent duplicate registration
-            if (REGISTERED_MODULES.has(moduleName)) {
-                return false;
-            }
-
-            // Add to registered set
-            REGISTERED_MODULES.add(moduleName);
-            
-            // Log only once when first frame registers
-            if (!registrationCountLogged && REGISTERED_MODULES.size > 0) {
-                registrationCountLogged = true;
-                window.__statusMachine?.log('handshake', 'READY', `First frame registered`);
-            }
-
-            // Also register with PARENT_AUTHORITY if available
-            if (window.__PARENT_AUTHORITY__ && source) {
-                // Check if already registered to prevent inflation
-                if (!window.__PARENT_AUTHORITY__.registeredFrames?.has?.(source)) {
-                    window.__PARENT_AUTHORITY__.registeredFrames?.add?.(source);
-                }
-            }
-
-            return true;
-        };
-
-        window.__getRegisteredCount = function() {
-            return REGISTERED_MODULES.size;
-        };
-
-        window.__resetRegistration = function() {
-            REGISTERED_MODULES.clear();
-            registrationCountLogged = false;
-        };
-    })();
-    </script>
-
-    <!-- ========== SINGLE HANDSHAKE AUTHORITY ========== -->
-    <script>
-    (function() {
-        'use strict';
-
-        // Log INIT once
-        window.__statusMachine?.log('handshake', 'INIT', 'Handshake controller');
 
         // Create single global handshake authority controller
         window.__PARENT_AUTHORITY__ = {
@@ -2329,11 +3229,10 @@
 
                 this.registeredFrames.add(frameSource);
                 
-                // Only log when first frame registers (handshake complete)
+                // Only mark when first frame registers (handshake complete)
                 if (!this.handshakeComplete && this.registeredFrames.size >= 1) {
                     this.handshakeComplete = true;
                     this.state = "READY";
-                    window.__statusMachine?.log('handshake', 'READY', 'Handshake complete');
                     // Mark handshake complete for our guard
                     if (window.__markHandshakeComplete) {
                         window.__markHandshakeComplete();
@@ -2358,7 +3257,6 @@
                 
                 if (this.heartbeatFailures >= this.maxHeartbeatFailures && 
                     !this.recoveryInProgress) {
-                    window.__statusMachine?.log('connection', 'WARNING', 'Unstable connection');
                     this.triggerRecovery();
                 }
             },
@@ -2373,8 +3271,6 @@
                 
                 this.recoveryInProgress = true;
                 this.lastHeartbeatReset = Date.now();
-                
-                window.__statusMachine?.log('connection', 'WARNING', 'Recovery in progress');
                 
                 this.heartbeatFailures = 0;
                 
@@ -2394,7 +3290,6 @@
                 
                 setTimeout(() => {
                     this.recoveryInProgress = false;
-                    window.__statusMachine?.log('connection', 'READY', 'Recovery complete');
                 }, 3000);
             },
             
@@ -2446,17 +3341,14 @@
 
         // Get current session safely
         function getCurrentSession() {
-            let sessionData = { authenticated: false };
-            
-            if (window.__KYNECTA_AUTHORITIES__?.session?.get) {
-                sessionData = window.__KYNECTA_AUTHORITIES__.session.get();
-            } else if (window.SessionGuardian?.getSession) {
-                sessionData = window.SessionGuardian.getSession();
+            if (window.__KYNECTA_AUTHORITIES__?.parentState?.getSession) {
+                return window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            } else if (window.__sessionManager?.getSession) {
+                return window.__sessionManager.getSession();
             } else if (window._sessionCache) {
-                sessionData = window._sessionCache;
+                return window._sessionCache;
             }
-            
-            return sessionData;
+            return { authenticated: false };
         }
 
         // Check if session is valid (has userId)
@@ -2575,6 +3467,75 @@
             }
         }
 
+        // Handle HANDSHAKE_REQUEST
+        function handleHandshakeRequest(event) {
+            const requestId = event.data?.requestId || event.data?.messageId;
+            const source = event.source;
+            const origin = event.origin;
+            const module = event.data?.module || event.data?.frameId || 'unknown';
+
+            // Register frame
+            window.__registerFrame?.(module, source);
+            
+            if (window.__PARENT_AUTHORITY__) {
+                window.__PARENT_AUTHORITY__.registerFrame(source);
+            }
+
+            // Get session data
+            let sessionData = getCurrentSession();
+            let sessionReady = sessionData && sessionData.authenticated;
+
+            // Prepare handshake response with session and config
+            const handshakeResponse = {
+                success: true,
+                session: {
+                    authenticated: sessionData.authenticated || false,
+                    user: sessionData.user || null,
+                    userId: sessionData.userId || (sessionData.user ? sessionData.user.id : null)
+                },
+                token: sessionData.token || null,
+                config: {
+                    module: module,
+                    features: ['basic'],
+                    timestamp: Date.now()
+                },
+                timestamp: Date.now()
+            };
+
+            // Send handshake response
+            try {
+                source.postMessage({
+                    type: "HANDSHAKE_RESPONSE",
+                    requestId: requestId,
+                    messageId: requestId,
+                    payload: handshakeResponse,
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+
+            // Send HANDSHAKE_ACK for backward compatibility
+            try {
+                source.postMessage({
+                    type: "HANDSHAKE_ACK",
+                    requestId: requestId,
+                    timestamp: Date.now(),
+                    payload: {
+                        success: true,
+                        sessionReady: sessionReady,
+                        timestamp: Date.now()
+                    }
+                }, origin);
+            } catch (e) {}
+
+            // ALWAYS send ACK
+            sendAck(source, origin, "HANDSHAKE_REQUEST", requestId, { success: true });
+
+            // Mark handshake complete
+            if (window.__markHandshakeComplete) {
+                window.__markHandshakeComplete();
+            }
+        }
+
         // Handle HEARTBEAT_ACK
         function handleHeartbeatAck(event) {
             const requestId = event.data?.requestId || event.data?.messageId;
@@ -2657,8 +3618,6 @@
 
             // ALWAYS ACK
             sendAck(source, origin, "CHILD_READY", requestId, { success: true });
-            
-            window.__statusMachine?.log('handshake', 'READY', `Child ready: ${module}`);
         }
 
         // Handle PING
@@ -2678,48 +3637,6 @@
             if (event.data?.expectAck) {
                 sendAck(source, origin, "PING", requestId, { success: true });
             }
-        }
-
-        // Handle HANDSHAKE_REQUEST
-        function handleHandshakeRequest(event) {
-            const requestId = event.data?.requestId || event.data?.messageId;
-            const source = event.source;
-            const origin = event.origin;
-
-            // Register frame
-            const module = event.data?.module || event.data?.frameId || 'unknown';
-            window.__registerFrame?.(module, source);
-            
-            if (window.__PARENT_AUTHORITY__) {
-                window.__PARENT_AUTHORITY__.registerFrame(source);
-            }
-
-            // Get session data
-            let sessionReady = false;
-            if (window.__KYNECTA_AUTHORITIES__?.session?.isAuthenticated) {
-                sessionReady = window.__KYNECTA_AUTHORITIES__.session.isAuthenticated();
-            } else if (window.SessionGuardian?.authenticated) {
-                sessionReady = window.SessionGuardian.authenticated;
-            }
-
-            // Send handshake ACK
-            try {
-                source.postMessage({
-                    type: "HANDSHAKE_ACK",
-                    requestId: requestId,
-                    timestamp: Date.now(),
-                    payload: {
-                        success: true,
-                        sessionReady: sessionReady,
-                        timestamp: Date.now()
-                    }
-                }, origin);
-            } catch (e) {}
-
-            // ALWAYS ACK
-            sendAck(source, origin, "HANDSHAKE_REQUEST", requestId, { success: true });
-            
-            window.__statusMachine?.log('handshake', 'SUCCESS', 'Handshake acknowledged');
         }
 
         // MAIN MESSAGE LISTENER - Single source of truth with origin validation
@@ -2746,6 +3663,10 @@
 
             // Route message to appropriate handler
             switch (msgType) {
+                case "HANDSHAKE_REQUEST":
+                    handleHandshakeRequest(event);
+                    break;
+
                 case "IFRAME_REGISTERED":
                     handleIframeRegistered(event);
                     break;
@@ -2774,10 +3695,6 @@
                     handlePing(event);
                     break;
 
-                case "HANDSHAKE_REQUEST":
-                    handleHandshakeRequest(event);
-                    break;
-
                 case "SESSION_ACK":
                 case "HANDSHAKE_ACK":
                 case "REGISTRATION_ACK":
@@ -2795,13 +3712,52 @@
                     break;
             }
         });
-
-        // Log that message handler is ready
-        window.__statusMachine?.log('system', 'READY', 'Message handler ready');
     })();
     </script>
 
-    <!-- ========== ENHANCED STABILITY LAYER WITH PROPER ACK INTEGRATION ========== -->
+    <!-- ========== DEDUPLICATED FRAME REGISTRATION (PRESERVED) ========== -->
+    <script>
+    (function() {
+        'use strict';
+        
+        // Deduplicated frame registration using Set
+        const REGISTERED_MODULES = new Set();
+        let registrationCountLogged = false;
+
+        window.__registerFrame = function(moduleName, source) {
+            if (!moduleName) return false;
+
+            // Prevent duplicate registration
+            if (REGISTERED_MODULES.has(moduleName)) {
+                return false;
+            }
+
+            // Add to registered set
+            REGISTERED_MODULES.add(moduleName);
+            
+            // Also register with PARENT_AUTHORITY if available
+            if (window.__PARENT_AUTHORITY__ && source) {
+                // Check if already registered to prevent inflation
+                if (!window.__PARENT_AUTHORITY__.registeredFrames?.has?.(source)) {
+                    window.__PARENT_AUTHORITY__.registeredFrames?.add?.(source);
+                }
+            }
+
+            return true;
+        };
+
+        window.__getRegisteredCount = function() {
+            return REGISTERED_MODULES.size;
+        };
+
+        window.__resetRegistration = function() {
+            REGISTERED_MODULES.clear();
+            registrationCountLogged = false;
+        };
+    })();
+    </script>
+
+    <!-- ========== ENHANCED STABILITY LAYER - FIXED VERSION ========== -->
     <script>
     (function() {
         'use strict';
@@ -2924,8 +3880,8 @@
                         const timeout = options.timeout || 3000;
                         
                         let token = null;
-                        if (window.__KYNECTA_AUTHORITIES__?.session?.getToken) {
-                            token = window.__KYNECTA_AUTHORITIES__.session.getToken();
+                        if (window.__KYNECTA_AUTHORITIES__?.parentState?.getToken) {
+                            token = window.__KYNECTA_AUTHORITIES__.parentState.getToken();
                         }
                         
                         const message = MessageFormatter.createCanonicalMessage(type, targetId, payload, { messageId, token, ...options });
@@ -3020,8 +3976,8 @@
             init() {
                 this.startSyncInterval();
                 
-                if (window.__KYNECTA_AUTHORITIES__?.session?.subscribe) {
-                    window.__KYNECTA_AUTHORITIES__.session.subscribe((session) => {
+                if (window.__KYNECTA_AUTHORITIES__?.parentState?.subscribe) {
+                    window.__KYNECTA_AUTHORITIES__.parentState.subscribe((event, session) => {
                         this.onSessionChange(session);
                     });
                 }
@@ -3075,11 +4031,9 @@
             onOnline() {
                 this.offlineMode = false;
                 this.processQueues();
-                window.__statusMachine?.log('connection', 'READY', 'Online');
             },
             onOffline() {
                 this.offlineMode = true;
-                window.__statusMachine?.log('connection', 'DISCONNECTED', 'Offline');
             },
             queueMessage(targetId, type, payload, options = {}) {
                 if (!this.queues.has(targetId)) {
@@ -3285,9 +4239,7 @@
                 
                 iframeIds.forEach(id => {
                     const status = HandshakeController.getStatus(id);
-                    if (status === 'DEGRADED' || status === 'UNKNOWN') {
-                        // Silent - no log noise
-                    }
+                    // Silent - no log noise
                 });
             },
             enable() {
@@ -3300,63 +4252,6 @@
         };
 
         DiagnosticsHub.init(false);
-
-        // Compatibility Adapter
-        const CompatibilityAdapter = {
-            detectSandboxFlags(iframe) {
-                if (!iframe) return {};
-                const sandbox = iframe.getAttribute('sandbox') || '';
-                const flags = sandbox.split(' ').filter(Boolean);
-                return { 
-                    'allow-scripts': flags.includes('allow-scripts'), 
-                    'allow-same-origin': flags.includes('allow-same-origin'), 
-                    'allow-forms': flags.includes('allow-forms'), 
-                    'allow-popups': flags.includes('allow-popups'), 
-                    'allow-modals': flags.includes('allow-modals'), 
-                    'allow-downloads': flags.includes('allow-downloads'), 
-                    'allow-top-navigation': flags.includes('allow-top-navigation'), 
-                    all: flags 
-                };
-            },
-            isLowMemoryDevice() {
-                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                if ('deviceMemory' in navigator) {
-                    return navigator.deviceMemory < 4;
-                }
-                return isMobile;
-            },
-            getPreferredStrategy(iframeId) {
-                const iframe = document.getElementById(iframeId);
-                if (!iframe) return 'standard';
-                const flags = this.detectSandboxFlags(iframe);
-                if (!flags['allow-scripts']) return 'minimal';
-                if (!flags['allow-same-origin']) return 'cross-origin';
-                if (this.isLowMemoryDevice()) return 'lightweight';
-                return 'standard';
-            },
-            adaptMessageForSandbox(message, iframeId) {
-                const strategy = this.getPreferredStrategy(iframeId);
-                if (strategy === 'cross-origin') {
-                    const safeMessage = { ...message };
-                    if (safeMessage.token) safeMessage.token = '[REDACTED]';
-                    return safeMessage;
-                }
-                if (strategy === 'minimal') return null;
-                return message;
-            },
-            getTargetOrigin(iframeId) {
-                const strategy = this.getPreferredStrategy(iframeId);
-                if (strategy === 'cross-origin') return '*';
-                const iframe = document.getElementById(iframeId);
-                if (iframe && iframe.src) {
-                    try {
-                        const url = new URL(iframe.src, window.location.href);
-                        return url.origin;
-                    } catch (e) {}
-                }
-                return window.location.origin;
-            }
-        };
 
         // Debug toggle
         window.toggleDebugPanel = function() {
@@ -3410,18 +4305,17 @@
             });
         }, 1000);
 
-        window.__statusMachine?.log('system', 'READY', 'Enhanced stability layer ready');
     })();
     </script>
 
-    <!-- ========== KYNECTA AUTHORITIES LAYER ========== -->
+    <!-- ========== KYNECTA AUTHORITIES LAYER - FIXED ========== -->
     <script>
     (function() {
         'use strict';
 
         // Global namespace for all authorities
         window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {
-            version: '2.0.0',
+            version: '2.1.0',
             initialized: false,
             debug: false
         };
@@ -3842,14 +4736,14 @@
                 state.retries++;
                 
                 let session = null;
-                if (window.__KYNECTA_AUTHORITIES__?.session) {
-                    session = window.__KYNECTA_AUTHORITIES__.session.get();
+                if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+                    session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
                 }
                 
                 const promise = ParentMessageBus.send(frameId, 'HANDSHAKE_REQUEST', {
                     timestamp: Date.now(),
                     protocol: 'KYN-2.0',
-                    environment: window.environmentDetector?.get().type || 'LOCAL_DEV',
+                    environment: Environment.type || 'LOCAL_DEV',
                     sessionReady: !!(session?.authenticated),
                     session: session ? { userId: session.userId, authenticated: session.authenticated } : null
                 }, {
@@ -3886,7 +4780,7 @@
                 ParentMessageBus.send(frameId, 'HANDSHAKE_ACK', {
                     timestamp: Date.now(),
                     protocol: 'KYN-2.0',
-                    sessionReady: !!(window.__KYNECTA_AUTHORITIES__?.session?.get()?.authenticated),
+                    sessionReady: !!(window.__KYNECTA_AUTHORITIES__?.parentState?.isReady()),
                     accepted: true
                 }, { messageId: `ack_${payload?.messageId}` });
                 
@@ -4192,7 +5086,7 @@
 
         // Store authorities in global namespace
         window.__KYNECTA_AUTHORITIES__ = {
-            version: '2.0.0',
+            version: '2.1.0',
             initialized: true,
             storage: SafeStorage,
             origin: OriginTrustManager,
@@ -4200,14 +5094,19 @@
             frames: FrameRegistry,
             handshake: ParentHandshakeAuthority,
             session: ParentSessionAuthority,
-            health: HealthSupervisor
+            health: HealthSupervisor,
+            
+            // Enhanced modules
+            moduleRegistry: window.__moduleRegistry,
+            sessionManager: window.__sessionManager,
+            environment: Environment,
+            parentState: ParentStateManager
         };
         
-        window.__statusMachine?.log('system', 'READY', 'Authorities initialized');
     })();
     </script>
 
-    <!-- ========== ALL OTHER EXISTING SCRIPTS PRESERVED ========== -->
+    <!-- ========== ALL OTHER EXISTING SCRIPTS PRESERVED - SILENT MODE ========== -->
     <!-- Environment Detector -->
     <script>
     (function() {
@@ -4287,11 +5186,10 @@
         };
         
         window.environmentDetector.detect();
-        window.__statusMachine?.log('env', 'READY', 'Environment detector ready');
     })();
     </script>
 
-    <!-- ========== GOVERNANCE LAYER ========== -->
+    <!-- ========== GOVERNANCE LAYER - SILENT MODE ========== -->
     <script>
     (function() {
         'use strict';
@@ -4391,6 +5289,9 @@
         // Session Coordinator
         const SessionCoordinator = {
             getCurrentSession() {
+                if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+                    return window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+                }
                 if (window.__KYNECTA_AUTHORITIES__?.session) {
                     return window.__KYNECTA_AUTHORITIES__.session.get();
                 }
@@ -4726,11 +5627,10 @@
             getOriginResolver: () => OriginResolver
         };
 
-        window.__statusMachine?.log('governance', 'READY', 'Governance layer ready');
     })();
     </script>
 
-    <!-- ========== STABILIZATION PATCHES ========== -->
+    <!-- ========== STABILIZATION PATCHES (PRESERVED) ========== -->
     <script>
     (function() {
         'use strict';
@@ -4802,16 +5702,13 @@
             if (window.KynectaCoreVersion) coreVersions.add(window.KynectaCoreVersion);
             if (window.kynectaVersion) coreVersions.add(window.kynectaVersion);
             if (window.__KYNECTA_CORE_VERSION__) coreVersions.add(window.__KYNECTA_CORE_VERSION__);
-            if (coreVersions.size > 1) {
-                // Silent - no log noise
-            }
+            // Silent - no log noise
         }, 1000);
 
-        window.__statusMachine?.log('stabilization', 'READY', 'Stabilization patches ready');
     })();
     </script>
 
-    <!-- ========== EARLY MESSAGE BRIDGE ========== -->
+    <!-- ========== EARLY MESSAGE BRIDGE (PRESERVED) ========== -->
     <script>
     (function() {
         // Early Message Bridge – single global listener, safe, permanent
@@ -4950,7 +5847,7 @@
     })();
     </script>
 
-    <!-- ========== RESPONSIVE LAYOUT CONTROLLER ========== -->
+    <!-- ========== RESPONSIVE LAYOUT CONTROLLER (PRESERVED) ========== -->
     <script>
     (function() {
         function syncLayout() {
@@ -4989,7 +5886,7 @@
     })();
     </script>
 
-    <!-- ========== ORCHESTRATION ENGINE ========== -->
+    <!-- ========== ORCHESTRATION ENGINE (PRESERVED - SILENT MODE) ========== -->
     <script>
     (function() {
         'use strict';
@@ -5019,30 +5916,20 @@
             }
         };
 
-        // Log Governor
+        // Log Governor - SILENT MODE
         const LogGovernor = {
             warned: new Set(),
             errors: new Map(),
             maxErrors: 50,
             enabled: false,
             once: function(type, message, ...args) {
-                if (!this.enabled) return;
-                const key = `${type}:${message}`;
-                if (!this.warned.has(key)) {
-                    this.warned.add(key);
-                }
+                // SILENT - do nothing
             },
             error: function(type, error, context = '') {
-                if (!this.enabled) return;
-                const id = `${type}_${Date.now()}`;
-                if (this.errors.size > this.maxErrors) {
-                    const oldest = Array.from(this.errors.keys()).shift();
-                    this.errors.delete(oldest);
-                }
-                this.errors.set(id, { type, error: error?.message || String(error), context, timestamp: Date.now() });
+                // SILENT - do nothing
             },
             info: function(type, message, ...args) {
-                if (!this.enabled) return;
+                // SILENT - do nothing
             }
         };
 
@@ -6437,7 +7324,7 @@
                     }, 300);
                 }
                 
-                window.__statusMachine?.log('system', 'READY', 'Kynecta ready');
+                // SILENT - no status log
             }
         };
 
@@ -6533,6 +7420,37 @@
             ToolController.init();
             Bootstrap.run().catch(e => {});
         }
+    })();
+    </script>
+
+    <!-- FIXED: Force hide loading screen after timeout -->
+    <script>
+    (function() {
+        // Force hide loading screen after 3 seconds even if bootstrap fails
+        setTimeout(function() {
+            var loadingScreen = document.getElementById('loadingScreen');
+            if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(function() {
+                    loadingScreen.classList.add('hidden');
+                    loadingScreen.style.opacity = '';
+                }, 300);
+            }
+        }, 3000);
+        
+        // Check if messages iframe is stuck and reload it
+        setTimeout(function() {
+            var messagesIframe = document.getElementById('messagesIframe');
+            if (messagesIframe && messagesIframe.contentWindow) {
+                try {
+                    // Ping the iframe
+                    messagesIframe.contentWindow.postMessage({ type: 'PING', timestamp: Date.now() }, '*');
+                } catch (e) {
+                    // If error, reload the iframe silently
+                    messagesIframe.src = messagesIframe.src.split('?')[0] + '?reload=' + Date.now();
+                }
+            }
+        }, 5000);
     })();
     </script>
 

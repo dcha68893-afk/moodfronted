@@ -1,8 +1,8 @@
 // calls-ui.js
 // ==================== RESILIENT UI CONTROLLER ====================
-// Version: 3.2.0
+// Version: 3.2.1
 // Purpose: Fault-tolerant, responsive UI layer for calls iframe
-// Dependencies: calls-core.js v3.2.0
+// Dependencies: calls-core.js v3.2.1
 // Security: XSS protected, input sanitized, CSP compliant
 // ===============================================================
 
@@ -137,7 +137,6 @@
             
             window.addEventListener('core.ready', readyHandler);
             
-            // Also check if core already has ready event
             if (window.callsCore && window.callsCore.isReady && window.callsCore.isReady()) {
                 clearTimeout(timeoutId);
                 window.removeEventListener('core.ready', readyHandler);
@@ -423,7 +422,6 @@
         
         initialized: false,
         
-        // UI-specific state
         selectedMood: 'neutral',
         selectedIntention: 'quick',
         currentCallCategory: 'all',
@@ -433,7 +431,6 @@
         groupCallOption: null,
         callLink: null,
         
-        // Media state
         localStream: null,
         remoteStreams: new Map(),
         screenStream: null,
@@ -443,27 +440,28 @@
         isSpeakerOn: true,
         currentFocusMode: false,
         
-        // Call state
         callStartTime: null,
         callDurationInterval: null,
         activeCallId: null,
         callType: null,
         callParticipants: [],
         
-        // Chat state
         chatMessages: [],
         unreadChatCount: 0,
         
-        // Polls state
         activePolls: [],
         pollResults: [],
         
-        // Notes state
         sharedNotes: [],
         privateNotes: {},
         
-        // Relationship insights
-        relationshipData: null
+        relationshipData: null,
+        
+        // Handshake tracking
+        handshakeAttempts: 0,
+        lastHandshakeAttempt: 0,
+        handshakeTimer: null,
+        sessionSyncTimer: null
     };
 
     // ==================== DOM ELEMENTS CACHE ====================
@@ -1357,15 +1355,20 @@
         showHandshakeStatus: function() {
             if (!elements.syncIndicator) return;
             
+            const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+            
+            if (isDemo) {
+                elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
+                elements.syncIndicator.className = 'sync-indicator demo';
+                return;
+            }
+            
             if (!parentReady) {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
                 elements.syncIndicator.className = 'sync-indicator connecting';
             } else if (!sessionReady) {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-sync-alt"></i><span>Syncing...</span>';
                 elements.syncIndicator.className = 'sync-indicator syncing';
-            } else if (session && session.isDemoMode && session.isDemoMode()) {
-                elements.syncIndicator.innerHTML = '<i class="fas fa-eye"></i><span>Demo Mode</span>';
-                elements.syncIndicator.className = 'sync-indicator demo';
             } else {
                 elements.syncIndicator.innerHTML = '<i class="fas fa-check-circle"></i><span>Ready</span>';
                 elements.syncIndicator.className = 'sync-indicator synced';
@@ -1605,7 +1608,7 @@
                 if (!AppState?.isOnline) {
                     elements.syncIndicator.innerHTML = '<i class="fas fa-cloud-slash"></i><span>Offline</span>';
                     elements.syncIndicator.className = 'sync-indicator offline';
-                } else if (!parentReady) {
+                } else if (!parentReady && !handshakeComplete) {
                     elements.syncIndicator.innerHTML = '<i class="fas fa-handshake"></i><span>Connecting...</span>';
                     elements.syncIndicator.className = 'sync-indicator connecting';
                 } else if (!sessionReady) {
@@ -1666,6 +1669,8 @@
     const CoreIntegration = {
         _subscriptions: new Set(),
         _validationCache: new Map(),
+        _handshakeCheckInterval: null,
+        _sessionCheckInterval: null,
         
         subscribeToCore: function() {
             if (DEBUG) {
@@ -1695,8 +1700,49 @@
                 IframeSessionClient.addListener(this.handleSessionEvent.bind(this));
             }
             
-            // Listen for core.ready event
             window.addEventListener('core.ready', this.handleCoreReady.bind(this));
+            
+            this._startHandshakeCheck();
+        },
+        
+        _startHandshakeCheck: function() {
+            if (this._handshakeCheckInterval) {
+                clearInterval(this._handshakeCheckInterval);
+            }
+            
+            this._handshakeCheckInterval = setInterval(() => {
+                if (!parentReady && !handshakeComplete) {
+                    const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
+                    if (!isDemo && window.parent && window.parent !== window) {
+                        this.checkHandshakeStatus();
+                    }
+                }
+            }, 3000);
+        },
+        
+        checkHandshakeStatus: function() {
+            if (window.callsCore && window.callsCore.IframeHandshakeAuthority) {
+                const status = window.callsCore.IframeHandshakeAuthority.getStatus();
+                if (status) {
+                    parentReady = status.parentReady || false;
+                    handshakeComplete = status.handshakeDone || false;
+                    RenderingPipeline.updateSyncIndicator();
+                    
+                    if (!parentReady && !handshakeComplete && !UIState.handshakeTimer) {
+                        UIState.handshakeTimer = setTimeout(() => {
+                            if (!parentReady && !handshakeComplete && window.callsCore && window.callsCore.IframeHandshakeAuthority) {
+                                window.callsCore.IframeHandshakeAuthority.start().catch(() => {});
+                            }
+                            UIState.handshakeTimer = null;
+                        }, 5000);
+                    }
+                }
+            }
+            
+            if (window.callsCore && window.callsCore.IframeSessionClient) {
+                sessionReady = window.callsCore.IframeSessionClient.isValid() || false;
+                RenderingPipeline.updateSyncIndicator();
+            }
         },
         
         handleCoreReady: function(event) {
@@ -1704,7 +1750,13 @@
             coreReady = true;
             parentReady = true;
             sessionReady = true;
+            handshakeComplete = true;
             RenderingPipeline.updateSyncIndicator();
+            
+            if (this._handshakeCheckInterval) {
+                clearInterval(this._handshakeCheckInterval);
+                this._handshakeCheckInterval = null;
+            }
         },
         
         handleHandshakeEvent: function(event, data) {
@@ -1743,6 +1795,7 @@
                         break;
                     case 'SESSION_UPDATE':
                     case 'SESSION_SYNC':
+                    case 'PARENT_SESSION_RESPONSE':
                         sessionReady = true;
                         RenderingPipeline.updateSyncIndicator();
                         break;
@@ -1798,6 +1851,9 @@
                     logOnce('info', 'Recovery successful');
                 }
                 showNotification('Connection restored', 'success');
+                parentReady = true;
+                sessionReady = true;
+                RenderingPipeline.updateSyncIndicator();
             } else if (event === 'failed') {
                 if (DEBUG) {
                     logOnce('warn', 'Recovery failed', data);
@@ -1850,6 +1906,16 @@
                     case 'NAVIGATE':
                         if (DEBUG) {
                             logOnce('info', 'Parent navigation:', data.payload);
+                        }
+                        break;
+                    case 'PARENT_SESSION_RESPONSE':
+                        if (data.payload && data.payload.session) {
+                            this.handleSessionUpdate(data.payload.session);
+                        }
+                        break;
+                    case 'PARENT_TOKEN_RESPONSE':
+                        if (data.payload && data.payload.token) {
+                            this.handleTokenUpdate(data.payload);
                         }
                         break;
                 }
@@ -2162,6 +2228,11 @@
             if (handler) {
                 window.removeEventListener('message', handler);
                 UIState.cachedElements.delete('parentMessageHandler');
+            }
+            
+            if (this._handshakeCheckInterval) {
+                clearInterval(this._handshakeCheckInterval);
+                this._handshakeCheckInterval = null;
             }
         }
     };
@@ -2879,11 +2950,13 @@
         openNewCallModal: function() {
             const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
+            if (!parentReady && !handshakeComplete && !isDemo) {
+                showNotification('Connecting to server...', 'info');
+                return;
+            }
+            
             if (parentCoordinator && !parentCoordinator.sessionValidated && !isDemo) {
                 showNotification('Please wait for authentication', 'warning');
-                if (parentCoordinator.showReconnectState) {
-                    parentCoordinator.showReconnectState();
-                }
                 return;
             }
             
@@ -2896,7 +2969,6 @@
                 elements.newCallModal.classList.add('active');
                 UIState.activeModals.add('newCallModal');
                 
-                // Fetch fresh contacts from core API
                 if (APICore && APICore.isReady && APICore.isReady()) {
                     APICore.get('/api/contacts', {}, { allowFallback: true })
                         .then(contacts => {
@@ -2906,7 +2978,6 @@
                             }
                         })
                         .catch(() => {
-                            // Use cached contacts if available
                             if (AppState?.contacts?.length > 0) {
                                 RenderingPipeline.renderContactsList(AppState.contacts);
                             }
@@ -3015,11 +3086,13 @@
         startCallGeneric: function(type) {
             const isDemo = session && session.isDemoMode ? session.isDemoMode() : false;
             
+            if (!parentReady && !handshakeComplete && !isDemo) {
+                showNotification('Connecting to server...', 'info');
+                return;
+            }
+            
             if (parentCoordinator && !parentCoordinator.sessionValidated && !isDemo) {
                 showNotification('Please wait for authentication', 'warning');
-                if (parentCoordinator.showReconnectState) {
-                    parentCoordinator.showReconnectState();
-                }
                 return;
             }
             
@@ -4004,6 +4077,8 @@
             window.__CHILD_SESSION__.userId = null;
             window.__CHILD_SESSION__.expires = null;
             sessionReady = false;
+            parentReady = false;
+            handshakeComplete = false;
             
             if (AppState) {
                 AppState.isAuthenticated = false;
@@ -4032,6 +4107,12 @@
             }
             
             showNotification('Logged out', 'info');
+            
+            setTimeout(() => {
+                if (window.callsCore && window.callsCore.IframeHandshakeAuthority) {
+                    window.callsCore.IframeHandshakeAuthority.start().catch(() => {});
+                }
+            }, 1000);
         }
     };
 
@@ -4213,7 +4294,6 @@
                 if (message && typeof sendChatMessage === 'function') {
                     sendChatMessage(message);
                     
-                    // Add message to UI
                     const msgEl = document.createElement('div');
                     msgEl.className = 'chat-message self';
                     msgEl.innerHTML = `
@@ -4234,7 +4314,6 @@
                     if (message && typeof sendChatMessage === 'function') {
                         sendChatMessage(message);
                         
-                        // Add message to UI
                         const msgEl = document.createElement('div');
                         msgEl.className = 'chat-message self';
                         msgEl.innerHTML = `
@@ -4309,7 +4388,6 @@
                 initializeWhiteboard(panel.querySelector('.whiteboard-canvas'));
             }
             
-            // Basic whiteboard functionality
             const canvas = panel.querySelector('.whiteboard-canvas');
             const ctx = canvas.getContext('2d');
             let drawing = false;
@@ -4540,7 +4618,6 @@
                 });
             });
             
-            // Add option button
             panel.querySelector('.add-option-btn').addEventListener('click', () => {
                 const optionsContainer = panel.querySelector('.poll-options');
                 const newInput = document.createElement('input');
@@ -4555,7 +4632,6 @@
                 if (question.trim()) {
                     showNotification('Poll created successfully!', 'success');
                     
-                    // Switch to active polls tab
                     panel.querySelector('[data-tab="active"]').click();
                 }
             });
@@ -4782,7 +4858,6 @@
             logOnce('info', 'Initializing UI system');
         }
         
-        // Wait for core to be ready
         const coreReady = await waitForCoreReady(10000);
         if (coreReady) {
             logOnce('success', 'Core is ready, proceeding with UI initialization');
@@ -4986,7 +5061,6 @@
         getUIState: () => ({ ...UIState })
     };
 
-    // Auto-initialize after core is ready
     waitForCoreReady(10000).then(() => {
         initializeUISystem().catch(error => {
             if (DEBUG) {
