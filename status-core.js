@@ -1,8 +1,7 @@
 // =============================================
 // STATUS SYSTEM - PASSIVE IFRAME MODULE
-// HARDENED ENHANCED VERSION v5.4 - CLEAN CONSOLE LOGGING
-// SINGLE-INSTANCE STATUS MESSAGES, NO REPETITION
-// ALL EXISTING FEATURES PRESERVED - BACKGROUND OPERATIONS ONLY
+// HARDENED ENHANCED VERSION v6.1 - CLEAN LOGGING, NO DUPLICATES
+// EACH MESSAGE APPEARS ONLY ONCE IN CONSOLE
 // =============================================
 
 // =============================================
@@ -10,20 +9,22 @@
 // =============================================
 const DEBUG = true;
 
-// Status tracking - ensures each state shows only once
-const _statusState = {
-    initShown: false,
-    sendingShown: new Set(),
-    waitingShown: new Set(),
-    successShown: new Set(),
-    failedShown: new Set(),
-    readyShown: false,
-    warningShown: new Set(),
-    disconnectedShown: false,
-    lastStatus: null
-};
+// Track which messages have been logged - prevents duplicates
+const _loggedMessages = new Set();
+const _loggedStatuses = new Set();
 
 function logStatus(type, message, data = null) {
+    // Create a unique key for this message
+    const key = `${type}:${message}`;
+    
+    // If we've already logged this exact status, don't log again
+    if (_loggedStatuses.has(key)) {
+        return;
+    }
+    
+    // Mark as logged
+    _loggedStatuses.add(key);
+    
     const now = Date.now();
     const emoji = {
         'INIT': '🚀',
@@ -33,96 +34,61 @@ function logStatus(type, message, data = null) {
         'FAILED': '❌',
         'READY': '🔵',
         'WARNING': '⚠️',
-        'DISCONNECTED': '🔴'
+        'DISCONNECTED': '🔴',
+        'VIEW': '👁️',
+        'REACTION': '👍',
+        'POST': '📝',
+        'EXPIRE': '⌛'
     }[type] || '📋';
     
-    // Check if this status should be shown (first time only)
-    let shouldShow = false;
+    console.log(`%c[STATUS] ${emoji} ${type}: ${message}`, 
+        type === 'FAILED' || type === 'DISCONNECTED' ? 'color: #ff3b30; font-weight: bold;' :
+        type === 'SUCCESS' || type === 'READY' ? 'color: #34c759; font-weight: bold;' :
+        type === 'WARNING' ? 'color: #ff9500; font-weight: bold;' :
+        type === 'SENDING' || type === 'WAITING' ? 'color: #0084ff; font-weight: bold;' :
+        type === 'VIEW' ? 'color: #5856d6; font-weight: bold;' :
+        type === 'REACTION' ? 'color: #ff2d55; font-weight: bold;' :
+        type === 'POST' ? 'color: #64d2ff; font-weight: bold;' :
+        'color: #5856d6; font-weight: bold;'
+    );
     
-    switch(type) {
-        case 'INIT':
-            shouldShow = !_statusState.initShown;
-            if (shouldShow) _statusState.initShown = true;
-            break;
-        case 'SENDING':
-            if (!_statusState.sendingShown.has(message)) {
-                _statusState.sendingShown.add(message);
-                shouldShow = true;
-            }
-            break;
-        case 'WAITING':
-            if (!_statusState.waitingShown.has(message)) {
-                _statusState.waitingShown.add(message);
-                shouldShow = true;
-            }
-            break;
-        case 'SUCCESS':
-            if (!_statusState.successShown.has(message)) {
-                _statusState.successShown.add(message);
-                shouldShow = true;
-            }
-            break;
-        case 'FAILED':
-            if (!_statusState.failedShown.has(message)) {
-                _statusState.failedShown.add(message);
-                shouldShow = true;
-            }
-            break;
-        case 'READY':
-            shouldShow = !_statusState.readyShown;
-            if (shouldShow) _statusState.readyShown = true;
-            break;
-        case 'WARNING':
-            if (!_statusState.warningShown.has(message)) {
-                _statusState.warningShown.add(message);
-                shouldShow = true;
-            }
-            break;
-        case 'DISCONNECTED':
-            shouldShow = !_statusState.disconnectedShown;
-            if (shouldShow) _statusState.disconnectedShown = true;
-            break;
-    }
-    
-    if (shouldShow && DEBUG) {
-        console.log(`%c[STATUS] ${emoji} ${type}${message ? ': ' + message : ''}`, 
-            type === 'FAILED' || type === 'DISCONNECTED' ? 'color: #ff3b30; font-weight: bold;' :
-            type === 'SUCCESS' || type === 'READY' ? 'color: #34c759; font-weight: bold;' :
-            type === 'WARNING' ? 'color: #ff9500; font-weight: bold;' :
-            type === 'SENDING' || type === 'WAITING' ? 'color: #0084ff; font-weight: bold;' :
-            'color: #5856d6; font-weight: bold;'
-        );
-        
-        // Update last status
-        _statusState.lastStatus = { type, message, timestamp: now };
+    if (data && Object.keys(data).length > 0) {
+        console.log('  📦', data);
     }
 }
 
-// Legacy debug functions - now using clean status logging
+// Debug functions - each logs only once
+const _debugLogs = new Set();
 function debugLog(...args) {
-    // Only log in development and only first occurrence
-    if (DEBUG && window.location.hostname === 'localhost') {
-        const key = args[0];
-        if (!window._debugCache) window._debugCache = new Set();
-        const cacheKey = key.substring(0, 50);
-        if (!window._debugCache.has(cacheKey)) {
-            window._debugCache.add(cacheKey);
-            console.log('[STATUS-CORE]', ...args);
-            setTimeout(() => window._debugCache.delete(cacheKey), 5000);
-        }
-    }
+    if (!DEBUG) return;
+    
+    const key = args.join('|');
+    if (_debugLogs.has(key)) return;
+    _debugLogs.add(key);
+    
+    console.log('[STATUS-CORE]', ...args);
 }
 
+const _debugErrors = new Set();
 function debugError(...args) {
-    if (DEBUG) {
-        console.error('[STATUS-CORE ERROR]', ...args);
-    }
+    if (!DEBUG) return;
+    
+    const key = args.join('|');
+    if (_debugErrors.has(key)) return;
+    _debugErrors.add(key);
+    
+    console.error('[STATUS-CORE ERROR]', ...args);
 }
 
+const _debugWarns = new Set();
 function debugWarn(...args) {
-    if (DEBUG) {
-        console.warn('[STATUS-CORE WARN]', ...args);
-    }
+    if (!DEBUG) return;
+    
+    const key = args.join('|');
+    if (_debugWarns.has(key)) return;
+    _debugWarns.add(key);
+    
+    console.warn('[STATUS-CORE WARN]', ...args);
 }
 
 // =============================================
@@ -412,7 +378,7 @@ const IframeEnvironment = {
     },
     
     logEnvironment() {
-        // Silent - already logged once with INIT
+        // Already logged in detect()
     }
 };
 
@@ -420,12 +386,10 @@ const IframeEnvironment = {
 IframeEnvironment.detect();
 
 // =============================================
-// FIX 1 — REMOVED CONFLICTING HANDSHAKE SYSTEM
+// FETCH FAILURE SAFE HANDLING (Enhanced)
 // =============================================
+const _fetchAttempts = {};
 
-// =============================================
-// FIX 2 — Fetch Failure Safe Handling (Enhanced)
-// =============================================
 async function safeFetch(url, options = {}) {
     // Check if we should attempt fetch
     if (!navigator.onLine) {
@@ -433,9 +397,7 @@ async function safeFetch(url, options = {}) {
         return { success: false, message: "Network offline", offline: true };
     }
     
-    // Track attempts but don't suppress errors completely
     const fetchKey = `fetch_${url}`;
-    if (!window.__FETCH_ATTEMPTS__) window.__FETCH_ATTEMPTS__ = {};
     
     try {
         const response = await fetch(url, {
@@ -450,18 +412,25 @@ async function safeFetch(url, options = {}) {
         const data = await response.json();
         
         // Reset attempt counter on success
-        if (window.__FETCH_ATTEMPTS__[fetchKey]) {
-            delete window.__FETCH_ATTEMPTS__[fetchKey];
+        if (_fetchAttempts[fetchKey]) {
+            delete _fetchAttempts[fetchKey];
+        }
+        
+        // Only log successful fetch once per URL
+        if (!_loggedMessages.has(`fetch_success_${url}`)) {
+            _loggedMessages.add(`fetch_success_${url}`);
+            logStatus('SUCCESS', `Fetch: ${url}`);
         }
         
         return data;
     } catch (error) {
         // Count attempts
-        window.__FETCH_ATTEMPTS__[fetchKey] = (window.__FETCH_ATTEMPTS__[fetchKey] || 0) + 1;
+        _fetchAttempts[fetchKey] = (_fetchAttempts[fetchKey] || 0) + 1;
         
         // Only log first attempt failure
-        if (window.__FETCH_ATTEMPTS__[fetchKey] === 1) {
-            logStatus('FAILED', `Fetch failed: ${error.message}`);
+        if (_fetchAttempts[fetchKey] === 1 && !_loggedMessages.has(`fetch_fail_${url}`)) {
+            _loggedMessages.add(`fetch_fail_${url}`);
+            logStatus('FAILED', `Fetch: ${url} - ${error.message}`);
         }
         
         return { success: false, message: "Network issue", error: error.message };
@@ -472,7 +441,7 @@ async function safeFetch(url, options = {}) {
 // COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY
 // =============================================
 const CompatibilityBridge = {
-    version: '5.4',
+    version: '6.1',
     legacyMode: false,
     adapters: new Map(),
     transforms: new Map(),
@@ -670,7 +639,8 @@ const CompatibilityBridge = {
 // =============================================
 const isStandaloneMode = !window.parent || window.parent === window || !document.referrer;
 
-if (isStandaloneMode) {
+if (isStandaloneMode && !_loggedMessages.has('standalone')) {
+    _loggedMessages.add('standalone');
     debugLog('Running in standalone mode (no parent iframe)');
 }
 
@@ -784,7 +754,7 @@ const IframeAuthority = {
 // DIAGNOSTICS AGENT - TELEMETRY & DEBUGGING
 // =============================================
 const DiagnosticsAgent = {
-    enabled: false, // Disabled by default - no console noise
+    enabled: true,
     reports: [],
     maxReports: 100,
     metrics: {
@@ -805,7 +775,11 @@ const DiagnosticsAgent = {
         storageReads: 0,
         storageWrites: 0,
         storageErrors: 0,
-        offlineOperations: 0
+        offlineOperations: 0,
+        statusViews: 0,
+        statusReactions: 0,
+        statusPosts: 0,
+        statusExpired: 0
     },
     events: [],
     maxEvents: 1000,
@@ -839,16 +813,13 @@ const DiagnosticsAgent = {
         
         if (level === 'error') {
             this.metrics.errors++;
-            logStatus('FAILED', `${module}: ${message}`);
         } else if (level === 'warn') {
             this.metrics.warnings++;
-            logStatus('WARNING', `${module}: ${message}`);
         }
     },
     
     sanitize(data) {
-        if (!data) return data;
-        if (typeof data !== 'object') return data;
+        if (!data || typeof data !== 'object') return data;
         
         try {
             return JSON.parse(JSON.stringify(data, (key, value) => {
@@ -934,13 +905,17 @@ const DiagnosticsAgent = {
             storageReads: 0,
             storageWrites: 0,
             storageErrors: 0,
-            offlineOperations: 0
+            offlineOperations: 0,
+            statusViews: 0,
+            statusReactions: 0,
+            statusPosts: 0,
+            statusExpired: 0
         };
     }
 };
 
 // =============================================
-// LOGGING SYSTEM - STRUCTURED, NO SPAM
+// LOGGING SYSTEM - STRUCTURED, NO DUPLICATES
 // =============================================
 const LOG_LEVEL = {
     DEBUG: 0,
@@ -949,7 +924,7 @@ const LOG_LEVEL = {
     ERROR: 3
 };
 
-let currentLogLevel = LOG_LEVEL.ERROR; // Only errors by default
+let currentLogLevel = LOG_LEVEL.DEBUG;
 const errorCache = new Set();
 const warningCache = new Set();
 
@@ -1151,7 +1126,7 @@ const SafeStorage = {
 // STARTUP GOVERNOR - PREVENTS DUPLICATE INITIALIZATION
 // =============================================
 const StartupGovernor = {
-    state: 'INIT', // INIT, WAIT_PARENT, HANDSHAKING, SYNCING, ACTIVE, DEGRADED, RECOVERING
+    state: 'INIT',
     lock: false,
     initializationAttempted: false,
     handshakeAttempted: false,
@@ -1174,12 +1149,11 @@ const StartupGovernor = {
         const oldState = this.state;
         this.state = newState;
         
-        if (newState === 'ACTIVE') {
-            logStatus('READY', 'System active');
-        } else if (newState === 'DEGRADED') {
-            logStatus('WARNING', 'System degraded');
-        } else if (newState === 'RECOVERING') {
-            logStatus('WARNING', 'Recovering...');
+        // Only log state transitions once
+        const key = `state_${oldState}_to_${newState}`;
+        if (!_loggedMessages.has(key)) {
+            _loggedMessages.add(key);
+            debugLog(`Governor transition: ${oldState} → ${newState}`);
         }
         
         this.stateChangeListeners.forEach(listener => {
@@ -1217,7 +1191,6 @@ const StartupGovernor = {
         this.handshakeAttempted = true;
         this.handshakeStartTime = Date.now();
         DiagnosticsAgent.increment('handshakeAttempts');
-        logStatus('WAITING', 'Handshake started');
         
         return true;
     },
@@ -1244,7 +1217,7 @@ const StartupGovernor = {
         this.transition('RECOVERING');
         this.recoveryAttempts++;
         DiagnosticsAgent.increment('recoveryAttempts');
-        logStatus('WARNING', 'Recovering, attempt ' + this.recoveryAttempts);
+        logStatus('WARNING', 'Recovering...');
     },
     
     recoverySucceeded() {
@@ -1277,7 +1250,6 @@ const StartupGovernor = {
     
     incrementRetry() {
         this.handshakeRetries++;
-        logStatus('WAITING', `Handshake retry ${this.handshakeRetries}/${this.maxHandshakeRetries}`);
     },
     
     resetRetries() {
@@ -1304,7 +1276,7 @@ const OriginTrustAdapter = {
     trustedOrigins: new Set(),
     blockedOrigins: new Set(),
     dynamicTrustCache: new Map(),
-    trustLevel: 'standard', // relaxed, standard, strict
+    trustLevel: 'standard',
     parentOrigin: null,
     backendDomain: 'https://moodchat-fy56.onrender.com',
     frontendDomain: 'https://moodfronted.onrender.com',
@@ -1646,7 +1618,12 @@ const ReliabilityEngine = {
             this.stats.sent++;
             
             if (enhancedMessage.requiresAck) {
-                logStatus('SENDING', message.type || 'Message');
+                // Only log sending once per message type
+                const key = `sending_${message.type || 'Message'}`;
+                if (!_loggedMessages.has(key)) {
+                    _loggedMessages.add(key);
+                    logStatus('SENDING', message.type || 'Message');
+                }
                 
                 const timer = setTimeout(() => {
                     if (this.pendingAcks.has(messageId)) {
@@ -1656,7 +1633,12 @@ const ReliabilityEngine = {
                             this.retry(messageId, enhancedMessage, handler);
                         } else {
                             this.stats.timedout++;
-                            logStatus('FAILED', `${message.type || 'Message'} - ACK timeout`);
+                            // Only log timeout once per message type
+                            const timeoutKey = `timeout_${message.type || 'Message'}`;
+                            if (!_loggedMessages.has(timeoutKey)) {
+                                _loggedMessages.add(timeoutKey);
+                                logStatus('FAILED', `${message.type || 'Message'} - ACK timeout`);
+                            }
                             handler.reject(new Error('ACK timeout'));
                             this.pendingAcks.delete(messageId);
                         }
@@ -1687,7 +1669,12 @@ const ReliabilityEngine = {
                     this.queueForRetry(enhancedMessage, resolve, reject);
                 } else {
                     this.stats.failed++;
-                    logStatus('FAILED', `${message.type || 'Message'} - ${error.message}`);
+                    // Only log failure once per message type
+                    const failKey = `fail_${message.type || 'Message'}`;
+                    if (!_loggedMessages.has(failKey)) {
+                        _loggedMessages.add(failKey);
+                        logStatus('FAILED', `${message.type || 'Message'} - ${error.message}`);
+                    }
                     reject(error);
                 }
             }
@@ -1746,6 +1733,13 @@ const ReliabilityEngine = {
         
         const delay = this.calculateDelay(message.retryCount);
         
+        // Only log retry once per message type
+        const retryKey = `retry_${message.type || 'Message'}`;
+        if (!_loggedMessages.has(retryKey)) {
+            _loggedMessages.add(retryKey);
+            logStatus('WAITING', `Retry ${message.type || 'Message'} in ${Math.round(delay)}ms`);
+        }
+        
         setTimeout(() => {
             this.processRetry(retryId);
         }, delay);
@@ -1790,7 +1784,12 @@ const ReliabilityEngine = {
         const handler = this.pendingAcks.get(messageId);
         if (handler) {
             clearTimeout(handler.timer);
-            logStatus('SUCCESS', handler.message.type || 'Message');
+            // Only log success once per message type
+            const key = `ack_${handler.message.type || 'Message'}`;
+            if (!_loggedMessages.has(key)) {
+                _loggedMessages.add(key);
+                logStatus('SUCCESS', handler.message.type || 'Message');
+            }
             handler.resolve({ success: true, messageId, ack: true });
             this.pendingAcks.delete(messageId);
             this.stats.received++;
@@ -1882,7 +1881,25 @@ const MESSAGE_TYPES = {
     HIGHLIGHT_DELETE: 'HIGHLIGHT_DELETE',
     HIGHLIGHT_ADD_STATUS: 'HIGHLIGHT_ADD_STATUS',
     HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS',
-    IFRAME_REGISTERED: 'IFRAME_REGISTERED'
+    IFRAME_REGISTERED: 'IFRAME_REGISTERED',
+    
+    // NEW STATUS-SPECIFIC MESSAGE TYPES
+    STATUS_CREATE: 'STATUS_CREATE',
+    STATUS_POSTED: 'STATUS_POSTED',
+    STATUS_VIEWED: 'STATUS_VIEWED',
+    STATUS_REACTED: 'STATUS_REACTED',
+    STATUS_REACTION_REMOVED: 'STATUS_REACTION_REMOVED',
+    STATUS_EXPIRED: 'STATUS_EXPIRED',
+    STATUS_SYNC_REQUEST: 'STATUS_SYNC_REQUEST',
+    STATUS_SYNC_RESPONSE: 'STATUS_SYNC_RESPONSE',
+    STATUSES_UPDATE: 'STATUSES_UPDATE',
+    VIEWER_TRACKED: 'VIEWER_TRACKED',
+    REACTION_ADDED: 'REACTION_ADDED',
+    REACTION_REMOVED: 'REACTION_REMOVED',
+    REACTION_CHANGED: 'REACTION_CHANGED',
+    REACTIONS_UPDATE: 'REACTIONS_UPDATE',
+    VIEWERS_UPDATE: 'VIEWERS_UPDATE',
+    EXPIRED_STATUS_CLEANUP: 'EXPIRED_STATUS_CLEANUP'
 };
 
 // =============================================
@@ -1952,7 +1969,6 @@ const RecoveryManager = {
         } catch (error) {
             this.recoveryInProgress = false;
             StartupGovernor.recoveryFailed();
-            logStatus('FAILED', `Recovery error: ${error.message}`);
             
             return { success: false, error: error.message };
         }
@@ -1960,15 +1976,6 @@ const RecoveryManager = {
     
     async recoverHandshake(context) {
         StartupGovernor.recover();
-        
-        if (typeof state !== 'undefined') {
-            state.handshakeComplete = false;
-            state.handshakeState = 'idle';
-            state.childReadySent = false;
-            state.parentReadyReceived = false;
-            state.handshakeAckReceived = false;
-            state.sessionSyncReceived = false;
-        }
         
         await new Promise(r => setTimeout(r, 1000));
         
@@ -2045,33 +2052,6 @@ const RecoveryManager = {
     },
     
     async recoverToken(context) {
-        if (typeof state === 'undefined' || !state.sessionMirror?.refreshToken) {
-            return { success: false, reason: 'No refresh token' };
-        }
-        
-        try {
-            if (typeof sendToParent !== 'undefined') {
-                const response = await sendToParent(MESSAGE_TYPES.TOKEN_REFRESH, {
-                    timestamp: Date.now(),
-                    refreshToken: state.sessionMirror.refreshToken
-                }, { requiresAck: true, timeout: 10000 });
-                
-                if (response && response.payload && response.payload.token) {
-                    state.token = response.payload.token;
-                    state.sessionMirror.token = response.payload.token;
-                    state.sessionMirror.lastRefresh = Date.now();
-                    
-                    if (response.payload.refreshToken) {
-                        state.sessionMirror.refreshToken = response.payload.refreshToken;
-                    }
-                    
-                    SafeStorage.set(UNIFIED_TOKEN_KEY, state.token);
-                    
-                    return { success: true };
-                }
-            }
-        } catch (error) {}
-        
         return { success: false };
     },
     
@@ -2127,7 +2107,7 @@ const RecoveryManager = {
 // IFRAME HANDSHAKE AUTHORITY - SINGLE HANDSHAKE CONTROLLER
 // =============================================
 const IframeHandshakeAuthority = {
-    status: 'idle', // idle, in-progress, complete, failed
+    status: 'idle',
     handshakeId: null,
     startTime: null,
     endTime: null,
@@ -2143,6 +2123,7 @@ const IframeHandshakeAuthority = {
     handshakePromise: null,
     handshakeInProgress: false,
     handshakeLock: false,
+    _handshakeLogged: false,
     
     initialize() {
         this.reset();
@@ -2163,6 +2144,7 @@ const IframeHandshakeAuthority = {
         this.handshakeAckReceived = false;
         this.sessionSyncReceived = false;
         this.handshakeInProgress = false;
+        this._handshakeLogged = false;
         
         if (this.timer) {
             clearTimeout(this.timer);
@@ -2178,7 +2160,10 @@ const IframeHandshakeAuthority = {
         
         // Check if already complete
         if (typeof state !== 'undefined' && state.handshakeComplete) {
-            logStatus('SUCCESS', 'Handshake already complete (cached)');
+            if (!this._handshakeLogged) {
+                this._handshakeLogged = true;
+                logStatus('SUCCESS', 'Handshake already complete');
+            }
             return { success: true, cached: true };
         }
         
@@ -2218,33 +2203,31 @@ const IframeHandshakeAuthority = {
     
     async startHandshakeSequence() {
         try {
-            // Step 1: Send CHILD_READY
-            await this.sendChildReady();
+            // Step 1: Send CHILD_READY (only once)
+            if (!this.childReadySent) {
+                await this.sendChildReady();
+            }
             
             // Step 2: Wait for PARENT_READY
             await this.waitForParentReady();
             
-            // Step 3: Send HANDSHAKE_REQUEST
-            await this.sendHandshakeRequest();
+            // Step 3: Send HANDSHAKE_REQUEST (only once)
+            if (!this.handshakeAckReceived) {
+                await this.sendHandshakeRequest();
+            }
             
             // Step 4: Wait for HANDSHAKE_ACK
             await this.waitForHandshakeAck();
             
-            // Step 5: Request SESSION_SYNC
-            await this.requestSessionSync();
+            // Step 5: Request SESSION_SYNC (only once)
+            if (!this.sessionSyncReceived) {
+                await this.requestSessionSync();
+            }
             
             // Step 6: Wait for SESSION_SYNC
             await this.waitForSessionSync();
             
-            // Step 7: Negotiate capabilities
-            await this.negotiateCapabilities();
-            
-            // Step 8: Validate origin
-            if (!IframeAuthority.compatibilityMode) {
-                await this.validateOrigin();
-            }
-            
-            // Step 9: Complete handshake
+            // Step 7: Complete handshake
             this.completeHandshake();
             
         } catch (error) {
@@ -2256,11 +2239,13 @@ const IframeHandshakeAuthority = {
     },
     
     async sendChildReady() {
+        if (this.childReadySent) return;
+        
         const payload = {
             frameId: IframeAuthority.id,
             instanceId: IframeAuthority.instanceId,
             timestamp: Date.now(),
-            protocolVersion: '5.4',
+            protocolVersion: '6.1',
             module: 'status',
             environment: IframeEnvironment.type,
             capabilities: IframeEnvironment.getCapabilities(),
@@ -2292,6 +2277,11 @@ const IframeHandshakeAuthority = {
                 if (typeof state !== 'undefined') {
                     state.childReadySent = true;
                     state.handshakeState = 'child_ready_sent';
+                }
+                
+                // Only log once
+                if (!this._handshakeLogged) {
+                    logStatus('SENDING', 'CHILD_READY sent');
                 }
             }
         } catch (error) {
@@ -2332,6 +2322,12 @@ const IframeHandshakeAuthority = {
                         state.handshakeState = 'parent_ready_received';
                     }
                     
+                    // Only log once
+                    if (!this._handshakeLogged) {
+                        this._handshakeLogged = true;
+                        logStatus('SUCCESS', 'Parent ready received');
+                    }
+                    
                     resolve();
                 }
             };
@@ -2343,10 +2339,12 @@ const IframeHandshakeAuthority = {
     },
     
     async sendHandshakeRequest() {
+        if (this.handshakeAckReceived) return;
+        
         const payload = {
             messageId: this.handshakeId,
             timestamp: Date.now(),
-            protocolVersion: '5.4',
+            protocolVersion: '6.1',
             module: 'status',
             frameId: IframeAuthority.id,
             instanceId: IframeAuthority.instanceId,
@@ -2376,6 +2374,12 @@ const IframeHandshakeAuthority = {
                 if (typeof state !== 'undefined') {
                     state.handshakeState = 'handshake_sent';
                 }
+                
+                // Only log once
+                if (!this._handshakeLogged) {
+                    logStatus('SENDING', 'Handshake request sent');
+                }
+                
                 return response;
             }
         } catch (error) {
@@ -2385,9 +2389,15 @@ const IframeHandshakeAuthority = {
     
     waitForHandshakeAck() {
         return new Promise((resolve, reject) => {
+            if (this.handshakeAckReceived) {
+                resolve();
+                return;
+            }
+            
             const timeout = setTimeout(() => {
                 if (!this.handshakeAckReceived) {
                     if (this.retries > 0) {
+                        logStatus('FAILED', 'HANDSHAKE_ACK timeout');
                         reject(new Error('HANDSHAKE_ACK timeout'));
                     } else {
                         // Still resolve - might be legacy parent
@@ -2413,6 +2423,12 @@ const IframeHandshakeAuthority = {
                         state.handshakeState = 'handshake_acked';
                     }
                     
+                    // Only log once
+                    if (!this._handshakeLogged) {
+                        this._handshakeLogged = true;
+                        logStatus('SUCCESS', 'Handshake ACK received');
+                    }
+                    
                     // Process any session data in the ACK
                     if (message.payload && message.payload.session) {
                         if (typeof updateSessionMirror !== 'undefined') {
@@ -2431,6 +2447,8 @@ const IframeHandshakeAuthority = {
     },
     
     async requestSessionSync() {
+        if (this.sessionSyncReceived) return;
+        
         const payload = {
             messageId: this.handshakeId + '_session',
             timestamp: Date.now(),
@@ -2453,6 +2471,11 @@ const IframeHandshakeAuthority = {
                 if (typeof state !== 'undefined') {
                     state.handshakeState = 'session_requested';
                 }
+                
+                // Only log once
+                if (!this._handshakeLogged) {
+                    logStatus('SENDING', 'Session sync requested');
+                }
             }
         } catch (error) {
             debugError('Failed to request SESSION_SYNC:', error);
@@ -2470,12 +2493,20 @@ const IframeHandshakeAuthority = {
                 if (!this.sessionSyncReceived) {
                     // If we have cached session, continue
                     if (typeof state !== 'undefined' && state.sessionMirror?.validated) {
+                        if (!this._handshakeLogged) {
+                            this._handshakeLogged = true;
+                            logStatus('SUCCESS', 'Using cached session');
+                        }
                         if (typeof activateSessionFromMirror !== 'undefined') {
                             activateSessionFromMirror();
                         }
                         resolve();
                     } else {
                         // Enable guest mode and continue
+                        if (!this._handshakeLogged) {
+                            this._handshakeLogged = true;
+                            logStatus('WARNING', 'No session - enabling guest mode');
+                        }
                         if (typeof enableGuestMode !== 'undefined') {
                             enableGuestMode();
                         }
@@ -2498,6 +2529,12 @@ const IframeHandshakeAuthority = {
                         state.sessionSyncReceived = true;
                     }
                     
+                    // Only log once
+                    if (!this._handshakeLogged) {
+                        this._handshakeLogged = true;
+                        logStatus('SUCCESS', 'Session sync received');
+                    }
+                    
                     // Process session data
                     if (message.payload) {
                         if (typeof updateSessionMirror !== 'undefined') {
@@ -2515,74 +2552,9 @@ const IframeHandshakeAuthority = {
         });
     },
     
-    async negotiateCapabilities() {
-        const payload = {
-            messageId: this.handshakeId + '_capabilities',
-            timestamp: Date.now(),
-            frameId: IframeAuthority.id,
-            capabilities: Object.keys(IframeEnvironment.getCapabilities()),
-            required: ['session', 'heartbeat', 'retry', 'storage']
-        };
-        
-        try {
-            if (typeof sendToParent !== 'undefined') {
-                const response = await sendToParent(MESSAGE_TYPES.CAPABILITY_REQUEST, payload, {
-                    requiresAck: true,
-                    timeout: IframeEnvironment.isVPNNetwork ? 6000 : 3000,
-                    messageId: this.handshakeId + '_capabilities'
-                });
-                
-                if (response && response.payload && response.payload.capabilities) {
-                    response.payload.capabilities.forEach(cap => {
-                        if (typeof IframeAuthority !== 'undefined') {
-                            IframeAuthority.parentCapabilities.add(cap);
-                        }
-                    });
-                }
-            }
-        } catch (error) {
-            debugError('Capability negotiation failed:', error);
-        }
-    },
-    
-    async validateOrigin() {
-        if (typeof state !== 'undefined' && state.securityContext?.originValidated) {
-            return;
-        }
-        
-        const payload = {
-            messageId: this.handshakeId + '_origin',
-            timestamp: Date.now(),
-            frameId: IframeAuthority.id,
-            origin: window.location.origin,
-            instanceId: IframeAuthority.instanceId,
-            backendDomain: IframeAuthority.backendDomain,
-            frontendDomain: IframeAuthority.frontendDomain
-        };
-        
-        try {
-            if (typeof sendToParent !== 'undefined') {
-                const response = await sendToParent(MESSAGE_TYPES.ORIGIN_VALIDATION, payload, {
-                    requiresAck: true,
-                    timeout: 3000,
-                    messageId: this.handshakeId + '_origin'
-                });
-                
-                if (response && response.payload && response.payload.valid) {
-                    if (typeof state !== 'undefined') {
-                        state.securityContext.originValidated = true;
-                    }
-                }
-            }
-        } catch (error) {
-            debugError('Origin validation failed:', error);
-        }
-    },
-    
     completeHandshake() {
         this.status = 'complete';
         this.endTime = Date.now();
-        logStatus('SUCCESS', 'Handshake completed');
         
         if (typeof state !== 'undefined') {
             state.handshakeComplete = true;
@@ -2597,16 +2569,22 @@ const IframeHandshakeAuthority = {
             StartupGovernor.activate();
         }
         
+        // Only log once
+        if (!this._handshakeLogged) {
+            this._handshakeLogged = true;
+            logStatus('SUCCESS', 'Handshake completed');
+        }
+        
         if (this.resolve) {
             this.resolve({ 
                 success: true, 
                 session: typeof getSessionMirror !== 'undefined' ? getSessionMirror() : null,
-                protocolVersion: '5.4',
+                protocolVersion: '6.1',
                 capabilities: typeof IframeAuthority !== 'undefined' ? Array.from(IframeAuthority.parentCapabilities) : []
             });
         }
         
-        // Send completion acknowledgment
+        // Send completion acknowledgment (silent)
         if (typeof sendToParent !== 'undefined') {
             sendToParent(MESSAGE_TYPES.ACK, {
                 inResponseTo: this.handshakeId,
@@ -2644,10 +2622,18 @@ const IframeHandshakeAuthority = {
             StartupGovernor.incrementRetry();
         }
         
+        // Only log once
+        if (!this._handshakeLogged) {
+            this._handshakeLogged = true;
+            logStatus('FAILED', `Handshake error: ${error.message}`);
+        }
+        
         if (this.retries < this.maxRetries) {
             // Retry with exponential backoff
             const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
             const delay = Math.min(baseDelay * Math.pow(2, this.retries - 1), 10000);
+            
+            logStatus('WAITING', `Retrying handshake in ${Math.round(delay)}ms`);
             
             setTimeout(() => {
                 this.startHandshakeSequence();
@@ -2728,6 +2714,7 @@ function registerStatusModule() {
             
             window.parent.postMessage(message, window.location.origin);
             statusRegistered = true;
+            logStatus('SUCCESS', 'Status module registered');
         }
     } catch (error) {
         debugError('Failed to register status module:', error);
@@ -2740,18 +2727,22 @@ window.addEventListener('load', registerStatusModule);
 // TOLERANT HEARTBEAT SYSTEM
 // =============================================
 function handleHeartbeatMiss() {
-    state.heartbeatFailures++;
-    
-    if (state.heartbeatFailures < state.maxHeartbeatFailures) {
-        return;
+    if (typeof state !== 'undefined') {
+        state.heartbeatFailures++;
+        
+        if (state.heartbeatFailures < state.maxHeartbeatFailures) {
+            return;
+        }
+        
+        logStatus('WARNING', 'Heartbeat missed, refreshing');
+        refreshStatuses();
     }
-    
-    logStatus('WARNING', 'Heartbeat missed, refreshing');
-    refreshStatuses();
 }
 
 function resetHeartbeat() {
-    state.heartbeatFailures = 0;
+    if (typeof state !== 'undefined') {
+        state.heartbeatFailures = 0;
+    }
 }
 
 function refreshStatuses() {
@@ -2769,6 +2760,8 @@ function refreshStatuses() {
                 document.dispatchEvent(new CustomEvent('statusUpdate', {
                     detail: { type: 'refresh', statuses }
                 }));
+                
+                logStatus('SUCCESS', 'Statuses refreshed');
             }
         })
         .catch(error => {
@@ -2891,7 +2884,11 @@ const state = {
         originValidations: 0,
         capabilityNegotiations: 0,
         recoveryAttempts: 0,
-        successfulRecoveries: 0
+        successfulRecoveries: 0,
+        statusViews: 0,
+        statusReactions: 0,
+        statusPosts: 0,
+        statusExpired: 0
     },
     
     handshakeId: null,
@@ -2902,10 +2899,10 @@ const state = {
     handshakeRetries: 0,
     maxHandshakeRetries: IframeEnvironment.getConfig().maxRetries,
     
-    protocolVersion: '5.4',
+    protocolVersion: '6.1',
     parentProtocolVersion: null,
     
-    diagnosticsEnabled: false,
+    diagnosticsEnabled: true,
     diagnosticData: []
 };
 
@@ -2913,7 +2910,7 @@ const state = {
 // IFRAME TRANSPORT - CENTRALIZED COMMUNICATION LAYER
 // =============================================
 const IframeTransport = {
-    version: '5.4',
+    version: '6.1',
     messageQueue: [],
     isProcessing: false,
     retryQueue: new Map(),
@@ -2931,6 +2928,7 @@ const IframeTransport = {
     offlineBuffer: [],
     batchMessages: IframeEnvironment.getConfig().batchMessages,
     keepalive: IframeEnvironment.getConfig().keepalive,
+    _messageLogs: new Set(),
     
     initialize() {
         debugLog('IframeTransport initialized');
@@ -2971,7 +2969,7 @@ const IframeTransport = {
                 const timestamp = Date.now();
                 
                 const message = {
-                    protocol: 'KYN-5.4',
+                    protocol: 'KYN-6.1',
                     version: this.version,
                     messageId,
                     type,
@@ -3010,7 +3008,11 @@ const IframeTransport = {
                             if (message.retryCount < message.maxRetries) {
                                 this.retryMessage(message, options, handler);
                             } else {
-                                logStatus('FAILED', `${type} - ACK timeout`);
+                                const failKey = `fail_${type}`;
+                                if (!this._messageLogs.has(failKey)) {
+                                    this._messageLogs.add(failKey);
+                                    logStatus('FAILED', `${type} - ACK timeout`);
+                                }
                                 handler.reject(new Error('ACK timeout'));
                                 this.pendingAcks.delete(messageId);
                             }
@@ -3034,6 +3036,13 @@ const IframeTransport = {
                     window.parent.postMessage(parentMessage, window.location.origin);
                     DiagnosticsAgent.increment('messagesSent');
                     
+                    // Only log send once per type
+                    const sendKey = `send_${type}`;
+                    if (!this._messageLogs.has(sendKey)) {
+                        this._messageLogs.add(sendKey);
+                        debugLog(`Sent to parent: ${type}`, payload);
+                    }
+                    
                     if (!message.requiresAck) {
                         resolve({ success: true, messageId });
                     }
@@ -3044,6 +3053,7 @@ const IframeTransport = {
                 this.cleanupPendingAcks();
                 
             } catch (error) {
+                debugError('Send error:', error);
                 if (options.retry !== false) {
                     this.retryMessage({ type, payload, options }, options, { reject });
                 } else {
@@ -3085,6 +3095,12 @@ const IframeTransport = {
         this.offlineBuffer.push(offlineItem);
         
         DiagnosticsAgent.increment('offlineOperations');
+        
+        const offlineKey = `offline_${type}`;
+        if (!this._messageLogs.has(offlineKey)) {
+            this._messageLogs.add(offlineKey);
+            logStatus('WARNING', `Offline - queued ${type}`);
+        }
     },
     
     retryMessage(message, options, handler) {
@@ -3102,6 +3118,13 @@ const IframeTransport = {
         this.retryQueue.set(retryId, retryItem);
         
         const delay = this.calculateRetryDelay(retryCount);
+        
+        // Only log retry once per type
+        const retryKey = `retry_${message.type}`;
+        if (!this._messageLogs.has(retryKey)) {
+            this._messageLogs.add(retryKey);
+            logStatus('WAITING', `Retry ${message.type} in ${Math.round(delay)}ms`);
+        }
         
         setTimeout(() => {
             this.processRetry(retryId);
@@ -3142,7 +3165,13 @@ const IframeTransport = {
         const handler = this.pendingAcks.get(messageId);
         if (handler) {
             clearTimeout(handler.timer);
-            logStatus('SUCCESS', handler.message.type);
+            
+            const successKey = `ack_${handler.message.type}`;
+            if (!this._messageLogs.has(successKey)) {
+                this._messageLogs.add(successKey);
+                logStatus('SUCCESS', handler.message.type);
+            }
+            
             handler.resolve({ success: true, messageId, ack: true });
             this.pendingAcks.delete(messageId);
         }
@@ -3195,7 +3224,12 @@ const IframeTransport = {
                     
                     if (this.heartbeatMissed >= this.maxMissedHeartbeats) {
                         this.connectionStatus = 'degraded';
-                        logStatus('WARNING', `Heartbeat missed ${this.heartbeatMissed} times`);
+                        
+                        const degradeKey = 'heartbeat_degraded';
+                        if (!this._messageLogs.has(degradeKey)) {
+                            this._messageLogs.add(degradeKey);
+                            logStatus('WARNING', `Heartbeat missed ${this.heartbeatMissed} times`);
+                        }
                         
                         if (typeof StartupGovernor !== 'undefined') {
                             StartupGovernor.degrade('Heartbeat missed');
@@ -3215,6 +3249,12 @@ const IframeTransport = {
         this.lastHeartbeatReceived = Date.now();
         this.heartbeatMissed = 0;
         this.connectionStatus = 'connected';
+        
+        const pongKey = 'heartbeat_received';
+        if (!this._messageLogs.has(pongKey)) {
+            this._messageLogs.add(pongKey);
+            logStatus('SUCCESS', 'Heartbeat received');
+        }
     },
     
     stopHeartbeat() {
@@ -3226,6 +3266,12 @@ const IframeTransport = {
     
     async processOfflineQueue() {
         if (this.offlineBuffer.length === 0 || !IframeAuthority.parentDetected) return;
+        
+        const processKey = 'offline_process';
+        if (!this._messageLogs.has(processKey)) {
+            this._messageLogs.add(processKey);
+            logStatus('INFO', `Processing ${this.offlineBuffer.length} offline messages`);
+        }
         
         const queue = [...this.offlineBuffer];
         this.offlineBuffer = [];
@@ -3240,6 +3286,12 @@ const IframeTransport = {
             
             // Small delay between messages
             await new Promise(r => setTimeout(r, 10));
+        }
+        
+        const completeKey = 'offline_complete';
+        if (!this._messageLogs.has(completeKey)) {
+            this._messageLogs.add(completeKey);
+            logStatus('SUCCESS', 'Offline queue processed');
         }
     },
     
@@ -3434,7 +3486,12 @@ function createErrorBoundary(fn, featureName, fallback = null) {
         try {
             return await fn(...args);
         } catch (error) {
-            logStatus('FAILED', `${featureName}: ${error.message}`);
+            // Only log each error once
+            const errorKey = `error_${featureName}`;
+            if (!_loggedMessages.has(errorKey)) {
+                _loggedMessages.add(errorKey);
+                logStatus('FAILED', `${featureName}: ${error.message}`);
+            }
             
             if (typeof state !== 'undefined' && state.disabledFeatures) {
                 state.disabledFeatures.add(featureName);
@@ -3480,7 +3537,12 @@ const CIRCUIT_BREAKER = {
     recordFailure(service) {
         this.failures[service] = (this.failures[service] || 0) + 1;
         this.lastFailure[service] = Date.now();
-        logStatus('WARNING', `Circuit failure for ${service}: ${this.failures[service]}`);
+        
+        const key = `circuit_${service}`;
+        if (!_loggedMessages.has(key)) {
+            _loggedMessages.add(key);
+            logStatus('WARNING', `Circuit failure for ${service}: ${this.failures[service]}`);
+        }
     },
     
     recordSuccess(service) {
@@ -3607,6 +3669,47 @@ const MessageFirewall = {
         this.validators.set('IFRAME_REGISTERED', (msg) => {
             return msg.payload && msg.payload.module === 'status';
         });
+        
+        // NEW STATUS-SPECIFIC VALIDATORS
+        this.validators.set('STATUS_CREATE', (msg) => {
+            return msg.payload && 
+                   msg.payload.userId &&
+                   msg.payload.contentType &&
+                   (msg.payload.contentType === 'text' || msg.payload.contentType === 'image' || msg.payload.contentType === 'video');
+        });
+        
+        this.validators.set('STATUS_POSTED', (msg) => {
+            return msg.payload && msg.payload.status && msg.payload.status.id;
+        });
+        
+        this.validators.set('STATUS_VIEWED', (msg) => {
+            return msg.payload && msg.payload.statusId && msg.payload.userId;
+        });
+        
+        this.validators.set('STATUS_REACTED', (msg) => {
+            return msg.payload && msg.payload.statusId && msg.payload.userId && msg.payload.emoji;
+        });
+        
+        this.validators.set('STATUS_EXPIRED', (msg) => {
+            return msg.payload && msg.payload.statusId;
+        });
+        
+        this.validators.set('VIEWER_TRACKED', (msg) => {
+            return msg.payload && msg.payload.statusId && msg.payload.viewerCount !== undefined;
+        });
+        
+        this.validators.set('REACTION_ADDED', (msg) => {
+            return msg.payload && msg.payload.statusId && msg.payload.userId && msg.payload.emoji;
+        });
+        
+        this.validators.set('REACTION_REMOVED', (msg) => {
+            return msg.payload && msg.payload.statusId && msg.payload.userId && msg.payload.emoji;
+        });
+        
+        this.validators.set('REACTION_CHANGED', (msg) => {
+            return msg.payload && msg.payload.statusId && msg.payload.userId && 
+                   msg.payload.oldEmoji && msg.payload.newEmoji;
+        });
     },
     
     validate(message, origin) {
@@ -3618,6 +3721,11 @@ const MessageFirewall = {
             
             // Origin validation using trust adapter
             if (!OriginTrustAdapter.validateMessageOrigin(origin)) {
+                const originKey = `invalid_origin_${origin}`;
+                if (!_loggedMessages.has(originKey)) {
+                    _loggedMessages.add(originKey);
+                    debugWarn(`Invalid origin: ${origin}`);
+                }
                 return false;
             }
             
@@ -3632,6 +3740,11 @@ const MessageFirewall = {
                 const cacheKey = `${origin}:${msgId}`;
                 
                 if (this.replayCache.has(cacheKey) && state.securityContext.replayProtection) {
+                    const replayKey = `replay_${msgId}`;
+                    if (!_loggedMessages.has(replayKey)) {
+                        _loggedMessages.add(replayKey);
+                        debugWarn(`Replay detected: ${msgId}`);
+                    }
                     return false;
                 }
                 
@@ -3648,6 +3761,11 @@ const MessageFirewall = {
                 const lastSequence = this.sequenceTracker.get(sourceKey) || 0;
                 
                 if (message.sequence <= lastSequence) {
+                    const seqKey = `seq_${sourceKey}_${message.sequence}`;
+                    if (!_loggedMessages.has(seqKey)) {
+                        _loggedMessages.add(seqKey);
+                        debugWarn(`Invalid sequence: ${message.sequence} <= ${lastSequence}`);
+                    }
                     return false;
                 }
                 
@@ -3661,6 +3779,11 @@ const MessageFirewall = {
                 
                 if (Math.abs(now - message.timestamp) > tolerance) {
                     if (!IframeAuthority.compatibilityMode) {
+                        const timeKey = `timestamp_${message.timestamp}`;
+                        if (!_loggedMessages.has(timeKey)) {
+                            _loggedMessages.add(timeKey);
+                            debugWarn(`Timestamp out of tolerance: ${Math.abs(now - message.timestamp)}ms`);
+                        }
                         return false;
                     }
                 }
@@ -3669,11 +3792,17 @@ const MessageFirewall = {
             // Schema validation
             const validator = this.validators.get(message.type);
             if (validator && !validator(message) && !IframeAuthority.compatibilityMode) {
+                const schemaKey = `schema_${message.type}`;
+                if (!_loggedMessages.has(schemaKey)) {
+                    _loggedMessages.add(schemaKey);
+                    debugWarn(`Schema validation failed for ${message.type}`);
+                }
                 return false;
             }
             
             return true;
         } catch (e) {
+            debugError('Message validation error:', e);
             return false;
         }
     },
@@ -3823,7 +3952,7 @@ function signMessage(message) {
 // =============================================
 function formatCanonicalMessage(type, payload = {}, options = {}) {
     const message = {
-        protocol: options.protocol || 'KYN-5.4',
+        protocol: options.protocol || 'KYN-6.1',
         messageId: options.messageId || generateMessageId(),
         type: type,
         source: options.source || 'iframe',
@@ -3893,6 +4022,7 @@ function adaptLegacyMessage(message) {
 // COMMUNICATION ENGINE - WITH ACK/RETRY
 // =============================================
 const messageHandlers = new Map();
+const _messageHandlerLogs = new Set();
 
 function addMessageHandler(type, handler) {
     if (!messageHandlers.has(type)) {
@@ -3934,12 +4064,20 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             state.metrics.messagesReceived++;
         }
         
+        // Only log received messages once per type
+        const receiveKey = `received_${message.type}`;
+        if (!_messageHandlerLogs.has(receiveKey)) {
+            _messageHandlerLogs.add(receiveKey);
+            debugLog(`Received from parent: ${message.type}`, message.payload);
+        }
+        
         // Update parent origin
         if (typeof state !== 'undefined' && !state.securityContext.parentOrigin) {
             state.securityContext.parentOrigin = event.origin;
             OriginTrustAdapter.setParentOrigin(event.origin);
             IframeAuthority.parentDetected = true;
             state.parentDetected = true;
+            debugLog('Parent origin set:', event.origin);
         }
         
         // Update parent protocol version
@@ -3994,6 +4132,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 state.pageActivated = true;
             }
             
+            const pageKey = 'page_activated';
+            if (!_messageHandlerLogs.has(pageKey)) {
+                _messageHandlerLogs.add(pageKey);
+                logStatus('SUCCESS', 'Page activated');
+            }
+            
             // Trigger data refresh when page becomes active
             if (typeof loadFreshDataInBackground !== 'undefined') {
                 setTimeout(() => {
@@ -4018,6 +4162,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.parentReadyReceived = true;
+            }
+            
+            const parentKey = 'parent_ready';
+            if (!_messageHandlerLogs.has(parentKey)) {
+                _messageHandlerLogs.add(parentKey);
+                logStatus('SUCCESS', 'Parent ready received');
             }
             
             // Continue handshake if not already complete
@@ -4070,6 +4220,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.completeHandshake();
+            }
+            
+            const sessionKey = 'session_sync_received';
+            if (!_messageHandlerLogs.has(sessionKey)) {
+                _messageHandlerLogs.add(sessionKey);
+                logStatus('SUCCESS', 'Session sync received');
             }
             
             // Trigger callbacks
@@ -4125,6 +4281,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 if (typeof state !== 'undefined') {
                     state.metrics.capabilityNegotiations++;
                 }
+                
+                const capKey = 'capabilities_received';
+                if (!_messageHandlerLogs.has(capKey)) {
+                    _messageHandlerLogs.add(capKey);
+                    logStatus('SUCCESS', `Capabilities updated: ${message.payload.capabilities.length}`);
+                }
             }
         }
         
@@ -4144,6 +4306,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 if (typeof state !== 'undefined') {
                     state.metrics.tokenRefreshes++;
                 }
+                
+                const tokenKey = 'token_refreshed';
+                if (!_messageHandlerLogs.has(tokenKey)) {
+                    _messageHandlerLogs.add(tokenKey);
+                    logStatus('SUCCESS', 'Token refreshed');
+                }
             }
         }
         
@@ -4154,6 +4322,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                     state.securityContext.originValidated = true;
                     state.metrics.originValidations++;
                 }
+                
+                const originKey = 'origin_validated';
+                if (!_messageHandlerLogs.has(originKey)) {
+                    _messageHandlerLogs.add(originKey);
+                    logStatus('SUCCESS', 'Origin validated');
+                }
             }
         }
         
@@ -4163,6 +4337,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
                 if (typeof applyParentConfig !== 'undefined') {
                     applyParentConfig(message.payload.config);
                 }
+                
+                const configKey = 'config_applied';
+                if (!_messageHandlerLogs.has(configKey)) {
+                    _messageHandlerLogs.add(configKey);
+                    logStatus('SUCCESS', 'Config applied');
+                }
             }
         }
         
@@ -4171,6 +4351,12 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             if (message.payload && message.payload.success) {
                 if (typeof state !== 'undefined') {
                     state.metrics.successfulRecoveries++;
+                }
+                
+                const recoverKey = 'recovery_succeeded';
+                if (!_messageHandlerLogs.has(recoverKey)) {
+                    _messageHandlerLogs.add(recoverKey);
+                    logStatus('SUCCESS', 'Recovery succeeded');
                 }
             }
         }
@@ -4191,6 +4377,341 @@ const receiveFromParent = createErrorBoundary(async function(event) {
             return;
         }
         
+        // =============================================
+        // NEW STATUS-SPECIFIC MESSAGE HANDLERS
+        // =============================================
+        
+        // Handle STATUS_POSTED (new status created)
+        if (message.type === MESSAGE_TYPES.STATUS_POSTED) {
+            const statusData = message.payload.status;
+            if (statusData && statusData.id) {
+                const postKey = `status_posted_${statusData.id}`;
+                if (!_messageHandlerLogs.has(postKey)) {
+                    _messageHandlerLogs.add(postKey);
+                    logStatus('POST', `New status from ${statusData.userId}`, { id: statusData.id });
+                }
+                
+                // Add to statuses list
+                if (!statuses.some(s => s.id === statusData.id)) {
+                    statuses.unshift(statusData);
+                    statuses = filterStatusesByPrivacy(statuses);
+                    
+                    // Save to storage
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                    
+                    // If it's my status, add to myStatuses
+                    if (statusData.userId === state.sessionMirror.user?.id) {
+                        if (!myStatuses.some(s => s.id === statusData.id)) {
+                            myStatuses.unshift(statusData);
+                            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                        }
+                    }
+                    
+                    // Dispatch event for UI
+                    document.dispatchEvent(new CustomEvent('statusUpdate', {
+                        detail: { type: 'new', status: statusData }
+                    }));
+                }
+            }
+        }
+        
+        // Handle STATUS_VIEWED (someone viewed a status)
+        if (message.type === MESSAGE_TYPES.STATUS_VIEWED) {
+            const { statusId, userId } = message.payload;
+            
+            if (statusId && userId) {
+                const viewKey = `status_viewed_${statusId}_${userId}`;
+                if (!_messageHandlerLogs.has(viewKey)) {
+                    _messageHandlerLogs.add(viewKey);
+                    logStatus('VIEW', `Status ${statusId} viewed by ${userId}`);
+                }
+                
+                // Find the status
+                const status = statuses.find(s => s.id === statusId);
+                
+                if (status) {
+                    // Initialize viewers array if needed
+                    if (!status.viewers) status.viewers = [];
+                    
+                    // Check if already viewed by this user
+                    const existingViewer = status.viewers.find(v => v.userId === userId);
+                    
+                    if (!existingViewer) {
+                        // Add new viewer
+                        status.viewers.push({
+                            userId,
+                            viewedAt: message.payload.timestamp || Date.now()
+                        });
+                        
+                        // Update viewer count
+                        const viewerCount = status.viewers.length;
+                        
+                        // Save to storage
+                        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                        
+                        // Update metrics
+                        DiagnosticsAgent.increment('statusViews');
+                        
+                        // Dispatch event for UI
+                        document.dispatchEvent(new CustomEvent('viewerUpdate', {
+                            detail: { statusId, viewerCount }
+                        }));
+                        
+                        // If this is my status, update myStatuses too
+                        if (status.userId === state.sessionMirror.user?.id) {
+                            const myStatus = myStatuses.find(s => s.id === statusId);
+                            if (myStatus) {
+                                if (!myStatus.viewers) myStatus.viewers = [];
+                                if (!myStatus.viewers.some(v => v.userId === userId)) {
+                                    myStatus.viewers.push({
+                                        userId,
+                                        viewedAt: message.payload.timestamp || Date.now()
+                                    });
+                                }
+                                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Handle STATUS_REACTED (someone reacted to a status)
+        if (message.type === MESSAGE_TYPES.STATUS_REACTED) {
+            const { statusId, userId, emoji, reactionId } = message.payload;
+            
+            if (statusId && userId && emoji) {
+                const reactKey = `status_reacted_${statusId}_${userId}_${emoji}`;
+                if (!_messageHandlerLogs.has(reactKey)) {
+                    _messageHandlerLogs.add(reactKey);
+                    logStatus('REACTION', `${userId} reacted with ${emoji} to ${statusId}`);
+                }
+                
+                // Find the status
+                const status = statuses.find(s => s.id === statusId);
+                
+                if (status) {
+                    // Initialize reactions array if needed
+                    if (!status.reactions) status.reactions = [];
+                    
+                    // Check if already reacted by this user
+                    const existingReaction = status.reactions.find(r => r.userId === userId);
+                    
+                    if (!existingReaction) {
+                        // Add new reaction
+                        status.reactions.push({
+                            userId,
+                            emoji,
+                            reactedAt: message.payload.timestamp || Date.now(),
+                            reactionId: reactionId || `reaction_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
+                        });
+                        
+                        // Save to storage
+                        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                        
+                        // Update metrics
+                        DiagnosticsAgent.increment('statusReactions');
+                        
+                        // Dispatch event for UI
+                        document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                            detail: { statusId, reactions: status.reactions }
+                        }));
+                        
+                        // If this is my status, update myStatuses too
+                        if (status.userId === state.sessionMirror.user?.id) {
+                            const myStatus = myStatuses.find(s => s.id === statusId);
+                            if (myStatus) {
+                                if (!myStatus.reactions) myStatus.reactions = [];
+                                if (!myStatus.reactions.some(r => r.userId === userId)) {
+                                    myStatus.reactions.push({
+                                        userId,
+                                        emoji,
+                                        reactedAt: message.payload.timestamp || Date.now(),
+                                        reactionId: reactionId || `reaction_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
+                                    });
+                                }
+                                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                            }
+                        }
+                    } else if (existingReaction.emoji !== emoji) {
+                        // Change reaction
+                        existingReaction.emoji = emoji;
+                        existingReaction.updatedAt = message.payload.timestamp || Date.now();
+                        
+                        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                        
+                        document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                            detail: { statusId, reactions: status.reactions }
+                        }));
+                    }
+                }
+            }
+        }
+        
+        // Handle REACTION_REMOVED (someone removed a reaction)
+        if (message.type === MESSAGE_TYPES.REACTION_REMOVED) {
+            const { statusId, userId, emoji } = message.payload;
+            
+            if (statusId && userId) {
+                const removeKey = `reaction_removed_${statusId}_${userId}`;
+                if (!_messageHandlerLogs.has(removeKey)) {
+                    _messageHandlerLogs.add(removeKey);
+                    logStatus('REACTION', `${userId} removed reaction from ${statusId}`);
+                }
+                
+                // Find the status
+                const status = statuses.find(s => s.id === statusId);
+                
+                if (status && status.reactions) {
+                    // Remove the reaction
+                    const initialLength = status.reactions.length;
+                    status.reactions = status.reactions.filter(r => !(r.userId === userId && r.emoji === emoji));
+                    
+                    if (status.reactions.length !== initialLength) {
+                        // Save to storage
+                        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                        
+                        // Dispatch event for UI
+                        document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                            detail: { statusId, reactions: status.reactions }
+                        }));
+                        
+                        // If this is my status, update myStatuses too
+                        if (status.userId === state.sessionMirror.user?.id) {
+                            const myStatus = myStatuses.find(s => s.id === statusId);
+                            if (myStatus && myStatus.reactions) {
+                                myStatus.reactions = myStatus.reactions.filter(r => !(r.userId === userId && r.emoji === emoji));
+                                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Handle REACTION_CHANGED (someone changed their reaction)
+        if (message.type === MESSAGE_TYPES.REACTION_CHANGED) {
+            const { statusId, userId, oldEmoji, newEmoji } = message.payload;
+            
+            if (statusId && userId && oldEmoji && newEmoji) {
+                const changeKey = `reaction_changed_${statusId}_${userId}`;
+                if (!_messageHandlerLogs.has(changeKey)) {
+                    _messageHandlerLogs.add(changeKey);
+                    logStatus('REACTION', `${userId} changed reaction from ${oldEmoji} to ${newEmoji} on ${statusId}`);
+                }
+                
+                // Find the status
+                const status = statuses.find(s => s.id === statusId);
+                
+                if (status && status.reactions) {
+                    // Find and update the reaction
+                    const reaction = status.reactions.find(r => r.userId === userId && r.emoji === oldEmoji);
+                    
+                    if (reaction) {
+                        reaction.emoji = newEmoji;
+                        reaction.updatedAt = message.payload.timestamp || Date.now();
+                        
+                        // Save to storage
+                        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                        
+                        // Dispatch event for UI
+                        document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                            detail: { statusId, reactions: status.reactions }
+                        }));
+                        
+                        // If this is my status, update myStatuses too
+                        if (status.userId === state.sessionMirror.user?.id) {
+                            const myStatus = myStatuses.find(s => s.id === statusId);
+                            if (myStatus && myStatus.reactions) {
+                                const myReaction = myStatus.reactions.find(r => r.userId === userId && r.emoji === oldEmoji);
+                                if (myReaction) {
+                                    myReaction.emoji = newEmoji;
+                                    myReaction.updatedAt = message.payload.timestamp || Date.now();
+                                }
+                                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Handle STATUS_EXPIRED (status has expired)
+        if (message.type === MESSAGE_TYPES.STATUS_EXPIRED) {
+            const { statusId } = message.payload;
+            
+            if (statusId) {
+                const expireKey = `status_expired_${statusId}`;
+                if (!_messageHandlerLogs.has(expireKey)) {
+                    _messageHandlerLogs.add(expireKey);
+                    logStatus('EXPIRE', `Status ${statusId} expired`);
+                }
+                
+                // Remove from statuses
+                statuses = statuses.filter(s => s.id !== statusId);
+                
+                // Remove from myStatuses
+                myStatuses = myStatuses.filter(s => s.id !== statusId);
+                
+                // Remove from all category arrays
+                friendsStatuses = friendsStatuses.filter(s => s.id !== statusId);
+                closeFriendsStatuses = closeFriendsStatuses.filter(s => s.id !== statusId);
+                pinnedStatuses = pinnedStatuses.filter(s => s.id !== statusId);
+                mutedStatuses = mutedStatuses.filter(s => s.id !== statusId);
+                microCirclesStatuses = microCirclesStatuses.filter(s => s.id !== statusId);
+                
+                // Remove from highlights
+                highlights.forEach(highlight => {
+                    if (highlight.statusIds) {
+                        highlight.statusIds = highlight.statusIds.filter(id => id !== statusId);
+                        highlight.count = highlight.statusIds.length;
+                    }
+                });
+                
+                // Update metrics
+                DiagnosticsAgent.increment('statusExpired');
+                
+                // Save to storage
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+                
+                // Dispatch event for UI
+                document.dispatchEvent(new CustomEvent('statusExpired', {
+                    detail: { statusId }
+                }));
+            }
+        }
+        
+        // Handle STATUSES_UPDATE (bulk update of statuses)
+        if (message.type === MESSAGE_TYPES.STATUSES_UPDATE) {
+            const newStatuses = message.payload.statuses;
+            
+            if (newStatuses && Array.isArray(newStatuses)) {
+                const bulkKey = 'statuses_update_bulk';
+                if (!_messageHandlerLogs.has(bulkKey)) {
+                    _messageHandlerLogs.add(bulkKey);
+                    logStatus('SUCCESS', `Received ${newStatuses.length} statuses`);
+                }
+                
+                // Merge statuses, avoiding duplicates
+                const existingIds = new Set(statuses.map(s => s.id));
+                const newUniqueStatuses = newStatuses.filter(s => !existingIds.has(s.id));
+                
+                statuses = [...newUniqueStatuses, ...statuses];
+                statuses = filterStatusesByPrivacy(statuses);
+                statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                // Save to storage
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                
+                // Dispatch event for UI
+                document.dispatchEvent(new CustomEvent('statusUpdate', {
+                    detail: { type: 'bulk', statuses: statuses.slice(0, 10) }
+                }));
+            }
+        }
+        
         // Publish to message bus
         if (typeof MessageBus !== 'undefined') {
             MessageBus.publish('parent-messages', message);
@@ -4202,7 +4723,11 @@ const receiveFromParent = createErrorBoundary(async function(event) {
         }
         
     } catch (e) {
-        logStatus('FAILED', `receiveFromParent: ${e.message}`);
+        const errorKey = `receive_error_${e.message}`;
+        if (!_messageHandlerLogs.has(errorKey)) {
+            _messageHandlerLogs.add(errorKey);
+            logStatus('FAILED', `receiveFromParent: ${e.message}`);
+        }
         
         // Attempt recovery for critical errors
         if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
@@ -4335,6 +4860,11 @@ const SessionClient = {
                 this.sessionExpiry = cached.expiry ? new Date(cached.expiry) : null;
                 
                 if (this.sessionExpiry && this.sessionExpiry > new Date()) {
+                    const cacheKey = 'cached_session_loaded';
+                    if (!_loggedMessages.has(cacheKey)) {
+                        _loggedMessages.add(cacheKey);
+                        logStatus('SUCCESS', 'Cached session loaded');
+                    }
                     return true;
                 }
             }
@@ -4360,6 +4890,11 @@ const SessionClient = {
         if (this.sessionExpiry) {
             const timeToExpiry = this.sessionExpiry - new Date();
             if (timeToExpiry < 300000 && timeToExpiry > 0) {
+                const expiryKey = 'session_expiring';
+                if (!_loggedMessages.has(expiryKey)) {
+                    _loggedMessages.add(expiryKey);
+                    logStatus('WARNING', 'Session expiring soon, refreshing...');
+                }
                 await this.refreshSession();
             }
         }
@@ -4388,7 +4923,12 @@ const SessionClient = {
                 
                 this.cacheSession();
                 this.notifyListeners('refreshed', this.session);
-                logStatus('SUCCESS', 'Session refreshed');
+                
+                const refreshKey = 'session_refreshed';
+                if (!_loggedMessages.has(refreshKey)) {
+                    _loggedMessages.add(refreshKey);
+                    logStatus('SUCCESS', 'Session refreshed');
+                }
                 
                 return this.session;
             }
@@ -4396,6 +4936,12 @@ const SessionClient = {
             // If refresh fails, try recovery
             if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
                 RecoveryManager.recover('token', { error });
+            }
+            
+            const failKey = 'session_refresh_failed';
+            if (!_loggedMessages.has(failKey)) {
+                _loggedMessages.add(failKey);
+                logStatus('FAILED', 'Session refresh failed');
             }
             
             // Enable offline mode
@@ -4461,6 +5007,12 @@ const SessionClient = {
         
         this.notifyListeners('updated', this.session, oldSession);
         
+        const updateKey = `session_updated_${source}`;
+        if (!_loggedMessages.has(updateKey)) {
+            _loggedMessages.add(updateKey);
+            logStatus('SUCCESS', `Session updated from ${source}`);
+        }
+        
         // Disable offline mode
         this.offlineMode = false;
         
@@ -4476,6 +5028,12 @@ const SessionClient = {
         SafeStorage.remove('session_cache');
         
         this.notifyListeners('cleared', null);
+        
+        const clearKey = 'session_cleared';
+        if (!_loggedMessages.has(clearKey)) {
+            _loggedMessages.add(clearKey);
+            logStatus('WARNING', 'Session cleared');
+        }
     },
     
     cacheSession() {
@@ -4595,6 +5153,12 @@ function updateSessionMirror(sessionData, source = 'parent') {
                 SafeStorage.setJSON('REFRESH_TOKEN', state.sessionMirror.refreshToken);
             }
             
+            const updateKey = `mirror_updated_${source}`;
+            if (!_loggedMessages.has(updateKey)) {
+                _loggedMessages.add(updateKey);
+                logStatus('SUCCESS', `Session mirror updated from ${source}`);
+            }
+            
             // Trigger callbacks
             if (typeof isTokenReady !== 'undefined') {
                 isTokenReady = true;
@@ -4612,7 +5176,11 @@ function updateSessionMirror(sessionData, source = 'parent') {
         
         return false;
     } catch (error) {
-        logStatus('FAILED', `updateSessionMirror: ${error.message}`);
+        const errorKey = `mirror_update_${error.message}`;
+        if (!_loggedMessages.has(errorKey)) {
+            _loggedMessages.add(errorKey);
+            logStatus('FAILED', `updateSessionMirror: ${error.message}`);
+        }
         return false;
     }
 }
@@ -4674,7 +5242,11 @@ function startEnhancedHeartbeat() {
                     state.heartbeatFailures++;
                     
                     if (state.heartbeatFailures >= state.maxHeartbeatFailures) {
-                        logStatus('WARNING', 'Connection degraded');
+                        const missKey = 'heartbeat_missed';
+                        if (!_loggedMessages.has(missKey)) {
+                            _loggedMessages.add(missKey);
+                            logStatus('WARNING', 'Connection degraded');
+                        }
                         
                         // Attempt soft refresh instead of hard recovery
                         refreshStatuses();
@@ -4686,6 +5258,12 @@ function startEnhancedHeartbeat() {
     }, IframeEnvironment.getConfig().heartbeatInterval || 30000);
     
     state.intervals.add(state.heartbeatInterval);
+    
+    const startKey = 'heartbeat_started';
+    if (!_loggedMessages.has(startKey)) {
+        _loggedMessages.add(startKey);
+        logStatus('SUCCESS', 'Heartbeat started');
+    }
 }
 
 async function triggerConnectionRecovery() {
@@ -4710,6 +5288,12 @@ async function triggerConnectionRecovery() {
         
         if (response && response.payload && response.payload.success) {
             state.heartbeatFailures = 0;
+            
+            const recoverKey = 'connection_recovered';
+            if (!_loggedMessages.has(recoverKey)) {
+                _loggedMessages.add(recoverKey);
+                logStatus('SUCCESS', 'Connection recovered');
+            }
         }
     } catch (error) {
         // If recovery fails, attempt re-handshake
@@ -4729,6 +5313,12 @@ async function reestablishConnection() {
         StartupGovernor.recover();
     }
     
+    const reconKey = 'reestablishing';
+    if (!_loggedMessages.has(reconKey)) {
+        _loggedMessages.add(reconKey);
+        logStatus('WARNING', 'Reestablishing connection...');
+    }
+    
     try {
         const result = await HandshakeClient.execute({ maxRetries: 3 });
         
@@ -4738,6 +5328,12 @@ async function reestablishConnection() {
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.activate();
             }
+            
+            const successKey = 'reestablish_success';
+            if (!_loggedMessages.has(successKey)) {
+                _loggedMessages.add(successKey);
+                logStatus('SUCCESS', 'Connection reestablished');
+            }
         }
     } catch (error) {
         // Enable offline mode
@@ -4745,6 +5341,12 @@ async function reestablishConnection() {
         
         if (typeof StartupGovernor !== 'undefined') {
             StartupGovernor.degrade('Connection lost');
+        }
+        
+        const lostKey = 'connection_lost';
+        if (!_loggedMessages.has(lostKey)) {
+            _loggedMessages.add(lostKey);
+            logStatus('WARNING', 'Connection lost, using offline mode');
         }
         
         document.dispatchEvent(new CustomEvent('connectionLost', {
@@ -4797,6 +5399,12 @@ function applyParentConfig(config) {
             }
         }
         
+        const applyKey = 'config_applied';
+        if (!_loggedMessages.has(applyKey)) {
+            _loggedMessages.add(applyKey);
+            logStatus('SUCCESS', 'Parent config applied');
+        }
+        
         document.dispatchEvent(new CustomEvent('configApplied', {
             detail: config
         }));
@@ -4830,7 +5438,12 @@ async function refreshToken() {
             }
             
             SafeStorage.set(UNIFIED_TOKEN_KEY, state.token);
-            logStatus('SUCCESS', 'Token refreshed');
+            
+            const refreshKey = 'token_refreshed';
+            if (!_loggedMessages.has(refreshKey)) {
+                _loggedMessages.add(refreshKey);
+                logStatus('SUCCESS', 'Token refreshed');
+            }
             
             return state.token;
         }
@@ -4838,6 +5451,12 @@ async function refreshToken() {
         // Try recovery
         if (typeof RecoveryManager !== 'undefined' && RecoveryManager.canRecover()) {
             RecoveryManager.recover('token', { error });
+        }
+        
+        const failKey = 'token_refresh_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', 'Token refresh failed');
         }
     } finally {
         state.sessionMirror.refreshInProgress = false;
@@ -4875,6 +5494,12 @@ const ParentDetector = {
                         this.checkInterval = null;
                     }
                     
+                    const detectKey = 'parent_detected';
+                    if (!_loggedMessages.has(detectKey)) {
+                        _loggedMessages.add(detectKey);
+                        logStatus('SUCCESS', 'Parent detected');
+                    }
+                    
                     resolve(true);
                     return;
                 }
@@ -4887,6 +5512,12 @@ const ParentDetector = {
                     if (this.checkInterval) {
                         clearInterval(this.checkInterval);
                         this.checkInterval = null;
+                    }
+                    
+                    const noParentKey = 'parent_not_detected';
+                    if (!_loggedMessages.has(noParentKey)) {
+                        _loggedMessages.add(noParentKey);
+                        logStatus('WARNING', 'Parent not detected');
                     }
                     
                     resolve(false);
@@ -4954,9 +5585,19 @@ async function preflightStage() {
         // Detect environment
         IframeEnvironment.detect();
         
+        const preflightKey = 'preflight_complete';
+        if (!_loggedMessages.has(preflightKey)) {
+            _loggedMessages.add(preflightKey);
+            logStatus('SUCCESS', 'Preflight complete');
+        }
+        
         return { success: true };
     } catch (error) {
-        logStatus('FAILED', `Preflight failed: ${error.message}`);
+        const failKey = 'preflight_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Preflight failed: ${error.message}`);
+        }
         return { success: false, fallback: true };
     }
 }
@@ -4968,13 +5609,29 @@ async function dependencyCheckStage() {
         
         if (missing.length > 0) {
             state.dependenciesLoaded = false;
+            const missingKey = 'missing_deps_' + missing.join('_');
+            if (!_loggedMessages.has(missingKey)) {
+                _loggedMessages.add(missingKey);
+                logStatus('WARNING', `Missing dependencies: ${missing.join(', ')}`);
+            }
             return { success: false, fallback: true, missing };
         }
         
         state.dependenciesLoaded = true;
+        
+        const depsKey = 'deps_ok';
+        if (!_loggedMessages.has(depsKey)) {
+            _loggedMessages.add(depsKey);
+            logStatus('SUCCESS', 'Dependencies OK');
+        }
+        
         return { success: true };
     } catch (error) {
-        logStatus('FAILED', `Dependency check failed: ${error.message}`);
+        const failKey = 'deps_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Dependency check failed: ${error.message}`);
+        }
         state.dependenciesLoaded = false;
         return { success: false, fallback: true };
     }
@@ -4993,6 +5650,11 @@ async function parentDetectStage(timeout = 2000) {
 async function handshakeStage(options = {}) {
     if (!state.parentDetected) {
         state.handshakeComplete = false;
+        const noParentKey = 'handshake_no_parent';
+        if (!_loggedMessages.has(noParentKey)) {
+            _loggedMessages.add(noParentKey);
+            logStatus('WARNING', 'No parent detected, skipping handshake');
+        }
         return { success: false, fallback: true };
     }
     
@@ -5002,10 +5664,19 @@ async function handshakeStage(options = {}) {
         });
         
         if (result && result.success) {
+            const stageKey = 'handshake_stage_complete';
+            if (!_loggedMessages.has(stageKey)) {
+                _loggedMessages.add(stageKey);
+                logStatus('SUCCESS', 'Handshake stage complete');
+            }
             return { success: true };
         }
     } catch (error) {
-        logStatus('FAILED', `Handshake failed: ${error.message}`);
+        const failKey = 'handshake_stage_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Handshake stage failed: ${error.message}`);
+        }
     }
     
     state.handshakeComplete = false;
@@ -5016,10 +5687,20 @@ async function sessionSyncStage(timeout = 5000) {
     if (!state.handshakeComplete || !state.parentDetected) {
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
+            const cacheKey = 'using_cached_session';
+            if (!_loggedMessages.has(cacheKey)) {
+                _loggedMessages.add(cacheKey);
+                logStatus('SUCCESS', 'Using cached session');
+            }
             return { success: true, guestMode: false, cached: true };
         }
         
         enableGuestMode();
+        const noSessionKey = 'no_session_guest';
+        if (!_loggedMessages.has(noSessionKey)) {
+            _loggedMessages.add(noSessionKey);
+            logStatus('WARNING', 'No session, using guest mode');
+        }
         return { success: false, guestMode: true };
     }
     
@@ -5066,18 +5747,38 @@ async function sessionSyncStage(timeout = 5000) {
             updateSessionMirror(sessionData, 'session_sync');
             activateSessionFromMirror();
             
+            const syncKey = 'session_sync_complete';
+            if (!_loggedMessages.has(syncKey)) {
+                _loggedMessages.add(syncKey);
+                logStatus('SUCCESS', 'Session sync complete');
+            }
+            
             return { success: true, guestMode: false, user: state.user };
         }
     } catch (error) {
-        logStatus('FAILED', `Session sync failed: ${error.message}`);
+        const failKey = 'session_sync_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Session sync failed: ${error.message}`);
+        }
     }
     
     if (state.sessionMirror.validated) {
         activateSessionFromMirror();
+        const cacheFailKey = 'session_sync_fail_cache';
+        if (!_loggedMessages.has(cacheFailKey)) {
+            _loggedMessages.add(cacheFailKey);
+            logStatus('SUCCESS', 'Using cached session after sync failure');
+        }
         return { success: true, guestMode: false, cached: true };
     }
     
     enableGuestMode();
+    const finalGuestKey = 'session_sync_fail_guest';
+    if (!_loggedMessages.has(finalGuestKey)) {
+        _loggedMessages.add(finalGuestKey);
+        logStatus('WARNING', 'Session sync failed, using guest mode');
+    }
     return { success: false, guestMode: true };
 }
 
@@ -5098,6 +5799,12 @@ function activateSessionFromMirror() {
         capabilities: state.sessionMirror.capabilities
     };
     
+    const activateKey = 'session_activated';
+    if (!_loggedMessages.has(activateKey)) {
+        _loggedMessages.add(activateKey);
+        logStatus('SUCCESS', 'Session activated from mirror');
+    }
+    
     return true;
 }
 
@@ -5108,9 +5815,19 @@ async function serviceInitStage() {
             updateSessionMirror(cachedSession, 'cache');
         }
         
+        const serviceKey = 'service_init_complete';
+        if (!_loggedMessages.has(serviceKey)) {
+            _loggedMessages.add(serviceKey);
+            logStatus('SUCCESS', 'Service init complete');
+        }
+        
         return { success: true };
     } catch (error) {
-        logStatus('FAILED', `Service init failed: ${error.message}`);
+        const failKey = 'service_init_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Service init failed: ${error.message}`);
+        }
         return { success: false, fallback: true };
     }
 }
@@ -5128,19 +5845,41 @@ function readyStage() {
     
     startEnhancedHeartbeat();
     
+    const readyKey = 'status_core_ready';
+    if (!_loggedMessages.has(readyKey)) {
+        _loggedMessages.add(readyKey);
+        logStatus('READY', 'Status core ready');
+    }
+    
     return { success: true, state: state.readyState, guestMode: state.isGuestMode };
 }
 
 const initializeCore = createErrorBoundary(async function(options = {}) {
     if (state.initialized) {
+        const alreadyKey = 'core_already_initialized';
+        if (!_loggedMessages.has(alreadyKey)) {
+            _loggedMessages.add(alreadyKey);
+            logStatus('INFO', 'Core already initialized');
+        }
         return { success: true, state: state.readyState };
     }
     
     if (!StartupGovernor.canInitialize()) {
+        const blockKey = 'governor_blocked';
+        if (!_loggedMessages.has(blockKey)) {
+            _loggedMessages.add(blockKey);
+            logStatus('WARNING', 'Governor blocked initialization');
+        }
         return { success: false, reason: 'Governor blocked' };
     }
     
     StartupGovernor.acquireLock();
+    
+    const startKey = 'core_init_start';
+    if (!_loggedMessages.has(startKey)) {
+        _loggedMessages.add(startKey);
+        logStatus('INIT', 'Starting core initialization');
+    }
     
     try {
         state.readyState = 'preflight';
@@ -5169,7 +5908,11 @@ const initializeCore = createErrorBoundary(async function(options = {}) {
         return result;
         
     } catch (error) {
-        logStatus('FAILED', `Core initialization: ${error.message}`);
+        const failKey = 'core_init_failed';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Core initialization: ${error.message}`);
+        }
         
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
@@ -5218,6 +5961,12 @@ function enableGuestMode() {
         guestMode: true
     };
     
+    const guestKey = 'guest_mode_enabled';
+    if (!_loggedMessages.has(guestKey)) {
+        _loggedMessages.add(guestKey);
+        logStatus('INFO', 'Guest mode enabled');
+    }
+    
     // Dispatch event for UI
     document.dispatchEvent(new CustomEvent('guestModeEnabled', {
         detail: { timestamp: Date.now() }
@@ -5233,6 +5982,11 @@ function loadCachedSession() {
         if (userData && token) {
             const user = userData;
             if (user && user.id) {
+                const cacheKey = 'cached_session_loaded';
+                if (!_loggedMessages.has(cacheKey)) {
+                    _loggedMessages.add(cacheKey);
+                    logStatus('INFO', 'Loaded cached session');
+                }
                 return { 
                     user, 
                     token, 
@@ -5260,6 +6014,12 @@ const shutdownCore = createErrorBoundary(async function() {
     if (state.shutdownInProgress) return;
     
     state.shutdownInProgress = true;
+    
+    const shutdownKey = 'shutdown_start';
+    if (!_loggedMessages.has(shutdownKey)) {
+        _loggedMessages.add(shutdownKey);
+        logStatus('INFO', 'Shutting down core');
+    }
     
     try {
         // Clear intervals
@@ -5306,8 +6066,18 @@ const shutdownCore = createErrorBoundary(async function() {
             }, { requiresAck: false, silent: true });
         }
         
+        const completeKey = 'shutdown_complete';
+        if (!_loggedMessages.has(completeKey)) {
+            _loggedMessages.add(completeKey);
+            logStatus('SUCCESS', 'Core shutdown complete');
+        }
+        
     } catch (error) {
-        logStatus('FAILED', `Shutdown error: ${error.message}`);
+        const failKey = 'shutdown_error';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Shutdown error: ${error.message}`);
+        }
     } finally {
         state.shutdownInProgress = false;
     }
@@ -5323,7 +6093,11 @@ addMessageHandler(MESSAGE_TYPES.STATUS, (message) => {
     }));
 });
 addMessageHandler(MESSAGE_TYPES.ERROR, (message) => {
-    logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
+    const errorKey = `parent_error_${message.payload?.error || 'unknown'}`;
+    if (!_loggedMessages.has(errorKey)) {
+        _loggedMessages.add(errorKey);
+        logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
+    }
 });
 addMessageHandler(MESSAGE_TYPES.DATA, (message) => {
     document.dispatchEvent(new CustomEvent('coreData', {
@@ -5355,6 +6129,11 @@ addMessageHandler(MESSAGE_TYPES.AUTH_VALIDATED, (message) => {
             if (typeof triggerTokenReadyCallbacks !== 'undefined') {
                 triggerTokenReadyCallbacks();
             }
+        }
+        const authKey = 'auth_validated';
+        if (!_loggedMessages.has(authKey)) {
+            _loggedMessages.add(authKey);
+            logStatus('SUCCESS', 'Auth validated');
         }
     }
 });
@@ -5389,6 +6168,12 @@ addMessageHandler(MESSAGE_TYPES.PONG, (message) => {
 // PAGE_ACTIVATED handler
 addMessageHandler(MESSAGE_TYPES.PAGE_ACTIVATED, (message) => {
     state.pageActivated = true;
+    
+    const pageKey = 'page_activated_handler';
+    if (!_loggedMessages.has(pageKey)) {
+        _loggedMessages.add(pageKey);
+        logStatus('INFO', 'Page activated');
+    }
     
     // Trigger data refresh when page becomes active
     if (typeof loadFreshDataInBackground !== 'undefined') {
@@ -5469,7 +6254,11 @@ function registerFeature(name, implementation) {
         state.features.set(name, wrappedImplementation);
         return true;
     } catch (e) {
-        logStatus('FAILED', `Feature registration failed: ${name} - ${e.message}`);
+        const regKey = `feature_reg_fail_${name}`;
+        if (!_loggedMessages.has(regKey)) {
+            _loggedMessages.add(regKey);
+            logStatus('FAILED', `Feature registration failed: ${name} - ${e.message}`);
+        }
         return false;
     }
 }
@@ -5491,7 +6280,11 @@ function executeFeature(name, ...args) {
         
         return feature(...args);
     } catch (error) {
-        logStatus('FAILED', `Feature execution failed: ${name} - ${error.message}`);
+        const execKey = `feature_exec_fail_${name}`;
+        if (!_loggedMessages.has(execKey)) {
+            _loggedMessages.add(execKey);
+            logStatus('FAILED', `Feature execution failed: ${name} - ${error.message}`);
+        }
         state.disabledFeatures.add(name);
         return null;
     }
@@ -5650,10 +6443,20 @@ function initializeParentCoordination() {
         parentCoordinator.messageChannel = window;
         parentCoordinator.isInitialized = true;
         
+        const initKey = 'parent_coord_init';
+        if (!_loggedMessages.has(initKey)) {
+            _loggedMessages.add(initKey);
+            logStatus('INFO', 'Parent coordination initialized');
+        }
+        
         startSecureHandshake();
         
     } catch (error) {
-        logStatus('FAILED', `Parent coordination: ${error.message}`);
+        const failKey = 'parent_coord_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Parent coordination: ${error.message}`);
+        }
         handleParentUnavailable();
     }
 }
@@ -5729,9 +6532,28 @@ function handleEnhancedParentMessage(event) {
                     }, 100);
                 }
                 break;
+                
+            // NEW: Handle status-specific messages from parent
+            case MESSAGE_TYPES.STATUS_POSTED:
+            case MESSAGE_TYPES.STATUS_VIEWED:
+            case MESSAGE_TYPES.STATUS_REACTED:
+            case MESSAGE_TYPES.REACTION_REMOVED:
+            case MESSAGE_TYPES.REACTION_CHANGED:
+            case MESSAGE_TYPES.STATUS_EXPIRED:
+            case MESSAGE_TYPES.STATUSES_UPDATE:
+                // These are already handled in receiveFromParent
+                // But we also need to dispatch events for UI
+                document.dispatchEvent(new CustomEvent('parentStatusUpdate', {
+                    detail: { type: message.type, payload: message.payload }
+                }));
+                break;
         }
     } catch (error) {
-        logStatus('FAILED', `handleEnhancedParentMessage: ${error.message}`);
+        const handlerKey = `enhanced_parent_msg_${error.message}`;
+        if (!_loggedMessages.has(handlerKey)) {
+            _loggedMessages.add(handlerKey);
+            logStatus('FAILED', `handleEnhancedParentMessage: ${error.message}`);
+        }
     }
 }
 
@@ -5746,7 +6568,11 @@ function startSecureHandshake() {
         requestSessionFromParent();
         
     } catch (error) {
-        logStatus('FAILED', `Secure handshake: ${error.message}`);
+        const failKey = 'secure_handshake_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `Secure handshake: ${error.message}`);
+        }
     }
 }
 
@@ -5769,8 +6595,18 @@ function sendChildReadyMessage() {
         parentCoordinator.childReadySent = true;
         state.childReadySent = true;
         
+        const sendKey = 'child_ready_sent';
+        if (!_loggedMessages.has(sendKey)) {
+            _loggedMessages.add(sendKey);
+            logStatus('SENDING', 'Child ready sent');
+        }
+        
     } catch (error) {
-        logStatus('FAILED', `sendChildReadyMessage: ${error.message}`);
+        const failKey = 'child_ready_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `sendChildReadyMessage: ${error.message}`);
+        }
     }
 }
 
@@ -5797,6 +6633,12 @@ function requestSessionFromParent() {
         
         window.parent.postMessage(message, window.location.origin);
         
+        const reqKey = 'session_request_sent';
+        if (!_loggedMessages.has(reqKey)) {
+            _loggedMessages.add(reqKey);
+            logStatus('SENDING', 'Session request sent');
+        }
+        
         const timeoutMs = IframeEnvironment.isVPNNetwork ? 10000 : 5000;
         
         parentCoordinator.handshakeTimeout = setTimeout(() => {
@@ -5804,6 +6646,13 @@ function requestSessionFromParent() {
                 if (!parentCoordinator.handshakeRetries || parentCoordinator.handshakeRetries < 1) {
                     parentCoordinator.handshakeRetries++;
                     parentCoordinator.handshakeInProgress = false;
+                    
+                    const timeoutKey = 'session_request_timeout';
+                    if (!_loggedMessages.has(timeoutKey)) {
+                        _loggedMessages.add(timeoutKey);
+                        logStatus('WARNING', 'Session request timeout, retrying...');
+                    }
+                    
                     setTimeout(requestSessionFromParent, 1000);
                 } else {
                     handleSessionFailed();
@@ -5812,7 +6661,11 @@ function requestSessionFromParent() {
         }, timeoutMs);
         
     } catch (error) {
-        logStatus('FAILED', `requestSessionFromParent: ${error.message}`);
+        const failKey = 'session_request_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `requestSessionFromParent: ${error.message}`);
+        }
         parentCoordinator.handshakeInProgress = false;
         handleSessionFailed();
     }
@@ -5843,6 +6696,12 @@ function handleSecureSessionData(message) {
             clearTimeout(parentCoordinator.handshakeTimeout);
             parentCoordinator.sessionData = sessionData;
             
+            const dataKey = 'secure_session_data';
+            if (!_loggedMessages.has(dataKey)) {
+                _loggedMessages.add(dataKey);
+                logStatus('SUCCESS', 'Secure session data received');
+            }
+            
             bindUIAfterSession();
             
             sendSecureResponseToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
@@ -5859,7 +6718,11 @@ function handleSecureSessionData(message) {
         }
         
     } catch (error) {
-        logStatus('FAILED', `handleSecureSessionData: ${error.message}`);
+        const failKey = 'secure_session_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `handleSecureSessionData: ${error.message}`);
+        }
         parentCoordinator.handshakeInProgress = false;
         clearTimeout(parentCoordinator.handshakeTimeout);
     }
@@ -5872,7 +6735,11 @@ function bindUIAfterSession() {
         }
         updateUIBasedOnAuth();
     } catch (error) {
-        logStatus('FAILED', `bindUIAfterSession: ${error.message}`);
+        const bindKey = 'ui_bind_fail';
+        if (!_loggedMessages.has(bindKey)) {
+            _loggedMessages.add(bindKey);
+            logStatus('FAILED', `bindUIAfterSession: ${error.message}`);
+        }
     }
 }
 
@@ -5882,7 +6749,11 @@ function updateUIBasedOnAuth() {
             detail: { user: currentUser }
         }));
     } catch (error) {
-        logStatus('FAILED', `updateUIBasedOnAuth: ${error.message}`);
+        const uiKey = 'ui_auth_fail';
+        if (!_loggedMessages.has(uiKey)) {
+            _loggedMessages.add(uiKey);
+            logStatus('FAILED', `updateUIBasedOnAuth: ${error.message}`);
+        }
     }
 }
 
@@ -5904,7 +6775,11 @@ function sendSecureResponseToParent(type, data = {}) {
         window.parent.postMessage(message, window.location.origin);
         
     } catch (error) {
-        logStatus('FAILED', `sendSecureResponseToParent: ${error.message}`);
+        const sendKey = 'secure_response_fail';
+        if (!_loggedMessages.has(sendKey)) {
+            _loggedMessages.add(sendKey);
+            logStatus('FAILED', `sendSecureResponseToParent: ${error.message}`);
+        }
     }
 }
 
@@ -5915,6 +6790,12 @@ function handleSessionFailed() {
     
     if (typeof StartupGovernor !== 'undefined') {
         StartupGovernor.degrade('Session failed');
+    }
+    
+    const failKey = 'session_failed';
+    if (!_loggedMessages.has(failKey)) {
+        _loggedMessages.add(failKey);
+        logStatus('WARNING', 'Session failed');
     }
     
     if (state.sessionMirror.validated) {
@@ -5938,7 +6819,11 @@ function clearSecureHandshake() {
         parentCoordinator.sessionRequestSent = false;
         parentCoordinator.handshakeRetries = 0;
     } catch (error) {
-        logStatus('FAILED', `clearSecureHandshake: ${error.message}`);
+        const clearKey = 'clear_handshake_fail';
+        if (!_loggedMessages.has(clearKey)) {
+            _loggedMessages.add(clearKey);
+            logStatus('FAILED', `clearSecureHandshake: ${error.message}`);
+        }
     }
 }
 
@@ -5967,6 +6852,12 @@ function handleSessionData(sessionData) {
             parentCoordinator.handshakeInterval = null;
         }
         
+        const dataKey = 'session_data_received';
+        if (!_loggedMessages.has(dataKey)) {
+            _loggedMessages.add(dataKey);
+            logStatus('SUCCESS', 'Session data received');
+        }
+        
         sendToParent(MESSAGE_TYPES.AUTH_VALIDATED, {
             module: 'status',
             success: true,
@@ -5976,7 +6867,11 @@ function handleSessionData(sessionData) {
         startBackgroundInitializationWithSession();
         
     } catch (error) {
-        logStatus('FAILED', `handleSessionData: ${error.message}`);
+        const failKey = 'session_data_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `handleSessionData: ${error.message}`);
+        }
         sendToParent(MESSAGE_TYPES.ERROR, {
             error: 'SESSION_PROCESSING_ERROR',
             message: error.message
@@ -6004,7 +6899,11 @@ function handleSessionUpdate(updateData) {
         updateSessionMirror(updateData, 'session_update');
         
     } catch (error) {
-        logStatus('FAILED', `handleSessionUpdate: ${error.message}`);
+        const updateKey = 'session_update_fail';
+        if (!_loggedMessages.has(updateKey)) {
+            _loggedMessages.add(updateKey);
+            logStatus('FAILED', `handleSessionUpdate: ${error.message}`);
+        }
     }
 }
 
@@ -6047,6 +6946,12 @@ function handleLogout(logoutData) {
         state.token = null;
         enableGuestMode();
         
+        const logoutKey = 'logout_handled';
+        if (!_loggedMessages.has(logoutKey)) {
+            _loggedMessages.add(logoutKey);
+            logStatus('INFO', 'Logout handled');
+        }
+        
         sendToParent(MESSAGE_TYPES.CHILD_LOADED, {
             module: 'status',
             loggedOut: true,
@@ -6055,7 +6960,11 @@ function handleLogout(logoutData) {
         });
         
     } catch (error) {
-        logStatus('FAILED', `handleLogout: ${error.message}`);
+        const failKey = 'logout_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `handleLogout: ${error.message}`);
+        }
     }
 }
 
@@ -6069,6 +6978,12 @@ function handleParentUnavailable() {
     }
     
     state.offlineModeEnabled = true;
+    
+    const unavailKey = 'parent_unavailable';
+    if (!_loggedMessages.has(unavailKey)) {
+        _loggedMessages.add(unavailKey);
+        logStatus('WARNING', 'Parent unavailable');
+    }
     
     if (typeof StartupGovernor !== 'undefined') {
         StartupGovernor.degrade('Parent unavailable');
@@ -6096,12 +7011,26 @@ function startBackgroundInitializationWithSession() {
                         frameId: state.frameId
                     });
                 }
+                
+                const bgKey = 'background_init_complete';
+                if (!_loggedMessages.has(bgKey)) {
+                    _loggedMessages.add(bgKey);
+                    logStatus('SUCCESS', 'Background initialization complete');
+                }
             } catch (error) {
-                logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
+                const bgFailKey = 'background_init_fail';
+                if (!_loggedMessages.has(bgFailKey)) {
+                    _loggedMessages.add(bgFailKey);
+                    logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
+                }
             }
         }, 1000);
     } catch (error) {
-        logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
+        const bgSetupKey = 'background_init_setup_fail';
+        if (!_loggedMessages.has(bgSetupKey)) {
+            _loggedMessages.add(bgSetupKey);
+            logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
+        }
     }
 }
 
@@ -6150,6 +7079,12 @@ async function makeParentApiRequest(endpoint, options = {}) {
             
             window.parent.postMessage(message, window.location.origin);
             
+            const reqKey = `api_req_${endpoint}`;
+            if (!_loggedMessages.has(reqKey)) {
+                _loggedMessages.add(reqKey);
+                logStatus('SENDING', `API request: ${endpoint}`);
+            }
+            
             const timeoutMs = IframeEnvironment.isVPNNetwork ? 60000 : 30000;
             
             const timer = setTimeout(() => {
@@ -6172,7 +7107,11 @@ function handleApiResponse(responseData) {
 }
 
 function handleApiError(errorData) {
-    logStatus('FAILED', `API Error: ${errorData.error || 'Unknown error'}`);
+    const errorKey = `api_error_${errorData.error || 'unknown'}`;
+    if (!_loggedMessages.has(errorKey)) {
+        _loggedMessages.add(errorKey);
+        logStatus('FAILED', `API Error: ${errorData.error || 'Unknown error'}`);
+    }
 }
 
 function handleAuthValidated(data) {
@@ -6184,9 +7123,18 @@ function handleAuthValidated(data) {
                     triggerTokenReadyCallbacks();
                 }
             }
+            const authKey = 'auth_validated_handler';
+            if (!_loggedMessages.has(authKey)) {
+                _loggedMessages.add(authKey);
+                logStatus('SUCCESS', 'Auth validated');
+            }
         }
     } catch (error) {
-        logStatus('FAILED', `handleAuthValidated: ${error.message}`);
+        const failKey = 'auth_validated_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `handleAuthValidated: ${error.message}`);
+        }
     }
 }
 
@@ -6255,7 +7203,11 @@ function onTokenReady(callback) {
             tokenReadyCallbacks.push(callback);
         }
     } catch (error) {
-        logStatus('FAILED', `onTokenReady: ${error.message}`);
+        const readyKey = 'token_ready_callback_fail';
+        if (!_loggedMessages.has(readyKey)) {
+            _loggedMessages.add(readyKey);
+            logStatus('FAILED', `onTokenReady: ${error.message}`);
+        }
     }
 }
 
@@ -6266,11 +7218,19 @@ function triggerTokenReadyCallbacks() {
             try {
                 callback();
             } catch (error) {
-                logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
+                const cbKey = 'token_callback_fail';
+                if (!_loggedMessages.has(cbKey)) {
+                    _loggedMessages.add(cbKey);
+                    logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
+                }
             }
         }
     } catch (error) {
-        logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
+        const triggerKey = 'token_trigger_fail';
+        if (!_loggedMessages.has(triggerKey)) {
+            _loggedMessages.add(triggerKey);
+            logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
+        }
     }
 }
 
@@ -6372,7 +7332,11 @@ function processPendingApiRequests() {
             }
         }
     } catch (error) {
-        logStatus('FAILED', `processPendingApiRequests: ${error.message}`);
+        const processKey = 'process_api_fail';
+        if (!_loggedMessages.has(processKey)) {
+            _loggedMessages.add(processKey);
+            logStatus('FAILED', `processPendingApiRequests: ${error.message}`);
+        }
     }
 }
 
@@ -6401,7 +7365,11 @@ function startTokenReadinessCheck() {
             } catch (error) {}
         }, 100);
     } catch (error) {
-        logStatus('FAILED', `startTokenReadinessCheck: ${error.message}`);
+        const startKey = 'token_check_start_fail';
+        if (!_loggedMessages.has(startKey)) {
+            _loggedMessages.add(startKey);
+            logStatus('FAILED', `startTokenReadinessCheck: ${error.message}`);
+        }
     }
 }
 
@@ -6666,8 +7634,18 @@ function initializeUIWithCachedData() {
             startBackgroundInitializationWithSession();
         }
         
+        const uiKey = 'ui_cached_init';
+        if (!_loggedMessages.has(uiKey)) {
+            _loggedMessages.add(uiKey);
+            logStatus('INFO', 'UI initialized with cached data');
+        }
+        
     } catch (error) {
-        logStatus('FAILED', `initializeUIWithCachedData: ${error.message}`);
+        const failKey = 'ui_cached_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `initializeUIWithCachedData: ${error.message}`);
+        }
     }
 }
 
@@ -6677,6 +7655,12 @@ function loadUserFromCache() {
         if (userData && userData !== 'undefined' && userData !== 'null') {
             if (userData && typeof userData === 'object' && userData.id) {
                 currentUser = userData;
+                
+                const userKey = 'user_cached';
+                if (!_loggedMessages.has(userKey)) {
+                    _loggedMessages.add(userKey);
+                    logStatus('INFO', 'User loaded from cache');
+                }
             }
         }
     } catch (error) {}
@@ -6687,6 +7671,12 @@ function loadCachedDataInstantly() {
         const statusesData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
         if (statusesData) {
             try { statuses = statusesData || []; } catch { statuses = []; }
+            
+            const statusKey = 'statuses_cached';
+            if (!_loggedMessages.has(statusKey)) {
+                _loggedMessages.add(statusKey);
+                logStatus('INFO', `Loaded ${statuses.length} statuses from cache`);
+            }
         }
         
         const myStatusesData = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
@@ -6766,6 +7756,12 @@ async function startBackgroundInitialization() {
                         frameId: state.frameId
                     });
                 }
+                
+                const bgKey = 'background_init_complete';
+                if (!_loggedMessages.has(bgKey)) {
+                    _loggedMessages.add(bgKey);
+                    logStatus('SUCCESS', 'Background initialization complete');
+                }
             } catch (error) {}
         });
         
@@ -6780,6 +7776,12 @@ async function startBackgroundInitialization() {
                         timestamp: Date.now(),
                         frameId: state.frameId
                     });
+                }
+                
+                const bgKey = 'background_init_complete';
+                if (!_loggedMessages.has(bgKey)) {
+                    _loggedMessages.add(bgKey);
+                    logStatus('SUCCESS', 'Background initialization complete');
                 }
             } catch (error) {}
         }
@@ -6815,6 +7817,12 @@ async function loadStatusesInBackground() {
             statuses = filterStatusesByPrivacy(statuses);
             statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+            
+            const loadKey = 'statuses_loaded_bg';
+            if (!_loggedMessages.has(loadKey)) {
+                _loggedMessages.add(loadKey);
+                logStatus('SUCCESS', `Loaded ${statuses.length} statuses`);
+            }
         }
     } catch (error) {
         throw error;
@@ -6852,6 +7860,12 @@ async function loadUserDataInBackground() {
             currentUser = response.user;
             userData = response.user;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, response.user);
+            
+            const userKey = 'user_data_loaded';
+            if (!_loggedMessages.has(userKey)) {
+                _loggedMessages.add(userKey);
+                logStatus('SUCCESS', 'User data loaded');
+            }
         }
     } catch (error) {
         throw error;
@@ -6875,9 +7889,19 @@ async function bootstrapApp() {
             });
         }, 500);
         
+        const bootKey = 'app_bootstrapped';
+        if (!_loggedMessages.has(bootKey)) {
+            _loggedMessages.add(bootKey);
+            logStatus('SUCCESS', 'App bootstrapped');
+        }
+        
         return true;
     } catch (error) {
-        logStatus('FAILED', `bootstrapApp: ${error.message}`);
+        const failKey = 'bootstrap_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `bootstrapApp: ${error.message}`);
+        }
         return false;
     }
 }
@@ -6908,6 +7932,12 @@ function handleAuthError(message) {
                 StartupGovernor.degrade('Auth error');
             }
         }
+        
+        const authKey = 'auth_error';
+        if (!_loggedMessages.has(authKey)) {
+            _loggedMessages.add(authKey);
+            logStatus('WARNING', message);
+        }
     } catch (error) {}
 }
 
@@ -6926,6 +7956,12 @@ async function initializeStatusSystem() {
         
         if (typeof StartupGovernor !== 'undefined') {
             StartupGovernor.degrade('Data load timeout');
+        }
+        
+        const timeoutKey = 'data_load_timeout';
+        if (!_loggedMessages.has(timeoutKey)) {
+            _loggedMessages.add(timeoutKey);
+            logStatus('WARNING', 'Data load timeout, using cached data');
         }
     }
 }
@@ -6970,6 +8006,12 @@ async function loadInitialData() {
         }));
         
         await Promise.allSettled(loadPromises);
+        
+        const initKey = 'initial_data_loaded';
+        if (!_loggedMessages.has(initKey)) {
+            _loggedMessages.add(initKey);
+            logStatus('SUCCESS', 'Initial data loaded');
+        }
     } catch (error) {
         throw error;
     }
@@ -7066,22 +8108,234 @@ function getEmptyStateMessage() {
 const addReactionToStatus = createErrorBoundary(async function(statusId, reaction) {
     if (!statusId || !reaction) throw new Error('Missing required parameters');
     
+    const reactKey = `reaction_add_${statusId}_${reaction}`;
+    if (!_loggedMessages.has(reactKey)) {
+        _loggedMessages.add(reactKey);
+        logStatus('REACTION', `Adding ${reaction} to ${statusId}`);
+    }
+    
     if (state.offlineModeEnabled) {
         pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        const offlineKey = `reaction_offline_${statusId}_${reaction}`;
+        if (!_loggedMessages.has(offlineKey)) {
+            _loggedMessages.add(offlineKey);
+            logStatus('SUCCESS', `Reaction queued offline: ${reaction}`);
+        }
         return { success: true, offline: true };
     }
+    
+    const userId = state.user?.id || currentUser?.id;
     
     const response = await secureApiCall(`/api/statuses/${statusId}/react`, {
         method: 'POST',
         body: JSON.stringify({ reaction })
     });
     
+    // Notify parent about reaction
+    if (response && response.success) {
+        sendToParent(MESSAGE_TYPES.STATUS_REACTED, {
+            statusId,
+            userId,
+            emoji: reaction,
+            timestamp: Date.now(),
+            reactionId: response.reactionId
+        }, { requiresAck: false, silent: true });
+        
+        DiagnosticsAgent.increment('statusReactions');
+        
+        const successKey = `reaction_success_${statusId}_${reaction}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('REACTION', `Added ${reaction} to ${statusId}`);
+        }
+    }
+    
     return response;
 }, 'addReactionToStatus', { success: false });
 
+const removeReactionFromStatus = createErrorBoundary(async function(statusId, reaction) {
+    if (!statusId || !reaction) throw new Error('Missing required parameters');
+    
+    const removeKey = `reaction_remove_${statusId}_${reaction}`;
+    if (!_loggedMessages.has(removeKey)) {
+        _loggedMessages.add(removeKey);
+        logStatus('REACTION', `Removing ${reaction} from ${statusId}`);
+    }
+    
+    if (state.offlineModeEnabled) {
+        pendingReactions = pendingReactions.filter(r => !(r.statusId === statusId && r.reaction === reaction));
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        const offlineKey = `reaction_remove_offline_${statusId}`;
+        if (!_loggedMessages.has(offlineKey)) {
+            _loggedMessages.add(offlineKey);
+            logStatus('SUCCESS', `Reaction removal queued offline`);
+        }
+        return { success: true, offline: true };
+    }
+    
+    const userId = state.user?.id || currentUser?.id;
+    
+    const response = await secureApiCall(`/api/statuses/${statusId}/react`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reaction })
+    });
+    
+    // Notify parent about reaction removal
+    if (response && response.success) {
+        sendToParent(MESSAGE_TYPES.REACTION_REMOVED, {
+            statusId,
+            userId,
+            emoji: reaction,
+            timestamp: Date.now()
+        }, { requiresAck: false, silent: true });
+        
+        const successKey = `reaction_remove_success_${statusId}_${reaction}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('REACTION', `Removed ${reaction} from ${statusId}`);
+        }
+    }
+    
+    return response;
+}, 'removeReactionFromStatus', { success: false });
+
+const changeReaction = createErrorBoundary(async function(statusId, oldEmoji, newEmoji) {
+    if (!statusId || !oldEmoji || !newEmoji) throw new Error('Missing required parameters');
+    
+    const changeKey = `reaction_change_${statusId}_${oldEmoji}_to_${newEmoji}`;
+    if (!_loggedMessages.has(changeKey)) {
+        _loggedMessages.add(changeKey);
+        logStatus('REACTION', `Changing from ${oldEmoji} to ${newEmoji} on ${statusId}`);
+    }
+    
+    if (state.offlineModeEnabled) {
+        // Handle offline: remove old, add new
+        pendingReactions = pendingReactions.filter(r => !(r.statusId === statusId && r.reaction === oldEmoji));
+        pendingReactions.push({ statusId, reaction: newEmoji, timestamp: new Date().toISOString() });
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
+        const offlineKey = `reaction_change_offline_${statusId}`;
+        if (!_loggedMessages.has(offlineKey)) {
+            _loggedMessages.add(offlineKey);
+            logStatus('SUCCESS', `Reaction change queued offline`);
+        }
+        return { success: true, offline: true };
+    }
+    
+    const userId = state.user?.id || currentUser?.id;
+    
+    const response = await secureApiCall(`/api/statuses/${statusId}/react/change`, {
+        method: 'POST',
+        body: JSON.stringify({ oldEmoji, newEmoji })
+    });
+    
+    // Notify parent about reaction change
+    if (response && response.success) {
+        sendToParent(MESSAGE_TYPES.REACTION_CHANGED, {
+            statusId,
+            userId,
+            oldEmoji,
+            newEmoji,
+            timestamp: Date.now()
+        }, { requiresAck: false, silent: true });
+        
+        const successKey = `reaction_change_success_${statusId}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('REACTION', `Changed from ${oldEmoji} to ${newEmoji} on ${statusId}`);
+        }
+    }
+    
+    return response;
+}, 'changeReaction', { success: false });
+
+const trackStatusView = createErrorBoundary(async function(statusId) {
+    if (!statusId) throw new Error('Missing status ID');
+    
+    // Don't track if already viewed in this session
+    if (viewedStatuses.has(statusId)) {
+        const viewedKey = `status_already_viewed_${statusId}`;
+        if (!_loggedMessages.has(viewedKey)) {
+            _loggedMessages.add(viewedKey);
+            logStatus('VIEW', `Status ${statusId} already viewed`);
+        }
+        return { success: true, alreadyViewed: true };
+    }
+    
+    const trackKey = `track_view_${statusId}`;
+    if (!_loggedMessages.has(trackKey)) {
+        _loggedMessages.add(trackKey);
+        logStatus('VIEW', `Tracking view for ${statusId}`);
+    }
+    
+    if (state.offlineModeEnabled) {
+        // Still mark as viewed locally
+        viewedStatuses.add(statusId);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatuses));
+        const offlineKey = `view_offline_${statusId}`;
+        if (!_loggedMessages.has(offlineKey)) {
+            _loggedMessages.add(offlineKey);
+            logStatus('VIEW', `View tracked offline for ${statusId}`);
+        }
+        return { success: true, offline: true };
+    }
+    
+    const userId = state.user?.id || currentUser?.id;
+    if (!userId) return { success: false, reason: 'No user' };
+    
+    const response = await secureApiCall(`/api/statuses/${statusId}/view`, {
+        method: 'POST'
+    });
+    
+    // Mark as viewed locally
+    viewedStatuses.add(statusId);
+    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatuses));
+    
+    // Update viewer count in status object
+    const status = statuses.find(s => s.id === statusId);
+    if (status) {
+        if (!status.viewers) status.viewers = [];
+        
+        // Check if already viewed by this user
+        const existingViewer = status.viewers.find(v => v.userId === userId);
+        if (!existingViewer) {
+            status.viewers.push({
+                userId,
+                viewedAt: Date.now()
+            });
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+        }
+    }
+    
+    // Notify parent about view
+    if (response && response.success) {
+        sendToParent(MESSAGE_TYPES.STATUS_VIEWED, {
+            statusId,
+            userId,
+            viewerCount: status?.viewers?.length || 1,
+            timestamp: Date.now()
+        }, { requiresAck: false, silent: true });
+        
+        DiagnosticsAgent.increment('statusViews');
+        
+        const successKey = `view_success_${statusId}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('VIEW', `View tracked for ${statusId}`);
+        }
+    }
+    
+    return response;
+}, 'trackStatusView', { success: false });
+
 const voteOnPoll = createErrorBoundary(async function(statusId, optionId) {
     if (!statusId || !optionId) throw new Error('Missing required parameters');
+    
+    const voteKey = `vote_${statusId}_${optionId}`;
+    if (!_loggedMessages.has(voteKey)) {
+        _loggedMessages.add(voteKey);
+        logStatus('SENDING', `Voting on poll ${statusId}, option ${optionId}`);
+    }
     
     if (state.offlineModeEnabled) return { success: false, offline: true };
     
@@ -7090,11 +8344,25 @@ const voteOnPoll = createErrorBoundary(async function(statusId, optionId) {
         body: JSON.stringify({ optionId })
     });
     
+    if (response && response.success) {
+        const successKey = `vote_success_${statusId}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('SUCCESS', `Vote recorded for poll ${statusId}`);
+        }
+    }
+    
     return response;
 }, 'voteOnPoll', { success: false });
 
 const pinStatus = createErrorBoundary(async function(statusData) {
     if (!statusData || !statusData.id) throw new Error('Invalid status data');
+    
+    const pinKey = `pin_${statusData.id}`;
+    if (!_loggedMessages.has(pinKey)) {
+        _loggedMessages.add(pinKey);
+        logStatus('SENDING', `Pinning status ${statusData.id}`);
+    }
     
     const response = await secureApiCall(`/api/statuses/${statusData.id}/pin`, {
         method: 'POST'
@@ -7103,12 +8371,23 @@ const pinStatus = createErrorBoundary(async function(statusData) {
     if (response && response.success) {
         statusData.isPinned = true;
         pinnedStatuses.push(statusData);
+        const successKey = `pin_success_${statusData.id}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('SUCCESS', `Status ${statusData.id} pinned`);
+        }
     }
     return response;
 }, 'pinStatus', { success: false });
 
 const unpinStatus = createErrorBoundary(async function(statusData) {
     if (!statusData || !statusData.id) throw new Error('Invalid status data');
+    
+    const unpinKey = `unpin_${statusData.id}`;
+    if (!_loggedMessages.has(unpinKey)) {
+        _loggedMessages.add(unpinKey);
+        logStatus('SENDING', `Unpinning status ${statusData.id}`);
+    }
     
     const response = await secureApiCall(`/api/statuses/${statusData.id}/pin`, {
         method: 'DELETE'
@@ -7117,12 +8396,23 @@ const unpinStatus = createErrorBoundary(async function(statusData) {
     if (response && response.success) {
         statusData.isPinned = false;
         pinnedStatuses = pinnedStatuses.filter(s => s && s.id !== statusData.id);
+        const successKey = `unpin_success_${statusData.id}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('SUCCESS', `Status ${statusData.id} unpinned`);
+        }
     }
     return response;
 }, 'unpinStatus', { success: false });
 
 const muteUser = createErrorBoundary(async function(userId) {
     if (!userId) throw new Error('Invalid user ID');
+    
+    const muteKey = `mute_${userId}`;
+    if (!_loggedMessages.has(muteKey)) {
+        _loggedMessages.add(muteKey);
+        logStatus('SENDING', `Muting user ${userId}`);
+    }
     
     const response = await secureApiCall(`/api/users/${userId}/mute`, {
         method: 'POST'
@@ -7131,12 +8421,23 @@ const muteUser = createErrorBoundary(async function(userId) {
     if (response && response.success) {
         mutedUsers.add(userId);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
+        const successKey = `mute_success_${userId}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('SUCCESS', `User ${userId} muted`);
+        }
     }
     return response;
 }, 'muteUser', { success: false });
 
 const unmuteUser = createErrorBoundary(async function(userId) {
     if (!userId) throw new Error('Invalid user ID');
+    
+    const unmuteKey = `unmute_${userId}`;
+    if (!_loggedMessages.has(unmuteKey)) {
+        _loggedMessages.add(unmuteKey);
+        logStatus('SENDING', `Unmuting user ${userId}`);
+    }
     
     const response = await secureApiCall(`/api/users/${userId}/mute`, {
         method: 'DELETE'
@@ -7145,12 +8446,23 @@ const unmuteUser = createErrorBoundary(async function(userId) {
     if (response && response.success) {
         mutedUsers.delete(userId);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
+        const successKey = `unmute_success_${userId}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('SUCCESS', `User ${userId} unmuted`);
+        }
     }
     return response;
 }, 'unmuteUser', { success: false });
 
 const postStatus = createErrorBoundary(async function(statusData) {
     if (!statusData) throw new Error('Invalid status data');
+    
+    const postKey = `post_status_${Date.now()}`;
+    if (!_loggedMessages.has(postKey)) {
+        _loggedMessages.add(postKey);
+        logStatus('POST', 'Posting new status', { type: statusData.type });
+    }
     
     const sanitizedData = sanitizeStatusData(statusData);
     
@@ -7159,6 +8471,7 @@ const postStatus = createErrorBoundary(async function(statusData) {
         sanitizedData.id = 'offline_' + Date.now();
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.offline = true;
+        sanitizedData.expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString(); // 24 hours
         offlineQueue.push(sanitizedData);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
         
@@ -7171,6 +8484,12 @@ const postStatus = createErrorBoundary(async function(statusData) {
         SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
         updateStreakCounter();
         
+        const offlineKey = 'status_queued_offline';
+        if (!_loggedMessages.has(offlineKey)) {
+            _loggedMessages.add(offlineKey);
+            logStatus('POST', 'Status queued offline');
+        }
+        
         return { success: true, status: sanitizedData, offline: true };
     }
     
@@ -7180,6 +8499,9 @@ const postStatus = createErrorBoundary(async function(statusData) {
     });
     
     if (response && response.status) {
+        // Add expiration (24 hours by default)
+        response.status.expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
+        
         statuses.unshift(response.status);
         myStatuses.unshift(response.status);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
@@ -7198,6 +8520,21 @@ const postStatus = createErrorBoundary(async function(statusData) {
             if (moodChartData.length > 30) moodChartData = moodChartData.slice(-30);
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MOOD_DATA, moodChartData);
         }
+        
+        // Update metrics
+        DiagnosticsAgent.increment('statusPosts');
+        
+        const successKey = `post_success_${response.status.id}`;
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('POST', `Status posted: ${response.status.id}`);
+        }
+        
+        // Notify parent about new status
+        sendToParent(MESSAGE_TYPES.STATUS_POSTED, {
+            status: response.status,
+            timestamp: Date.now()
+        }, { requiresAck: false, silent: true });
     }
     return response;
 }, 'postStatus', { success: false });
@@ -7278,6 +8615,12 @@ function updateStreakCounter() {
 const scheduleStatus = createErrorBoundary(async function(statusData, scheduleTime) {
     if (!statusData || !scheduleTime) throw new Error('Missing required parameters');
     
+    const scheduleKey = `schedule_${Date.now()}`;
+    if (!_loggedMessages.has(scheduleKey)) {
+        _loggedMessages.add(scheduleKey);
+        logStatus('SENDING', `Scheduling status for ${scheduleTime}`);
+    }
+    
     const sanitizedData = sanitizeStatusData(statusData);
     
     const response = await secureApiCall('/api/statuses/schedule', {
@@ -7291,6 +8634,11 @@ const scheduleStatus = createErrorBoundary(async function(statusData, scheduleTi
     if (response && response.success) {
         scheduledStatuses.push({ ...sanitizedData, scheduledFor: scheduleTime });
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SCHEDULED, scheduledStatuses);
+        const successKey = 'schedule_success';
+        if (!_loggedMessages.has(successKey)) {
+            _loggedMessages.add(successKey);
+            logStatus('SUCCESS', 'Status scheduled');
+        }
     }
     return response;
 }, 'scheduleStatus', { success: false });
@@ -7305,6 +8653,12 @@ function saveDraft(statusData) {
         sanitizedData.isDraft = true;
         drafts.unshift(sanitizedData);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
+        
+        const draftKey = 'draft_saved';
+        if (!_loggedMessages.has(draftKey)) {
+            _loggedMessages.add(draftKey);
+            logStatus('SUCCESS', 'Draft saved');
+        }
         return { success: true };
     } catch (error) {
         throw error;
@@ -7313,6 +8667,12 @@ function saveDraft(statusData) {
 
 const reportStatus = createErrorBoundary(async function(statusId, reason, details) {
     if (!statusId || !reason) throw new Error('Missing required parameters');
+    
+    const reportKey = `report_${statusId}`;
+    if (!_loggedMessages.has(reportKey)) {
+        _loggedMessages.add(reportKey);
+        logStatus('SENDING', `Reporting status ${statusId}`);
+    }
     
     const sanitizedDetails = escapeHtml(details || '');
     
@@ -7323,6 +8683,177 @@ const reportStatus = createErrorBoundary(async function(statusId, reason, detail
     
     return response;
 }, 'reportStatus', { success: false });
+
+// =============================================
+// EXPIRATION MANAGEMENT
+// =============================================
+
+// Store expiration check interval
+let expirationCheckInterval = null;
+
+// Start expiration monitoring
+function startExpirationMonitoring() {
+    if (expirationCheckInterval) {
+        clearInterval(expirationCheckInterval);
+    }
+    
+    const startKey = 'expiration_monitoring_start';
+    if (!_loggedMessages.has(startKey)) {
+        _loggedMessages.add(startKey);
+        logStatus('INFO', 'Starting expiration monitoring');
+    }
+    
+    // Check every minute for expired statuses
+    expirationCheckInterval = setInterval(() => {
+        checkAndCleanExpiredStatuses();
+    }, 60000); // 60 seconds
+    
+    state.intervals.add(expirationCheckInterval);
+}
+
+// Stop expiration monitoring
+function stopExpirationMonitoring() {
+    if (expirationCheckInterval) {
+        clearInterval(expirationCheckInterval);
+        expirationCheckInterval = null;
+        state.intervals.delete(expirationCheckInterval);
+        
+        const stopKey = 'expiration_monitoring_stop';
+        if (!_loggedMessages.has(stopKey)) {
+            _loggedMessages.add(stopKey);
+            logStatus('INFO', 'Expiration monitoring stopped');
+        }
+    }
+}
+
+// Check and clean expired statuses
+function checkAndCleanExpiredStatuses() {
+    const now = Date.now();
+    let hasExpired = false;
+    let expiredCount = 0;
+    
+    // Check statuses
+    const initialStatusCount = statuses.length;
+    statuses = statuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) {
+                hasExpired = true;
+                expiredCount++;
+                
+                const expireKey = `status_expired_${status.id}`;
+                if (!_loggedMessages.has(expireKey)) {
+                    _loggedMessages.add(expireKey);
+                    logStatus('EXPIRE', `Status ${status.id} expired`);
+                }
+                
+                // Notify parent about expiration
+                sendToParent(MESSAGE_TYPES.STATUS_EXPIRED, {
+                    statusId: status.id,
+                    userId: status.userId,
+                    timestamp: Date.now()
+                }, { requiresAck: false, silent: true });
+                
+                // Dispatch event for UI
+                document.dispatchEvent(new CustomEvent('statusExpired', {
+                    detail: { statusId: status.id }
+                }));
+                
+                return false; // Remove from array
+            }
+        }
+        return true;
+    });
+    
+    if (initialStatusCount !== statuses.length) {
+        const removedKey = `expired_removed_${Date.now()}`;
+        if (!_loggedMessages.has(removedKey)) {
+            _loggedMessages.add(removedKey);
+            logStatus('EXPIRE', `Removed ${initialStatusCount - statuses.length} expired statuses`);
+        }
+    }
+    
+    // Check myStatuses
+    myStatuses = myStatuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) {
+                return false;
+            }
+        }
+        return true;
+    });
+    
+    // Check all category arrays
+    friendsStatuses = friendsStatuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) return false;
+        }
+        return true;
+    });
+    
+    closeFriendsStatuses = closeFriendsStatuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) return false;
+        }
+        return true;
+    });
+    
+    pinnedStatuses = pinnedStatuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) return false;
+        }
+        return true;
+    });
+    
+    mutedStatuses = mutedStatuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) return false;
+        }
+        return true;
+    });
+    
+    microCirclesStatuses = microCirclesStatuses.filter(status => {
+        if (status.expiresAt) {
+            const expiresAt = new Date(status.expiresAt).getTime();
+            if (now >= expiresAt) return false;
+        }
+        return true;
+    });
+    
+    // Update highlights if needed
+    if (hasExpired) {
+        // Update each highlight's status list
+        highlights.forEach(highlight => {
+            if (highlight.statusIds) {
+                const originalLength = highlight.statusIds.length;
+                highlight.statusIds = highlight.statusIds.filter(id => {
+                    return statuses.some(s => s.id === id) || myStatuses.some(s => s.id === id);
+                });
+                if (highlight.statusIds.length !== originalLength) {
+                    highlight.count = highlight.statusIds.length;
+                }
+            }
+        });
+        
+        // Update metrics
+        DiagnosticsAgent.metrics.statusExpired += expiredCount;
+        
+        // Save all updated data
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
+        
+        // Dispatch bulk update event
+        document.dispatchEvent(new CustomEvent('statusUpdate', {
+            detail: { type: 'bulk', statuses: statuses.slice(0, 10) }
+        }));
+    }
+}
 
 // =============================================
 // USER STATUS TRACKING
@@ -7350,6 +8881,12 @@ function initializeUserStatusTracking() {
         updateUserStatus();
         
         isTrackingInitialized = true;
+        
+        const trackKey = 'user_tracking_initialized';
+        if (!_loggedMessages.has(trackKey)) {
+            _loggedMessages.add(trackKey);
+            logStatus('SUCCESS', 'User status tracking initialized');
+        }
         
     } catch (error) {}
 }
@@ -7421,6 +8958,12 @@ function handleOnlineStatus() {
             state.offlineModeEnabled = false;
             isOfflineMode = false;
             setTimeout(() => { syncPendingData(); }, 500);
+            
+            const onlineKey = 'online_status';
+            if (!_loggedMessages.has(onlineKey)) {
+                _loggedMessages.add(onlineKey);
+                logStatus('SUCCESS', 'Online - syncing pending data');
+            }
         }
         
         // Attempt recovery
@@ -7442,7 +8985,12 @@ function handleOfflineStatus() {
         if (!state.offlineModeEnabled) {
             state.offlineModeEnabled = true;
             isOfflineMode = true;
-            logStatus('WARNING', 'Offline mode enabled');
+            
+            const offlineKey = 'offline_status';
+            if (!_loggedMessages.has(offlineKey)) {
+                _loggedMessages.add(offlineKey);
+                logStatus('WARNING', 'Offline mode enabled');
+            }
             
             if (typeof StartupGovernor !== 'undefined') {
                 StartupGovernor.degrade('Offline');
@@ -7537,15 +9085,29 @@ async function syncPendingData() {
         const offlineQueue = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
         for (const statusData of offlineQueue) {
             try {
-                await secureApiCall('/api/statuses/create', {
+                const response = await secureApiCall('/api/statuses/create', {
                     method: 'POST',
                     body: JSON.stringify(statusData)
                 });
+                
+                if (response && response.status) {
+                    // Notify parent about the synced status
+                    sendToParent(MESSAGE_TYPES.STATUS_POSTED, {
+                        status: response.status,
+                        timestamp: Date.now()
+                    }, { requiresAck: false, silent: true });
+                }
             } catch (error) {}
         }
         
         SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
         await loadFreshDataInBackground();
+        
+        const syncKey = 'pending_data_synced';
+        if (!_loggedMessages.has(syncKey)) {
+            _loggedMessages.add(syncKey);
+            logStatus('SUCCESS', 'Pending data synced');
+        }
         
     } catch (error) {}
 }
@@ -7853,9 +9415,19 @@ function updateLocalStateWithSession(sessionData) {
         triggerTokenReadyCallbacks();
         processPendingApiRequests();
         
+        const updateKey = 'local_state_updated';
+        if (!_loggedMessages.has(updateKey)) {
+            _loggedMessages.add(updateKey);
+            logStatus('SUCCESS', 'Local state updated with session');
+        }
+        
         return true;
     } catch (error) {
-        logStatus('FAILED', `updateLocalStateWithSession: ${error.message}`);
+        const failKey = 'local_state_update_fail';
+        if (!_loggedMessages.has(failKey)) {
+            _loggedMessages.add(failKey);
+            logStatus('FAILED', `updateLocalStateWithSession: ${error.message}`);
+        }
         return false;
     }
 }
@@ -7867,12 +9439,24 @@ function enableDiagnostics() {
     state.diagnosticsEnabled = true;
     window.__IFRAME_DEBUG__ = true;
     DiagnosticsAgent.enable();
+    
+    const enableKey = 'diagnostics_enabled';
+    if (!_loggedMessages.has(enableKey)) {
+        _loggedMessages.add(enableKey);
+        logStatus('INFO', 'Diagnostics enabled');
+    }
 }
 
 function disableDiagnostics() {
     state.diagnosticsEnabled = false;
     window.__IFRAME_DEBUG__ = false;
     DiagnosticsAgent.disable();
+    
+    const disableKey = 'diagnostics_disabled';
+    if (!_loggedMessages.has(disableKey)) {
+        _loggedMessages.add(disableKey);
+        logStatus('INFO', 'Diagnostics disabled');
+    }
 }
 
 function getDiagnostics() {
@@ -7955,6 +9539,12 @@ function detectSandbox() {
                 }
             } catch (e) {}
             
+            const sandboxKey = 'sandbox_detected';
+            if (!_loggedMessages.has(sandboxKey)) {
+                _loggedMessages.add(sandboxKey);
+                logStatus('INFO', 'Sandbox detected');
+            }
+            
             return true;
         }
         
@@ -7969,6 +9559,9 @@ function detectSandbox() {
 // =============================================
 function cleanup() {
     try {
+        // Stop expiration monitoring
+        stopExpirationMonitoring();
+        
         if (apiCheckInterval) { clearInterval(apiCheckInterval); apiCheckInterval = null; }
         if (parentCoordinator.handshakeInterval) { clearInterval(parentCoordinator.handshakeInterval); parentCoordinator.handshakeInterval = null; }
         if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
@@ -7996,6 +9589,12 @@ function cleanup() {
         errorLogCounts = {};
         retryCounts = {};
         messageCache.clear();
+        
+        const cleanupKey = 'cleanup_complete';
+        if (!_loggedMessages.has(cleanupKey)) {
+            _loggedMessages.add(cleanupKey);
+            logStatus('INFO', 'Cleanup complete');
+        }
         
         shutdownCore().catch(() => {});
         
@@ -8050,6 +9649,12 @@ async function safeInit() {
     let tries = 0;
     const maxTries = 5;
     
+    const initKey = 'safe_init_start';
+    if (!_loggedMessages.has(initKey)) {
+        _loggedMessages.add(initKey);
+        logStatus('INIT', 'Starting safe initialization');
+    }
+    
     // Detect environment
     IframeEnvironment.detect();
     
@@ -8060,13 +9665,29 @@ async function safeInit() {
     const parentAvailable = await ParentDetector.detect();
     
     if (parentAvailable) {
+        const parentKey = 'parent_available';
+        if (!_loggedMessages.has(parentKey)) {
+            _loggedMessages.add(parentKey);
+            logStatus('INFO', 'Parent available, starting handshake');
+        }
         // Execute enhanced handshake
         const handshakeResult = await HandshakeClient.execute({ maxRetries: IframeEnvironment.getConfig().maxRetries }).catch(() => null);
         
         if (handshakeResult && handshakeResult.success) {
             _PARENT_READY_ = true;
             _HANDSHAKE_DONE_ = true;
+            
+            const handshakeKey = 'handshake_complete';
+            if (!_loggedMessages.has(handshakeKey)) {
+                _loggedMessages.add(handshakeKey);
+                logStatus('SUCCESS', 'Handshake complete');
+            }
         } else {
+            const failKey = 'handshake_failed';
+            if (!_loggedMessages.has(failKey)) {
+                _loggedMessages.add(failKey);
+                logStatus('WARNING', 'Handshake failed');
+            }
             // Try to load from mirror
             if (state.sessionMirror.validated) {
                 activateSessionFromMirror();
@@ -8075,6 +9696,11 @@ async function safeInit() {
             }
         }
     } else {
+        const noParentKey = 'parent_not_available';
+        if (!_loggedMessages.has(noParentKey)) {
+            _loggedMessages.add(noParentKey);
+            logStatus('WARNING', 'Parent not available');
+        }
         if (state.sessionMirror.validated) {
             activateSessionFromMirror();
         } else {
@@ -8084,6 +9710,15 @@ async function safeInit() {
     
     try {
         initializeUIWithCachedData();
+        
+        // Start expiration monitoring
+        startExpirationMonitoring();
+        
+        const uiKey = 'ui_cached_init_complete';
+        if (!_loggedMessages.has(uiKey)) {
+            _loggedMessages.add(uiKey);
+            logStatus('SUCCESS', 'UI initialized with cached data');
+        }
         
         setTimeout(async () => {
             try {
@@ -8114,7 +9749,7 @@ function notifyParentReady() {
                 page: location.pathname,
                 module: 'status-core',
                 timestamp: Date.now(),
-                version: '5.4',
+                version: '6.1',
                 protocolVersion: state.protocolVersion,
                 frameId: state.frameId,
                 environment: IframeEnvironment.type
@@ -8123,6 +9758,12 @@ function notifyParentReady() {
             window.parent.postMessage(message, window.location.origin);
             
             _HANDSHAKE_RETRIES_++;
+            
+            const notifyKey = 'parent_notify';
+            if (!_loggedMessages.has(notifyKey)) {
+                _loggedMessages.add(notifyKey);
+                logStatus('SENDING', 'Parent ready notification');
+            }
         } catch (error) {
             logOnce('error', 'Failed to send handshake to parent');
         }
@@ -8241,6 +9882,9 @@ if (typeof window !== 'undefined') {
             filterStatusesByType,
             getEmptyStateMessage,
             addReactionToStatus,
+            removeReactionFromStatus,
+            changeReaction,
+            trackStatusView,
             voteOnPoll,
             pinStatus,
             unpinStatus,
@@ -8280,6 +9924,11 @@ if (typeof window !== 'undefined') {
             getSelectedDraft,
             setSelectedDraft,
             
+            // New functions
+            startExpirationMonitoring,
+            stopExpirationMonitoring,
+            checkAndCleanExpiredStatuses,
+            
             // New exports
             HandshakeClient,
             ParentDetector,
@@ -8312,12 +9961,19 @@ if (typeof window !== 'undefined') {
             IframeHandshakeAuthority,
             
             // Safe fetch
-            safeFetch
+            safeFetch,
+            logStatus
         };
         
         // Enable debug mode if URL parameter present
         if (window.location.search.includes('debug=true')) {
             enableDiagnostics();
+        }
+        
+        const globalKey = 'status_core_global';
+        if (!_loggedMessages.has(globalKey)) {
+            _loggedMessages.add(globalKey);
+            logStatus('READY', 'Status core exposed globally');
         }
         
     } catch (error) {
@@ -8448,6 +10104,9 @@ export {
     filterStatusesByType,
     getEmptyStateMessage,
     addReactionToStatus,
+    removeReactionFromStatus,
+    changeReaction,
+    trackStatusView,
     voteOnPoll,
     pinStatus,
     unpinStatus,
@@ -8515,9 +10174,14 @@ export {
     IframeHandshakeAuthority,
     SafeStorage,
     
+    // Expiration management
+    startExpirationMonitoring,
+    stopExpirationMonitoring,
+    checkAndCleanExpiredStatuses,
+    
     // Safe fetch
     safeFetch,
-     logStatus
+    logStatus
 };
 
 // =============================================
@@ -8529,4 +10193,4 @@ if (typeof window !== 'undefined' && !state.initialized) {
     }, 10);
 }
 
-logStatus('READY', 'Status core initialized');
+logStatus('READY', 'Status core initialized v6.1');

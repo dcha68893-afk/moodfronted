@@ -1,5 +1,5 @@
 // =============================================
-// SETTINGS UI - COMPLETE IMPLEMENTATION v6.1.0 (FIXED)
+// SETTINGS UI - COMPLETE IMPLEMENTATION v6.2.0 (FIXED)
 // ENHANCED PARENT COMMUNICATION | FULL SECTION SUPPORT
 // INTEGRATED WITH CORE HARDENING | UI FAILSAFE
 // SILENT BACKGROUND OPERATIONS | MOBILE OPTIMIZED
@@ -139,13 +139,12 @@ let isMobileView = window.innerWidth <= 768;
 let menuVisible = true;
 let currentMobileSection = null;
 
-// Silent mode - don't show console noise in production
-const SILENT_MODE = !window.__IFRAME_DEBUG__;
+// Enable console logs for debugging
+const SILENT_MODE = false;
+window.__IFRAME_DEBUG__ = true;
 
 function debugLog(...args) {
-    if (!SILENT_MODE && window.__IFRAME_DEBUG__) {
-        console.log('[UI-DEBUG]', ...args);
-    }
+    console.log('[SettingsUI]', ...args);
 }
 
 // =============================================
@@ -155,7 +154,7 @@ const UIErrorBoundary = {
     _errors: [],
     _maxErrors: 20,
     _handlers: new Set(),
-    _silent: true,
+    _silent: false,
     
     wrap(fn, context = 'unknown') {
         return function(...args) {
@@ -190,9 +189,7 @@ const UIErrorBoundary = {
         
         uiErrorCount++;
         
-        if (!SILENT_MODE) {
-            console.error(`[UI Error][${context}]`, error, args);
-        }
+        console.error(`[UI Error][${context}]`, error, args);
         
         if (DiagnosticsAgent) {
             DiagnosticsAgent.error(error, `ui_${context}`);
@@ -248,7 +245,6 @@ function showMobileMenu() {
         content.style.display = 'none';
         currentMobileSection = null;
         
-        // Push state for back button handling
         history.pushState({ mobileMenu: true }, null, window.location.href);
     }
 }
@@ -264,24 +260,20 @@ function showMobileSection(sectionId) {
         content.style.display = 'flex';
         currentMobileSection = sectionId;
         
-        // Push state for back button handling
         history.pushState({ mobileSection: sectionId }, null, window.location.href);
     }
 }
 
 // =============================================
-// ANDROID BACK BUTTON HANDLER (NEW)
+// ANDROID BACK BUTTON HANDLER
 // =============================================
 function setupAndroidBackButton() {
-    // Handle Android hardware back button / browser back
     window.addEventListener('popstate', function(event) {
         if (isMobileView) {
             if (currentMobileSection) {
-                // If we're in a section, go back to menu
                 event.preventDefault();
                 showMobileMenu();
             } else {
-                // If we're in menu, close settings
                 if (unsavedChanges) {
                     if (confirm('You have unsaved changes. Leave anyway?')) {
                         sendMessageToParent({
@@ -291,7 +283,6 @@ function setupAndroidBackButton() {
                             timestamp: Date.now()
                         }).catch(() => {});
                     } else {
-                        // Prevent navigation and push state back
                         history.pushState({ mobileMenu: true }, null, window.location.href);
                     }
                 } else {
@@ -305,21 +296,19 @@ function setupAndroidBackButton() {
         }
     });
 
-    // Initialize history state
     if (isMobileView) {
         history.replaceState({ mobileMenu: true }, null, window.location.href);
     }
 }
 
 // =============================================
-// UI INITIALIZATION - SILENT BACKGROUND
+// UI INITIALIZATION
 // =============================================
-
 export async function initializeUI() {
     if (uiInitialized) return;
     
     const wrappedInit = UIErrorBoundary.wrap(async function() {
-        debugLog('[SettingsUI] Initializing UI components');
+        debugLog('Initializing UI components');
         
         checkMobileView();
         
@@ -329,7 +318,7 @@ export async function initializeUI() {
         
         const coreReady = await waitForCore(8000);
         if (!coreReady) {
-            debugLog('[SettingsUI] Core not ready, showing loading state silently');
+            debugLog('Core not ready, showing loading state');
             showLoadingState();
             
             setTimeout(() => {
@@ -344,7 +333,7 @@ export async function initializeUI() {
         
         setupEventListeners();
         
-        setupAndroidBackButton(); // Add Android back button support
+        setupAndroidBackButton();
         
         updateUserStatus();
         
@@ -369,7 +358,7 @@ export async function initializeUI() {
         
         dispatchUIReady();
         
-        debugLog('[SettingsUI] UI initialization complete');
+        debugLog('UI initialization complete');
         
     }, 'initializeUI');
     
@@ -395,24 +384,21 @@ function waitForCore(timeout = 5000) {
     });
 }
 
-// Show loading state (minimal, no console noise)
+// Show loading state
 function showLoadingState() {
     const contentContainer = document.getElementById('settingsContentBody');
     if (!contentContainer) return;
     
-    if (contentContainer.children.length === 0 || 
-        contentContainer.innerHTML.includes('Initializing')) {
-        contentContainer.innerHTML = `
-            <div class="settings-section" style="text-align: center; padding: 50px;">
-                <div class="section-header">
-                    <h3><i class="fas fa-spinner fa-spin section-icon"></i> Loading Settings</h3>
-                </div>
+    contentContainer.innerHTML = `
+        <div class="settings-section" style="text-align: center; padding: 50px;">
+            <div class="section-header">
+                <h3><i class="fas fa-spinner fa-spin section-icon"></i> Loading Settings</h3>
             </div>
-        `;
-    }
+        </div>
+    `;
 }
 
-// Show fallback UI (minimal, no console noise)
+// Show fallback UI
 function showFallbackUI() {
     const contentContainer = document.getElementById('settingsContentBody');
     if (!contentContainer) return;
@@ -496,7 +482,7 @@ function registerForCoreUpdates() {
     }
 }
 
-// Update connection state in UI (silent)
+// Update connection state in UI
 function updateConnectionState(state) {
     const statusIndicator = document.getElementById('userStatusIndicator');
     const statusText = document.getElementById('userStatusText');
@@ -589,7 +575,7 @@ function setupNetworkAwareUI() {
 }
 
 // =============================================
-// KEYBOARD SHORTCUTS (ENHANCED)
+// KEYBOARD SHORTCUTS
 // =============================================
 function setupKeyboardShortcuts() {
     const wrappedHandler = UIErrorBoundary.wrap(function(e) {
@@ -627,13 +613,12 @@ function setupKeyboardShortcuts() {
 }
 
 // =============================================
-// BUILD SETTINGS MENU - ENHANCED (FIXED CLICK HANDLER)
+// BUILD SETTINGS MENU
 // =============================================
 export function buildSettingsMenu() {
     const menuContainer = document.getElementById('settingsMenu');
     if (!menuContainer) return;
     
-    // Clear existing menu
     menuContainer.innerHTML = '';
     
     SETTINGS_MENU.forEach(item => {
@@ -664,14 +649,12 @@ export function buildSettingsMenu() {
             ${item.badge ? `<div class="menu-badge">${item.badge}</div>` : ''}
         `;
         
-        // FIXED: Proper click handler with error handling
         menuItem.addEventListener('click', async (e) => {
             e.preventDefault();
             e.stopPropagation();
             
             try {
                 if (item.requiresAuth && !hasAuth) {
-                    // Show notification instead of silent fail
                     const notification = document.getElementById('notification');
                     const notificationText = document.getElementById('notificationText');
                     if (notification && notificationText) {
@@ -682,23 +665,19 @@ export function buildSettingsMenu() {
                     return;
                 }
                 
-                // Update active states
                 document.querySelectorAll('.menu-item').forEach(item => {
                     item.classList.remove('active');
                 });
                 menuItem.classList.add('active');
                 
-                // Load the section
                 await loadSection(item.id);
                 
-                // Handle mobile view
                 if (isMobileView) {
                     showMobileSection(item.id);
                 }
                 
             } catch (error) {
                 console.error('Error loading section:', error);
-                // Show error notification
                 const notification = document.getElementById('notification');
                 const notificationText = document.getElementById('notificationText');
                 if (notification && notificationText) {
@@ -781,9 +760,10 @@ function addConnectionStatusIndicator() {
 }
 
 // =============================================
-// LOAD SECTION - ENHANCED WITH ERROR HANDLING (FIXED)
+// LOAD SECTION - FIXED VERSION (NO CONST ASSIGNMENT)
 // =============================================
 export async function loadSection(sectionId) {
+    // Guard against concurrent loads
     if (sectionLoadInProgress) {
         uiRenderQueue.push(sectionId);
         return;
@@ -792,35 +772,46 @@ export async function loadSection(sectionId) {
     sectionLoadInProgress = true;
     lastUIAction = Date.now();
     
+    console.log('[SettingsUI] 📂 Loading section:', sectionId);
+    
     try {
+        // Check authentication
         if (!checkAuthenticationState() && sectionId !== 'profile') {
+            console.log('[SettingsUI] 🔒 Authentication required for', sectionId);
             sectionLoadInProgress = false;
             return;
         }
         
+        // Update global state
         currentSection = sectionId;
         unsavedChanges = false;
         
+        // Update UI
         updateSectionTitle(sectionId);
         updateSaveButton();
         
+        // Get container
         const contentContainer = document.getElementById('settingsContentBody');
         if (!contentContainer) {
+            console.log('[SettingsUI] ❌ Content container not found');
             sectionLoadInProgress = false;
             return;
         }
         
+        // Reset scroll and show loading
         contentContainer.scrollTop = 0;
-        
         contentContainer.innerHTML = `
             <div class="settings-section" style="text-align: center; padding: 30px;">
                 <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
+                <p style="margin-top: 15px;">Loading ${sectionId} settings...</p>
             </div>
         `;
         
+        // Small delay for UI feedback
         await new Promise(resolve => setTimeout(resolve, 50));
         
-        const loadFunctions = {
+        // IMPORTANT: Use LET instead of CONST for anything that might be reassigned
+        let loadFunctionsMap = {
             'profile': loadProfileSection,
             'security': loadSecuritySection,
             'privacy': loadPrivacySection,
@@ -838,20 +829,26 @@ export async function loadSection(sectionId) {
             'danger': loadDangerSection
         };
         
-        const loadFn = loadFunctions[sectionId];
-        if (loadFn) {
+        // Get the appropriate load function
+        let sectionLoader = loadFunctionsMap[sectionId];
+        
+        if (sectionLoader) {
             try {
-                await loadFn(contentContainer);
+                // Call the section-specific loader
+                await sectionLoader(contentContainer);
+                console.log('[SettingsUI] ✅ Successfully loaded section:', sectionId);
             } catch (sectionError) {
-                console.error(`Error loading section ${sectionId}:`, sectionError);
+                console.error('[SettingsUI] ❌ Error loading section', sectionId, ':', sectionError);
                 contentContainer.innerHTML = `
                     <div class="settings-section">
                         <div class="section-header">
                             <h3><i class="fas fa-exclamation-triangle section-icon" style="color: var(--danger-color);"></i> Error Loading Section</h3>
                         </div>
                         <div class="section-body">
-                            <p>There was an error loading this section. Please try again.</p>
-                            <button class="action-btn primary" onclick="location.reload()">
+                            <p style="color: var(--danger-color); margin-bottom: 15px;">${sectionError.message || 'Unknown error'}</p>
+                            <p style="margin-bottom: 10px;">Stack trace:</p>
+                            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; font-size: 12px;">${sectionError.stack || 'No stack trace'}</pre>
+                            <button class="action-btn primary" onclick="window.location.reload()">
                                 <i class="fas fa-redo"></i> Refresh
                             </button>
                         </div>
@@ -862,15 +859,16 @@ export async function loadSection(sectionId) {
             contentContainer.innerHTML = '<p>Section not found</p>';
         }
         
+        // Process queue if needed
         if (uiRenderQueue.length > 0) {
-            const nextSection = uiRenderQueue.shift();
-            if (nextSection !== sectionId) {
-                setTimeout(() => loadSection(nextSection), 100);
+            let nextQueuedSection = uiRenderQueue.shift();
+            if (nextQueuedSection !== sectionId) {
+                setTimeout(() => loadSection(nextQueuedSection), 100);
             }
         }
         
     } catch (error) {
-        debugLog(`[SettingsUI] Error loading section ${sectionId}:`, error);
+        console.error('[SettingsUI] 💥 Critical error in loadSection', sectionId, ':', error);
         
         const contentContainer = document.getElementById('settingsContentBody');
         if (contentContainer) {
@@ -880,7 +878,9 @@ export async function loadSection(sectionId) {
                         <h3><i class="fas fa-exclamation-triangle section-icon" style="color: var(--danger-color);"></i> Error</h3>
                     </div>
                     <div class="section-body">
-                        <p style="color: var(--danger-color);">${escapeHtml(error.message || 'Unknown error')}</p>
+                        <p style="color: var(--danger-color); margin-bottom: 15px;">${error.message || 'Unknown error'}</p>
+                        <p style="margin-bottom: 10px;">Stack trace:</p>
+                        <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; font-size: 12px;">${error.stack || 'No stack trace'}</pre>
                         <button class="action-btn primary" onclick="window.location.reload()">
                             <i class="fas fa-redo"></i> Refresh
                         </button>
@@ -958,7 +958,7 @@ export function updateSaveButton() {
 }
 
 // =============================================
-// SETUP EVENT LISTENERS - ENHANCED
+// SETUP EVENT LISTENERS
 // =============================================
 export function setupEventListeners() {
     const backToAppBtn = document.getElementById('backToAppBtn');
@@ -996,7 +996,6 @@ export function setupEventListeners() {
                 
                 await saveSettings();
                 
-                // Show success notification
                 showNotification('Settings saved successfully', 'success');
                 
             } catch (error) {
@@ -1199,7 +1198,7 @@ export function setupPasswordModalListeners() {
 }
 
 // =============================================
-// COLOR PICKER - ENHANCED
+// COLOR PICKER
 // =============================================
 export function initializeColorPicker() {
     const container = document.getElementById('colorPickerContainer');
@@ -1347,7 +1346,7 @@ export function shadeColor(color, percent) {
 }
 
 // =============================================
-// SEARCH SETTINGS - ENHANCED
+// SEARCH SETTINGS
 // =============================================
 export function searchSettings(query) {
     const normalizedQuery = query.toLowerCase().trim();
@@ -1448,7 +1447,7 @@ export function searchSettings(query) {
 }
 
 // =============================================
-// NOTIFICATION SYSTEM - SILENT (MINIMAL)
+// NOTIFICATION SYSTEM
 // =============================================
 export function showNotification(message, type = 'success', duration = 3000) {
     const notification = document.getElementById('notification');
@@ -1509,7 +1508,7 @@ export function showConfirmation(title, message, confirmCallback, cancelCallback
 }
 
 // =============================================
-// SAVE SETTINGS - ENHANCED
+// SAVE SETTINGS
 // =============================================
 export async function saveSettings() {
     try {
@@ -1532,7 +1531,7 @@ export async function saveSettings() {
         return true;
         
     } catch (error) {
-        debugLog('[SettingsUI] Save error:', error);
+        debugLog('Save error:', error);
         throw error;
     }
 }
@@ -1628,12 +1627,11 @@ export function escapeHtml(text) {
 }
 
 // =============================================
-// PHOTO FUNCTIONS - ENHANCED
+// PHOTO FUNCTIONS
 // =============================================
 export function takePhoto() {
     debugLog('Photo capture requested');
     
-    // Simulate photo capture
     setTimeout(() => {
         pendingPhotoData = 'data:image/jpeg;base64,/9j/4AAQSkZJRg...';
         updatePhotoPreview(pendingPhotoData);
@@ -1718,7 +1716,7 @@ export function savePhoto() {
 }
 
 // =============================================
-// CHANGE PASSWORD - ENHANCED
+// CHANGE PASSWORD
 // =============================================
 export async function changePassword() {
     const currentPassword = document.getElementById('currentPassword');
@@ -1781,7 +1779,7 @@ function setPasswordInputsDisabled(disabled) {
 }
 
 // =============================================
-// EDIT MOOD COLOR - ENHANCED
+// EDIT MOOD COLOR
 // =============================================
 export function editMoodColor(mood) {
     if (!colorPicker) {
@@ -1829,9 +1827,10 @@ function editMoodColorFallback(mood) {
 }
 
 // =============================================
-// PROFILE SECTION - ENHANCED
+// SECTION LOADER FUNCTIONS
 // =============================================
 export function loadProfileSection(container) {
+    debugLog('Loading profile section');
     const hasAuth = checkAuthenticationState();
     const settings = userSettings?.profile || DEFAULT_SETTINGS.profile;
     
@@ -2013,10 +2012,8 @@ function setupProfileEventListeners() {
     });
 }
 
-// =============================================
-// SECURITY SECTION - ENHANCED
-// =============================================
 export function loadSecuritySection(container) {
+    debugLog('Loading security section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('security', 'Security');
         return;
@@ -2151,10 +2148,8 @@ function setupSecurityEventListeners() {
     });
 }
 
-// =============================================
-// PRIVACY SECTION - ENHANCED
-// =============================================
 export function loadPrivacySection(container) {
+    debugLog('Loading privacy section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('privacy', 'Privacy');
         return;
@@ -2306,10 +2301,8 @@ function setupPrivacyEventListeners() {
     });
 }
 
-// =============================================
-// CHAT SECTION - ENHANCED
-// =============================================
 export function loadChatSection(container) {
+    debugLog('Loading chat section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('chat', 'Chat');
         return;
@@ -2401,10 +2394,8 @@ function setupChatEventListeners() {
     });
 }
 
-// =============================================
-// FRIENDS SECTION - ENHANCED
-// =============================================
 export function loadFriendsSection(container) {
+    debugLog('Loading friends section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('friends', 'Friends');
         return;
@@ -2481,10 +2472,8 @@ function setupFriendsEventListeners() {
     });
 }
 
-// =============================================
-// GROUPS SECTION - ENHANCED
-// =============================================
 export function loadGroupsSection(container) {
+    debugLog('Loading groups section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('groups', 'Groups');
         return;
@@ -2561,10 +2550,8 @@ function setupGroupsEventListeners() {
     });
 }
 
-// =============================================
-// CALLS SECTION - ENHANCED
-// =============================================
 export function loadCallsSection(container) {
+    debugLog('Loading calls section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('calls', 'Calls');
         return;
@@ -2656,10 +2643,8 @@ function setupCallsEventListeners() {
     });
 }
 
-// =============================================
-// STATUS SECTION - ENHANCED
-// =============================================
 export function loadStatusSection(container) {
+    debugLog('Loading status section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('status', 'Status');
         return;
@@ -2724,10 +2709,8 @@ function setupStatusEventListeners() {
     });
 }
 
-// =============================================
-// NOTIFICATIONS SECTION - ENHANCED
-// =============================================
 export function loadNotificationsSection(container) {
+    debugLog('Loading notifications section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('notifications', 'Notifications');
         return;
@@ -2804,10 +2787,8 @@ function setupNotificationsEventListeners() {
     });
 }
 
-// =============================================
-// APPEARANCE SECTION - ENHANCED
-// =============================================
 export function loadAppearanceSection(container) {
+    debugLog('Loading appearance section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('appearance', 'Appearance');
         return;
@@ -2931,10 +2912,8 @@ function setupAppearanceEventListeners() {
     }
 }
 
-// =============================================
-// STORAGE SECTION - ENHANCED
-// =============================================
 export function loadStorageSection(container) {
+    debugLog('Loading storage section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('storage', 'Storage');
         return;
@@ -3034,10 +3013,8 @@ function setupStorageEventListeners() {
     }
 }
 
-// =============================================
-// MOOD SETTINGS SECTION - ENHANCED
-// =============================================
 export function loadMoodSection(container) {
+    debugLog('Loading mood section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('mood', 'Mood');
         return;
@@ -3148,10 +3125,8 @@ function setupMoodEventListeners() {
     }
 }
 
-// =============================================
-// ADVANCED SECTION - ENHANCED
-// =============================================
 export function loadAdvancedSection(container) {
+    debugLog('Loading advanced section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('advanced', 'Advanced');
         return;
@@ -3236,10 +3211,8 @@ function setupAdvancedEventListeners() {
     }
 }
 
-// =============================================
-// BACKUP SECTION - ENHANCED
-// =============================================
 export function loadBackupSection(container) {
+    debugLog('Loading backup section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('backup', 'Backup');
         return;
@@ -3310,10 +3283,8 @@ function setupBackupEventListeners() {
     }
 }
 
-// =============================================
-// DANGER ZONE SECTION - ENHANCED
-// =============================================
 export function loadDangerSection(container) {
+    debugLog('Loading danger section');
     if (!checkAuthenticationState()) {
         container.innerHTML = getAuthRequiredHTML('danger', 'Danger Zone');
         return;
@@ -3395,7 +3366,7 @@ function setupDangerEventListeners() {
 }
 
 // =============================================
-// SHOW ACTIVE SESSIONS - ENHANCED
+// SHOW ACTIVE SESSIONS
 // =============================================
 export function showActiveSessions() {
     const sessionsList = document.getElementById('sessionsList');
@@ -3405,7 +3376,6 @@ export function showActiveSessions() {
     
     sessionsList.innerHTML = '';
     
-    // Current session
     sessionsList.innerHTML += `
         <div class="session-item">
             <div class="session-icon"><i class="fas fa-laptop"></i></div>
@@ -3462,7 +3432,7 @@ export function showActiveSessions() {
 }
 
 // =============================================
-// SHOW BLOCKED USERS - ENHANCED
+// SHOW BLOCKED USERS
 // =============================================
 export function showBlockedUsers() {
     const blockedUsersList = document.getElementById('blockedUsersList');
@@ -3530,13 +3500,13 @@ function getAuthRequiredHTML(section, title) {
 }
 
 // =============================================
-// UI RECOVERY MECHANISM (SILENT)
+// UI RECOVERY MECHANISM
 // =============================================
 function attemptUIRecovery() {
     if (uiRecoveryTimer) clearTimeout(uiRecoveryTimer);
     
     uiRecoveryTimer = setTimeout(() => {
-        debugLog('[SettingsUI] Attempting UI recovery');
+        debugLog('Attempting UI recovery');
         
         uiErrorCount = 0;
         
@@ -3576,11 +3546,11 @@ window.__UI_DEBUG__ = {
 };
 
 // =============================================
-// INITIALIZATION - SILENT BACKGROUND
+// INITIALIZATION
 // =============================================
 document.addEventListener('DOMContentLoaded', async function() {
     try {
-        debugLog('[SettingsUI] DOM loaded, initializing UI');
+        debugLog('DOM loaded, initializing UI');
         
         showLoadingState();
         
@@ -3588,19 +3558,25 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         await UIErrorBoundary.wrap(initializeUI, 'dom_initialization')();
         
-        debugLog('[SettingsUI] UI initialization complete');
+        debugLog('UI initialization complete');
         
     } catch (error) {
-        debugLog('[SettingsUI] Initialization error:', error);
+        debugLog('Initialization error:', error);
         showFallbackUI();
     }
 });
 
-// =============================================
-// EXPORT ALL PUBLIC FUNCTIONS
-// =============================================
+// Fallback direct loader if module fails
+setTimeout(() => {
+    if (!uiInitialized) {
+        console.log('[SettingsUI] ⚠️ Fallback: loading profile section directly');
+        const container = document.getElementById('settingsContentBody');
+        if (container && typeof loadProfileSection === 'function') {
+            loadProfileSection(container);
+        }
+    }
+}, 3000);
 
-
 // =============================================
-// END OF FILE - COMPLETE UI IMPLEMENTATION (FIXED)
+// END OF FILE
 // =============================================

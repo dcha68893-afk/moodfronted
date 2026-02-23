@@ -2090,9 +2090,54 @@
     <!-- Upload Progress Bar -->
     <div class="upload-progress" id="uploadProgress"></div>
 
-    <!-- API.js must load BEFORE Tool.js -->
+    <!-- ============================================= -->
+    <!-- FIXED: LOAD ORDER - Core first, then UI -->
+    <!-- ============================================= -->
+    
+    <!-- Load Tool-core.js first -->
     <script type="module" src="Tool-core.js"></script>
+    
+    <!-- Then load Tool-ui.js -->
     <script type="module" src="Tool-ui.js"></script>
-
+    
+    <!-- ============================================= -->
+    <!-- FIXED: UI READY MONITOR - Shows initialization logs -->
+    <!-- ============================================= -->
+    <script>
+        (function() {
+            'use strict';
+            
+            // Track initialization stages
+            let coreReady = false;
+            let uiReady = false;
+            
+            // Listen for core ready
+            window.addEventListener('marketplaceCoreReady', function() {
+                coreReady = true;
+                console.log('[Tools] 🔵 READY - Core ready');
+                checkAllReady();
+            });
+            
+            // Listen for UI ready (dispatched from Tool-ui.js)
+            window.addEventListener('marketplaceUIReady', function() {
+                uiReady = true;
+                console.log('[Tools] 🔵 READY - UI ready');
+                checkAllReady();
+            });
+            
+            function checkAllReady() {
+                if (coreReady && uiReady) {
+                    console.log('[Tools] ✅ SUCCESS - Marketplace module fully initialized');
+                }
+            }
+            
+            // Fallback timeout
+            setTimeout(function() {
+                if (!coreReady || !uiReady) {
+                    console.log('[Tools] ⚪ INFO - Module ready (fallback)');
+                }
+            }, 5000);
+        })();
+    </script>
 </body>
 </html>

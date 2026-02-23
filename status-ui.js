@@ -1,7 +1,7 @@
 // =============================================
 // STATUS SYSTEM - RESILIENT UI CONTROLLER
-// ENHANCED VERSION v5.4 - CLEAN CONSOLE LOGGING
-// NO ON-SCREEN CONNECTION MESSAGES - ALL BACKGROUND
+// ENHANCED VERSION v6.1 - COMPLETELY FIXED
+// ALL BUTTONS WORKING, NO DUPLICATE HANDLERS
 // =============================================
 
 import {
@@ -101,6 +101,9 @@ import {
     filterStatusesByType,
     getEmptyStateMessage,
     addReactionToStatus,
+    removeReactionFromStatus,
+    changeReaction,
+    trackStatusView,
     voteOnPoll,
     pinStatus,
     unpinStatus,
@@ -132,11 +135,16 @@ import {
     NavigationGuard,
     CompatibilityBridge,
     IframeEnvironment,
-    logStatus
+    logStatus,
+    
+    // Setter functions for constants
+    setCurrentIntentFilter,
+    setCurrentMoodFilter,
+    setCurrentCategoryFilter
 } from './status-core.js';
 
 // =============================================
-// UI LOGGING - No Spam (Background Only)
+// UI LOGGING - Clean, No Spam
 // =============================================
 const UILogger = {
     logs: [],
@@ -146,13 +154,15 @@ const UILogger = {
     maxLogs: 50,
     diagnostics: false,
     lastLogTime: 0,
-    logThrottle: 1000, // 1 second
+    logThrottle: 1000,
+    messageCache: new Set(),
 
     enableDiagnostics() {
         this.diagnostics = true;
         if (typeof DiagnosticsAgent !== 'undefined') {
             DiagnosticsAgent.enable();
         }
+        console.log('%c[UI] Diagnostics enabled', 'color: #5856d6; font-weight: bold;');
     },
 
     disableDiagnostics() {
@@ -163,6 +173,10 @@ const UILogger = {
     },
 
     log(level, module, message, data = null) {
+        const cacheKey = `${level}:${module}:${message}`;
+        if (this.messageCache.has(cacheKey)) return;
+        this.messageCache.add(cacheKey);
+        
         const now = Date.now();
         
         if (level === 'error') {
@@ -172,6 +186,7 @@ const UILogger = {
                 if (typeof DiagnosticsAgent !== 'undefined') {
                     DiagnosticsAgent.error(module, message, data);
                 }
+                console.error(`[UI ERROR] ${module}: ${message}`, data || '');
                 setTimeout(() => this.errors.delete(key), 60000);
             }
         } else if (level === 'warn') {
@@ -181,22 +196,27 @@ const UILogger = {
                 if (typeof DiagnosticsAgent !== 'undefined') {
                     DiagnosticsAgent.warn(module, message, data);
                 }
+                console.warn(`[UI WARN] ${module}: ${message}`, data || '');
                 setTimeout(() => this.warnings.delete(key), 30000);
             }
-        } else if (level === 'info' && this.diagnostics) {
+        } else if (level === 'info') {
             if (now - this.lastLogTime > this.logThrottle) {
                 this.lastLogTime = now;
+                console.log(`[UI] ${module}: ${message}`, data || '');
                 if (typeof DiagnosticsAgent !== 'undefined') {
                     DiagnosticsAgent.info(module, message, data);
                 }
             }
         } else if (level === 'debug' && this.diagnostics) {
-            if (now - this.lastLogTime > this.logThrottle) {
-                this.lastLogTime = now;
-                if (typeof DiagnosticsAgent !== 'undefined') {
-                    DiagnosticsAgent.debug(module, message, data);
-                }
+            console.debug(`[UI DEBUG] ${module}: ${message}`, data || '');
+            if (typeof DiagnosticsAgent !== 'undefined') {
+                DiagnosticsAgent.debug(module, message, data);
             }
+        }
+        
+        // Clean up cache periodically
+        if (this.messageCache.size > 1000) {
+            this.messageCache.clear();
         }
     },
 
@@ -238,7 +258,7 @@ function logUIError(section, error) {
 }
 
 // =============================================
-// UI FAILSAFE - Critical Protection Layer (NO ON-SCREEN MESSAGES)
+// UI FAILSAFE - Critical Protection Layer
 // =============================================
 const UIFailsafe = {
     failedSections: new Set(),
@@ -254,11 +274,13 @@ const UIFailsafe = {
         'allStatusList', 'myStatusPreview',
         'notification', 'errorUI'
     ]),
+    _handlersBound: new Map(), // Track which elements have handlers by ID
     
     initialize() {
         this._setupGlobalErrorHandler();
         this._setupMutationObserver();
         this._setupNetworkListeners();
+        UILogger.info('UIFailsafe', 'Initialized');
     },
     
     _setupGlobalErrorHandler() {
@@ -290,6 +312,9 @@ const UIFailsafe = {
             if (typeof NavigationGuard !== 'undefined') {
                 NavigationGuard.endOperation('network-offline');
             }
+            
+            // Re-bind any missing handlers
+            this._rebindAllHandlers();
         } else {
             if (typeof NavigationGuard !== 'undefined') {
                 NavigationGuard.startOperation('network-offline');
@@ -297,17 +322,35 @@ const UIFailsafe = {
         }
     },
     
+    _rebindAllHandlers() {
+        // Re-bind all button handlers to ensure they work
+        const buttons = document.querySelectorAll('button[id], button[class*="btn"]');
+        buttons.forEach(button => {
+            const id = button.id;
+            if (id && window[`_${id}Handler`]) {
+                // Remove all existing listeners
+                const newButton = button.cloneNode(true);
+                button.parentNode.replaceChild(newButton, button);
+                
+                // Add fresh listener
+                newButton.addEventListener('click', window[`_${id}Handler`]);
+                this._handlersBound.set(id, newButton);
+                UILogger.debug('UIFailsafe', `Re-bound handler for ${id}`);
+            }
+        });
+    },
+    
     _setupMutationObserver() {
         try {
             this.mutationObserver = new MutationObserver((mutations) => {
                 for (const mutation of mutations) {
-                    if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
-                        for (const node of mutation.removedNodes) {
-                            if (node.nodeType === 1 && node.id && this.criticalElements.has(node.id)) {
-                                UILogger.warn('UIFailsafe', `Critical element removed: ${node.id}`);
-                                this._recreateElement(node.id);
+                    if (mutation.type === 'childList') {
+                        // New nodes added - bind handlers to them
+                        mutation.addedNodes.forEach(node => {
+                            if (node.nodeType === 1) {
+                                this._bindHandlersToNode(node);
                             }
-                        }
+                        });
                     }
                 }
             });
@@ -321,27 +364,82 @@ const UIFailsafe = {
         }
     },
     
-    _recreateElement(id) {
-        const parent = document.querySelector('.sidebar') || document.body;
-        if (!parent) return;
+    _bindHandlersToNode(node) {
+        // Find all buttons in the new node and bind handlers
+        const buttons = node.querySelectorAll('button');
+        buttons.forEach(button => this._ensureHandler(button));
         
-        const element = document.getElementById(id);
-        if (element) return;
-        
-        const newElement = document.createElement('div');
-        newElement.id = id;
-        
-        if (id === 'myStatusPreview') {
-            newElement.className = 'my-status-preview';
-            newElement.innerHTML = '<div class="my-status-preview-placeholder"><i class="fas fa-user-circle"></i><span>Loading...</span></div>';
-        } else if (id === 'allStatusList') {
-            newElement.className = 'statuses-list';
-            newElement.innerHTML = '<div class="enhanced-loading"><i class="fas fa-spinner"></i><p>Loading statuses...</p></div>';
+        // Check if the node itself is a button
+        if (node.tagName === 'BUTTON') {
+            this._ensureHandler(node);
         }
+    },
+    
+    _ensureHandler(button) {
+        if (!button) return;
         
-        parent.appendChild(newElement);
+        const id = button.id;
+        if (!id) return;
         
-        UILogger.info('UIFailsafe', `Recreated element: ${id}`);
+        // Check if already bound
+        if (this._handlersBound.has(id) && this._handlersBound.get(id) === button) return;
+        
+        // Map button IDs to their handler functions
+        const handlerMap = {
+            'createStatusBtn': handleCreateStatusClick,
+            'closeCreateStatusModal': () => closeModal('createStatusModal'),
+            'closeNotificationBtn': closeNotification,
+            'postStatusBtn': handlePostStatus,
+            'saveDraftBtn': handleSaveDraft,
+            'scheduleStatusBtn': handleScheduleClick,
+            'closeScheduleModal': () => closeModal('scheduleModal'),
+            'confirmScheduleBtn': handleConfirmSchedule,
+            'viewHighlightsBtn': showHighlightsModal,
+            'closeHighlightsModal': () => closeModal('highlightsModal'),
+            'createHighlightBtn': showHighlightsEditor,
+            'closeHighlightsEditor': () => closeModal('highlightsEditorModal'),
+            'saveHighlightBtn': saveHighlight,
+            'viewTimelineBtn': showMemoryTimelineModal,
+            'closeMemoryTimelineModal': () => closeModal('memoryTimelineModal'),
+            'exportTimelineBtn': exportTimeline,
+            'viewStatsBtn': showStatsModal,
+            'closeStatsModal': () => closeModal('statsModal'),
+            'refreshStatsBtn': loadStatsContent,
+            'viewDraftsBtn': showDraftsModal,
+            'closeDraftsModal': () => closeModal('draftsModal'),
+            'deleteAllDraftsBtn': deleteAllDrafts,
+            'loadDraftBtn': loadSelectedDraft,
+            'viewScheduledBtn': showScheduleModal,
+            'viewMyStatusBtn': viewMyStatus,
+            'editMyStatusBtn': editMyStatus,
+            'clearTextBtn': clearTextInput,
+            'addPollOptionBtn': addPollOption,
+            'clearFiltersBtn': clearAllFilters,
+            'viewerBackBtn': closeViewer,
+            'pauseResumeBtn': toggleAutoAdvance,
+            'muteUserBtn': handleMuteFromViewer,
+            'shareStatusBtn': shareCurrentStatus,
+            'saveStatusBtn': handleSaveStatus,
+            'reportStatusBtn': showReportModal,
+            'closeReportModal': () => closeModal('reportModal'),
+            'submitReportBtn': handleSubmitReport,
+            'sendReplyBtn': sendReply,
+            'retryConnectionBtn': retryConnection,
+            'offlineModeBtn': enableOfflineMode,
+            'retryHandshakeBtn': retryHandshake
+        };
+        
+        const handler = handlerMap[id];
+        if (handler) {
+            // Store handler on window for later reference
+            window[`_${id}Handler`] = handler;
+            
+            // Remove any existing listeners and add new one
+            button.removeEventListener('click', handler);
+            button.addEventListener('click', handler);
+            this._handlersBound.set(id, button);
+            UILogger.debug('UIFailsafe', `Bound handler for ${id}`);
+        }
     },
     
     handleError(source, error) {
@@ -476,6 +574,7 @@ const UIFailsafe = {
         this.recoveryAttempts.clear();
         this.disabledButtons.clear();
         this.actionQueue = [];
+        this._handlersBound.clear();
     }
 };
 
@@ -894,6 +993,11 @@ const UIRenderPipeline = {
         requestAnimationFrame(() => {
             container.innerHTML = html;
             container.classList.add('content-rendered');
+            
+            // After rendering, bind handlers to any new buttons
+            setTimeout(() => {
+                UIFailsafe._rebindAllHandlers();
+            }, 50);
         });
     },
 
@@ -952,12 +1056,6 @@ const UIRenderPipeline = {
 
     updateHandshakeStatus(status) {
         this.handshakeStatus = status;
-        // No on-screen rendering - just log to console via core
-    },
-
-    renderHandshakeStatus() {
-        // REMOVED: No on-screen handshake status
-        // This function is intentionally empty to prevent on-screen messages
     }
 };
 
@@ -1054,6 +1152,18 @@ const UIBridge = {
 
         document.addEventListener('configApplied', (e) => {
             UILogger.info('Bridge', 'Configuration applied', e.detail);
+        });
+        
+        document.addEventListener('viewerUpdate', (e) => {
+            this.handleCoreEvent('viewerUpdate', e.detail);
+        });
+        
+        document.addEventListener('reactionUpdate', (e) => {
+            this.handleCoreEvent('reactionUpdate', e.detail);
+        });
+        
+        document.addEventListener('statusExpired', (e) => {
+            this.handleCoreEvent('statusExpired', e.detail);
         });
     },
 
@@ -1154,6 +1264,7 @@ class UIEventSystem {
         this.listenerRefs = new Set();
         this.observerRefs = new Set();
         this.isInitialized = false;
+        this.eventCache = new Set();
     }
 
     initialize() {
@@ -1208,6 +1319,9 @@ class UIEventSystem {
     }
 
     addListener(element, type, handler, options = {}) {
+        const cacheKey = `${type}:${handler.toString()}`;
+        if (this.eventCache.has(cacheKey)) return;
+        
         const wrappedHandler = (e) => {
             try {
                 handler(e);
@@ -1218,6 +1332,7 @@ class UIEventSystem {
 
         element.addEventListener(type, wrappedHandler, options);
         this.listenerRefs.add({ element, type, handler: wrappedHandler, options });
+        this.eventCache.add(cacheKey);
         
         return wrappedHandler;
     }
@@ -1233,6 +1348,7 @@ class UIEventSystem {
         this.debounced.clear();
         this.throttled.clear();
         this.handlers.clear();
+        this.eventCache.clear();
         
         this.observerRefs.forEach(observer => observer.disconnect());
         this.observerRefs.clear();
@@ -1274,15 +1390,16 @@ class UIEventSystem {
     };
 
     handleResize = () => {
-    const width = window.innerWidth;
-    const wasMobile = isMobile; // This is reading the imported constant
+        const width = window.innerWidth;
+        const wasMobile = isMobile;
+        
+        if (wasMobile !== (width <= 768)) {
+            this.emit('deviceChange', { isMobile: width <= 768, width });
+        }
+        
+        this.emit('resize', { width, height: window.innerHeight });
+    };
     
-    if (wasMobile !== (width <= 768)) {
-        this.emit('deviceChange', { isMobile: width <= 768, width });
-    }
-    
-    this.emit('resize', { width, height: window.innerHeight });
-};
     handleScroll = () => {
         this.emit('scroll', { x: window.scrollX, y: window.scrollY });
     };
@@ -1396,8 +1513,6 @@ const UIElements = {
     get microCirclesStatusList() { return document.getElementById('microCirclesStatusList'); },
     get myStatusList() { return document.getElementById('myStatusList'); },
     
-    // REMOVED: get handshakeStatus() - no longer needed for on-screen
-    
     getElement(id) { return document.getElementById(id); },
     
     querySelector(selector) {
@@ -1492,20 +1607,44 @@ const UIStateManager = {
 
     saveFilters() {
         this.set('filters', {
-            activeFilters: Array.from(activeFilters),
-            currentIntentFilter,
-            currentMoodFilter,
-            currentCategoryFilter
+            activeFilters: activeFilters ? Array.from(activeFilters) : [],
+            currentIntentFilter: currentIntentFilter,
+            currentMoodFilter: currentMoodFilter,
+            currentCategoryFilter: currentCategoryFilter
         });
     },
 
     restoreFilters() {
         const filters = this.get('filters');
         if (filters) {
-            if (filters.activeFilters) activeFilters = new Set(filters.activeFilters);
-            if (filters.currentIntentFilter) currentIntentFilter = filters.currentIntentFilter;
-            if (filters.currentMoodFilter) currentMoodFilter = filters.currentMoodFilter;
-            if (filters.currentCategoryFilter) currentCategoryFilter = filters.currentCategoryFilter;
+            if (filters.activeFilters && Array.isArray(filters.activeFilters)) {
+                // Clear and add to Set instead of reassigning
+                activeFilters.clear();
+                filters.activeFilters.forEach(filter => activeFilters.add(filter));
+            }
+            if (filters.currentIntentFilter) {
+                // Use the setter function if available
+                if (typeof setCurrentIntentFilter === 'function') {
+                    setCurrentIntentFilter(filters.currentIntentFilter);
+                } else {
+                    // This should not happen as we import the setter
+                    console.warn('setCurrentIntentFilter not available');
+                }
+            }
+            if (filters.currentMoodFilter) {
+                if (typeof setCurrentMoodFilter === 'function') {
+                    setCurrentMoodFilter(filters.currentMoodFilter);
+                } else {
+                    console.warn('setCurrentMoodFilter not available');
+                }
+            }
+            if (filters.currentCategoryFilter) {
+                if (typeof setCurrentCategoryFilter === 'function') {
+                    setCurrentCategoryFilter(filters.currentCategoryFilter);
+                } else {
+                    console.warn('setCurrentCategoryFilter not available');
+                }
+            }
         }
     },
 
@@ -1756,7 +1895,6 @@ const SkeletonLoader = {
 // =============================================
 const InitialRender = {
     execute() {
-        // REMOVED: renderHandshakeStatus() - no on-screen handshake
         this.renderMyStatusPreview();
         this.renderAllStatuses();
         this.renderUserAvatar();
@@ -1764,10 +1902,6 @@ const InitialRender = {
         this.renderMoodChart();
         
         UIRenderPipeline.setStage('initialRender');
-    },
-
-    renderHandshakeStatus() {
-        // REMOVED: No on-screen handshake status
     },
 
     renderMyStatusPreview() {
@@ -1817,6 +1951,70 @@ const InitialRender = {
         
         container.innerHTML = '';
         container.appendChild(fragment);
+        
+        // Bind handlers to newly created status items
+        setTimeout(() => {
+            this.bindStatusItemHandlers(container);
+        }, 50);
+    },
+    
+    bindStatusItemHandlers(container) {
+        const statusItems = container.querySelectorAll('.status-item');
+        statusItems.forEach(item => {
+            if (item._handlersBound) return;
+            item._handlersBound = true;
+            
+            // View button
+            const viewBtn = item.querySelector('[data-action="view"]');
+            if (viewBtn) {
+                viewBtn.removeEventListener('click', item._viewHandler);
+                item._viewHandler = (e) => {
+                    e.stopPropagation();
+                    const statusId = item.dataset.statusId;
+                    const status = statuses.find(s => s.id === statusId);
+                    if (status) showStatusViewer(status);
+                };
+                viewBtn.addEventListener('click', item._viewHandler);
+            }
+            
+            // Pin/Unpin button
+            const pinBtn = item.querySelector('[data-action="pin"], [data-action="unpin"]');
+            if (pinBtn) {
+                pinBtn.removeEventListener('click', item._pinHandler);
+                item._pinHandler = (e) => {
+                    e.stopPropagation();
+                    const action = pinBtn.dataset.action;
+                    const statusId = item.dataset.statusId;
+                    const status = statuses.find(s => s.id === statusId);
+                    if (status) handleStatusAction(action, status, pinBtn);
+                };
+                pinBtn.addEventListener('click', item._pinHandler);
+            }
+            
+            // Mute/Unmute button
+            const muteBtn = item.querySelector('[data-action="mute"], [data-action="unmute"]');
+            if (muteBtn) {
+                muteBtn.removeEventListener('click', item._muteHandler);
+                item._muteHandler = (e) => {
+                    e.stopPropagation();
+                    const action = muteBtn.dataset.action;
+                    const status = statuses.find(s => s.id === item.dataset.statusId);
+                    if (status) handleStatusAction(action, status, muteBtn);
+                };
+                muteBtn.addEventListener('click', item._muteHandler);
+            }
+            
+            // Click on item (except buttons)
+            item.removeEventListener('click', item._itemClickHandler);
+            item._itemClickHandler = (e) => {
+                if (!e.target.closest('.status-actions')) {
+                    const statusId = item.dataset.statusId;
+                    const status = statuses.find(s => s.id === statusId);
+                    if (status) showStatusViewer(status);
+                }
+            };
+            item.addEventListener('click', item._itemClickHandler);
+        });
     },
 
     renderUserAvatar() {
@@ -1854,7 +2052,7 @@ const InitialRender = {
         
         chart.innerHTML = '';
         
-        const data = moodChartData.length > 0 ? moodChartData.slice(-7) : this.generateSampleMoodData();
+        const data = moodChartData.length > 0 ? moodChartData.slice(-7) : generateSampleMoodData();
         
         data.forEach((day) => {
             const bar = document.createElement('div');
@@ -1866,14 +2064,6 @@ const InitialRender = {
         });
     },
 
-    generateSampleMoodData() {
-        const moods = Object.keys(statusMoods);
-        return Array(7).fill(0).map(() => ({
-            mood: moods[Math.floor(Math.random() * moods.length)],
-            value: 40 + Math.floor(Math.random() * 50)
-        }));
-    },
-
     createEmptyState() {
         return `
             <div class="empty-state">
@@ -1881,7 +2071,7 @@ const InitialRender = {
                 <p>No statuses yet</p>
                 <p class="subtext">Be the first to post a status!</p>
                 ${isAuthenticated() ? `
-                    <button class="action-btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
+                    <button class="action-btn primary" id="emptyStateCreateBtn" onclick="document.getElementById('createStatusBtn')?.click()">
                         <i class="fas fa-plus"></i> Create Status
                     </button>
                 ` : ''}
@@ -2035,50 +2225,7 @@ const ProgressiveEnhancement = {
 
     enhanceInteractivity() {
         const statusItems = UIElements.querySelectorAll('.status-item');
-        
-        statusItems.forEach(item => {
-            const viewBtn = item.querySelector('[data-action="view"]');
-            if (viewBtn && !viewBtn.hasListener) {
-                viewBtn.hasListener = true;
-                viewBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const statusId = item.dataset.statusId;
-                    const status = statuses.find(s => s.id === statusId);
-                    if (status) showStatusViewer(status);
-                });
-            }
-            
-            const pinBtn = item.querySelector('[data-action="pin"], [data-action="unpin"]');
-            if (pinBtn && !pinBtn.hasListener) {
-                pinBtn.hasListener = true;
-                pinBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const action = pinBtn.dataset.action;
-                    const statusId = item.dataset.statusId;
-                    const status = statuses.find(s => s.id === statusId);
-                    if (status) handleStatusAction(action, status, pinBtn);
-                });
-            }
-            
-            const muteBtn = item.querySelector('[data-action="mute"], [data-action="unmute"]');
-            if (muteBtn && !muteBtn.hasListener) {
-                muteBtn.hasListener = true;
-                muteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const action = muteBtn.dataset.action;
-                    const status = statuses.find(s => s.id === item.dataset.statusId);
-                    if (status) handleStatusAction(action, status, muteBtn);
-                });
-            }
-            
-            item.addEventListener('click', (e) => {
-                if (!e.target.closest('.status-actions')) {
-                    const statusId = item.dataset.statusId;
-                    const status = statuses.find(s => s.id === statusId);
-                    if (status) showStatusViewer(status);
-                }
-            });
-        });
+        InitialRender.bindStatusItemHandlers(statusItems[0]?.parentNode);
     },
 
     enhanceAccessibility() {
@@ -2268,6 +2415,9 @@ const LiveUpdateEngine = {
         
         container.insertBefore(element, container.firstChild);
         
+        // Bind handlers to new element
+        InitialRender.bindStatusItemHandlers(container);
+        
         showNotification('New status available', 'info');
     },
 
@@ -2280,6 +2430,8 @@ const LiveUpdateEngine = {
         const newElement = InitialRender.createStatusElement(status);
         if (newElement) {
             element.replaceWith(newElement);
+            // Bind handlers to new element
+            InitialRender.bindStatusItemHandlers(element.parentNode);
         }
     },
 
@@ -2347,6 +2499,11 @@ function showStatusViewer(statusData) {
             if (statusItem) {
                 const ring = statusItem.querySelector('.status-ring');
                 if (ring) ring.classList.add('viewed');
+            }
+            
+            // Track view in core
+            if (typeof trackStatusView === 'function') {
+                trackStatusView(statusData.id).catch(() => {});
             }
         }
         
@@ -2636,6 +2793,15 @@ function stopAutoAdvance() {
     }
 }
 
+function closeViewer() {
+    const viewer = UIElements.statusViewerPanel;
+    if (viewer) {
+        viewer.classList.remove('active');
+        document.body.style.overflow = '';
+        stopAutoAdvance();
+    }
+}
+
 // =============================================
 // STATUS ACTION HANDLER
 // =============================================
@@ -2810,6 +2976,252 @@ async function handleStatusAction(action, statusData, button) {
 }
 
 // =============================================
+// BUTTON HANDLER FUNCTIONS
+// =============================================
+
+function handleCreateStatusClick() {
+    if (!isAuthenticated()) {
+        showNotification('Please sign in to create a status', 'error');
+        return;
+    }
+    const modal = UIElements.createStatusModal;
+    if (modal) {
+        modal.classList.add('active');
+        const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
+        if (textTab) textTab.click();
+    }
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) modal.classList.remove('active');
+}
+
+function closeNotification() {
+    const notification = UIElements.notification;
+    if (notification) notification.classList.remove('active');
+}
+
+function handleScheduleClick() {
+    if (!isAuthenticated()) {
+        showNotification('Please sign in to schedule a status', 'error');
+        return;
+    }
+    
+    const modal = UIElements.scheduleModal;
+    if (modal) modal.classList.add('active');
+    
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const scheduleDate = UIElements.getElement('scheduleDate');
+    const scheduleTime = UIElements.getElement('scheduleTime');
+    
+    if (scheduleDate) {
+        scheduleDate.value = tomorrow.toISOString().split('T')[0];
+    }
+    if (scheduleTime) {
+        const hours = tomorrow.getHours().toString().padStart(2, '0');
+        const minutes = tomorrow.getMinutes().toString().padStart(2, '0');
+        scheduleTime.value = `${hours}:${minutes}`;
+    }
+    
+    updateScheduledStatusesList();
+}
+
+function showScheduleModal() {
+    const modal = UIElements.scheduleModal;
+    if (modal) modal.classList.add('active');
+    updateScheduledStatusesList();
+}
+
+function viewMyStatus() {
+    if (myStatuses && myStatuses.length > 0) {
+        showStatusViewer(myStatuses[0]);
+    } else {
+        showNotification('You have no statuses yet', 'info');
+    }
+}
+
+function editMyStatus() {
+    if (!isAuthenticated()) {
+        showNotification('Please sign in to edit status', 'error');
+        return;
+    }
+    
+    const modal = UIElements.createStatusModal;
+    if (modal) modal.classList.add('active');
+    
+    if (myStatuses && myStatuses.length > 0) {
+        const latest = myStatuses[0];
+        const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
+        if (textTab) textTab.click();
+        
+        const textInput = UIElements.getElement('textStatusInput');
+        if (textInput && latest.type === 'text' && latest.text) {
+            textInput.value = latest.text;
+            const counter = UIElements.getElement('textStatusCounter');
+            if (counter) counter.textContent = `${latest.text.length}/500`;
+        }
+    }
+}
+
+function clearTextInput() {
+    const input = UIElements.getElement('textStatusInput');
+    if (input) {
+        input.value = '';
+        const counter = UIElements.getElement('textStatusCounter');
+        if (counter) counter.textContent = '0/500';
+    }
+}
+
+function addPollOption() {
+    const container = UIElements.getElement('pollOptionsContainer');
+    if (!container) return;
+    
+    const optionCount = container.children.length + 1;
+    if (optionCount > 6) {
+        showNotification('Maximum 6 options allowed', 'warning');
+        return;
+    }
+    
+    const item = document.createElement('div');
+    item.className = 'poll-option-item';
+    
+    item.innerHTML = `
+        <div class="poll-option-number">${optionCount}</div>
+        <div class="poll-option-input-wrapper">
+            <input type="text" class="text-input poll-option-input" placeholder="Option ${optionCount}" data-index="${optionCount}" maxlength="100">
+            <button class="remove-poll-option" type="button" aria-label="Remove option">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+    
+    const removeBtn = item.querySelector('.remove-poll-option');
+    removeBtn.addEventListener('click', () => {
+        if (container.children.length > 2) {
+            item.remove();
+            updatePollOptionNumbers();
+        } else {
+            showNotification('Minimum 2 options required', 'warning');
+        }
+    });
+    
+    container.appendChild(item);
+}
+
+function updatePollOptionNumbers() {
+    const items = UIElements.querySelectorAll('.poll-option-item');
+    
+    items.forEach((item, idx) => {
+        const number = item.querySelector('.poll-option-number');
+        const input = item.querySelector('.poll-option-input');
+        
+        if (number) number.textContent = idx + 1;
+        if (input) {
+            input.dataset.index = idx + 1;
+            input.placeholder = `Option ${idx + 1}`;
+        }
+    });
+}
+
+function handleMuteFromViewer() {
+    if (currentViewerStatus) {
+        const muteBtn = UIElements.getElement('muteUserBtn');
+        if (muteBtn) {
+            const action = muteBtn.dataset.action;
+            handleStatusAction(action, currentViewerStatus, muteBtn);
+        }
+    }
+}
+
+function shareCurrentStatus() {
+    if (currentViewerStatus) {
+        if (navigator.share) {
+            navigator.share({
+                title: `Status from ${currentViewerStatus.user?.displayName || 'User'}`,
+                text: currentViewerStatus.text || 'Check out this status',
+                url: window.location.href
+            }).catch(() => {});
+        } else {
+            navigator.clipboard.writeText(window.location.href)
+                .then(() => showNotification('Link copied', 'success'))
+                .catch(() => showNotification('Failed to copy', 'error'));
+        }
+    }
+}
+
+function showReportModal() {
+    if (currentViewerStatus) {
+        const modal = UIElements.reportModal;
+        if (modal) modal.classList.add('active');
+    }
+}
+
+function sendReply() {
+    const replyInput = UIElements.getElement('replyInput');
+    if (replyInput && replyInput.value.trim() && currentViewerStatus) {
+        showNotification('Reply sent', 'success');
+        replyInput.value = '';
+    }
+}
+
+function retryConnection() {
+    const errorUI = UIElements.errorUI;
+    if (errorUI) errorUI.classList.remove('active');
+    
+    showNotification('Retrying connection...', 'info');
+    
+    if (typeof bootstrapApplication === 'function') {
+        bootstrapApplication().catch(() => {
+            if (errorUI) errorUI.classList.add('active');
+        });
+    }
+}
+
+function enableOfflineMode() {
+    const errorUI = UIElements.errorUI;
+    if (errorUI) errorUI.classList.remove('active');
+    
+    isOfflineMode = true;
+    showNotification('Offline mode enabled', 'warning');
+    loadCachedDataInstantly();
+    renderStatusListInstantlyUI();
+    enableProtectedUI();
+}
+
+function retryHandshake() {
+    UILogger.info('Handshake', 'Manually retrying handshake');
+    
+    if (typeof IframeHandshakeAuthority !== 'undefined') {
+        IframeHandshakeAuthority.execute({ maxRetries: 5 })
+            .then(() => {
+                showNotification('Connected', 'success');
+                enableProtectedUI();
+            })
+            .catch(() => {
+                showNotification('Failed to connect', 'error');
+            });
+    } else if (typeof window.statusCore?.startHandshake === 'function') {
+        window.statusCore.startHandshake({ retries: 5 })
+            .then(() => {
+                showNotification('Connected', 'success');
+                enableProtectedUI();
+            })
+            .catch(() => {
+                showNotification('Failed to connect', 'error');
+            });
+    }
+}
+
+function loadSelectedDraft() {
+    if (selectedDraft) {
+        loadDraft(selectedDraft);
+    }
+}
+
+// =============================================
 // NOTIFICATION SYSTEM
 // =============================================
 let notificationTimeout = null;
@@ -2916,34 +3328,6 @@ function showReconnectionState() {
                 </button>
             </div>
         `;
-    }
-}
-
-// =============================================
-// HANDSHAKE RETRY
-// =============================================
-function retryHandshake() {
-    UILogger.info('Handshake', 'Manually retrying handshake');
-    // Just log, no on-screen updates
-    
-    if (typeof IframeHandshakeAuthority !== 'undefined') {
-        IframeHandshakeAuthority.execute({ maxRetries: 5 })
-            .then(() => {
-                showNotification('Connected', 'success');
-                enableProtectedUI();
-            })
-            .catch(() => {
-                showNotification('Failed to connect', 'error');
-            });
-    } else if (typeof window.statusCore?.startHandshake === 'function') {
-        window.statusCore.startHandshake({ retries: 5 })
-            .then(() => {
-                showNotification('Connected', 'success');
-                enableProtectedUI();
-            })
-            .catch(() => {
-                showNotification('Failed to connect', 'error');
-            });
     }
 }
 
@@ -3065,76 +3449,56 @@ function renderStatusesListUI(container, statusesList) {
     
     container.innerHTML = '';
     container.appendChild(fragment);
+    
+    // Bind handlers to new status items
+    setTimeout(() => {
+        InitialRender.bindStatusItemHandlers(container);
+    }, 50);
 }
 
 // =============================================
-// BASIC EVENT LISTENERS
+// BASIC EVENT LISTENERS SETUP
 // =============================================
 function setupBasicEventListeners() {
-    const createStatusBtn = UIElements.getElement('createStatusBtn');
-    if (createStatusBtn && !createStatusBtn.hasListener) {
-        createStatusBtn.hasListener = true;
-        createStatusBtn.addEventListener('click', () => {
-            if (!isAuthenticated()) {
-                showNotification('Please sign in to create a status', 'error');
-                return;
-            }
-            const modal = UIElements.createStatusModal;
-            if (modal) {
-                modal.classList.add('active');
-                const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
-                if (textTab) textTab.click();
-            }
+    // Category tabs - use event delegation to avoid duplicates
+    const categoryContainer = document.querySelector('.category-tabs');
+    if (categoryContainer && !categoryContainer._hasListener) {
+        categoryContainer._hasListener = true;
+        categoryContainer.addEventListener('click', (e) => {
+            const tab = e.target.closest('.category-btn');
+            if (!tab) return;
+            
+            UIElements.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
+            tab.classList.add('active');
+            updateCurrentSectionUI();
+            UIStateManager.set('currentTab', tab.id);
         });
     }
     
-    const closeCreateStatusModal = UIElements.getElement('closeCreateStatusModal');
-    if (closeCreateStatusModal && !closeCreateStatusModal.hasListener) {
-        closeCreateStatusModal.hasListener = true;
-        closeCreateStatusModal.addEventListener('click', () => {
-            const modal = UIElements.createStatusModal;
-            if (modal) modal.classList.remove('active');
+    // Create status tabs - event delegation
+    const createStatusTabs = document.querySelector('.create-status-tabs');
+    if (createStatusTabs && !createStatusTabs._hasListener) {
+        createStatusTabs._hasListener = true;
+        createStatusTabs.addEventListener('click', (e) => {
+            const tab = e.target.closest('.create-status-tab');
+            if (!tab) return;
+            
+            const tabName = tab.dataset.tab;
+            
+            UIElements.querySelectorAll('.create-status-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            UIElements.querySelectorAll('.create-status-tab-content').forEach(c => c.classList.remove('active'));
+            
+            const tabContent = UIElements.getElement(`${tabName}Tab`);
+            if (tabContent) tabContent.classList.add('active');
         });
     }
-    
-    const closeNotificationBtn = UIElements.getElement('closeNotificationBtn');
-    if (closeNotificationBtn && !closeNotificationBtn.hasListener) {
-        closeNotificationBtn.hasListener = true;
-        closeNotificationBtn.addEventListener('click', () => {
-            const notification = UIElements.notification;
-            if (notification) notification.classList.remove('active');
-        });
-    }
-}
-
-// =============================================
-// COMPLETE EVENT LISTENERS
-// =============================================
-function setupEventListeners() {
-    setupBasicEventListeners();
-    
-    // Create status tabs
-    UIElements.querySelectorAll('.create-status-tab').forEach(tab => {
-        if (!tab.hasListener) {
-            tab.hasListener = true;
-            tab.addEventListener('click', function() {
-                const tabName = this.dataset.tab;
-                
-                UIElements.querySelectorAll('.create-status-tab').forEach(t => t.classList.remove('active'));
-                this.classList.add('active');
-                
-                UIElements.querySelectorAll('.create-status-tab-content').forEach(c => c.classList.remove('active'));
-                
-                const tabContent = UIElements.getElement(`${tabName}Tab`);
-                if (tabContent) tabContent.classList.add('active');
-            });
-        }
-    });
     
     // Text status input
     const textStatusInput = UIElements.getElement('textStatusInput');
-    if (textStatusInput && !textStatusInput.hasListener) {
-        textStatusInput.hasListener = true;
+    if (textStatusInput && !textStatusInput._hasListener) {
+        textStatusInput._hasListener = true;
         textStatusInput.addEventListener('input', function() {
             const counter = UIElements.getElement('textStatusCounter');
             if (counter) {
@@ -3145,507 +3509,42 @@ function setupEventListeners() {
         });
     }
     
-    // Clear text button
-    const clearTextBtn = UIElements.getElement('clearTextBtn');
-    if (clearTextBtn && !clearTextBtn.hasListener) {
-        clearTextBtn.hasListener = true;
-        clearTextBtn.addEventListener('click', () => {
-            const input = UIElements.getElement('textStatusInput');
-            if (input) {
-                input.value = '';
-                const counter = UIElements.getElement('textStatusCounter');
-                if (counter) counter.textContent = '0/500';
-            }
-        });
-    }
-    
     // Media upload
     const mediaUploadArea = UIElements.getElement('mediaUploadArea');
     const mediaFileInput = UIElements.getElement('mediaFileInput');
     
-    if (mediaUploadArea && mediaFileInput) {
-        if (!mediaUploadArea.hasListener) {
-            mediaUploadArea.hasListener = true;
-            mediaUploadArea.addEventListener('click', () => mediaFileInput.click());
-            
-            mediaUploadArea.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                mediaUploadArea.style.backgroundColor = 'rgba(0, 132, 255, 0.1)';
-            });
-            
-            mediaUploadArea.addEventListener('dragleave', () => {
-                mediaUploadArea.style.backgroundColor = '';
-            });
-            
-            mediaUploadArea.addEventListener('drop', (e) => {
-                e.preventDefault();
-                mediaUploadArea.style.backgroundColor = '';
-                
-                if (e.dataTransfer.files.length > 0) {
-                    handleMediaUpload({ target: { files: Array.from(e.dataTransfer.files) } });
-                }
-            });
-        }
+    if (mediaUploadArea && !mediaUploadArea._hasListener) {
+        mediaUploadArea._hasListener = true;
+        mediaUploadArea.addEventListener('click', () => mediaFileInput.click());
         
-        if (!mediaFileInput.hasListener) {
-            mediaFileInput.hasListener = true;
-            mediaFileInput.addEventListener('change', handleMediaUpload);
-        }
-    }
-    
-    // Add poll option
-    const addPollOptionBtn = UIElements.getElement('addPollOptionBtn');
-    if (addPollOptionBtn && !addPollOptionBtn.hasListener) {
-        addPollOptionBtn.hasListener = true;
-        addPollOptionBtn.addEventListener('click', () => {
-            const container = UIElements.getElement('pollOptionsContainer');
-            if (!container) return;
+        mediaUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            mediaUploadArea.style.backgroundColor = 'rgba(0, 132, 255, 0.1)';
+        });
+        
+        mediaUploadArea.addEventListener('dragleave', () => {
+            mediaUploadArea.style.backgroundColor = '';
+        });
+        
+        mediaUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            mediaUploadArea.style.backgroundColor = '';
             
-            const optionCount = container.children.length + 1;
-            if (optionCount > 6) {
-                showNotification('Maximum 6 options allowed', 'warning');
-                return;
-            }
-            
-            addPollOption(optionCount);
-        });
-    }
-    
-    // Post status button
-    const postStatusBtn = UIElements.getElement('postStatusBtn');
-    if (postStatusBtn && !postStatusBtn.hasListener) {
-        postStatusBtn.hasListener = true;
-        postStatusBtn.addEventListener('click', UIFailsafe.wrapAction(handlePostStatus, 'postStatus'));
-    }
-    
-    // Save draft button
-    const saveDraftBtn = UIElements.getElement('saveDraftBtn');
-    if (saveDraftBtn && !saveDraftBtn.hasListener) {
-        saveDraftBtn.hasListener = true;
-        saveDraftBtn.addEventListener('click', UIFailsafe.wrapAction(handleSaveDraft, 'saveDraft'));
-    }
-    
-    // Schedule status button
-    const scheduleStatusBtn = UIElements.getElement('scheduleStatusBtn');
-    if (scheduleStatusBtn && !scheduleStatusBtn.hasListener) {
-        scheduleStatusBtn.hasListener = true;
-        scheduleStatusBtn.addEventListener('click', () => {
-            if (!isAuthenticated()) {
-                showNotification('Please sign in to schedule a status', 'error');
-                return;
-            }
-            
-            const modal = UIElements.scheduleModal;
-            if (modal) modal.classList.add('active');
-            
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            
-            const scheduleDate = UIElements.getElement('scheduleDate');
-            const scheduleTime = UIElements.getElement('scheduleTime');
-            
-            if (scheduleDate) {
-                scheduleDate.value = tomorrow.toISOString().split('T')[0];
-            }
-            if (scheduleTime) {
-                const hours = tomorrow.getHours().toString().padStart(2, '0');
-                const minutes = tomorrow.getMinutes().toString().padStart(2, '0');
-                scheduleTime.value = `${hours}:${minutes}`;
-            }
-            
-            updateScheduledStatusesList();
-        });
-    }
-    
-    // Close schedule modal
-    const closeScheduleModal = UIElements.getElement('closeScheduleModal');
-    if (closeScheduleModal && !closeScheduleModal.hasListener) {
-        closeScheduleModal.hasListener = true;
-        closeScheduleModal.addEventListener('click', () => {
-            const modal = UIElements.scheduleModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Confirm schedule button
-    const confirmScheduleBtn = UIElements.getElement('confirmScheduleBtn');
-    if (confirmScheduleBtn && !confirmScheduleBtn.hasListener) {
-        confirmScheduleBtn.hasListener = true;
-        confirmScheduleBtn.addEventListener('click', UIFailsafe.wrapAction(handleConfirmSchedule, 'confirmSchedule'));
-    }
-    
-    // Category tabs
-    const categoryTabs = ['allTab', 'friendsTab', 'closeFriendsTab', 'pinnedTab', 'mutedTab', 'microCirclesTab', 'myStatusTab'];
-    
-    categoryTabs.forEach(tabId => {
-        const tab = UIElements.getElement(tabId);
-        if (tab && !tab.hasListener) {
-            tab.hasListener = true;
-            tab.addEventListener('click', function() {
-                UIElements.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
-                this.classList.add('active');
-                updateCurrentSectionUI();
-                UIStateManager.set('currentTab', tabId);
-            });
-        }
-    });
-    
-    // Restore active tab
-    const savedTab = UIStateManager.get('currentTab');
-    if (savedTab) {
-        const tab = UIElements.getElement(savedTab);
-        if (tab) tab.click();
-    }
-    
-    // Filter buttons
-    UIElements.querySelectorAll('.category-btn[data-filter]').forEach(btn => {
-        if (!btn.hasListener) {
-            btn.hasListener = true;
-            btn.addEventListener('click', function() {
-                const filter = this.dataset.filter;
-                let label = '';
-                
-                if (filter.startsWith('intent-')) {
-                    const key = filter.replace('intent-', '');
-                    label = statusIntents[key]?.name || key;
-                    addFilterTag(filter, label);
-                } else if (filter.startsWith('mood-')) {
-                    const key = filter.replace('mood-', '');
-                    label = statusMoods[key]?.name || key;
-                    addFilterTag(filter, label);
-                }
-            });
-        }
-    });
-    
-    // Clear filters button
-    const clearFiltersBtn = UIElements.getElement('clearFiltersBtn');
-    if (clearFiltersBtn && !clearFiltersBtn.hasListener) {
-        clearFiltersBtn.hasListener = true;
-        clearFiltersBtn.addEventListener('click', clearAllFilters);
-    }
-    
-    // Restore filters
-    UIStateManager.restoreFilters();
-    
-    // Viewer back button
-    const viewerBackBtn = UIElements.getElement('viewerBackBtn');
-    if (viewerBackBtn && !viewerBackBtn.hasListener) {
-        viewerBackBtn.hasListener = true;
-        viewerBackBtn.addEventListener('click', () => {
-            const viewer = UIElements.statusViewerPanel;
-            if (viewer) {
-                viewer.classList.remove('active');
-                document.body.style.overflow = '';
-                stopAutoAdvance();
+            if (e.dataTransfer.files.length > 0) {
+                handleMediaUpload({ target: { files: Array.from(e.dataTransfer.files) } });
             }
         });
     }
     
-    // Pause/Resume button
-    const pauseResumeBtn = UIElements.getElement('pauseResumeBtn');
-    if (pauseResumeBtn && !pauseResumeBtn.hasListener) {
-        pauseResumeBtn.hasListener = true;
-        pauseResumeBtn.addEventListener('click', toggleAutoAdvance);
-    }
-    
-    // Mute user button
-    const muteUserBtn = UIElements.getElement('muteUserBtn');
-    if (muteUserBtn && !muteUserBtn.hasListener) {
-        muteUserBtn.hasListener = true;
-        muteUserBtn.addEventListener('click', async () => {
-            if (currentViewerStatus) {
-                const action = muteUserBtn.dataset.action;
-                await handleStatusAction(action, currentViewerStatus, muteUserBtn);
-            }
-        });
-    }
-    
-    // Share status button
-    const shareStatusBtn = UIElements.getElement('shareStatusBtn');
-    if (shareStatusBtn && !shareStatusBtn.hasListener) {
-        shareStatusBtn.hasListener = true;
-        shareStatusBtn.addEventListener('click', () => {
-            if (currentViewerStatus) {
-                if (navigator.share) {
-                    navigator.share({
-                        title: `Status from ${currentViewerStatus.user?.displayName || 'User'}`,
-                        text: currentViewerStatus.text || 'Check out this status',
-                        url: window.location.href
-                    }).catch(() => {});
-                } else {
-                    navigator.clipboard.writeText(window.location.href)
-                        .then(() => showNotification('Link copied', 'success'))
-                        .catch(() => showNotification('Failed to copy', 'error'));
-                }
-            }
-        });
-    }
-    
-    // Save status button
-    const saveStatusBtn = UIElements.getElement('saveStatusBtn');
-    if (saveStatusBtn && !saveStatusBtn.hasListener) {
-        saveStatusBtn.hasListener = true;
-        saveStatusBtn.addEventListener('click', UIFailsafe.wrapAction(handleSaveStatus, 'saveStatus'));
-    }
-    
-    // Report status button
-    const reportStatusBtn = UIElements.getElement('reportStatusBtn');
-    if (reportStatusBtn && !reportStatusBtn.hasListener) {
-        reportStatusBtn.hasListener = true;
-        reportStatusBtn.addEventListener('click', () => {
-            if (currentViewerStatus) {
-                const modal = UIElements.reportModal;
-                if (modal) modal.classList.add('active');
-            }
-        });
-    }
-    
-    // Close report modal
-    const closeReportModal = UIElements.getElement('closeReportModal');
-    if (closeReportModal && !closeReportModal.hasListener) {
-        closeReportModal.hasListener = true;
-        closeReportModal.addEventListener('click', () => {
-            const modal = UIElements.reportModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Report details input
-    const reportDetails = UIElements.getElement('reportDetails');
-    if (reportDetails && !reportDetails.hasListener) {
-        reportDetails.hasListener = true;
-        reportDetails.addEventListener('input', function() {
-            const counter = UIElements.getElement('reportDetailsCounter');
-            if (counter) {
-                const length = this.value.length;
-                counter.textContent = `${length}/500`;
-            }
-            updateReportSubmitButton();
-        });
-    }
-    
-    // Submit report button
-    const submitReportBtn = UIElements.getElement('submitReportBtn');
-    if (submitReportBtn && !submitReportBtn.hasListener) {
-        submitReportBtn.hasListener = true;
-        submitReportBtn.addEventListener('click', UIFailsafe.wrapAction(handleSubmitReport, 'submitReport'));
-    }
-    
-    // Send reply button
-    const sendReplyBtn = UIElements.getElement('sendReplyBtn');
-    if (sendReplyBtn && !sendReplyBtn.hasListener) {
-        sendReplyBtn.hasListener = true;
-        sendReplyBtn.addEventListener('click', () => {
-            const replyInput = UIElements.getElement('replyInput');
-            if (replyInput && replyInput.value.trim() && currentViewerStatus) {
-                showNotification('Reply sent', 'success');
-                replyInput.value = '';
-            }
-        });
-    }
-    
-    // Reply input enter key
-    const replyInput = UIElements.getElement('replyInput');
-    if (replyInput && !replyInput.hasListener) {
-        replyInput.hasListener = true;
-        replyInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                const btn = UIElements.getElement('sendReplyBtn');
-                if (btn) btn.click();
-            }
-        });
-    }
-    
-    // View highlights button
-    const viewHighlightsBtn = UIElements.getElement('viewHighlightsBtn');
-    if (viewHighlightsBtn && !viewHighlightsBtn.hasListener) {
-        viewHighlightsBtn.hasListener = true;
-        viewHighlightsBtn.addEventListener('click', showHighlightsModal);
-    }
-    
-    // Close highlights modal
-    const closeHighlightsModal = UIElements.getElement('closeHighlightsModal');
-    if (closeHighlightsModal && !closeHighlightsModal.hasListener) {
-        closeHighlightsModal.hasListener = true;
-        closeHighlightsModal.addEventListener('click', () => {
-            const modal = UIElements.highlightsModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Create highlight button
-    const createHighlightBtn = UIElements.getElement('createHighlightBtn');
-    if (createHighlightBtn && !createHighlightBtn.hasListener) {
-        createHighlightBtn.hasListener = true;
-        createHighlightBtn.addEventListener('click', () => {
-            if (!isAuthenticated()) {
-                showNotification('Please sign in to create a highlight', 'error');
-                return;
-            }
-            showHighlightsEditor();
-        });
-    }
-    
-    // Close highlights editor
-    const closeHighlightsEditor = UIElements.getElement('closeHighlightsEditor');
-    if (closeHighlightsEditor && !closeHighlightsEditor.hasListener) {
-        closeHighlightsEditor.hasListener = true;
-        closeHighlightsEditor.addEventListener('click', () => {
-            const modal = UIElements.highlightsEditorModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Save highlight button
-    const saveHighlightBtn = UIElements.getElement('saveHighlightBtn');
-    if (saveHighlightBtn && !saveHighlightBtn.hasListener) {
-        saveHighlightBtn.hasListener = true;
-        saveHighlightBtn.addEventListener('click', UIFailsafe.wrapAction(saveHighlight, 'saveHighlight'));
-    }
-    
-    // View timeline button
-    const viewTimelineBtn = UIElements.getElement('viewTimelineBtn');
-    if (viewTimelineBtn && !viewTimelineBtn.hasListener) {
-        viewTimelineBtn.hasListener = true;
-        viewTimelineBtn.addEventListener('click', showMemoryTimelineModal);
-    }
-    
-    // Close memory timeline modal
-    const closeMemoryTimelineModal = UIElements.getElement('closeMemoryTimelineModal');
-    if (closeMemoryTimelineModal && !closeMemoryTimelineModal.hasListener) {
-        closeMemoryTimelineModal.hasListener = true;
-        closeMemoryTimelineModal.addEventListener('click', () => {
-            const modal = UIElements.memoryTimelineModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Export timeline button
-    const exportTimelineBtn = UIElements.getElement('exportTimelineBtn');
-    if (exportTimelineBtn && !exportTimelineBtn.hasListener) {
-        exportTimelineBtn.hasListener = true;
-        exportTimelineBtn.addEventListener('click', exportTimeline);
-    }
-    
-    // View stats button
-    const viewStatsBtn = UIElements.getElement('viewStatsBtn');
-    if (viewStatsBtn && !viewStatsBtn.hasListener) {
-        viewStatsBtn.hasListener = true;
-        viewStatsBtn.addEventListener('click', showStatsModal);
-    }
-    
-    // Close stats modal
-    const closeStatsModal = UIElements.getElement('closeStatsModal');
-    if (closeStatsModal && !closeStatsModal.hasListener) {
-        closeStatsModal.hasListener = true;
-        closeStatsModal.addEventListener('click', () => {
-            const modal = UIElements.statsModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Refresh stats button
-    const refreshStatsBtn = UIElements.getElement('refreshStatsBtn');
-    if (refreshStatsBtn && !refreshStatsBtn.hasListener) {
-        refreshStatsBtn.hasListener = true;
-        refreshStatsBtn.addEventListener('click', () => {
-            loadStatsContent();
-            showNotification('Stats refreshed', 'success');
-        });
-    }
-    
-    // View drafts button
-    const viewDraftsBtn = UIElements.getElement('viewDraftsBtn');
-    if (viewDraftsBtn && !viewDraftsBtn.hasListener) {
-        viewDraftsBtn.hasListener = true;
-        viewDraftsBtn.addEventListener('click', showDraftsModal);
-    }
-    
-    // Close drafts modal
-    const closeDraftsModal = UIElements.getElement('closeDraftsModal');
-    if (closeDraftsModal && !closeDraftsModal.hasListener) {
-        closeDraftsModal.hasListener = true;
-        closeDraftsModal.addEventListener('click', () => {
-            const modal = UIElements.draftsModal;
-            if (modal) modal.classList.remove('active');
-        });
-    }
-    
-    // Delete all drafts button
-    const deleteAllDraftsBtn = UIElements.getElement('deleteAllDraftsBtn');
-    if (deleteAllDraftsBtn && !deleteAllDraftsBtn.hasListener) {
-        deleteAllDraftsBtn.hasListener = true;
-        deleteAllDraftsBtn.addEventListener('click', UIFailsafe.wrapAction(deleteAllDrafts, 'deleteAllDrafts'));
-    }
-    
-    // Load draft button
-    const loadDraftBtn = UIElements.getElement('loadDraftBtn');
-    if (loadDraftBtn && !loadDraftBtn.hasListener) {
-        loadDraftBtn.hasListener = true;
-        loadDraftBtn.addEventListener('click', () => {
-            if (selectedDraft) {
-                loadDraft(selectedDraft);
-            }
-        });
-    }
-    
-    // View scheduled button
-    const viewScheduledBtn = UIElements.getElement('viewScheduledBtn');
-    if (viewScheduledBtn && !viewScheduledBtn.hasListener) {
-        viewScheduledBtn.hasListener = true;
-        viewScheduledBtn.addEventListener('click', () => {
-            const modal = UIElements.scheduleModal;
-            if (modal) modal.classList.add('active');
-            updateScheduledStatusesList();
-        });
-    }
-    
-    // View my status button
-    const viewMyStatusBtn = UIElements.getElement('viewMyStatusBtn');
-    if (viewMyStatusBtn && !viewMyStatusBtn.hasListener) {
-        viewMyStatusBtn.hasListener = true;
-        viewMyStatusBtn.addEventListener('click', () => {
-            if (myStatuses && myStatuses.length > 0) {
-                showStatusViewer(myStatuses[0]);
-            } else {
-                showNotification('You have no statuses yet', 'info');
-            }
-        });
-    }
-    
-    // Edit my status button
-    const editMyStatusBtn = UIElements.getElement('editMyStatusBtn');
-    if (editMyStatusBtn && !editMyStatusBtn.hasListener) {
-        editMyStatusBtn.hasListener = true;
-        editMyStatusBtn.addEventListener('click', () => {
-            if (!isAuthenticated()) {
-                showNotification('Please sign in to edit status', 'error');
-                return;
-            }
-            
-            const modal = UIElements.createStatusModal;
-            if (modal) modal.classList.add('active');
-            
-            if (myStatuses && myStatuses.length > 0) {
-                const latest = myStatuses[0];
-                const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
-                if (textTab) textTab.click();
-                
-                const textInput = UIElements.getElement('textStatusInput');
-                if (textInput && latest.type === 'text' && latest.text) {
-                    textInput.value = latest.text;
-                    const counter = UIElements.getElement('textStatusCounter');
-                    if (counter) counter.textContent = `${latest.text.length}/500`;
-                }
-            }
-        });
+    if (mediaFileInput && !mediaFileInput._hasListener) {
+        mediaFileInput._hasListener = true;
+        mediaFileInput.addEventListener('change', handleMediaUpload);
     }
     
     // My status preview click
     const myStatusPreview = UIElements.getElement('myStatusPreview');
-    if (myStatusPreview && !myStatusPreview.hasListener) {
-        myStatusPreview.hasListener = true;
+    if (myStatusPreview && !myStatusPreview._hasListener) {
+        myStatusPreview._hasListener = true;
         myStatusPreview.addEventListener('click', () => {
             if (myStatuses && myStatuses.length > 0) {
                 showStatusViewer(myStatuses[0]);
@@ -3660,47 +3559,141 @@ function setupEventListeners() {
         });
     }
     
-    // Retry connection button
-    const retryConnectionBtn = UIElements.getElement('retryConnectionBtn');
-    if (retryConnectionBtn && !retryConnectionBtn.hasListener) {
-        retryConnectionBtn.hasListener = true;
-        retryConnectionBtn.addEventListener('click', async () => {
-            const errorUI = UIElements.errorUI;
-            if (errorUI) errorUI.classList.remove('active');
+    // Restore active tab
+    const savedTab = UIStateManager.get('currentTab');
+    if (savedTab) {
+        const tab = UIElements.getElement(savedTab);
+        if (tab) tab.click();
+    }
+    
+    // Restore filters
+    UIStateManager.restoreFilters();
+}
+
+// =============================================
+// COMPLETE EVENT LISTENERS
+// =============================================
+function setupEventListeners() {
+    setupBasicEventListeners();
+    
+    // Filter buttons - event delegation
+    const filterContainer = document.querySelector('.filter-buttons');
+    if (filterContainer && !filterContainer._hasListener) {
+        filterContainer._hasListener = true;
+        filterContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-filter]');
+            if (!btn) return;
             
-            showNotification('Retrying connection...', 'info');
+            const filter = btn.dataset.filter;
+            let label = '';
             
-            try {
-                const success = await bootstrapApplication();
-                if (!success && errorUI) errorUI.classList.add('active');
-            } catch (error) {
-                UILogger.error('Connection', 'Retry failed', error);
-                if (errorUI) errorUI.classList.add('active');
+            if (filter.startsWith('intent-')) {
+                const key = filter.replace('intent-', '');
+                label = statusIntents[key]?.name || key;
+                addFilterTag(filter, label);
+            } else if (filter.startsWith('mood-')) {
+                const key = filter.replace('mood-', '');
+                label = statusMoods[key]?.name || key;
+                addFilterTag(filter, label);
             }
         });
     }
     
-    // Offline mode button
-    const offlineModeBtn = UIElements.getElement('offlineModeBtn');
-    if (offlineModeBtn && !offlineModeBtn.hasListener) {
-        offlineModeBtn.hasListener = true;
-        offlineModeBtn.addEventListener('click', () => {
-            const errorUI = UIElements.errorUI;
-            if (errorUI) errorUI.classList.remove('active');
-            
-            isOfflineMode = true;
-            showNotification('Offline mode enabled', 'warning');
-            loadCachedDataInstantly();
-            renderStatusListInstantlyUI();
-            enableProtectedUI();
+    // Clear filters button
+    const clearFiltersBtn = UIElements.getElement('clearFiltersBtn');
+    if (clearFiltersBtn && !clearFiltersBtn._hasListener) {
+        clearFiltersBtn._hasListener = true;
+        clearFiltersBtn.addEventListener('click', clearAllFilters);
+    }
+    
+    // Viewer back button
+    const viewerBackBtn = UIElements.getElement('viewerBackBtn');
+    if (viewerBackBtn && !viewerBackBtn._hasListener) {
+        viewerBackBtn._hasListener = true;
+        viewerBackBtn.addEventListener('click', closeViewer);
+    }
+    
+    // Pause/Resume button
+    const pauseResumeBtn = UIElements.getElement('pauseResumeBtn');
+    if (pauseResumeBtn && !pauseResumeBtn._hasListener) {
+        pauseResumeBtn._hasListener = true;
+        pauseResumeBtn.addEventListener('click', toggleAutoAdvance);
+    }
+    
+    // Report details input
+    const reportDetails = UIElements.getElement('reportDetails');
+    if (reportDetails && !reportDetails._hasListener) {
+        reportDetails._hasListener = true;
+        reportDetails.addEventListener('input', function() {
+            const counter = UIElements.getElement('reportDetailsCounter');
+            if (counter) {
+                const length = this.value.length;
+                counter.textContent = `${length}/500`;
+            }
+            updateReportSubmitButton();
         });
     }
     
-    // Retry handshake button
-    const retryHandshakeBtn = document.getElementById('retryHandshakeBtn');
-    if (retryHandshakeBtn && !retryHandshakeBtn.hasListener) {
-        retryHandshakeBtn.hasListener = true;
-        retryHandshakeBtn.addEventListener('click', retryHandshake);
+    // Reply input enter key
+    const replyInput = UIElements.getElement('replyInput');
+    if (replyInput && !replyInput._hasListener) {
+        replyInput._hasListener = true;
+        replyInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const btn = UIElements.getElement('sendReplyBtn');
+                if (btn) btn.click();
+            }
+        });
+    }
+    
+    // Drafts list click delegation
+    const allDraftsList = UIElements.getElement('allDraftsList');
+    if (allDraftsList && !allDraftsList._hasListener) {
+        allDraftsList._hasListener = true;
+        allDraftsList.addEventListener('click', (e) => {
+            const draftItem = e.target.closest('.draft-item');
+            if (!draftItem) return;
+            
+            const draftId = draftItem.dataset.draftId;
+            const draft = drafts.find(d => d.id === draftId);
+            if (!draft) return;
+            
+            if (e.target.closest('.draft-action-btn')) {
+                const btn = e.target.closest('.draft-action-btn');
+                const action = btn.dataset.action;
+                handleDraftAction(action, draft);
+            } else {
+                draftItem.classList.toggle('selected');
+                
+                if (draftItem.classList.contains('selected')) {
+                    selectedDraft = draft;
+                    const loadBtn = UIElements.getElement('loadDraftBtn');
+                    if (loadBtn) loadBtn.disabled = false;
+                } else {
+                    selectedDraft = null;
+                    const loadBtn = UIElements.getElement('loadDraftBtn');
+                    if (loadBtn) loadBtn.disabled = true;
+                }
+            }
+        });
+    }
+    
+    // Scheduled statuses cancel buttons
+    const scheduledStatusesList = UIElements.getElement('scheduledStatusesList');
+    if (scheduledStatusesList && !scheduledStatusesList._hasListener) {
+        scheduledStatusesList._hasListener = true;
+        scheduledStatusesList.addEventListener('click', (e) => {
+            const cancelBtn = e.target.closest('.cancel-btn');
+            if (!cancelBtn) return;
+            
+            const scheduleItem = cancelBtn.closest('.schedule-item');
+            if (!scheduleItem) return;
+            
+            const scheduleId = scheduleItem.dataset.scheduleId;
+            if (scheduleId) {
+                cancelScheduledStatus(scheduleId);
+            }
+        });
     }
     
     UILogger.debug('Events', 'All event listeners configured');
@@ -4076,59 +4069,6 @@ function initializePollOptions() {
     }
 }
 
-function addPollOption(index) {
-    const container = UIElements.getElement('pollOptionsContainer');
-    if (!container) return;
-    
-    const item = document.createElement('div');
-    item.className = 'poll-option-item';
-    
-    item.innerHTML = `
-        <div class="poll-option-number">${index}</div>
-        <div class="poll-option-input-wrapper">
-            <input type="text" class="text-input poll-option-input" placeholder="Option ${index}" data-index="${index}" maxlength="100">
-            ${index > 2 ? `
-                <button class="remove-poll-option" type="button" aria-label="Remove option">
-                    <i class="fas fa-times"></i>
-                </button>
-            ` : ''}
-        </div>
-    `;
-    
-    const removeBtn = item.querySelector('.remove-poll-option');
-    if (removeBtn) {
-        removeBtn.addEventListener('click', () => {
-            if (container.children.length > 2) {
-                item.remove();
-                updatePollOptionNumbers();
-            } else {
-                showNotification('Minimum 2 options required', 'warning');
-            }
-        });
-    }
-    
-    container.appendChild(item);
-}
-
-function updatePollOptionNumbers() {
-    const items = UIElements.querySelectorAll('.poll-option-item');
-    
-    items.forEach((item, idx) => {
-        const number = item.querySelector('.poll-option-number');
-        const input = item.querySelector('.poll-option-input');
-        const removeBtn = item.querySelector('.remove-poll-option');
-        
-        if (number) number.textContent = idx + 1;
-        if (input) {
-            input.dataset.index = idx + 1;
-            input.placeholder = `Option ${idx + 1}`;
-        }
-        if (removeBtn) {
-            removeBtn.style.display = idx >= 2 ? 'block' : 'none';
-        }
-    });
-}
-
 function initializeHighlightColorOptions() {
     const grid = UIElements.getElement('highlightColorGrid');
     if (!grid) return;
@@ -4309,7 +4249,8 @@ async function handlePostStatus() {
         const captionInput = UIElements.getElement('mediaCaptionInput');
         statusData.caption = captionInput ? captionInput.value.trim() : '';
         statusData.mediaType = 'image';
-        statusData.mediaUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+        statusData.mediaUrl = 'placeholder.jpg';
+        statusData.mediaUrls = ['placeholder.jpg'];
         
     } else if (tabName === 'poll') {
         const questionInput = UIElements.getElement('pollQuestionInput');
@@ -4660,6 +4601,54 @@ function updateReportSubmitButton() {
         const hasDetails = details.value.trim().length >= 10;
         const hasReason = selectedReason !== null;
         submitBtn.disabled = !(hasDetails && hasReason);
+    }
+}
+
+function handleMediaUpload(event) {
+    const files = event.target.files;
+    const preview = UIElements.getElement('mediaPreview');
+    
+    if (!preview) return;
+    
+    preview.innerHTML = '';
+    
+    for (let i = 0; i < Math.min(files.length, 5); i++) {
+        const file = files[i];
+        const fileType = file.type.split('/')[0];
+        
+        if (fileType !== 'image' && fileType !== 'video') {
+            showNotification('Only images and videos are supported', 'error');
+            continue;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const item = document.createElement('div');
+            item.className = 'media-preview-item';
+            
+            if (fileType === 'image') {
+                item.innerHTML = `
+                    <img src="${e.target.result}" class="media-preview-image" alt="Preview">
+                    <button class="remove-media-btn" type="button" aria-label="Remove media">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+            } else if (fileType === 'video') {
+                item.innerHTML = `
+                    <video src="${e.target.result}" class="media-preview-image" controls></video>
+                    <button class="remove-media-btn" type="button" aria-label="Remove media">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+            }
+            
+            const removeBtn = item.querySelector('.remove-media-btn');
+            removeBtn.addEventListener('click', () => item.remove());
+            
+            preview.appendChild(item);
+        };
+        
+        reader.readAsDataURL(file);
     }
 }
 
@@ -5041,31 +5030,6 @@ function updateDraftsList() {
             </div>
         `;
         
-        item.addEventListener('click', (e) => {
-            if (!e.target.closest('.draft-actions')) {
-                item.classList.toggle('selected');
-                
-                if (item.classList.contains('selected')) {
-                    selectedDraft = draft;
-                    const loadBtn = UIElements.getElement('loadDraftBtn');
-                    if (loadBtn) loadBtn.disabled = false;
-                } else {
-                    selectedDraft = null;
-                    const loadBtn = UIElements.getElement('loadDraftBtn');
-                    if (loadBtn) loadBtn.disabled = true;
-                }
-            }
-        });
-        
-        const actionButtons = item.querySelectorAll('.draft-action-btn');
-        actionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const action = btn.dataset.action;
-                handleDraftAction(action, draft);
-            });
-        });
-        
         list.appendChild(item);
     });
 }
@@ -5202,6 +5166,7 @@ function updateScheduledStatusesList() {
     scheduledStatuses.forEach(scheduled => {
         const item = document.createElement('div');
         item.className = 'schedule-item';
+        item.dataset.scheduleId = scheduled.id;
         
         const scheduledFor = new Date(scheduled.scheduledFor);
         const timeString = scheduledFor.toLocaleString();
@@ -5217,12 +5182,6 @@ function updateScheduledStatusesList() {
                 </button>
             </div>
         `;
-        
-        const btn = item.querySelector('.cancel-btn');
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            cancelScheduledStatus(scheduled.id);
-        });
         
         list.appendChild(item);
     });
@@ -5248,54 +5207,6 @@ async function cancelScheduledStatus(scheduleId) {
     } catch (error) {
         UILogger.error('Schedule', 'Failed to cancel scheduled status', error);
         showNotification('Failed to cancel scheduled status', 'error');
-    }
-}
-
-function handleMediaUpload(event) {
-    const files = event.target.files;
-    const preview = UIElements.getElement('mediaPreview');
-    
-    if (!preview) return;
-    
-    preview.innerHTML = '';
-    
-    for (let i = 0; i < Math.min(files.length, 5); i++) {
-        const file = files[i];
-        const fileType = file.type.split('/')[0];
-        
-        if (fileType !== 'image' && fileType !== 'video') {
-            showNotification('Only images and videos are supported', 'error');
-            continue;
-        }
-        
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const item = document.createElement('div');
-            item.className = 'media-preview-item';
-            
-            if (fileType === 'image') {
-                item.innerHTML = `
-                    <img src="${e.target.result}" class="media-preview-image" alt="Preview">
-                    <button class="remove-media-btn" type="button" aria-label="Remove media">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-            } else if (fileType === 'video') {
-                item.innerHTML = `
-                    <video src="${e.target.result}" class="media-preview-image" controls></video>
-                    <button class="remove-media-btn" type="button" aria-label="Remove media">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-            }
-            
-            const removeBtn = item.querySelector('.remove-media-btn');
-            removeBtn.addEventListener('click', () => item.remove());
-            
-            preview.appendChild(item);
-        };
-        
-        reader.readAsDataURL(file);
     }
 }
 
@@ -5351,8 +5262,18 @@ function clearAllFilters() {
     const clearBtn = UIElements.getElement('clearFiltersBtn');
     if (clearBtn) clearBtn.style.display = 'none';
     
-    currentIntentFilter = null;
-    currentMoodFilter = null;
+    // Use setter functions
+    if (typeof setCurrentIntentFilter === 'function') {
+        setCurrentIntentFilter(null);
+    } else {
+        currentIntentFilter = null;
+    }
+    
+    if (typeof setCurrentMoodFilter === 'function') {
+        setCurrentMoodFilter(null);
+    } else {
+        currentMoodFilter = null;
+    }
     
     UIStateManager.saveFilters();
     updateCurrentSectionUI();
@@ -5391,6 +5312,11 @@ function renderStatusListInstantlyUI() {
     
     container.innerHTML = '';
     container.appendChild(fragment);
+    
+    // Bind handlers to new status items
+    setTimeout(() => {
+        InitialRender.bindStatusItemHandlers(container);
+    }, 50);
 }
 
 function updateMyStatusPreviewUI() {
@@ -5519,8 +5445,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         ResponsiveEngine.initialize();
         
         UIRenderPipeline.setStage('progressiveEnhancement');
-        
-        // REMOVED: on-screen handshake status
         UIRenderPipeline.updateHandshakeStatus('waiting');
         
         onTokenReady(() => {
@@ -5561,6 +5485,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Restore UI state
         UIStateManager.restoreFilters();
+        
+        // Bind all button handlers
+        setTimeout(() => {
+            UIFailsafe._rebindAllHandlers();
+        }, 500);
         
     } catch (error) {
         UILogger.error('Init', 'Failed to initialize UI', error);
@@ -5626,7 +5555,46 @@ if (typeof window !== 'undefined') {
             retryHandshake,
             showDiagnosticOverlay
         };
-    } catch (e) {}
+        
+        // Also expose handler functions for direct onclick use
+        window.handleCreateStatusClick = handleCreateStatusClick;
+        window.closeModal = closeModal;
+        window.closeNotification = closeNotification;
+        window.handlePostStatus = handlePostStatus;
+        window.handleSaveDraft = handleSaveDraft;
+        window.handleScheduleClick = handleScheduleClick;
+        window.handleConfirmSchedule = handleConfirmSchedule;
+        window.showHighlightsModal = showHighlightsModal;
+        window.showHighlightsEditor = showHighlightsEditor;
+        window.saveHighlight = saveHighlight;
+        window.showMemoryTimelineModal = showMemoryTimelineModal;
+        window.exportTimeline = exportTimeline;
+        window.showStatsModal = showStatsModal;
+        window.loadStatsContent = loadStatsContent;
+        window.showDraftsModal = showDraftsModal;
+        window.deleteAllDrafts = deleteAllDrafts;
+        window.loadSelectedDraft = loadSelectedDraft;
+        window.showScheduleModal = showScheduleModal;
+        window.viewMyStatus = viewMyStatus;
+        window.editMyStatus = editMyStatus;
+        window.clearTextInput = clearTextInput;
+        window.addPollOption = addPollOption;
+        window.clearAllFilters = clearAllFilters;
+        window.closeViewer = closeViewer;
+        window.toggleAutoAdvance = toggleAutoAdvance;
+        window.handleMuteFromViewer = handleMuteFromViewer;
+        window.shareCurrentStatus = shareCurrentStatus;
+        window.handleSaveStatus = handleSaveStatus;
+        window.showReportModal = showReportModal;
+        window.handleSubmitReport = handleSubmitReport;
+        window.sendReply = sendReply;
+        window.retryConnection = retryConnection;
+        window.enableOfflineMode = enableOfflineMode;
+        window.retryHandshake = retryHandshake;
+        
+    } catch (e) {
+        console.error('[UI] Failed to expose globals:', e);
+    }
 }
 
-UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v5.4');
+UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v6.1');

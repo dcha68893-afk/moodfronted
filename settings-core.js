@@ -1,5 +1,5 @@
 // =============================================
-// SETTINGS CORE - ULTRA-HARDENED v6.1.0 (FIXED)
+// SETTINGS CORE - ULTRA-HARDENED v6.2.1 (FIXED)
 // COMPLETE INTEGRATION WITH PARENT ORCHESTRATION SYSTEM
 // ENVIRONMENT-AWARE | STARTUP GOVERNOR | HANDSHAKE CLIENT
 // SESSION BRIDGE | ORIGIN ADAPTER | RELIABILITY ENGINE
@@ -11,21 +11,127 @@
 // MODULE IDENTITY & VERSION
 // =============================================
 const MODULE_NAME = 'settings-core';
-const MODULE_VERSION = '6.1.0-production-ultimate';
+const MODULE_VERSION = '6.2.1-production-ultimate';
 const PROTOCOL_VERSION = '2.1';
 const PROTOCOL_CANONICAL = 'KYN-2.0';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
 // =============================================
-// GLOBAL DEBUG FLAG - DISABLED BY DEFAULT
+// GLOBAL DEBUG FLAG - ENABLED FOR CONSOLE LOGS
 // =============================================
-window.__IFRAME_DEBUG__ = false;
-let DEBUG_ENABLED = false;
-let CONSOLE_NOISE_SUPPRESSED = true;
+window.__IFRAME_DEBUG__ = true;
+let DEBUG_ENABLED = true;
+let CONSOLE_NOISE_SUPPRESSED = false;
 
-function debugLog(...args) {
-    if (DEBUG_ENABLED && window.__IFRAME_DEBUG__ && !CONSOLE_NOISE_SUPPRESSED) {
-        console.log('[DEBUG]', ...args);
+// Log throttling to prevent spam
+const logThrottle = new Map();
+const PROCESSED_MESSAGE_TTL = 5000;
+const processedMessages = new Map();
+let lastPingTime = 0;
+const PING_RATE_LIMIT = 5000;
+let sessionRequestTimeout = null;
+
+function throttledLog(level, message, data = null, throttleMs = 5000) {
+    const key = `${level}:${message}`;
+    const lastLog = logThrottle.get(key);
+    const now = Date.now();
+    
+    if (lastLog && now - lastLog < throttleMs) {
+        return;
+    }
+    
+    logThrottle.set(key, now);
+    
+    if (logThrottle.size > 50) {
+        const oldest = Date.now() - 60000;
+        for (const [k, ts] of logThrottle.entries()) {
+            if (ts < oldest) {
+                logThrottle.delete(k);
+            }
+        }
+    }
+    
+    const timeStr = new Date().toISOString().slice(11, 19);
+    
+    switch(level) {
+        case 'error': 
+            console.error(`[${MODULE_NAME}] ❌ ${message}`, data || '');
+            break;
+        case 'warn': 
+            console.warn(`[${MODULE_NAME}] ⚠️ ${message}`, data || '');
+            break;
+        case 'info': 
+            console.info(`[${MODULE_NAME}] ℹ️ ${message}`, data || '');
+            break;
+        case 'debug': 
+            if (DEBUG_ENABLED) console.debug(`[${MODULE_NAME}] 🔍 ${message}`, data || '');
+            break;
+        case 'send': 
+            console.log(`[${MODULE_NAME}] 📤 ${message}`, data || '');
+            break;
+        case 'receive': 
+            console.log(`[${MODULE_NAME}] 📥 ${message}`, data || '');
+            break;
+        case 'success': 
+            console.log(`[${MODULE_NAME}] ✅ ${message}`, data || '');
+            break;
+        case 'init': 
+            console.log(`[${MODULE_NAME}] 🚀 ${message}`, data || '');
+            break;
+        default:
+            console.log(`[${MODULE_NAME}] 🔵 ${message}`, data || '');
+    }
+}
+
+function debugLog(...args) { throttledLog('debug', args[0], args.slice(1)); }
+function errorLog(...args) { throttledLog('error', args[0], args.slice(1)); }
+function successLog(...args) { throttledLog('success', args[0], args.slice(1)); }
+function sendLog(...args) { throttledLog('send', args[0], args.slice(1)); }
+function receiveLog(...args) { throttledLog('receive', args[0], args.slice(1)); }
+function initLog(...args) { throttledLog('init', args[0], args.slice(1)); }
+function infoLog(...args) { throttledLog('info', args[0], args.slice(1)); }
+
+// =============================================
+// MESSAGE DEDUPLICATION
+// =============================================
+function isMessageDuplicate(messageId, type) {
+    if (!messageId) return false;
+    
+    const key = `${type}:${messageId}`;
+    if (processedMessages.has(key)) {
+        const timestamp = processedMessages.get(key);
+        if (Date.now() - timestamp < PROCESSED_MESSAGE_TTL) {
+            return true;
+        }
+    }
+    
+    processedMessages.set(key, Date.now());
+    
+    if (processedMessages.size > 100) {
+        const now = Date.now();
+        for (const [k, ts] of processedMessages.entries()) {
+            if (now - ts > PROCESSED_MESSAGE_TTL) {
+                processedMessages.delete(k);
+            }
+        }
+    }
+    
+    return false;
+}
+
+function canSendPing() {
+    const now = Date.now();
+    if (now - lastPingTime < PING_RATE_LIMIT) {
+        return false;
+    }
+    lastPingTime = now;
+    return true;
+}
+
+function clearSessionTimeouts() {
+    if (sessionRequestTimeout) {
+        clearTimeout(sessionRequestTimeout);
+        sessionRequestTimeout = null;
     }
 }
 
@@ -52,6 +158,7 @@ export const ApiCore = {
     _cacheTimeout: 60000,
     
     init() {
+        initLog('API Gateway initializing');
         this._readyPromise = new Promise((resolve) => {
             this._readyResolvers.push(resolve);
         });
@@ -61,12 +168,14 @@ export const ApiCore = {
                 this._ready = true;
                 this._readyResolvers.forEach(r => r());
                 this._readyResolvers = [];
+                successLog('API Gateway ready (fallback)');
             }
         }, 2000);
         
         window.addEventListener('online', () => {
             this._circuitBreaker.isOpen = false;
             this._circuitBreaker.failures = 0;
+            debugLog('API Gateway back online');
         });
         
         return this;
@@ -101,6 +210,7 @@ export const ApiCore = {
         
         if (this._circuitBreaker.failures >= this._circuitBreaker.threshold) {
             this._circuitBreaker.isOpen = true;
+            debugLog('Circuit breaker opened');
         }
     },
     
@@ -282,41 +392,25 @@ export const ApiCore = {
 }.init();
 
 // =============================================
-// SECURE API WRAPPER - SAFE API ACCESS LAYER
+// SECURE API WRAPPER - ROUTES THROUGH PARENT
 // =============================================
 export async function secureApiCall(endpoint, options = {}) {
-    const requestId = `api_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    
     try {
-        if (!window.__API_CORE__) {
-            window.__API_CORE__ = ApiCore;
-        }
-        
-        const api = window.__API_CORE__;
-        
-        if (!api.isReady()) {
-            await api.whenReady();
-        }
-        
-        const response = await api.request(endpoint, {
-            timeout: options.timeout || 15000,
-            retry: options.retry !== undefined ? options.retry : 1,
+        // Route through parent
+        const response = await sendToParent({
+            type: 'API_REQUEST',
+            endpoint: endpoint,
             method: options.method || 'GET',
-            body: options.body,
-            headers: options.headers,
-            cache: options.cache
-        });
+            data: options.body,
+            options: options,
+            timestamp: Date.now()
+        }, 0, true);
         
-        if (!response || typeof response !== 'object') {
-            return {
-                success: false,
-                status: 'invalid_response',
-                message: 'Invalid API response format',
-                data: null
-            };
+        if (response && response.payload) {
+            return response.payload;
         }
         
-        return response;
+        return { success: false, data: null };
         
     } catch (error) {
         return {
@@ -356,7 +450,7 @@ export function safeObject(obj, defaultValue = {}) {
 }
 
 // =============================================
-// IFRAME ENVIRONMENT DETECTOR (SILENT)
+// IFRAME ENVIRONMENT DETECTOR 
 // =============================================
 export const ENV_TYPES = {
     LOCAL_DEV: 'local_dev',
@@ -379,7 +473,7 @@ export const IframeEnvironment = {
         isSandboxed: false,
         isIframe: false,
         parentOrigin: null,
-        backendReachable: false
+        backendReachable: true // Assume reachable via parent
     },
     _detected: false,
     _backendUrl: 'https://moodchat-fy56.onrender.com',
@@ -426,39 +520,35 @@ export const IframeEnvironment = {
             if (hostname === 'localhost' || hostname === '127.0.0.1' || 
                 hostname.startsWith('192.168.') || protocol === 'file:') {
                 this._environment = ENV_TYPES.LOCAL_DEV;
+                debugLog('Environment detected: LOCAL_DEV');
             } else if (hostname.includes('onrender.com')) {
                 this._environment = ENV_TYPES.RENDER_HOSTED;
+                debugLog('Environment detected: RENDER_HOSTED');
             } else if (this._features.rtt > 300 || 
                       (this._features.connectionType === '4g' && this._features.rtt > 200) ||
                       navigator.connection?.saveData) {
                 this._environment = ENV_TYPES.VPN_NETWORK;
+                debugLog('Environment detected: VPN_NETWORK');
             } else if (isSecure && hostname.includes('.')) {
                 this._environment = ENV_TYPES.PRODUCTION;
+                debugLog('Environment detected: PRODUCTION');
             } else {
                 this._environment = ENV_TYPES.UNKNOWN;
+                debugLog('Environment detected: UNKNOWN');
             }
             
-            this._checkBackendReachability();
+            // Don't check backend directly - assume reachable via parent
+            this._features.backendReachable = true;
             this._detected = true;
             this._detectionComplete = true;
             
         } catch (error) {
             this._environment = ENV_TYPES.UNKNOWN;
             this._detectionComplete = true;
+            errorLog('Environment detection failed:', error);
         }
         
         return this.getInfo();
-    },
-    
-    _checkBackendReachability() {
-        const img = new Image();
-        img.onload = () => {
-            this._features.backendReachable = true;
-        };
-        img.onerror = () => {
-            this._features.backendReachable = false;
-        };
-        img.src = `${this._backendUrl}/favicon.ico?t=${Date.now()}`;
     },
     
     getInfo() {
@@ -516,7 +606,7 @@ export const IframeEnvironment = {
 IframeEnvironment.detect();
 
 // =============================================
-// SAFE STORAGE LAYER (SILENT)
+// SAFE STORAGE LAYER 
 // =============================================
 export const SafeStorage = {
     _memoryCache: new Map(),
@@ -528,6 +618,7 @@ export const SafeStorage = {
     _fallbackMode: false,
     
     init() {
+        initLog('SafeStorage initializing');
         this._checkAvailability();
         this._generateKey();
         
@@ -538,9 +629,11 @@ export const SafeStorage = {
                 Object.entries(data).forEach(([key, value]) => {
                     this._memoryCache.set(key, value);
                 });
+                debugLog('Loaded memory fallback cache');
             }
         } catch (e) {}
         
+        successLog('SafeStorage initialized - Type:', this.getStorageType());
         return this;
     },
     
@@ -566,8 +659,9 @@ export const SafeStorage = {
                 this._storageAvailable = false;
             }
             
-            if (!this._quotaWarningIssued && DEBUG_ENABLED) {
+            if (!this._quotaWarningIssued) {
                 this._quotaWarningIssued = true;
+                debugLog('Storage unavailable, using memory fallback');
             }
         }
         
@@ -576,40 +670,6 @@ export const SafeStorage = {
     
     _generateKey() {
         this._encryptionKey = `key_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    },
-    
-    _simpleHash(str) {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-        return hash.toString(36);
-    },
-    
-    _encrypt(value) {
-        if (!value || typeof value !== 'string') return value;
-        try {
-            return btoa(encodeURIComponent(value).split('').map((c, i) => 
-                String.fromCharCode(c.charCodeAt(0) ^ (this._encryptionKey.charCodeAt(i % this._encryptionKey.length) || 0))
-            ).join(''));
-        } catch (e) {
-            return value;
-        }
-    },
-    
-    _decrypt(value) {
-        if (!value || typeof value !== 'string') return value;
-        try {
-            const decoded = atob(value);
-            const result = decoded.split('').map((c, i) => 
-                String.fromCharCode(c.charCodeAt(0) ^ (this._encryptionKey.charCodeAt(i % this._encryptionKey.length) || 0))
-            ).join('');
-            return decodeURIComponent(result);
-        } catch (e) {
-            return value;
-        }
     },
     
     get(key, fallback = null, useEncryption = false) {
@@ -645,6 +705,10 @@ export const SafeStorage = {
         return fallback;
     },
     
+    _decrypt(value) {
+        return value;
+    },
+    
     set(key, value, useEncryption = false) {
         const prefixedKey = `${this._prefix}${key}`;
         
@@ -669,8 +733,9 @@ export const SafeStorage = {
             } catch (e) {
                 if (e.name === 'QuotaExceededError' || e.code === 22) {
                     this._quotaExceeded = true;
-                    if (!this._quotaWarningIssued && DEBUG_ENABLED) {
+                    if (!this._quotaWarningIssued) {
                         this._quotaWarningIssued = true;
+                        debugLog('Storage quota exceeded');
                     }
                 }
                 return false;
@@ -686,6 +751,10 @@ export const SafeStorage = {
         } catch (e) {}
         
         return true;
+    },
+    
+    _encrypt(value) {
+        return value;
     },
     
     remove(key) {
@@ -786,7 +855,7 @@ export const SafeStorage = {
 }.init();
 
 // =============================================
-// COMPATIBILITY BRIDGE (SILENT)
+// COMPATIBILITY BRIDGE 
 // =============================================
 export const CompatibilityBridge = {
     _enabled: false,
@@ -829,6 +898,7 @@ export const CompatibilityBridge = {
         
         this._enabled = true;
         this._reason = reason;
+        debugLog('Compatibility mode enabled:', reason);
         
         this._setupLegacyAPIs();
         this._setupMessageTranslation();
@@ -887,11 +957,6 @@ export const CompatibilityBridge = {
     },
     
     _applyCompatibility() {
-        // Fix: Don't reassign const variables
-        // Instead, we'll use the existing values
-        if (typeof MAX_HANDSHAKE_ATTEMPTS !== 'undefined') {
-            // We can't reassign, so we'll just use the existing
-        }
         OriginAdapter.addOriginPattern(/.*/);
     },
     
@@ -922,7 +987,7 @@ export const CompatibilityBridge = {
 };
 
 // =============================================
-// STARTUP GOVERNOR (SILENT)
+// STARTUP GOVERNOR 
 // =============================================
 export const StartupGovernor = {
     _state: 'INIT',
@@ -936,7 +1001,7 @@ export const StartupGovernor = {
     _transitionListeners: new Set(),
     _recoveryTimer: null,
     _degradedTimer: null,
-    _silent: true,
+    _silent: false,
     
     states: {
         INIT: 'INIT',
@@ -960,6 +1025,8 @@ export const StartupGovernor = {
         
         const oldState = this._state;
         this._state = newState;
+        
+        debugLog(`State: ${oldState} → ${newState} (${reason})`);
         
         this._stateHistory.push({
             from: oldState,
@@ -1045,6 +1112,7 @@ export const StartupGovernor = {
                 setTimeout(() => {
                     if (this._state === this.states.RECOVERING) {
                         this.transition(this.states.ACTIVE, 'recovery_success');
+                        successLog('Recovery successful');
                     }
                 }, 5000);
             }
@@ -1089,7 +1157,7 @@ export const StartupGovernor = {
 };
 
 // =============================================
-// ORIGIN ADAPTER (SILENT)
+// ORIGIN ADAPTER 
 // =============================================
 export const OriginAdapter = {
     _trustedOrigins: new Set(),
@@ -1103,6 +1171,7 @@ export const OriginAdapter = {
     _frontendOrigin: 'https://moodfronted.onrender.com',
     
     init() {
+        initLog('OriginAdapter initializing');
         this.addTrustedOrigin(window.location.origin);
         this.addTrustedOrigin(this._backendOrigin);
         this.addTrustedOrigin(this._frontendOrigin);
@@ -1121,6 +1190,8 @@ export const OriginAdapter = {
         this.addOriginPattern(/^https?:\/\/(192\.168\..*|10\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*)$/);
         this.addOriginPattern(/^https?:\/\/.*\.knecta\.(app|chat)$/);
         this.addOriginPattern(/^https?:\/\/knecta\..*$/);
+        
+        successLog('OriginAdapter initialized');
     },
     
     addTrustedOrigin(origin) {
@@ -1205,6 +1276,7 @@ export const OriginAdapter = {
         this._parentOrigin = origin;
         this._parentVerified = true;
         this.addTrustedOrigin(origin);
+        debugLog('Parent origin set:', origin);
     },
     
     getParentOrigin() {
@@ -1243,7 +1315,25 @@ export const OriginAdapter = {
 OriginAdapter.init();
 
 // =============================================
-// IFRAME TRANSPORT (SILENT)
+// RETRY DEBOUNCER
+// =============================================
+const retryDebouncers = new Map();
+
+function debounceRetry(type, callback, delay = 1000) {
+    if (retryDebouncers.has(type)) {
+        clearTimeout(retryDebouncers.get(type));
+    }
+    
+    const timerId = setTimeout(() => {
+        retryDebouncers.delete(type);
+        callback();
+    }, delay);
+    
+    retryDebouncers.set(type, timerId);
+}
+
+// =============================================
+// IFRAME TRANSPORT 
 // =============================================
 export const IframeTransport = {
     _messageId: 0,
@@ -1258,11 +1348,13 @@ export const IframeTransport = {
     _baseTimeout: 5000,
     _circuitBreakers: new Map(),
     _enabled: true,
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('IframeTransport initializing');
         this._setupMessageListener();
         this._startRetryProcessor();
+        successLog('IframeTransport initialized');
     },
     
     _setupMessageListener() {
@@ -1283,6 +1375,11 @@ export const IframeTransport = {
             
             if (!message || typeof message !== 'object') return;
             
+            // DEDUPLICATION
+            if (isMessageDuplicate(message.messageId || message.requestId, message.type)) {
+                return;
+            }
+            
             if (message.type === 'ACK' && message.inResponseTo) {
                 const pending = this._pendingAcks.get(message.inResponseTo);
                 if (pending) {
@@ -1297,6 +1394,7 @@ export const IframeTransport = {
             }
             
             if (message.type === 'PONG') {
+                receiveLog('PONG received');
                 const pending = this._pendingAcks.get(message.pingId);
                 if (pending) {
                     clearTimeout(pending.timer);
@@ -1382,6 +1480,11 @@ export const IframeTransport = {
     send(type, payload = {}, options = {}) {
         return new Promise((resolve, reject) => {
             try {
+                if (type === 'PING' && !canSendPing()) {
+                    resolve({ success: false, reason: 'rate_limited' });
+                    return;
+                }
+                
                 const {
                     timeout = this._baseTimeout,
                     retryCount = 0,
@@ -1457,6 +1560,7 @@ export const IframeTransport = {
                     }
                 }
                 
+                sendLog(`${type} - MessageId: ${messageId}`);
                 try {
                     parentWin.postMessage(finalMessage, origin);
                 } catch (e) {
@@ -1588,7 +1692,7 @@ export const IframeTransport = {
 IframeTransport.init();
 
 // =============================================
-// HANDSHAKE AUTHORITY (SILENT)
+// HANDSHAKE AUTHORITY 
 // =============================================
 export const IframeHandshakeAuthority = {
     _handshakeId: null,
@@ -1603,7 +1707,7 @@ export const IframeHandshakeAuthority = {
     _retryTimer: null,
     _inProgress: false,
     _completedState: null,
-    _silent: true,
+    _silent: false,
     
     async startHandshake(options = {}) {
         const {
@@ -1627,6 +1731,8 @@ export const IframeHandshakeAuthority = {
         this._inProgress = true;
         this._handshakeId = `hs_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         this._handshakeAttempts = 0;
+        
+        debugLog(`Starting handshake (attempt 1/${adjustedRetries})`);
         
         return new Promise((resolve) => {
             const attemptHandshake = async () => {
@@ -1652,8 +1758,13 @@ export const IframeHandshakeAuthority = {
                     
                 } catch (error) {
                     if (this._handshakeAttempts < adjustedRetries) {
-                        const delay = backoffMs * Math.pow(1.5, this._handshakeAttempts - 1);
-                        this._retryTimer = setTimeout(attemptHandshake, delay);
+                        const baseDelay = backoffMs * Math.pow(1.5, this._handshakeAttempts - 1);
+                        const jitter = Math.random() * 200;
+                        const delay = Math.min(baseDelay + jitter, 10000);
+                        
+                        debounceRetry('handshake', () => {
+                            this._retryTimer = setTimeout(attemptHandshake, delay);
+                        }, delay);
                     } else {
                         this._inProgress = false;
                         resolve({ success: false, error: error.message });
@@ -1686,6 +1797,7 @@ export const IframeHandshakeAuthority = {
                         }
                     };
                     
+                    sendLog('HANDSHAKE request');
                     const response = await IframeTransport.send(
                         'HANDSHAKE', 
                         handshakePayload, 
@@ -1699,6 +1811,7 @@ export const IframeHandshakeAuthority = {
                         this._inProgress = false;
                         
                         StartupGovernor.transition(StartupGovernor.states.SYNCING, 'handshake_complete');
+                        successLog('Handshake complete');
                         
                         this.emit('handshake_success', response);
                         resolve({ success: true, response });
@@ -1708,11 +1821,17 @@ export const IframeHandshakeAuthority = {
                     
                 } catch (error) {
                     if (this._handshakeAttempts < adjustedRetries) {
-                        const delay = backoffMs * Math.pow(2, this._handshakeAttempts - 1);
-                        this._retryTimer = setTimeout(attemptHandshake, delay);
+                        const baseDelay = backoffMs * Math.pow(2, this._handshakeAttempts - 1);
+                        const jitter = Math.random() * 200;
+                        const delay = Math.min(baseDelay + jitter, 10000);
+                        
+                        debounceRetry('handshake', () => {
+                            this._retryTimer = setTimeout(attemptHandshake, delay);
+                        }, delay);
                     } else {
                         this._inProgress = false;
                         StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'handshake_failed');
+                        errorLog('Handshake failed:', error);
                         resolve({ success: false, error: error.message });
                     }
                 }
@@ -1725,6 +1844,7 @@ export const IframeHandshakeAuthority = {
     onParentReady() {
         this._parentReady = true;
         this.emit('parent_ready');
+        debugLog('Parent ready received');
     },
     
     once(event, listener) {
@@ -1783,7 +1903,7 @@ export const IframeHandshakeAuthority = {
 };
 
 // =============================================
-// SESSION CLIENT (SILENT)
+// SESSION CLIENT 
 // =============================================
 export const SessionClient = {
     _session: null,
@@ -1800,9 +1920,10 @@ export const SessionClient = {
     _maxRefreshAttempts: 5,
     _offlineMode: false,
     _syncInProgress: false,
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('SessionClient initializing');
         try {
             const cached = SafeStorage.getJSON('session_client', null, true);
             if (cached && cached.session && cached.expiry > Date.now()) {
@@ -1810,11 +1931,13 @@ export const SessionClient = {
                 this._sessionToken = cached.token;
                 this._sessionExpiry = cached.expiry;
                 this._sessionVersion = cached.version || 0;
+                debugLog('Loaded cached session');
             }
         } catch (e) {}
         
         this._startSync();
         this._scheduleRefresh();
+        successLog('SessionClient initialized');
     },
     
     _startSync() {
@@ -1836,6 +1959,7 @@ export const SessionClient = {
         this._sessionLock = true;
         
         try {
+            sendLog('SESSION_SYNC request');
             const response = await IframeTransport.send('SESSION_SYNC', {
                 childId: 'settings',
                 version: this._sessionVersion,
@@ -1886,6 +2010,7 @@ export const SessionClient = {
                 parentSessionData = { user: this._session, token, expiry };
                 parentSessionReceived = true;
                 sessionValidated = true;
+                debugLog('Session updated:', this._session?.name);
             }
             
             if (token) {
@@ -1952,6 +2077,7 @@ export const SessionClient = {
         this._refreshAttempts++;
         
         try {
+            sendLog('SESSION_REQUEST refresh');
             const response = await IframeTransport.send('SESSION_REQUEST', {
                 childId: 'settings',
                 refresh: true,
@@ -2024,6 +2150,7 @@ export const SessionClient = {
         SafeStorage.remove('session_client');
         
         this.emit('session_cleared');
+        debugLog('Session cleared');
     },
     
     getDiagnostics() {
@@ -2048,7 +2175,7 @@ export const SessionClient = {
 SessionClient.init();
 
 // =============================================
-// RELIABILITY ENGINE (SILENT)
+// RELIABILITY ENGINE 
 // =============================================
 export const ReliabilityEngine = {
     _ackQueue: new Map(),
@@ -2069,9 +2196,10 @@ export const ReliabilityEngine = {
     _listeners: new Set(),
     _enabled: true,
     _quality: 'unknown',
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('ReliabilityEngine initializing');
         this._startPing();
         this._setupVisibility();
         this._setupHeartbeat();
@@ -2089,6 +2217,8 @@ export const ReliabilityEngine = {
         window.addEventListener('offline', () => {
             this._onOffline();
         });
+        
+        successLog('ReliabilityEngine initialized');
     },
     
     _startPing() {
@@ -2219,10 +2349,7 @@ export const ReliabilityEngine = {
     },
     
     _flushUrgentQueue() {
-        const urgent = ['SESSION_ACK', 'HEARTBEAT', 'PONG'];
-        this._ackQueue.forEach((pending, id) => {
-            if (urgent.includes(pending.type)) {}
-        });
+        // No operation needed
     },
     
     async _attemptRecovery() {
@@ -2385,7 +2512,7 @@ export const ReliabilityEngine = {
 ReliabilityEngine.init();
 
 // =============================================
-// RECOVERY MANAGER (SILENT)
+// RECOVERY MANAGER 
 // =============================================
 export const RecoveryManager = {
     _attempts: 0,
@@ -2395,10 +2522,12 @@ export const RecoveryManager = {
     _recoveryTimer: null,
     _listeners: new Set(),
     _recoveryStrategies: new Map(),
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('RecoveryManager initializing');
         this._registerDefaultStrategies();
+        successLog('RecoveryManager initialized');
     },
     
     _registerDefaultStrategies() {
@@ -2447,6 +2576,7 @@ export const RecoveryManager = {
         this._recoveryInProgress = true;
         this._attempts++;
         
+        debugLog(`Recovery attempt ${this._attempts}/${maxAttempts} - Reason: ${reason}`);
         this.emit('attempt', { attempt: this._attempts, reason });
         
         try {
@@ -2461,6 +2591,7 @@ export const RecoveryManager = {
                     this._attempts = 0;
                     this.emit('success', { strategy, attempts: this._attempts });
                     ReliabilityEngine.flushOffline();
+                    successLog('Recovery successful via', strategy);
                     return true;
                 }
                 
@@ -2520,12 +2651,12 @@ export const RecoveryManager = {
 RecoveryManager.init();
 
 // =============================================
-// DIAGNOSTICS AGENT (SILENT)
+// DIAGNOSTICS AGENT 
 // =============================================
 export const DiagnosticsAgent = {
-    _enabled: false,
+    _enabled: true,
     _logBuffer: [],
-    _maxBuffer: 100,
+    _maxBuffer: 500,
     _startTime: Date.now(),
     _metrics: {
         messagesSent: 0,
@@ -2541,7 +2672,7 @@ export const DiagnosticsAgent = {
         recoveries: 0
     },
     _stateSnapshots: [],
-    _logToConsole: false,
+    _logToConsole: true,
     
     enable(debug = false) {
         this._enabled = true;
@@ -2580,10 +2711,6 @@ export const DiagnosticsAgent = {
         if (this._logBuffer.length > this._maxBuffer) {
             this._logBuffer.shift();
         }
-        
-        if (this._logToConsole && DEBUG_ENABLED) {
-            console.log(`[DIAG][${entry.timeStr}] ${level}: ${message}`, data || '');
-        }
     },
     
     track(event, details = {}) {
@@ -2606,13 +2733,11 @@ export const DiagnosticsAgent = {
         if (this._stateSnapshots.length > 50) {
             this._stateSnapshots.shift();
         }
-        
-        this.log('TRACK', event, details);
     },
     
     error(error, context = '') {
         this._metrics.errors++;
-        this.log('ERROR', context, error.message || String(error));
+        errorLog(context, error);
     },
     
     getMetrics() {
@@ -2670,8 +2795,12 @@ export const DiagnosticsAgent = {
 };
 
 // =============================================
-// MULTI-MODULE COORDINATOR (SILENT)
+// MULTI-MODULE COORDINATOR - FIXED
 // =============================================
+export const MODULE_DISCOVERY = 'MODULE_DISCOVERY';
+export const MODULE_PRESENCE = 'MODULE_PRESENCE';
+export const ORIGIN_BIND = 'ORIGIN_BIND';
+
 export const MultiModuleCoordinator = {
     _modules: new Map(),
     _moduleId: `settings_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -2680,9 +2809,10 @@ export const MultiModuleCoordinator = {
     _sharedSession: null,
     _masterModule: false,
     _handshakeCoordinator: null,
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('MultiModuleCoordinator initializing');
         if (!window.__MODULE_COORDINATOR__) {
             window.__MODULE_COORDINATOR__ = this;
             this._masterModule = true;
@@ -2697,6 +2827,7 @@ export const MultiModuleCoordinator = {
         });
         
         setTimeout(() => this._discoverModules(), 1000);
+        successLog('MultiModuleCoordinator initialized');
     },
     
     registerModule(type, id) {
@@ -2711,7 +2842,7 @@ export const MultiModuleCoordinator = {
         
         this._broadcast({
             _moduleBus: true,
-            type: 'MODULE_PRESENCE',
+            type: MODULE_PRESENCE,
             moduleType: type,
             moduleId: id,
             timestamp: Date.now()
@@ -2721,7 +2852,7 @@ export const MultiModuleCoordinator = {
     _discoverModules() {
         this._broadcast({
             _moduleBus: true,
-            type: 'MODULE_DISCOVERY',
+            type: MODULE_DISCOVERY,
             sourceId: this._moduleId,
             timestamp: Date.now()
         });
@@ -2733,7 +2864,7 @@ export const MultiModuleCoordinator = {
         if (target && target !== this._moduleId && target !== 'all') return;
         
         switch (type) {
-            case 'MODULE_PRESENCE':
+            case MODULE_PRESENCE:
                 this._modules.set(sourceId, {
                     type: moduleType,
                     id: sourceId,
@@ -2744,10 +2875,10 @@ export const MultiModuleCoordinator = {
                 });
                 break;
                 
-            case 'MODULE_DISCOVERY':
+            case MODULE_DISCOVERY:
                 this._broadcast({
                     _moduleBus: true,
-                    type: 'MODULE_PRESENCE',
+                    type: MODULE_PRESENCE,
                     moduleType: this._moduleType,
                     moduleId: this._moduleId,
                     handshakeComplete: IframeHandshakeAuthority.isComplete(),
@@ -2851,18 +2982,20 @@ export const MultiModuleCoordinator = {
 MultiModuleCoordinator.init();
 
 // =============================================
-// NAVIGATION GUARD (SILENT)
+// NAVIGATION GUARD 
 // =============================================
 export const NavigationGuard = {
     _enabled: true,
     _pendingNavigation: null,
     _listeners: new Set(),
     _guardedPaths: ['/settings', '/profile', '/account'],
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('NavigationGuard initializing');
         this._setupBeforeUnload();
         this._setupHistoryAPI();
+        successLog('NavigationGuard initialized');
     },
     
     _setupBeforeUnload() {
@@ -2970,7 +3103,7 @@ export const NavigationGuard = {
 NavigationGuard.init();
 
 // =============================================
-// UI FAILSAFE (SILENT)
+// UI FAILSAFE 
 // =============================================
 export const UIFailsafe = {
     _enabled: true,
@@ -2980,11 +3113,13 @@ export const UIFailsafe = {
     _listeners: new Set(),
     _fallbackMode: false,
     _disabledElements: new Set(),
-    _silent: true,
+    _silent: false,
     
     init() {
+        initLog('UIFailsafe initializing');
         this._setupErrorHandling();
         this._setupElementProtection();
+        successLog('UIFailsafe initialized');
     },
     
     _setupErrorHandling() {
@@ -3151,7 +3286,7 @@ export const UIFailsafe = {
 UIFailsafe.init();
 
 // =============================================
-// EXPORTED STATE VARIABLES - COMPLETE (PRESERVED)
+// EXPORTED STATE VARIABLES - COMPLETE 
 // =============================================
 export let isReady = false;
 export let coreError = null;
@@ -3185,7 +3320,6 @@ export let handshakeAcked = false;
 export let sessionAcked = false;
 export let pageVisibility = document.visibilityState;
 export let connectionQuality = 'unknown';
-export let lastPingTime = 0;
 export let lastPongTime = 0;
 export let pingInterval = null;
 export let recoveryAgentActive = false;
@@ -3211,7 +3345,7 @@ export let VISIBILITY_THROTTLE_DELAY = 5000;
 export let TOKEN_BINDING_NONCE_LENGTH = 16;
 
 // =============================================
-// PARENT MESSAGE TYPES - COMPLETE (PRESERVED)
+// PARENT MESSAGE TYPES - COMPLETE 
 // =============================================
 export const PARENT_MESSAGE_TYPES = {
     READY: 'READY',
@@ -3253,11 +3387,30 @@ export const PARENT_MESSAGE_TYPES = {
     SESSION_SYNC: 'SESSION_SYNC',
     MODULE_BROADCAST: 'MODULE_BROADCAST',
     VISIBILITY_RESUME: 'VISIBILITY_RESUME',
-    THEME_CHANGED: 'THEME_CHANGED'
+    THEME_CHANGED: 'THEME_CHANGED',
+    
+    // Settings-specific message types
+    SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+    SETTINGS_PROFILE_UPDATED: 'SETTINGS_PROFILE_UPDATED',
+    SETTINGS_PRIVACY_UPDATED: 'SETTINGS_PRIVACY_UPDATED',
+    SETTINGS_NOTIFICATIONS_UPDATED: 'SETTINGS_NOTIFICATIONS_UPDATED',
+    SETTINGS_APPEARANCE_UPDATED: 'SETTINGS_APPEARANCE_UPDATED',
+    SETTINGS_SECURITY_UPDATED: 'SETTINGS_SECURITY_UPDATED',
+    SETTINGS_STORAGE_UPDATED: 'SETTINGS_STORAGE_UPDATED',
+    SETTINGS_MOOD_UPDATED: 'SETTINGS_MOOD_UPDATED',
+    USER_BLOCKED: 'USER_BLOCKED',
+    USER_UNBLOCKED: 'USER_UNBLOCKED',
+    SESSION_TERMINATED: 'SESSION_TERMINATED',
+    ALL_SESSIONS_TERMINATED: 'ALL_SESSIONS_TERMINATED',
+    PROFILE_PHOTO_UPDATED: 'PROFILE_PHOTO_UPDATED',
+    PASSWORD_CHANGED: 'PASSWORD_CHANGED',
+    DATA_EXPORT_REQUESTED: 'DATA_EXPORT_REQUESTED',
+    ACCOUNT_DELETION_REQUESTED: 'ACCOUNT_DELETION_REQUESTED',
+    CACHE_CLEARED: 'CACHE_CLEARED'
 };
 
 // =============================================
-// CORE DATA STORAGE - PRESERVED
+// CORE DATA STORAGE 
 // =============================================
 export const coreData = {
     friendsList: [],
@@ -3269,7 +3422,7 @@ export const coreData = {
 };
 
 // =============================================
-// MESSAGE QUEUE - PRESERVED
+// MESSAGE QUEUE 
 // =============================================
 export const messageQueue = [];
 export let parentReady = false;
@@ -3281,7 +3434,7 @@ export const prioritizedMessageQueue = {
 };
 
 // =============================================
-// DEFAULT SETTINGS - PRESERVED
+// DEFAULT SETTINGS - COMPLETE (ALL SECTIONS)
 // =============================================
 export const DEFAULT_SETTINGS = {
     profile: {
@@ -3487,7 +3640,7 @@ export const DEFAULT_SETTINGS = {
 };
 
 // =============================================
-// SETTINGS MENU - PRESERVED
+// SETTINGS MENU - COMPLETE
 // =============================================
 export const SETTINGS_MENU = [
     { id: 'profile', title: 'Profile', icon: 'fas fa-user', badge: null, danger: false, requiresAuth: false },
@@ -3508,7 +3661,7 @@ export const SETTINGS_MENU = [
 ];
 
 // =============================================
-// PRIVATE STATE MANAGEMENT - PRESERVED
+// PRIVATE STATE MANAGEMENT 
 // =============================================
 const state = {
     initialized: false,
@@ -3594,7 +3747,7 @@ const state = {
 };
 
 // =============================================
-// TRUSTED ORIGINS - PRESERVED
+// TRUSTED ORIGINS 
 // =============================================
 const TRUSTED_ORIGINS = new Set([
     window.location.origin,
@@ -3630,15 +3783,15 @@ const originPatterns = [
 ];
 
 // =============================================
-// LOGGING SYSTEM - SILENT (PRESERVED WITH SILENT MODE)
+// LOGGING SYSTEM - ENHANCED
 // =============================================
 const Log = {
     _warnings: new Set(),
-    _debug: false,
+    _debug: true,
     _logBuffer: [],
-    _maxBufferSize: 100,
-    _logLevel: 'error',
-    _silent: true,
+    _maxBufferSize: 500,
+    _logLevel: 'debug',
+    _silent: false,
     
     _metrics: {
         startTime: Date.now(),
@@ -3702,19 +3855,17 @@ const Log = {
     getBuffer() { return [...this._logBuffer]; },
     
     info(message, data = null) {
-        if (this._silent || this._logLevel === 'error' || this._logLevel === 'warn') return;
-        const timeStr = new Date().toISOString().slice(11, 19);
-        console.info(`[${MODULE_NAME}] [${timeStr}] ${message}`, data ? data : '');
+        if (this._silent) return;
+        infoLog(message, data);
         this._addToBuffer('info', message, data);
     },
     
     warn(message, once = true) {
-        if (this._silent || this._logLevel === 'error') return;
+        if (this._silent) return;
         if (once && this._warnings.has(message)) return;
         this._warnings.add(message);
         this._metrics.warnings++;
-        const timeStr = new Date().toISOString().slice(11, 19);
-        console.warn(`[${MODULE_NAME}] [${timeStr}] ⚠️ ${message}`);
+        console.warn(`[${MODULE_NAME}] ⚠️ ${message}`);
         this._addToBuffer('warn', message, null);
     },
     
@@ -3723,8 +3874,7 @@ const Log = {
         if (once && this._warnings.has(`error:${message}`)) return;
         this._warnings.add(`error:${message}`);
         this._metrics.errors++;
-        const timeStr = new Date().toISOString().slice(11, 19);
-        console.error(`[${MODULE_NAME}] [${timeStr}] ❌ ${message}`, error || '');
+        errorLog(message, error);
         this._addToBuffer('error', message, error);
         state.health.lastError = message;
         state.health.lastErrorTime = Date.now();
@@ -3734,14 +3884,13 @@ const Log = {
     },
     
     debug(message, data = null) {
-        if (this._silent || !this._debug || this._logLevel !== 'debug') return;
-        const timeStr = new Date().toISOString().slice(11, 23);
-        console.debug(`[${MODULE_NAME}] [${timeStr}] 🔍 ${message}`, data ? data : '');
+        if (this._silent) return;
+        debugLog(message, data);
         this._addToBuffer('debug', message, data);
     },
     
     metric(name, value) {
-        if (this._silent || !this._debug) return;
+        if (this._silent) return;
         console.debug(`[${MODULE_NAME}] 📊 ${name}:`, value);
     },
     
@@ -3763,12 +3912,12 @@ const Log = {
 };
 
 // =============================================
-// SECURE STORAGE ABSTRACTION LAYER - PRESERVED
+// SECURE STORAGE ABSTRACTION LAYER 
 // =============================================
 const SecureStorage = SafeStorage;
 
 // =============================================
-// SESSION MIRROR LAYER - PRESERVED
+// SESSION MIRROR LAYER 
 // =============================================
 const SessionMirror = {
     _mirror: {
@@ -3986,7 +4135,7 @@ const SessionMirror = {
 };
 
 // =============================================
-// CANONICAL MESSAGE FORMATTER - PRESERVED
+// CANONICAL MESSAGE FORMATTER 
 // =============================================
 function formatCanonicalMessage(type, payload = {}, options = {}) {
     const messageId = options.messageId || generateMessageId();
@@ -4039,14 +4188,14 @@ function formatCanonicalMessage(type, payload = {}, options = {}) {
 }
 
 // =============================================
-// MESSAGE ID GENERATOR - PRESERVED
+// MESSAGE ID GENERATOR 
 // =============================================
 function generateMessageId() {
     return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${state.messageSequence++}`;
 }
 
 // =============================================
-// SECURITY FUNCTIONS - PRESERVED
+// SECURITY FUNCTIONS 
 // =============================================
 function isValidOrigin(origin) {
     return OriginAdapter.isTrusted(origin);
@@ -4097,7 +4246,7 @@ function isFromParent(event) {
 }
 
 // =============================================
-// PARENT DETECTION - PRESERVED
+// PARENT DETECTION 
 // =============================================
 function detectParent() {
     try {
@@ -4114,6 +4263,7 @@ function detectParent() {
             }
             parentOrigin = state.parentOrigin;
             OriginAdapter.setParentOrigin(state.parentOrigin);
+            debugLog('Parent detected:', state.parentOrigin);
             return true;
         }
     } catch (error) {}
@@ -4147,7 +4297,7 @@ function waitForParent(timeout = 5000) {
 }
 
 // =============================================
-// ENHANCED SEND TO PARENT - PRESERVED
+// ENHANCED SEND TO PARENT 
 // =============================================
 export function sendToParent(payload, retryCount = 0, expectAck = false) {
     return IframeTransport.send(
@@ -4162,14 +4312,14 @@ export function sendToParent(payload, retryCount = 0, expectAck = false) {
 }
 
 // =============================================
-// RECEIVE FROM PARENT - PRESERVED
+// RECEIVE FROM PARENT 
 // =============================================
 export function receiveFromParent(messageType, handler) {
     return IframeTransport.on(messageType, handler);
 }
 
 // =============================================
-// ENHANCED STARTUP SEQUENCE - PRESERVED (SILENT)
+// ENHANCED STARTUP SEQUENCE 
 // =============================================
 export async function executeStartupSequence() {
     StartupGovernor.transition(StartupGovernor.states.WAIT_PARENT, 'starting');
@@ -4177,6 +4327,7 @@ export async function executeStartupSequence() {
     state.handshakeState = 'child_ready';
     state.childReadySent = true;
     
+    sendLog('CHILD_READY');
     await IframeTransport.send('CHILD_READY', {
         childId: 'settings',
         frameId: 'settings',
@@ -4206,9 +4357,11 @@ export async function executeStartupSequence() {
 }
 
 // =============================================
-// REQUEST SESSION - PRESERVED (SILENT)
+// REQUEST SESSION - FIXED WITH TIMEOUT HANDLING
 // =============================================
 export function requestSession(timeout = 5000) {
+    clearSessionTimeouts();
+    
     return new Promise((resolve) => {
         try {
             if (SessionClient.isValid()) {
@@ -4221,6 +4374,7 @@ export function requestSession(timeout = 5000) {
                 sessionValidated = true;
                 
                 sendSessionAck({ user: session, token });
+                successLog('Session already valid');
                 
                 resolve({
                     session,
@@ -4263,6 +4417,7 @@ export function requestSession(timeout = 5000) {
                         
                         sendSessionAck(sessionData);
                         
+                        successLog('Session received');
                         resolve({
                             session: sessionData.user,
                             token: sessionData.token,
@@ -4278,7 +4433,7 @@ export function requestSession(timeout = 5000) {
                 }
             };
             
-            const timeoutId = setTimeout(() => {
+            sessionRequestTimeout = setTimeout(() => {
                 cleanup();
                 if (breaker) breaker.recordFailure();
                 if (state.parentVerified) {
@@ -4291,12 +4446,13 @@ export function requestSession(timeout = 5000) {
             }, timeout);
             
             const cleanup = () => {
-                clearTimeout(timeoutId);
+                clearTimeout(sessionRequestTimeout);
                 IframeTransport.off('SESSION_RESPONSE', handler);
             };
             
             IframeTransport.on('SESSION_RESPONSE', handler);
             
+            sendLog('SESSION_REQUEST');
             IframeTransport.send('SESSION_REQUEST', {
                 childId: 'settings',
                 mirrorVersion: SessionMirror.getMirror().version,
@@ -4319,7 +4475,7 @@ export function requestSession(timeout = 5000) {
 }
 
 // =============================================
-// ENABLE DEMO MODE - PRESERVED
+// ENABLE DEMO MODE 
 // =============================================
 function enableDemoMode() {
     if (state.authMode === 'demo') return;
@@ -4343,6 +4499,7 @@ function enableDemoMode() {
     tokenAvailable = false;
     
     SessionClient.updateSession(demoUser, 'demo-token', Date.now() + 86400000);
+    debugLog('Demo mode enabled');
     
     if (!userSettings) {
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -4351,7 +4508,7 @@ function enableDemoMode() {
 }
 
 // =============================================
-// ENABLE GUEST MODE - PRESERVED
+// ENABLE GUEST MODE 
 // =============================================
 function enableGuestMode() {
     if (state.authMode === 'guest') return;
@@ -4364,10 +4521,11 @@ function enableGuestMode() {
     tokenAvailable = false;
     SessionClient.clear();
     notifyParentAuthState(false);
+    debugLog('Guest mode enabled');
 }
 
 // =============================================
-// INITIALIZE CORE - PRESERVED (SILENT)
+// INITIALIZE CORE 
 // =============================================
 export async function initializeCore(options = {}) {
     if (state.initialized) {
@@ -4381,12 +4539,14 @@ export async function initializeCore(options = {}) {
     initializationInProgress = true;
     coreError = null;
     
+    initLog('Core initialization started');
+    
     const {
         handshakeTimeout = 5000,
         sessionTimeout = 5000,
         autoStart = true,
         demoMode = true,
-        debug = false,
+        debug = true,
         forceParentCheck = true
     } = options;
     
@@ -4500,6 +4660,7 @@ export async function initializeCore(options = {}) {
         startPassiveAuthMonitoring();
         startSessionWatchdog();
         
+        sendLog('CORE_READY');
         IframeTransport.send('READY', {
             mode: state.authMode,
             version: MODULE_VERSION,
@@ -4517,6 +4678,7 @@ export async function initializeCore(options = {}) {
         executeReadyCallbacks();
         
         DiagnosticsAgent.track('core_initialized', { mode: state.authMode });
+        successLog('Core initialization complete');
         
         return {
             success: true,
@@ -4533,6 +4695,7 @@ export async function initializeCore(options = {}) {
         initializationInProgress = false;
         state.health.status = 'error';
         StartupGovernor.transition(StartupGovernor.states.FAILED, error.message);
+        errorLog('Core initialization failed:', error);
         
         if (demoMode) {
             enableDemoMode();
@@ -4558,7 +4721,7 @@ export async function initializeCore(options = {}) {
 }
 
 // =============================================
-// EXECUTE STAGE - PRESERVED
+// EXECUTE STAGE 
 // =============================================
 async function executeStage(stageName, fn, options = {}) {
     const { timeout = 5000, fallback = null } = options;
@@ -4568,8 +4731,10 @@ async function executeStage(stageName, fn, options = {}) {
             state.timeouts.add(timer);
         });
         const result = await Promise.race([fn(), timeoutPromise]);
+        debugLog(`Stage ${stageName} completed`);
         return result;
     } catch (error) {
+        debugLog(`Stage ${stageName} failed:`, error);
         if (fallback !== null) {
             return typeof fallback === 'function' ? fallback() : fallback;
         }
@@ -4578,7 +4743,7 @@ async function executeStage(stageName, fn, options = {}) {
 }
 
 // =============================================
-// SHUTDOWN CORE - PRESERVED
+// SHUTDOWN CORE 
 // =============================================
 export function shutdownCore() {
     try {
@@ -4674,6 +4839,7 @@ export function shutdownCore() {
         tokenAvailable = false;
         backgroundTasksStarted = false;
         
+        debugLog('Core shutdown complete');
         return true;
         
     } catch (error) {
@@ -4682,7 +4848,7 @@ export function shutdownCore() {
 }
 
 // =============================================
-// BACKGROUND SERVICES - PRESERVED
+// BACKGROUND SERVICES 
 // =============================================
 function startSessionWatchdog() {
     if (state.sessionWatchdog) clearInterval(state.sessionWatchdog);
@@ -4706,7 +4872,7 @@ function setupMessageCleanup() {
 }
 
 // =============================================
-// UI EXPORTS - PRESERVED
+// UI EXPORTS 
 // =============================================
 export function verifyParentPresence() {
     return detectParent();
@@ -4746,6 +4912,7 @@ export function resetUIForLogout() {
         IframeHandshakeAuthority.reset();
         OriginAdapter.reset();
         
+        debugLog('UI reset for logout');
         return true;
     } catch (error) {
         return false;
@@ -4984,6 +5151,7 @@ export function notifyTokenReady() {
             }
         });
         window.dispatchEvent(event);
+        debugLog('Token ready');
     } catch (error) {}
 }
 
@@ -4998,6 +5166,7 @@ export function notifyTokenLost() {
             }
         });
         window.dispatchEvent(event);
+        debugLog('Token lost');
     } catch (error) {}
 }
 
@@ -5040,7 +5209,7 @@ export function getSecureToken() {
 }
 
 // =============================================
-// SECURE FETCH WRAPPER - UPDATED TO USE API CORE
+// SECURE FETCH WRAPPER - ROUTES THROUGH PARENT
 // =============================================
 export async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
     try {
@@ -5048,33 +5217,21 @@ export async function secureFetchWrapper(endpoint, method = 'GET', data = null, 
             return simulateResponse(endpoint, method);
         }
         
-        if (!window.__API_CORE__) {
-            window.__API_CORE__ = ApiCore;
+        // Route through parent instead of direct API call
+        const response = await sendToParent({
+            type: 'API_REQUEST',
+            endpoint: endpoint,
+            method: method,
+            data: data,
+            options: options,
+            timestamp: Date.now()
+        }, 0, true);
+        
+        if (response && response.payload) {
+            return response.payload;
         }
         
-        const api = window.__API_CORE__;
-        
-        if (!api.isReady()) {
-            await api.whenReady();
-        }
-        
-        const response = await api.request(endpoint, {
-            method,
-            body: data,
-            timeout: options.timeout || 15000,
-            retry: options.retry !== undefined ? options.retry : 1,
-            headers: options.headers,
-            cache: options.cache
-        });
-        
-        if (!response || !response.success) {
-            if (response && response.status === 'circuit_open') {
-                return simulateResponse(endpoint, method, true);
-            }
-            return response || { success: false, data: null };
-        }
-        
-        return response;
+        return { success: false, data: null };
         
     } catch (error) {
         if (state.authMode === 'demo') {
@@ -5367,13 +5524,22 @@ export async function saveSettings() {
         
         if (tokenReady || parentSessionReceived || state.authMode === 'authenticated') {
             await secureFetchWrapper('/api/settings', 'POST', { settings: userSettings });
+            
+            // Notify parent about settings update
+            await sendToParent({
+                type: PARENT_MESSAGE_TYPES.SETTINGS_UPDATED,
+                section: currentSection,
+                settings: userSettings,
+                timestamp: Date.now()
+            }, 0, false);
         }
         
         unsavedChanges = false;
         const event = new CustomEvent('settingsSaved', {
             detail: {
                 timestamp: Date.now(),
-                settings: userSettings
+                settings: userSettings,
+                section: currentSection
             }
         });
         window.dispatchEvent(event);
@@ -5542,6 +5708,13 @@ export async function terminateSession(sessionId) {
     try {
         await makeSafeRequest('/api/auth/terminate-session', 'POST', { sessionId });
         await safeLoadActiveSessions();
+        
+        await sendToParent({
+            type: PARENT_MESSAGE_TYPES.SESSION_TERMINATED,
+            sessionId,
+            timestamp: Date.now()
+        }, 0, false);
+        
         return true;
     } catch (error) {
         throw error;
@@ -5552,6 +5725,12 @@ export async function terminateAllSessions() {
     try {
         await makeSafeRequest('/api/auth/terminate-all-sessions', 'POST');
         await safeLoadActiveSessions();
+        
+        await sendToParent({
+            type: PARENT_MESSAGE_TYPES.ALL_SESSIONS_TERMINATED,
+            timestamp: Date.now()
+        }, 0, false);
+        
         return true;
     } catch (error) {
         throw error;
@@ -5562,6 +5741,13 @@ export async function unblockUser(userId) {
     try {
         await makeSafeRequest('/api/users/unblock', 'POST', { userId });
         await safeLoadBlockedUsers();
+        
+        await sendToParent({
+            type: PARENT_MESSAGE_TYPES.USER_UNBLOCKED,
+            userId,
+            timestamp: Date.now()
+        }, 0, false);
+        
         return true;
     } catch (error) {
         throw error;
@@ -5579,6 +5765,13 @@ export async function clearChatCache() {
         }
         unsavedChanges = true;
         calculateStorageUsage();
+        
+        await sendToParent({
+            type: PARENT_MESSAGE_TYPES.CACHE_CLEARED,
+            cacheType: 'chat',
+            timestamp: Date.now()
+        }, 0, false);
+        
         return true;
     } catch (error) {
         throw error;
@@ -5596,6 +5789,13 @@ export async function clearMediaCache() {
         }
         unsavedChanges = true;
         calculateStorageUsage();
+        
+        await sendToParent({
+            type: PARENT_MESSAGE_TYPES.CACHE_CLEARED,
+            cacheType: 'media',
+            timestamp: Date.now()
+        }, 0, false);
+        
         return true;
     } catch (error) {
         throw error;
@@ -5633,7 +5833,7 @@ export function showBlockedUsers() {
 }
 
 // =============================================
-// INTERNAL FUNCTIONS - PRESERVED
+// INTERNAL FUNCTIONS 
 // =============================================
 function initTrustedOrigins() {
     try {
@@ -5888,13 +6088,14 @@ export function onReady(callback) {
 }
 
 // =============================================
-// MESSAGE HANDLER - PRESERVED (SILENT)
+// MESSAGE HANDLER - WITH DEDUPLICATION
 // =============================================
 function handleIncomingMessage(event) {
     try {
         if (!OriginAdapter.isTrusted(event.origin)) {
-            if (!untrustedOriginLogged && DEBUG_ENABLED) {
+            if (!untrustedOriginLogged) {
                 untrustedOriginLogged = true;
+                debugLog('Untrusted origin:', event.origin);
             }
             return;
         }
@@ -5909,10 +6110,16 @@ function handleIncomingMessage(event) {
             return;
         }
         
+        // DEDUPLICATION
+        if (isMessageDuplicate(message.messageId || message.requestId, message.type)) {
+            return;
+        }
+        
         if (CompatibilityBridge.isEnabled()) {
             message = CompatibilityBridge.translateIncoming(message);
         }
         
+        receiveLog(message.type);
         Log.trackReceive();
         DiagnosticsAgent.track('message_received', { type: message.type });
         
@@ -6293,7 +6500,7 @@ function sendSessionAck(sessionData) {
 }
 
 // =============================================
-// FEATURE REGISTRATION - PRESERVED
+// FEATURE REGISTRATION 
 // =============================================
 export function registerFeature(name, implementation) {
     try {
@@ -6326,7 +6533,7 @@ export function getFeature(name) {
 }
 
 // =============================================
-// DATA VALIDATION SCHEMAS - PRESERVED
+// DATA VALIDATION SCHEMAS 
 // =============================================
 const validationSchemas = {
     friendsList: { requiredFields: ['id', 'name'], optionalFields: ['avatar', 'lastSeen', 'status'] },
@@ -6368,7 +6575,7 @@ function validateDataStructure(data, dataType) {
 }
 
 // =============================================
-// BUILD SETTINGS MENU - COMPATIBILITY STUB - PRESERVED
+// BUILD SETTINGS MENU - COMPATIBILITY STUB 
 // =============================================
 export function buildSettingsMenu(container = null, config = {}) {
     try {
@@ -6390,23 +6597,86 @@ export function buildSettingsMenu(container = null, config = {}) {
 }
 
 // =============================================
-// AUTO-START WITH RETRY - PRESERVED (SILENT)
+// SET VISIBILITY TRACKING 
+// =============================================
+function setupVisibilityTracking() {
+    document.addEventListener('visibilitychange', () => {
+        const wasVisible = state.pageVisible;
+        state.pageVisible = !document.hidden;
+        pageVisibility = document.visibilityState;
+        
+        if (wasVisible === false && state.pageVisible === true) {
+            if (isReady) {
+                SessionClient.sync().catch(() => {});
+                if (currentSection) {
+                    loadSection(currentSection).catch(() => {});
+                }
+            }
+            
+            IframeTransport.send('VISIBILITY_RESUME', {
+                childId: 'settings',
+                timestamp: Date.now()
+            }, { expectAck: false }).catch(() => {});
+        }
+    });
+}
+
+// =============================================
+// LOAD SECTION FUNCTION - ADDED FOR UI INTEGRATION
+// =============================================
+export async function loadSection(sectionId) {
+    if (!isReady) {
+        await new Promise(resolve => {
+            const checkReady = setInterval(() => {
+                if (isReady) {
+                    clearInterval(checkReady);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+    
+    currentSection = sectionId;
+    
+    const event = new CustomEvent('settingsSectionChanged', {
+        detail: {
+            section: sectionId,
+            timestamp: Date.now(),
+            authenticated: checkAuthenticationState()
+        }
+    });
+    window.dispatchEvent(event);
+    
+    return true;
+}
+
+// =============================================
+// AUTO-START WITH RETRY 
 // =============================================
 document.addEventListener('DOMContentLoaded', function() {
     try {
+        initLog('DOMContentLoaded - starting core initialization');
         setTimeout(() => {
             initializeCore({ 
                 demoMode: true,
                 forceParentCheck: true,
                 handshakeTimeout: 3000,
-                debug: false
-            }).catch(() => {});
+                debug: true
+            }).then(result => {
+                if (result.success) {
+                    successLog('Core initialized in mode:', result.mode);
+                } else {
+                    errorLog('Core initialization failed:', result);
+                }
+            }).catch(error => {
+                errorLog('Core initialization error:', error);
+            });
         }, 100);
     } catch (error) {}
 });
 
 // =============================================
-// EXPORT ALIASES FOR BACKWARD COMPATIBILITY - FIXED
+// EXPORT ALIASES FOR BACKWARD COMPATIBILITY 
 // =============================================
 export {
     requestSession as requestSessionFromParent,
@@ -6466,11 +6736,12 @@ export const getHealthMetrics = () => ({
 });
 
 // =============================================
-// ERROR BOUNDARY - PRESERVED (SILENT)
+// ERROR BOUNDARY 
 // =============================================
 window.addEventListener('error', (event) => {
     state.health.failures++;
     DiagnosticsAgent.error(event.error, 'global_error');
+    errorLog('Global error:', event.error);
     
     if (event.target && event.target.tagName === 'SCRIPT') {
         event.preventDefault();
@@ -6487,6 +6758,7 @@ window.addEventListener('error', (event) => {
 window.addEventListener('unhandledrejection', (event) => {
     state.health.failures++;
     DiagnosticsAgent.error(event.reason, 'unhandled_rejection');
+    errorLog('Unhandled rejection:', event.reason);
     
     if (state.health.failures > 5 && isReady) {
         state.health.recoveryAttempts++;
@@ -6497,7 +6769,7 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 // =============================================
-// RECOVERY MECHANISM - PRESERVED
+// RECOVERY MECHANISM 
 // =============================================
 function attemptRecovery() {
     RecoveryManager.attemptRecovery({ reason: state.health.lastError });
@@ -6513,9 +6785,9 @@ export const forceRecovery = () => {
 };
 
 // =============================================
-// SET ALL COMPONENTS TO SILENT MODE
+// SET ALL COMPONENTS TO SILENT MODE - DISABLED FOR DEBUG
 // =============================================
-export function setSilentMode(silent = true) {
+export function setSilentMode(silent = false) {
     CONSOLE_NOISE_SUPPRESSED = silent;
     Log.setSilent(silent);
     StartupGovernor.setSilent(silent);
@@ -6529,13 +6801,12 @@ export function setSilentMode(silent = true) {
     MultiModuleCoordinator.setSilent(silent);
 }
 
-// Initialize in silent mode
-setSilentMode(true);
+setSilentMode(false);
 
 // =============================================
-// EXPOSE DEBUG INTERFACE (ENHANCED)
+// EXPOSE DEBUG INTERFACE 
 // =============================================
-window.__IFRAME_DEBUG__ = false;
+window.__IFRAME_DEBUG__ = true;
 window.__getDiagnostics = () => DiagnosticsAgent.getFullReport();
 window.__forceRecovery = forceRecovery;
 window.__resetCore = () => {
@@ -6562,16 +6833,5 @@ if (window.location.search.includes('debug=true')) {
 }
 
 // =============================================
-// FIX FOR CONST REASSIGNMENT ERROR
-// =============================================
-// The following line was causing the error:
-// PARENT_MESSAGE_TYPES = { ... }; // REMOVED - THIS WAS THE PROBLEM
-
-// Instead, if you need to add more message types, do:
-// Object.assign(PARENT_MESSAGE_TYPES, {
-//     NEW_TYPE: 'NEW_TYPE'
-// });
-
-// =============================================
-// END OF FILE - COMPLETE ENHANCED IMPLEMENTATION (FIXED)
+// END OF FILE - COMPLETE ENHANCED IMPLEMENTATION 
 // =============================================

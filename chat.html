@@ -3781,7 +3781,7 @@
 
         // Handle VERIFY_SESSION (NEW - for calls-core.js)
        
-       
+        
         
         function handleVerifySession(event) {
     // CRITICAL: Get the requestId from the message - MUST match exactly what the iframe sent
@@ -3844,124 +3844,600 @@
         }
     }
 }
-        // MAIN MESSAGE LISTENER - Single source of truth with origin validation
-        window.addEventListener("message", function(event) {
-            // FIX: Use dynamic origin validation, never hardcode localhost/127.0.0.1
-            if (event.origin !== window.location.origin && event.origin !== 'null') {
-                return;
+        
+       // MAIN MESSAGE LISTENER - Single source of truth with origin validation
+    window.addEventListener("message", function(event) {
+        // FIX: Use dynamic origin validation, never hardcode localhost/127.0.0.1
+        if (event.origin !== window.location.origin && event.origin !== 'null') {
+            return;
+        }
+
+        if (!event.data || typeof event.data !== 'object') return;
+
+        // Get message details
+        const msgType = event.data.type;
+        const messageId = event.data.messageId || event.data.requestId;
+        
+        // Deduplicate based on messageId if present
+        if (messageId) {
+            if (processedMessageIds.has(messageId)) {
+                return; // Already processed this message
             }
+            processedMessageIds.add(messageId);
+            cleanupProcessedIds();
+        }
 
-            if (!event.data || typeof event.data !== 'object') return;
+        // Route message to appropriate handler
+        switch (msgType) {
+            case "HANDSHAKE_REQUEST":
+                handleHandshakeRequest(event);
+                break;
 
-            // Get message details
-            const msgType = event.data.type;
-            const messageId = event.data.messageId || event.data.requestId;
-            
-            // Deduplicate based on messageId if present
-            if (messageId) {
-                if (processedMessageIds.has(messageId)) {
-                    return; // Already processed this message
+            case "IFRAME_REGISTERED":
+                handleIframeRegistered(event);
+                break;
+
+            case "CHILD_READY":
+                handleChildReady(event);
+                break;
+
+            case "REQUEST_SESSION":
+                handleSessionRequest(event);
+                break;
+
+            case "SESSION_SYNC":
+                handleSessionSync(event);
+                break;
+
+            case "HEARTBEAT":
+                handleHeartbeat(event);
+                break;
+
+            case "HEARTBEAT_ACK":
+                handleHeartbeatAck(event);
+                break;
+
+            case "PING":
+                handlePing(event);
+                break;
+
+            // Handle VERIFY_SESSION from calls-core.js
+            case "VERIFY_SESSION":
+                handleVerifySession(event);
+                break;
+
+            // =============================================
+            // SETTINGS MODULE MESSAGE HANDLERS
+            // =============================================
+            case "SETTINGS_UPDATED":
+                handleSettingsUpdated(event);
+                break;
+                
+            case "SETTINGS_PROFILE_UPDATED":
+                handleProfileUpdated(event);
+                break;
+                
+            case "SETTINGS_PRIVACY_UPDATED":
+                handlePrivacyUpdated(event);
+                break;
+                
+            case "SETTINGS_NOTIFICATIONS_UPDATED":
+                handleNotificationsUpdated(event);
+                break;
+                
+            case "SETTINGS_APPEARANCE_UPDATED":
+                handleAppearanceUpdated(event);
+                break;
+                
+            case "USER_BLOCKED":
+                handleUserBlocked(event);
+                break;
+                
+            case "USER_UNBLOCKED":
+                handleUserUnblocked(event);
+                break;
+                
+            case "SESSION_TERMINATED":
+                handleSessionTerminated(event);
+                break;
+                
+            case "ALL_SESSIONS_TERMINATED":
+                handleAllSessionsTerminated(event);
+                break;
+                
+            case "PROFILE_PHOTO_UPDATED":
+                handleProfilePhotoUpdated(event);
+                break;
+                
+            case "PASSWORD_CHANGED":
+                handlePasswordChanged(event);
+                break;
+                
+            case "DATA_EXPORT_REQUESTED":
+                handleDataExportRequested(event);
+                break;
+                
+            case "ACCOUNT_DELETION_REQUESTED":
+                handleAccountDeletionRequested(event);
+                break;
+                
+            case "CACHE_CLEARED":
+                handleCacheCleared(event);
+                break;
+
+            case "SESSION_ACK":
+            case "HANDSHAKE_ACK":
+            case "REGISTRATION_ACK":
+                // These are ACKs from children - update state if needed
+                if (window.__PARENT_AUTHORITY__) {
+                    window.__PARENT_AUTHORITY__.heartbeatSuccess();
                 }
-                processedMessageIds.add(messageId);
-                cleanupProcessedIds();
+                break;
+
+            default:
+                // For any other message type that expects ACK, send generic ACK
+                if (event.data.expectAck && messageId) {
+                    sendAck(event.source, event.origin, msgType, messageId, { success: true });
+                }
+                break;
+        }
+    });
+
+    // =============================================
+    // SETTINGS MODULE HANDLER FUNCTIONS
+    // =============================================
+    
+    /**
+     * Handle settings updates from settings module
+     */
+    function handleSettingsUpdated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        
+        // Update global settings if needed
+        if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user) {
+                session.user.settings = payload.settings;
             }
-
-            // Route message to appropriate handler
-            switch (msgType) {
-                case "HANDSHAKE_REQUEST":
-                    handleHandshakeRequest(event);
-                    break;
-
-                case "IFRAME_REGISTERED":
-                    handleIframeRegistered(event);
-                    break;
-
-                case "CHILD_READY":
-                    handleChildReady(event);
-                    break;
-
-                case "REQUEST_SESSION":
-                    handleSessionRequest(event);
-                    break;
-
-                case "SESSION_SYNC":
-                    handleSessionSync(event);
-                    break;
-
-                case "HEARTBEAT":
-                    handleHeartbeat(event);
-                    break;
-
-                case "HEARTBEAT_ACK":
-                    handleHeartbeatAck(event);
-                    break;
-
-                case "PING":
-                    handlePing(event);
-                    break;
-
-                // NEW: Handle VERIFY_SESSION from calls-core.js
-                case "VERIFY_SESSION":
-    console.log('[Parent] Handling VERIFY_SESSION');
-    handleVerifySession(event);
-    break;
-
-                case "SESSION_ACK":
-                case "HANDSHAKE_ACK":
-                case "REGISTRATION_ACK":
-                    // These are ACKs from children - update state if needed
-                    if (window.__PARENT_AUTHORITY__) {
-                        window.__PARENT_AUTHORITY__.heartbeatSuccess();
-                    }
-                    break;
-
-                default:
-                    // For any other message type that expects ACK, send generic ACK
-                    if (event.data.expectAck && messageId) {
-                        sendAck(event.source, event.origin, msgType, messageId, { success: true });
-                    }
-                    break;
+        }
+        
+        // Broadcast to other iframes
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'toolsIframe'];
+        iframeIds.forEach(id => {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: 'SETTINGS_UPDATED',
+                        payload: {
+                            section: payload.section,
+                            settings: payload.settings,
+                            timestamp: Date.now()
+                        },
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (e) {}
             }
         });
-    })();
-    // Handle PING requests from iframes
-function handlePing(event) {
-    const requestId = event.data?.requestId || event.data?.messageId;
-    const source = event.source;
-    const origin = event.origin;
-    
-    // Send PONG response
-    try {
-        source.postMessage({
-            type: "PONG",
-            requestId: requestId,
-            messageId: requestId || ('pong_' + Date.now()),
-            payload: {
-                timestamp: Date.now(),
-                echo: event.data.payload || {}
-            },
-            timestamp: Date.now()
-        }, origin);
-    } catch (e) {
-        console.error('[Parent] Failed to send PONG:', e);
+        
+        // Send ACK
+        sendAck(event.source, event.origin, "SETTINGS_UPDATED", requestId, { success: true });
     }
     
-    // Send ACK manually instead of calling sendAck
-    if (event.data?.expectAck && requestId) {
+    /**
+     * Handle profile updates from settings module
+     */
+    function handleProfileUpdated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        
+        // Update user in parent state
+        if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user) {
+                Object.assign(session.user, payload.user);
+            }
+        }
+        
+        // Broadcast to all iframes
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'toolsIframe'];
+        iframeIds.forEach(id => {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: 'USER_UPDATED',
+                        payload: {
+                            user: payload.user,
+                            timestamp: Date.now()
+                        },
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (e) {}
+            }
+        });
+        
+        sendAck(event.source, event.origin, "SETTINGS_PROFILE_UPDATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle privacy updates from settings module
+     */
+    function handlePrivacyUpdated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        
+        // Update privacy settings in parent state
+        if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user) {
+                session.user.privacy = payload.privacy;
+            }
+        }
+        
+        // Notify relevant modules
+        const iframeIds = ['statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe'];
+        iframeIds.forEach(id => {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: 'PRIVACY_UPDATED',
+                        payload: {
+                            privacy: payload.privacy,
+                            timestamp: Date.now()
+                        },
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (e) {}
+            }
+        });
+        
+        sendAck(event.source, event.origin, "SETTINGS_PRIVACY_UPDATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle notification settings updates
+     */
+    function handleNotificationsUpdated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        
+        // Update notification settings in parent state
+        if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user) {
+                session.user.notifications = payload.notifications;
+            }
+        }
+        
+        sendAck(event.source, event.origin, "SETTINGS_NOTIFICATIONS_UPDATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle appearance/theme updates
+     */
+    function handleAppearanceUpdated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        const appearance = payload.appearance || {};
+        
+        // Apply theme globally
+        if (appearance.theme) {
+            applyGlobalTheme(appearance.theme);
+        }
+        
+        // Update accent color
+        if (appearance.accentColor) {
+            updateGlobalAccentColor(appearance.accentColor);
+        }
+        
+        // Broadcast to all iframes
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'toolsIframe'];
+        iframeIds.forEach(id => {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: 'THEME_CHANGED',
+                        payload: {
+                            appearance: appearance,
+                            timestamp: Date.now()
+                        },
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (e) {}
+            }
+        });
+        
+        sendAck(event.source, event.origin, "SETTINGS_APPEARANCE_UPDATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle user blocked event
+     */
+    function handleUserBlocked(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        const userId = payload.userId;
+        
+        // Update blocked users list in parent state
+        if (window.__KYNECTA_AUTHORITIES__?.parentState && userId) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user) {
+                if (!session.user.blockedUsers) session.user.blockedUsers = [];
+                if (!session.user.blockedUsers.includes(userId)) {
+                    session.user.blockedUsers.push(userId);
+                }
+            }
+        }
+        
+        sendAck(event.source, event.origin, "USER_BLOCKED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle user unblocked event
+     */
+    function handleUserUnblocked(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        const userId = payload.userId;
+        
+        // Update blocked users list in parent state
+        if (window.__KYNECTA_AUTHORITIES__?.parentState && userId) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user && session.user.blockedUsers) {
+                session.user.blockedUsers = session.user.blockedUsers.filter(id => id !== userId);
+            }
+        }
+        
+        sendAck(event.source, event.origin, "USER_UNBLOCKED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle session terminated event
+     */
+    function handleSessionTerminated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        
+        sendAck(event.source, event.origin, "SESSION_TERMINATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle all sessions terminated event
+     */
+    function handleAllSessionsTerminated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        
+        sendAck(event.source, event.origin, "ALL_SESSIONS_TERMINATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle profile photo updated event
+     */
+    function handleProfilePhotoUpdated(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        const payload = data.payload || {};
+        const photoUrl = payload.photoUrl;
+        
+        // Update user photo in parent state
+        if (window.__KYNECTA_AUTHORITIES__?.parentState && photoUrl) {
+            const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            if (session && session.user) {
+                session.user.photoURL = photoUrl;
+            }
+        }
+        
+        // Broadcast to all iframes
+        const iframeIds = ['messagesIframe', 'statusIframe', 'groupIframe', 'friendsIframe', 'callsIframe', 'toolsIframe'];
+        iframeIds.forEach(id => {
+            const iframe = document.getElementById(id);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.postMessage({
+                        type: 'USER_PHOTO_UPDATED',
+                        payload: {
+                            photoUrl: photoUrl,
+                            timestamp: Date.now()
+                        },
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (e) {}
+            }
+        });
+        
+        sendAck(event.source, event.origin, "PROFILE_PHOTO_UPDATED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle password changed event
+     */
+    function handlePasswordChanged(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        
+        sendAck(event.source, event.origin, "PASSWORD_CHANGED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle data export requested event
+     */
+    function handleDataExportRequested(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        
+        sendAck(event.source, event.origin, "DATA_EXPORT_REQUESTED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle account deletion requested event
+     */
+    function handleAccountDeletionRequested(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        
+        // Trigger logout if needed
+        if (window.handleLogout) {
+            window.handleLogout();
+        }
+        
+        sendAck(event.source, event.origin, "ACCOUNT_DELETION_REQUESTED", requestId, { success: true });
+    }
+    
+    /**
+     * Handle cache cleared event
+     */
+    function handleCacheCleared(event) {
+        const data = event.data;
+        const requestId = data.requestId || data.messageId;
+        
+        sendAck(event.source, event.origin, "CACHE_CLEARED", requestId, { success: true });
+    }
+
+    /**
+     * Apply global theme
+     */
+    function applyGlobalTheme(theme) {
+        if (theme === 'dark') {
+            document.body.classList.add('theme-dark');
+            document.documentElement.style.colorScheme = 'dark';
+        } else if (theme === 'light') {
+            document.body.classList.remove('theme-dark');
+            document.documentElement.style.colorScheme = 'light';
+        } else if (theme === 'auto') {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (prefersDark) {
+                document.body.classList.add('theme-dark');
+                document.documentElement.style.colorScheme = 'dark';
+            } else {
+                document.body.classList.remove('theme-dark');
+                document.documentElement.style.colorScheme = 'light';
+            }
+        }
+    }
+    
+    /**
+     * Update global accent color
+     */
+    function updateGlobalAccentColor(color) {
+        document.documentElement.style.setProperty('--primary-color', color);
+        
+        // Update theme-color meta tag
+        let metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (metaThemeColor) {
+            metaThemeColor.content = color;
+        } else {
+            metaThemeColor = document.createElement('meta');
+            metaThemeColor.name = 'theme-color';
+            metaThemeColor.content = color;
+            document.head.appendChild(metaThemeColor);
+        }
+    }
+
+    // Handle VERIFY_SESSION (for calls-core.js)
+    function handleVerifySession(event) {
+        // CRITICAL: Get the requestId from the message - MUST match exactly what the iframe sent
+        const requestId = event.data?.requestId || 
+                          event.data?.messageId || 
+                          event.data?.payload?.requestId;
+        
+        // If no requestId, we can't respond properly
+        if (!requestId) {
+            console.error('[Parent] VERIFY_SESSION missing requestId');
+            return;
+        }
+        
+        const source = event.source;
+        const origin = event.origin;
+        
+        // Get current session
+        const session = getCurrentSession();
+        
+        // Verify the session is valid
+        const isValid = session && session.authenticated && session.token && 
+                       (!session.expiresAt || session.expiresAt > Date.now());
+        
+        // Send the verification response (SESSION_VERIFIED) with the SAME requestId
+        if (source) {
+            try {
+                // Send SESSION_VERIFIED response with the original requestId
+                source.postMessage({
+                    type: "SESSION_VERIFIED",
+                    requestId: requestId,  // MUST be the same as received
+                    messageId: requestId,   // MUST be the same as received
+                    payload: { 
+                        valid: isValid,
+                        userId: session.userId,
+                        timestamp: Date.now()
+                    },
+                    timestamp: Date.now()
+                }, origin);
+                
+                // Send ACK with the SAME requestId
+                source.postMessage({
+                    type: "ACK",
+                    originalType: "VERIFY_SESSION",
+                    messageId: requestId,     // Use the original requestId
+                    requestId: requestId,      // This MUST match exactly
+                    payload: { success: true, valid: isValid },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {
+                console.error('[Parent] Failed to send response:', e);
+            }
+        }
+    }
+
+    // Handle PING requests from iframes
+    function handlePing(event) {
+        const requestId = event.data?.requestId || event.data?.messageId;
+        const source = event.source;
+        const origin = event.origin;
+        
+        // Send PONG response
         try {
             source.postMessage({
-                type: "ACK",
-                originalType: "PING",
-                messageId: 'ack_' + requestId,
+                type: "PONG",
                 requestId: requestId,
-                payload: { success: true },
+                messageId: requestId || ('pong_' + Date.now()),
+                payload: {
+                    timestamp: Date.now(),
+                    echo: event.data.payload || {}
+                },
                 timestamp: Date.now()
             }, origin);
         } catch (e) {
-            console.error('[Parent] Failed to send ACK:', e);
+            console.error('[Parent] Failed to send PONG:', e);
+        }
+        
+        // Send ACK manually instead of calling sendAck
+        if (event.data?.expectAck && requestId) {
+            try {
+                source.postMessage({
+                    type: "ACK",
+                    originalType: "PING",
+                    messageId: 'ack_' + requestId,
+                    requestId: requestId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {
+                console.error('[Parent] Failed to send ACK:', e);
+            }
         }
     }
-}
+})();
     </script>
 
 
@@ -4556,6 +5032,7 @@ function handlePing(event) {
         }, 1000);
 
     })();
+    
     </script>
 
     <!-- ========== KYNECTA AUTHORITIES LAYER - FIXED ========== -->

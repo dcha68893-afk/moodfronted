@@ -1,13 +1,13 @@
 // =============================================
 // PRODUCTION-READY GROUPS SYSTEM WITH PARENT SESSION AUTHORITY
 // COMPLETE CORE ENGINE - HIGHLY SECURE, XSS PROTECTED
-// VERSION: 3.6.0 - STABILITY ENHANCED, RACE CONDITION FIXED
+// VERSION: 4.0.0 - FIXED DUPLICATE MESSAGES, PROPER STATE TRACKING
 // =============================================
 
 // =============================================
 // STATUS MACHINE - One Message Only Per State Change
 // =============================================
-const MODULE_VERSION = '3.6.0';
+const MODULE_VERSION = '4.0.0';
 
 const STATUS_MACHINE = (function() {
     'use strict';
@@ -80,6 +80,43 @@ window.__STATUS_MACHINE = STATUS_MACHINE;
 STATUS_MACHINE.log('group-core', 'INIT', 'Groups module loading');
 
 // =============================================
+// MESSAGE DEDUPLICATION - Prevents duplicate logs
+// =============================================
+const MessageDeduplicator = {
+    _processedIds: new Set(),
+    _processedTimestamps: new Map(),
+    _maxSize: 100,
+    
+    isProcessed(messageId) {
+        return this._processedIds.has(messageId);
+    },
+    
+    markProcessed(messageId) {
+        this._processedIds.add(messageId);
+        this._processedTimestamps.set(messageId, Date.now());
+        this._cleanup();
+    },
+    
+    _cleanup() {
+        if (this._processedIds.size > this._maxSize) {
+            const now = Date.now();
+            for (const [id, timestamp] of this._processedTimestamps) {
+                if (now - timestamp > 60000) {
+                    this._processedIds.delete(id);
+                    this._processedTimestamps.delete(id);
+                }
+                if (this._processedIds.size <= this._maxSize) break;
+            }
+        }
+    },
+    
+    reset() {
+        this._processedIds.clear();
+        this._processedTimestamps.clear();
+    }
+};
+
+// =============================================
 // GLOBAL DECLARATIONS
 // =============================================
 let tokenQueue = [];
@@ -106,6 +143,11 @@ let __SESSION_REQUEST_PENDING__ = false;
 const groupActionQueue = [];
 let isProcessingQueue = false;
 
+// Track handshake state
+let handshakeInProgress = false;
+let handshakeAttempts = 0;
+let handshakeCompleted = false;
+
 // Track handshake initialization globally
 if (typeof window !== 'undefined' && !window.__GROUP_HANDSHAKE_INITIALIZED__) {
     window.__GROUP_HANDSHAKE_INITIALIZED__ = true;
@@ -116,7 +158,7 @@ if (typeof window !== 'undefined' && !window.__GROUP_HANDSHAKE_INITIALIZED__) {
     let handshakeSuccess = false;
     
     function initiateHandshake() {
-        if (handshakeAttempts >= maxAttempts || handshakeSuccess) {
+        if (handshakeAttempts >= maxAttempts || handshakeSuccess || handshakeCompleted) {
             if (handshakeInterval) {
                 clearInterval(handshakeInterval);
                 handshakeInterval = null;
@@ -140,7 +182,7 @@ if (typeof window !== 'undefined' && !window.__GROUP_HANDSHAKE_INITIALIZED__) {
     }
     
     handshakeInterval = setInterval(() => {
-        if (window.__PARENT_ACK_RECEIVED__) {
+        if (window.__PARENT_ACK_RECEIVED__ || handshakeCompleted) {
             if (handshakeInterval) {
                 clearInterval(handshakeInterval);
                 handshakeInterval = null;
@@ -154,10 +196,12 @@ if (typeof window !== 'undefined' && !window.__GROUP_HANDSHAKE_INITIALIZED__) {
     window.addEventListener("message", (event) => {
         if (!event.data) return;
         
-        if (event.data.type === "PARENT_ACK" || event.data.type === "HANDSHAKE_ACK") {
+        if (event.data.type === "PARENT_ACK" || event.data.type === "HANDSHAKE_ACK" || event.data.type === "SESSION_VERIFIED") {
             window.__PARENT_ACK_RECEIVED__ = true;
             handshakeSuccess = true;
+            handshakeCompleted = true;
             __PARENT_READY__ = true;
+            __HANDSHAKE_COMPLETE__ = true;
             if (handshakeInterval) {
                 clearInterval(handshakeInterval);
                 handshakeInterval = null;
@@ -546,8 +590,12 @@ const StartupGovernor = {
 const OriginAdapter = {
     _trustCache: new Map(),
     _dynamicOrigins: new Set(),
+    _initialized: false,
     
     init() {
+        if (this._initialized) return;
+        this._initialized = true;
+        
         this.addTrustedOrigin(window.location.origin);
         
         try {
@@ -601,14 +649,6 @@ const OriginAdapter = {
             }
         }
         
-        if (this._isSandboxed() || (StartupGovernor && StartupGovernor.isDegraded())) {
-            if (originStr.includes(window.location.hostname) || 
-                window.location.hostname.includes(originStr.replace(/^https?:\/\//, '').split(':')[0])) {
-                this._trustCache.set(origin, true);
-                return true;
-            }
-        }
-        
         this._trustCache.set(origin, false);
         return false;
     },
@@ -635,7 +675,7 @@ const OriginAdapter = {
 // CANONICAL MESSAGE FORMATTER
 // =============================================
 
-export const CanonicalMessageFormatter = {
+const CanonicalMessageFormatter = {
     createMessage(type, payload = {}, options = {}) {
         const messageId = options.messageId || this.generateMessageId();
         const timestamp = Date.now();
@@ -690,7 +730,7 @@ export const CanonicalMessageFormatter = {
 };
 
 // =============================================
-// TRANSPORT AGENT
+// TRANSPORT AGENT - FIXED WITH DEDUPLICATION
 // =============================================
 
 const TransportAgent = {
@@ -704,6 +744,8 @@ const TransportAgent = {
     _maxRetries: 3,
     _baseBackoff: 500,
     _listeners: new Set(),
+    _sentMessages: new Set(),
+    _initialized: false,
     _stats: {
         sent: 0,
         received: 0,
@@ -714,22 +756,30 @@ const TransportAgent = {
     },
     
     init() {
+        if (this._initialized) return this;
+        this._initialized = true;
+        
         this._setupHeartbeat();
         this._processOfflineQueue();
         return this;
     },
     
     send(type, payload = {}, options = {}) {
-        const messageId = this._generateMessageId();
+        const messageId = options.messageId || this._generateMessageId();
         const requiresAck = options.requiresAck !== false;
         const timeout = options.timeout || SECURITY_CONFIG.ACK_TIMEOUT;
         const retryCount = options.retryCount || 0;
         const maxRetries = options.maxRetries || this._maxRetries || 3;
         const priority = options.priority || 'normal';
         
-        const parentAvailable = ParentConnectionManager && 
-                                ParentConnectionManager.parentAvailable &&
-                                this._connectionState !== 'disconnected';
+        // Check if we already sent this message
+        if (this._sentMessages.has(messageId)) {
+            return Promise.resolve({ success: true, cached: true, messageId });
+        }
+        
+        const isInIframe = window !== window.parent;
+        const hasPostMessage = !!(window.parent && typeof window.parent.postMessage === 'function');
+        const parentAvailable = isInIframe && hasPostMessage;
         
         if (!parentAvailable) {
             this._offlineQueue.push({
@@ -779,9 +829,21 @@ const TransportAgent = {
             if (window.parent && window.parent.postMessage) {
                 window.parent.postMessage(message, '*');
                 this._stats.sent++;
+                this._sentMessages.add(messageId);
+                
+                // Only log once per message type per session
+                const logKey = `${type}_sent`;
+                if (!MessageDeduplicator.isProcessed(logKey)) {
+                    STATUS_MACHINE.log('transport', 'SENDING', type);
+                    MessageDeduplicator.markProcessed(logKey);
+                }
+                
                 if (!requiresAck) {
                     this._stats.acked++;
                 }
+                
+                this._connectionState = 'connected';
+                this._lastHeartbeat = Date.now();
             } else {
                 throw new Error('No parent window');
             }
@@ -819,6 +881,13 @@ const TransportAgent = {
         this._pendingAcks.delete(messageId);
         this._stats.timedout++;
         
+        // Only log timeout once per retry attempt
+        const logKey = `${type}_timeout_${retryCount}`;
+        if (!MessageDeduplicator.isProcessed(logKey)) {
+            STATUS_MACHINE.log('transport', 'WAITING', `${type} retry ${retryCount}/${maxRetries}`);
+            MessageDeduplicator.markProcessed(logKey);
+        }
+        
         if (retryCount < maxRetries) {
             const backoffDelay = this._baseBackoff * Math.pow(2, retryCount);
             this._stats.retried++;
@@ -832,6 +901,7 @@ const TransportAgent = {
                 }).then(pending.resolve).catch(pending.reject);
             }, backoffDelay);
         } else {
+            STATUS_MACHINE.log('transport', 'FAILED', `${type} max retries`);
             if (pending.reject) {
                 pending.reject(new Error('ACK timeout after max retries'));
             }
@@ -839,7 +909,7 @@ const TransportAgent = {
     },
     
     handleAck(message) {
-        const messageId = message.inResponseTo || message.payload?.inResponseTo;
+        const messageId = message.inResponseTo || message.payload?.inResponseTo || message.messageId;
         if (!messageId) return;
         
         const pending = this._pendingAcks.get(messageId);
@@ -879,7 +949,7 @@ const TransportAgent = {
             timestamp: Date.now(),
             payload: sanitizePayload(payload),
             requiresAck: options.requiresAck || false,
-            token: ParentConnectionManager ? ParentConnectionManager.getToken() : null
+            token: null
         };
     },
     
@@ -889,8 +959,9 @@ const TransportAgent = {
         }
         
         this._heartbeatInterval = setInterval(() => {
-            const parentAvailable = ParentConnectionManager && 
-                                    ParentConnectionManager.parentAvailable;
+            const isInIframe = window !== window.parent;
+            const hasPostMessage = !!(window.parent && typeof window.parent.postMessage === 'function');
+            const parentAvailable = isInIframe && hasPostMessage;
             
             if (parentAvailable && this._connectionState === 'connected') {
                 this.send('PING', {
@@ -910,8 +981,9 @@ const TransportAgent = {
     _processOfflineQueue() {
         if (this._offlineQueue.length === 0) return;
         
-        const parentAvailable = ParentConnectionManager && 
-                                ParentConnectionManager.parentAvailable;
+        const isInIframe = window !== window.parent;
+        const hasPostMessage = !!(window.parent && typeof window.parent.postMessage === 'function');
+        const parentAvailable = isInIframe && hasPostMessage;
         
         if (!parentAvailable) return;
         
@@ -959,7 +1031,6 @@ const TransportAgent = {
     setConnectionState(state) {
         const validStates = ['disconnected', 'connecting', 'connected', 'degraded'];
         if (validStates.includes(state)) {
-            const oldState = this._connectionState;
             this._connectionState = state;
         }
     }
@@ -976,8 +1047,12 @@ const RecoveryManager = {
     _lastRecovery: 0,
     _recoveryInProgress: false,
     _strategies: null,
+    _initialized: false,
     
     init() {
+        if (this._initialized) return this;
+        this._initialized = true;
+        
         this._strategies = {
             network: this._recoverNetwork.bind(this),
             session: this._recoverSession.bind(this),
@@ -1036,15 +1111,16 @@ const RecoveryManager = {
     },
     
     async _recoverNetwork() {
-        const parentAvailable = ParentConnectionManager && 
-                                ParentConnectionManager.parentAvailable;
+        const isInIframe = window !== window.parent;
+        const hasPostMessage = !!(window.parent && typeof window.parent.postMessage === 'function');
+        const parentAvailable = isInIframe && hasPostMessage;
         
         if (!parentAvailable) {
             return { success: false, reason: 'parent_unavailable' };
         }
         
         try {
-            await TransportAgent.send('REQUEST_STATUS', {}, { requiresAck: true, timeout: 3000 });
+            await TransportAgent.send('PING', {}, { requiresAck: true, timeout: 3000 });
             TransportAgent.setConnectionState('connected');
             return { success: true };
         } catch (error) {
@@ -1054,9 +1130,10 @@ const RecoveryManager = {
     
     async _recoverSession() {
         try {
-            await TransportAgent.send('REQUEST_SESSION', {
+            await TransportAgent.send('VERIFY_SESSION', {
                 frameId: SECURITY_CONFIG.FRAME_ID,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                requestId: 'recovery_' + Date.now()
             }, { requiresAck: true, timeout: 3000 });
             
             return { success: true };
@@ -1114,8 +1191,12 @@ const CompatibilityBridge = {
     _enabled: false,
     _legacyMode: false,
     _features: new Set(),
+    _initialized: false,
     
     init() {
+        if (this._initialized) return;
+        this._initialized = true;
+        
         this._legacyMode = this._detectLegacyMode();
     },
     
@@ -1142,54 +1223,6 @@ const CompatibilityBridge = {
         
         this._features = new Set(missingFeatures);
         return missingFeatures.length > 0;
-    },
-    
-    _enableLegacyMode() {
-        this._enabled = true;
-        
-        this._patchTransportAgent();
-        this._patchHandshakeClient();
-    },
-    
-    _patchTransportAgent() {
-        const originalSend = TransportAgent.send;
-        
-        TransportAgent.send = function(type, payload, options) {
-            if (!this._enabled) {
-                return originalSend.call(this, type, payload, options);
-            }
-            
-            return new Promise((resolve) => {
-                try {
-                    const legacyMsg = {
-                        type: type,
-                        data: payload,
-                        id: 'legacy_' + Date.now(),
-                        timestamp: Date.now(),
-                        source: 'iframe'
-                    };
-                    
-                    if (window.parent) {
-                        window.parent.postMessage(legacyMsg, '*');
-                        resolve({ success: true, legacy: true });
-                    } else {
-                        resolve({ success: false, reason: 'no_parent' });
-                    }
-                } catch (e) {
-                    resolve({ success: false, error: e.message });
-                }
-            });
-        }.bind({ _enabled: true });
-    },
-    
-    _patchHandshakeClient() {
-        HandshakeClient.initiate = function() {
-            return Promise.resolve({
-                success: true,
-                legacy: true,
-                message: 'Legacy handshake bypassed'
-            });
-        };
     },
     
     isLegacyMode() {
@@ -1324,10 +1357,10 @@ const SandboxDetector = {
 };
 
 // =============================================
-// ENHANCED HANDSHAKE CLIENT
+// FIXED HANDSHAKE CLIENT - Proper state tracking
 // =============================================
 
-export const HandshakeClient = {
+const HandshakeClient = {
     _handshakeInProgress: false,
     _handshakeAttempts: 0,
     _handshakePromise: null,
@@ -1341,12 +1374,22 @@ export const HandshakeClient = {
     _handshakeComplete: false,
     
     initiate: function(options = {}) {
-        if (this._handshakeComplete) {
+        if (this._handshakeComplete || handshakeCompleted) {
+            STATUS_MACHINE.log('handshake', 'SUCCESS', 'Already complete');
             return Promise.resolve({ success: true, fromCache: false });
         }
         
         if (this._handshakeInProgress) {
             return this._handshakePromise || Promise.reject(new Error('Handshake already in progress'));
+        }
+        
+        // Check if we already have a valid session
+        if (ParentConnectionManager && ParentConnectionManager.sessionMirror.authenticated) {
+            this._handshakeComplete = true;
+            handshakeCompleted = true;
+            __HANDSHAKE_COMPLETE__ = true;
+            STATUS_MACHINE.log('handshake', 'SUCCESS', 'Already authenticated');
+            return Promise.resolve({ success: true, fromCache: true });
         }
         
         this._handshakeInProgress = true;
@@ -1356,6 +1399,8 @@ export const HandshakeClient = {
         
         const maxRetries = options.maxRetries || SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES;
         const timeout = options.timeout || SECURITY_CONFIG.HANDSHAKE_TIMEOUT;
+        
+        STATUS_MACHINE.log('handshake', 'SENDING', `Attempt ${this._handshakeAttempts}`);
         
         this._handshakePromise = new Promise((resolve, reject) => {
             this._handshakeResolve = resolve;
@@ -1377,24 +1422,36 @@ export const HandshakeClient = {
                 } else {
                     this._handshakeInProgress = false;
                     this._handshakeState = 'failed';
+                    STATUS_MACHINE.log('handshake', 'FAILED', 'Max retries exceeded');
                     reject(new Error('handshake_timeout'));
                 }
             }, timeout);
             
             if (window.parent) {
+                // Send CHILD_READY first
                 TransportAgent.send('CHILD_READY', {
                     childId: SECURITY_CONFIG.FRAME_ID,
                     version: MODULE_VERSION,
                     timestamp: Date.now(),
-                    handshakeState: 'initiating'
+                    module: 'groups'
                 }, { requiresAck: false }).catch(() => {});
                 
-                TransportAgent.send('HANDSHAKE_REQUEST', {
-                    childId: SECURITY_CONFIG.FRAME_ID,
-                    version: MODULE_VERSION,
+                // Use VERIFY_SESSION
+                const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+                
+                TransportAgent.send('VERIFY_SESSION', {
+                    requestId: requestId,
+                    messageId: requestId,
                     timestamp: Date.now(),
-                    features: ['groups', 'chat', 'admin', 'protocol-v1']
-                }, { requiresAck: true, timeout: 3000 }).catch(() => {});
+                    frameId: SECURITY_CONFIG.FRAME_ID,
+                    module: 'groups'
+                }, { requiresAck: true, timeout: 3000 }).then((response) => {
+                    if (response && response.ack) {
+                        this.handleHandshakeAck(response.ack);
+                    }
+                }).catch((error) => {
+                    // Don't reject here, let timeout handle it
+                });
             }
         });
         
@@ -1402,19 +1459,23 @@ export const HandshakeClient = {
     },
     
     handleParentReady: function(message) {
+        if (this._handshakeComplete || handshakeCompleted) return;
+        
         this._parentReadyReceived = true;
         
         if (this._handshakeState === 'child_ready_sent') {
             this._handshakeState = 'waiting_parent_ready';
         }
         
-        if (window.parent) {
-            TransportAgent.send('HANDSHAKE_REQUEST', {
-                childId: SECURITY_CONFIG.FRAME_ID,
-                version: MODULE_VERSION,
+        if (window.parent && !this._handshakeComplete && !handshakeCompleted) {
+            const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            
+            TransportAgent.send('VERIFY_SESSION', {
+                requestId: requestId,
+                messageId: requestId,
                 timestamp: Date.now(),
                 parentReadyAck: true,
-                features: ['groups', 'chat', 'admin', 'protocol-v1']
+                module: 'groups'
             }, { requiresAck: true }).catch(() => {});
             
             this._handshakeState = 'handshake_request_sent';
@@ -1422,7 +1483,11 @@ export const HandshakeClient = {
     },
     
     handleHandshakeAck: function(message) {
+        if (this._handshakeComplete || handshakeCompleted) return;
+        
         this._handshakeAckReceived = true;
+        this._handshakeComplete = true;
+        handshakeCompleted = true;
         __HANDSHAKE_COMPLETE__ = true;
         
         if (this._handshakeState === 'handshake_request_sent' || this._handshakeState === 'waiting_parent_ready') {
@@ -1433,6 +1498,8 @@ export const HandshakeClient = {
     },
     
     handleResponse: function(response) {
+        if (this._handshakeComplete && handshakeCompleted) return;
+        
         if (this._handshakeResolve) {
             clearTimeout(this._handshakeTimer);
             this._handshakeResolve(response);
@@ -1442,9 +1509,12 @@ export const HandshakeClient = {
             this._handshakeResolve = null;
             this._handshakeState = 'complete';
             this._handshakeComplete = true;
+            handshakeCompleted = true;
             __HANDSHAKE_COMPLETE__ = true;
             
             TransportAgent.setConnectionState('connected');
+            
+            STATUS_MACHINE.log('handshake', 'SUCCESS', 'Handshake complete');
             
             processGroupActionQueue();
         }
@@ -1457,7 +1527,8 @@ export const HandshakeClient = {
             parentReadyReceived: this._parentReadyReceived,
             handshakeAckReceived: this._handshakeAckReceived,
             startTime: this._startTime,
-            duration: this._startTime ? Date.now() - this._startTime : 0
+            duration: this._startTime ? Date.now() - this._startTime : 0,
+            complete: this._handshakeComplete || handshakeCompleted
         };
     },
     
@@ -1470,6 +1541,7 @@ export const HandshakeClient = {
         this._parentReadyReceived = false;
         this._handshakeAckReceived = false;
         this._handshakeComplete = false;
+        handshakeCompleted = false;
         this._startTime = null;
         __HANDSHAKE_COMPLETE__ = false;
         
@@ -1484,7 +1556,7 @@ export const HandshakeClient = {
 // PARENT MESSAGE TYPES
 // =============================================
 
-export const PARENT_MESSAGE_TYPES = {
+const PARENT_MESSAGE_TYPES = {
     CHILD_READY: 'CHILD_READY',
     REQUEST_SESSION: 'REQUEST_SESSION',
     CHILD_INITIALIZED: 'CHILD_INITIALIZED',
@@ -1508,7 +1580,20 @@ export const PARENT_MESSAGE_TYPES = {
     SESSION_SYNC: 'SESSION_SYNC',
     SESSION_ACK: 'SESSION_ACK',
     PAGE_ACTIVATED: 'PAGE_ACTIVATED',
-    NAVIGATE: 'NAVIGATE'
+    NAVIGATE: 'NAVIGATE',
+    SESSION_VERIFIED: 'SESSION_VERIFIED',
+    
+    // Group-specific message types
+    GROUP_CREATED: 'GROUP_CREATED',
+    GROUP_UPDATED: 'GROUP_UPDATED',
+    GROUP_DELETED: 'GROUP_DELETED',
+    MEMBER_ADDED: 'MEMBER_ADDED',
+    MEMBER_REMOVED: 'MEMBER_REMOVED',
+    MEMBER_ROLE_CHANGED: 'MEMBER_ROLE_CHANGED',
+    GROUP_MESSAGE: 'GROUP_MESSAGE',
+    UNREAD_COUNT_UPDATED: 'UNREAD_COUNT_UPDATED',
+    GROUP_TYPING: 'GROUP_TYPING',
+    GROUP_CALL: 'GROUP_CALL'
 };
 
 export const SESSION_SCHEMA = {
@@ -1584,7 +1669,7 @@ export const ParentConnectionManager = {
     detectParentAvailability() {
         try {
             const isInIframe = window !== window.parent;
-            const hasPostMessage = window.parent && typeof window.parent.postMessage === 'function';
+            const hasPostMessage = !!(window.parent && typeof window.parent.postMessage === 'function');
             
             const isSandboxed = this.detectSandbox();
             
@@ -1654,10 +1739,29 @@ export const ParentConnectionManager = {
                 return;
             }
             
+            // Handle SESSION_VERIFIED
+            if (message.type === 'SESSION_VERIFIED') {
+                if (!handshakeCompleted && !this.handshakeComplete) {
+                    HandshakeClient.handleHandshakeAck(message);
+                    handshakeCompleted = true;
+                    this.handshakeComplete = true;
+                    STATUS_MACHINE.log('handshake', 'SUCCESS', 'SESSION_VERIFIED');
+                }
+                this.isConnected = true;
+                this.connectionState = 'connected';
+                __HANDSHAKE_COMPLETE__ = true;
+                __PARENT_READY__ = true;
+                return;
+            }
+            
             if (message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_ACK || 
                 message.type === PARENT_MESSAGE_TYPES.HANDSHAKE_RESPONSE) {
-                HandshakeClient.handleHandshakeAck(message);
-                this.handshakeComplete = true;
+                if (!handshakeCompleted && !this.handshakeComplete) {
+                    HandshakeClient.handleHandshakeAck(message);
+                    handshakeCompleted = true;
+                    this.handshakeComplete = true;
+                    STATUS_MACHINE.log('handshake', 'SUCCESS', 'HANDSHAKE_ACK');
+                }
                 this.isConnected = true;
                 this.connectionState = 'connected';
                 __HANDSHAKE_COMPLETE__ = true;
@@ -1722,6 +1826,79 @@ export const ParentConnectionManager = {
                 return;
             }
             
+            // Handle group-specific messages from parent
+            if (message.type === PARENT_MESSAGE_TYPES.GROUP_CREATED) {
+                const groupData = message.payload?.group;
+                if (groupData && typeof handleGroupCreatedFromParent === 'function') {
+                    handleGroupCreatedFromParent(groupData);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.GROUP_UPDATED) {
+                const groupData = message.payload?.group;
+                if (groupData && typeof handleGroupUpdatedFromParent === 'function') {
+                    handleGroupUpdatedFromParent(groupData);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.GROUP_DELETED) {
+                const groupId = message.payload?.groupId;
+                if (groupId && typeof handleGroupDeletedFromParent === 'function') {
+                    handleGroupDeletedFromParent(groupId);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.MEMBER_ADDED) {
+                const { groupId, member } = message.payload || {};
+                if (groupId && member && typeof handleMemberAddedFromParent === 'function') {
+                    handleMemberAddedFromParent(groupId, member);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.MEMBER_REMOVED) {
+                const { groupId, userId } = message.payload || {};
+                if (groupId && userId && typeof handleMemberRemovedFromParent === 'function') {
+                    handleMemberRemovedFromParent(groupId, userId);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.MEMBER_ROLE_CHANGED) {
+                const { groupId, userId, role } = message.payload || {};
+                if (groupId && userId && role && typeof handleMemberRoleChangedFromParent === 'function') {
+                    handleMemberRoleChangedFromParent(groupId, userId, role);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.GROUP_MESSAGE) {
+                const { groupId, message: msgData } = message.payload || {};
+                if (groupId && msgData && typeof handleGroupMessageFromParent === 'function') {
+                    handleGroupMessageFromParent(groupId, msgData);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.UNREAD_COUNT_UPDATED) {
+                const { groupId, count } = message.payload || {};
+                if (groupId && typeof handleUnreadCountUpdatedFromParent === 'function') {
+                    handleUnreadCountUpdatedFromParent(groupId, count);
+                }
+                return;
+            }
+            
+            if (message.type === PARENT_MESSAGE_TYPES.GROUP_TYPING) {
+                const { groupId, userId, isTyping } = message.payload || {};
+                if (groupId && userId && typeof handleGroupTypingFromParent === 'function') {
+                    handleGroupTypingFromParent(groupId, userId, isTyping);
+                }
+                return;
+            }
+            
             const handler = this.messageHandlers.get(message.type);
             if (handler) {
                 handler(message);
@@ -1743,9 +1920,7 @@ export const ParentConnectionManager = {
     },
     
     _isReadyForMessage() {
-        return this.parentAvailable && 
-               (__HANDSHAKE_COMPLETE__ || this.handshakeComplete) &&
-               (__SESSION_READY__ || this.sessionMirror.authenticated);
+        return this.parentAvailable;
     },
     
     handleAck(message) {
@@ -1758,7 +1933,7 @@ export const ParentConnectionManager = {
     },
     
     handleHandshakeResponse(message) {
-        if (this.handshakeResolve) {
+        if (this.handshakeResolve && !handshakeCompleted && !this.handshakeComplete) {
             this.handshakeResolve(message);
             this.handshakeResolve = null;
             this.handshakeReject = null;
@@ -1767,6 +1942,7 @@ export const ParentConnectionManager = {
                 this.handshakeTimer = null;
             }
             this.handshakeComplete = true;
+            handshakeCompleted = true;
             this.isConnected = true;
             this.handshakeInProgress = false;
             this.connectionState = 'connected';
@@ -1787,9 +1963,11 @@ export const ParentConnectionManager = {
     },
     
     handleParentReady(message) {
+        if (handshakeCompleted || this.handshakeComplete) return;
+        
         HandshakeClient.handleParentReady(message);
         
-        if (!this.handshakeComplete) {
+        if (!this.handshakeComplete && !handshakeCompleted) {
             this.initiateHandshake();
         }
     },
@@ -1845,6 +2023,7 @@ export const ParentConnectionManager = {
         if (this.validateSessionData(sessionData)) {
             this.updateSessionMirror(sessionData);
             this.handshakeComplete = true;
+            handshakeCompleted = true;
             this.isConnected = true;
             this.handshakeInProgress = false;
             this.connectionState = 'connected';
@@ -1934,6 +2113,7 @@ export const ParentConnectionManager = {
         };
         this.sessionData = null;
         this.handshakeComplete = false;
+        handshakeCompleted = false;
         this.isConnected = false;
         this.connectionState = 'disconnected';
         __SESSION_READY__ = false;
@@ -1946,7 +2126,7 @@ export const ParentConnectionManager = {
     },
     
     initiateHandshake() {
-        if (this.handshakeInProgress) {
+        if (this.handshakeInProgress || handshakeCompleted || this.handshakeComplete) {
             return this.handshakePromise;
         }
         
@@ -1988,15 +2168,23 @@ export const ParentConnectionManager = {
                 childId: SECURITY_CONFIG.FRAME_ID,
                 version: MODULE_VERSION,
                 timestamp: Date.now(),
-                features: ['groups', 'chat', 'admin', 'protocol-v1']
+                module: 'groups'
             }, { requiresAck: false }).catch(() => {});
             
-            this.sendMessage('HANDSHAKE_REQUEST', {
-                childId: SECURITY_CONFIG.FRAME_ID,
-                version: MODULE_VERSION,
+            // Use VERIFY_SESSION
+            const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            
+            this.sendMessage('VERIFY_SESSION', {
+                requestId: requestId,
+                messageId: requestId,
                 timestamp: Date.now(),
-                features: ['groups', 'chat', 'admin', 'protocol-v1']
-            }, { requiresAck: true, timeout: 3000 }).catch(() => {});
+                frameId: SECURITY_CONFIG.FRAME_ID,
+                module: 'groups'
+            }, { requiresAck: true, timeout: 3000 }).then((response) => {
+                if (response && response.ack) {
+                    this.handleHandshakeResponse(response.ack);
+                }
+            }).catch(() => {});
         });
         
         return this.handshakePromise;
@@ -2020,6 +2208,7 @@ export const ParentConnectionManager = {
                 };
                 this.sessionData = { user, token: cachedToken, timestamp: Date.now() };
                 this.handshakeComplete = true;
+                handshakeCompleted = true;
                 this.isConnected = false;
                 this.connectionState = 'degraded';
                 __SESSION_READY__ = true;
@@ -2041,6 +2230,7 @@ export const ParentConnectionManager = {
     reconnect() {
         this.isConnected = false;
         this.handshakeComplete = false;
+        handshakeCompleted = false;
         this.handshakeAttempts = 0;
         this.connectionState = 'connecting';
         
@@ -2054,7 +2244,7 @@ export const ParentConnectionManager = {
             action: 'status',
             status: {
                 initialized: true,
-                handshakeComplete: this.handshakeComplete,
+                handshakeComplete: this.handshakeComplete || handshakeCompleted,
                 hasUser: !!this.sessionMirror.user,
                 hasToken: !!this.sessionMirror.token,
                 authenticated: this.sessionMirror.authenticated,
@@ -2071,7 +2261,7 @@ export const ParentConnectionManager = {
     getStatus() {
         return {
             isConnected: this.isConnected,
-            handshakeComplete: this.handshakeComplete,
+            handshakeComplete: this.handshakeComplete || handshakeCompleted,
             connectionState: this.connectionState,
             sessionSyncState: this.sessionSyncState,
             parentAvailable: this.parentAvailable,
@@ -2103,25 +2293,31 @@ export const ParentConnectionManager = {
     },
     
     isReady() {
-        return this.handshakeComplete || this.sessionMirror.fromCache;
+        return this.handshakeComplete || handshakeCompleted || this.sessionMirror.fromCache;
     },
     
     requestSession() {
-        if (__SESSION_REQUEST_PENDING__) {
+        if (__SESSION_REQUEST_PENDING__ || handshakeCompleted || this.handshakeComplete) {
             return;
         }
         
         __SESSION_REQUEST_PENDING__ = true;
         
-        TransportAgent.send('REQUEST_SESSION', {
+        const requestId = 'session_' + Date.now();
+        
+        TransportAgent.send('VERIFY_SESSION', {
             source: 'groups-iframe',
             frameId: SECURITY_CONFIG.FRAME_ID,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            requestId: requestId,
+            messageId: requestId
         }, { requiresAck: true, timeout: 5000 }).catch(() => {
             __SESSION_REQUEST_PENDING__ = false;
         });
     }
 };
+
+// Global handshake tracker
 
 // =============================================
 // SESSION MIRROR LAYER
@@ -2153,7 +2349,7 @@ export const SessionMirror = {
         
         if (!this.authenticated) {
             setTimeout(() => {
-                if (!__SESSION_REQUEST_PENDING__ && !__SESSION_READY__) {
+                if (!__SESSION_REQUEST_PENDING__ && !__SESSION_READY__ && !handshakeCompleted) {
                     ParentConnectionManager.requestSession();
                 }
             }, 100);
@@ -2248,11 +2444,15 @@ const SessionClient = {
         this.syncRequested = true;
         __SESSION_REQUEST_PENDING__ = true;
         
-        TransportAgent.send('REQUEST_SESSION', {
+        const requestId = 'sync_' + Date.now();
+        
+        TransportAgent.send('VERIFY_SESSION', {
             source: 'groups-iframe',
             frameId: SECURITY_CONFIG.FRAME_ID,
             timestamp: Date.now(),
-            sync: true
+            sync: true,
+            requestId: requestId,
+            messageId: requestId
         }, { requiresAck: true }).catch(() => {
             __SESSION_REQUEST_PENDING__ = false;
         });
@@ -2318,7 +2518,7 @@ const SessionClient = {
 function queueGroupAction(action) {
     groupActionQueue.push(action);
     
-    if (!isProcessingQueue && __SESSION_READY__ && __HANDSHAKE_COMPLETE__) {
+    if (!isProcessingQueue && __SESSION_READY__ && (__HANDSHAKE_COMPLETE__ || handshakeCompleted)) {
         processGroupActionQueue();
     }
 }
@@ -2327,7 +2527,7 @@ function processGroupActionQueue() {
     if (isProcessingQueue) return;
     if (groupActionQueue.length === 0) return;
     
-    if (!__SESSION_READY__ || !__HANDSHAKE_COMPLETE__) {
+    if (!__SESSION_READY__ || (!__HANDSHAKE_COMPLETE__ && !handshakeCompleted)) {
         return;
     }
     
@@ -2352,9 +2552,23 @@ function processGroupActionQueue() {
                         case 'leaveGroup':
                             leaveGroupOnline(action.groupId).catch(() => {});
                             break;
+                        case 'deleteGroup':
+                            deleteGroupOnline(action.groupId).catch(() => {});
+                            break;
+                        case 'addMember':
+                            addMemberOnline(action.groupId, action.userId, action.role).catch(() => {});
+                            break;
+                        case 'removeMember':
+                            removeMemberOnline(action.groupId, action.userId).catch(() => {});
+                            break;
+                        case 'changeMemberRole':
+                            changeMemberRoleOnline(action.groupId, action.userId, action.role).catch(() => {});
+                            break;
                         case 'sendMessage':
                             if (typeof action.fn === 'function') {
                                 action.fn();
+                            } else if (action.groupId && action.message) {
+                                sendGroupMessageOnline(action.groupId, action.message).catch(() => {});
                             }
                             break;
                         case 'syncGroups':
@@ -2393,6 +2607,12 @@ export let pendingGroupActions = [];
 export let offlineOverlayDismissed = false;
 export let friends = [];
 export let selectedFriends = [];
+
+// Group messages and unread counts
+export let groupMessages = {};
+export let groupUnreadCounts = {};
+export let groupTypingUsers = {};
+export let currentChatGroup = null;
 
 // =============================================
 // UNIQUE FEATURES VARIABLES
@@ -2536,7 +2756,6 @@ export const groupRoles = Object.freeze({
 // CHAT & CALL VARIABLES
 // =============================================
 
-export let currentChatGroup = null;
 export let chatMessagesList = [];
 export let isTyping = false;
 export let callInProgress = false;
@@ -2586,7 +2805,8 @@ export const LOCAL_STORAGE_KEYS = Object.freeze({
     GROUP_TRANSPARENCY: 'knecta_group_transparency_',
     USER_PARTICIPATION_MODES: 'knecta_user_participation_modes',
     USER_TOKEN: 'USER_TOKEN',
-    API_BASE: 'knecta_api_base'
+    API_BASE: 'knecta_api_base',
+    GROUP_UNREAD: 'knecta_group_unread_'
 });
 
 // =============================================
@@ -2618,7 +2838,7 @@ function hasValidSession() {
 }
 
 function isGroupOperationReady() {
-    return __HANDSHAKE_COMPLETE__ && __SESSION_READY__;
+    return (__HANDSHAKE_COMPLETE__ || handshakeCompleted) && __SESSION_READY__;
 }
 
 function guardGroupOperation(operation, fallback = null) {
@@ -3426,6 +3646,8 @@ export async function initializeGroupsCore() {
         
         const duration = Date.now() - startTime;
         
+        STATUS_MACHINE.log('core', 'SUCCESS', `Initialized in ${duration}ms`);
+        
         return {
             success: true,
             authenticated: session.success,
@@ -3438,6 +3660,8 @@ export async function initializeGroupsCore() {
         if (typeof isPageInitialized !== 'undefined') {
             isPageInitialized = true;
         }
+        
+        STATUS_MACHINE.log('core', 'WARNING', 'Fallback mode active');
         
         return {
             success: false,
@@ -3879,7 +4103,7 @@ export function startHandshakeProtocol() {
 export function scheduleHandshakeRetry() {}
 
 export function sendMessageToParent(type, payload, options) {
-    if (!__PARENT_READY__ || !__HANDSHAKE_COMPLETE__) {
+    if (!__PARENT_READY__ && !handshakeCompleted && !__HANDSHAKE_COMPLETE__) {
         return Promise.resolve({ 
             success: false, 
             queued: true, 
@@ -4032,6 +4256,134 @@ export function stopBackgroundProcesses() {
 }
 
 // =============================================
+// GROUP MESSAGE FUNCTIONS
+// =============================================
+
+export function getGroupMessages(groupId) {
+    return groupMessages[groupId] || [];
+}
+
+export function saveGroupMessages(groupId, messages) {
+    groupMessages[groupId] = messages;
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId, JSON.stringify(messages));
+    } catch (e) {}
+}
+
+export function addGroupMessage(groupId, message) {
+    if (!groupId || !message) return;
+    
+    const messages = groupMessages[groupId] || [];
+    messages.push(message);
+    
+    if (messages.length > 100) {
+        messages.splice(0, messages.length - 100);
+    }
+    
+    groupMessages[groupId] = messages;
+    
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId, JSON.stringify(messages));
+    } catch (e) {}
+    
+    // Update unread count
+    incrementGroupUnreadCount(groupId);
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_MESSAGE, {
+        groupId,
+        message,
+        timestamp: Date.now()
+    }).catch(() => {});
+}
+
+export function getGroupUnreadCount(groupId) {
+    return groupUnreadCounts[groupId] || 0;
+}
+
+export function incrementGroupUnreadCount(groupId) {
+    if (!groupId) return;
+    
+    // Don't increment if this is the currently open chat
+    if (currentChatGroup && currentChatGroup.id === groupId) {
+        return;
+    }
+    
+    const count = (groupUnreadCounts[groupId] || 0) + 1;
+    groupUnreadCounts[groupId] = count;
+    
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId, count.toString());
+    } catch (e) {}
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.UNREAD_COUNT_UPDATED, {
+        groupId,
+        count,
+        timestamp: Date.now()
+    }).catch(() => {});
+}
+
+export function resetGroupUnreadCount(groupId) {
+    if (!groupId) return;
+    
+    groupUnreadCounts[groupId] = 0;
+    
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId, '0');
+    } catch (e) {}
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.UNREAD_COUNT_UPDATED, {
+        groupId,
+        count: 0,
+        timestamp: Date.now()
+    }).catch(() => {});
+}
+
+export function markMessageAsSeen(groupId, messageId, userId) {
+    if (!groupId || !messageId || !userId) return;
+    
+    const messages = groupMessages[groupId];
+    if (!messages) return;
+    
+    const message = messages.find(m => m.id === messageId);
+    if (!message) return;
+    
+    if (!message.seenBy) {
+        message.seenBy = [];
+    }
+    
+    if (!message.seenBy.includes(userId)) {
+        message.seenBy.push(userId);
+    }
+    
+    saveGroupMessages(groupId, messages);
+}
+
+export function handleGroupTyping(groupId, userId, isTyping) {
+    if (!groupId || !userId) return;
+    
+    if (!groupTypingUsers[groupId]) {
+        groupTypingUsers[groupId] = {};
+    }
+    
+    if (isTyping) {
+        groupTypingUsers[groupId][userId] = Date.now();
+    } else {
+        delete groupTypingUsers[groupId][userId];
+    }
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_TYPING, {
+        groupId,
+        userId,
+        isTyping,
+        timestamp: Date.now()
+    }).catch(() => {});
+}
+
+// =============================================
 // MAIN INITIALIZATION
 // =============================================
 
@@ -4042,10 +4394,11 @@ async function safeGroupPageInit() {
     TransportAgent.send('CHILD_READY', {
         childId: SECURITY_CONFIG.FRAME_ID,
         version: MODULE_VERSION,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        module: 'groups'
     }, { requiresAck: false }).catch(() => {});
 
-    while (!ParentConnectionManager.isReady() && tries < MAX_TRIES) {
+    while (!ParentConnectionManager.isReady() && tries < MAX_TRIES && !handshakeCompleted) {
         await new Promise(r => setTimeout(r, 500));
         tries++;
     }
@@ -4081,7 +4434,7 @@ async function originalGroupPageInit() {
             startBackgroundProcesses();
             __SESSION_READY__ = true;
         } else {
-            if (!__SESSION_REQUEST_PENDING__) {
+            if (!__SESSION_REQUEST_PENDING__ && !handshakeCompleted) {
                 ParentConnectionManager.requestSession();
             }
             
@@ -4233,6 +4586,27 @@ export function loadCachedDataInstantly() {
             currentUser = JSON.parse(cachedUser);
             userData = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.USER_PROFILE) || '{}');
         }
+        
+        // Load group messages
+        const allGroupIds = new Set();
+        groups.forEach(g => allGroupIds.add(g.id));
+        myGroups.forEach(g => allGroupIds.add(g.id));
+        joinedGroups.forEach(g => allGroupIds.add(g.id));
+        adminGroups.forEach(g => allGroupIds.add(g.id));
+        
+        allGroupIds.forEach(groupId => {
+            try {
+                const messagesData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId);
+                if (messagesData) {
+                    groupMessages[groupId] = JSON.parse(messagesData);
+                }
+                
+                const unreadData = localStorage.getItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId);
+                if (unreadData) {
+                    groupUnreadCounts[groupId] = parseInt(unreadData, 10);
+                }
+            } catch (e) {}
+        });
         
         loadUniqueFeaturesData();
         
@@ -4427,6 +4801,9 @@ export function addGroupItem(groupData, container, type) {
         const ruleInfo = postingRules[postingRule];
         const pulse = calculateGroupPulse(safeGroupData);
         
+        // Get unread count
+        const unreadCount = groupUnreadCounts[safeGroupData.id] || 0;
+        
         groupItem.innerHTML = `
             <div class="group-avatar" ${safeGroupData.photoURL ? `style="background-image: url('${safeGroupData.photoURL}'); background: ${themeInfo.gradient};"` : `style="background: ${themeInfo.gradient};"`}>
                 ${safeGroupData.photoURL ? '' : `<span>${initials}</span>`}
@@ -4435,6 +4812,7 @@ export function addGroupItem(groupData, container, type) {
                     <i class="${typeInfo ? typeInfo.icon : 'fas fa-lock'}"></i>
                 </div>
                 ${purposeInfo ? `<div class="group-purpose-badge" style="position: absolute; bottom: -5px; right: -5px; background: ${purposeInfo.color}; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px;">${purposeInfo.icon}</div>` : ''}
+                ${unreadCount > 0 ? `<span class="group-unread-badge">${unreadCount}</span>` : ''}
             </div>
             <div class="group-info">
                 <div class="group-name">
@@ -4520,10 +4898,10 @@ export function handleGroupAction(action, groupData, type, button) {
                 leaveGroupConfirm(groupData);
                 break;
             case 'accept-invite':
-                acceptGroupInviteLocal(groupData);
+                acceptGroupInvite(groupData);
                 break;
             case 'decline-invite':
-                declineGroupInviteLocal(groupData);
+                declineGroupInvite(groupData);
                 break;
             default:
                 break;
@@ -4592,6 +4970,430 @@ export async function backgroundSyncWithServer() {
 }
 
 // =============================================
+// GROUP MEMBER MANAGEMENT FUNCTIONS
+// =============================================
+
+export function getUserRoleInGroup(groupData, userId) {
+    if (!groupData || !userId) return null;
+    
+    if (groupData.createdBy === userId) return 'creator';
+    
+    const member = groupData.members?.find(m => m.userId === userId);
+    return member ? member.role : null;
+}
+
+export function isUserAdmin(groupData, userId) {
+    if (!groupData || !userId) return false;
+    
+    return groupData.createdBy === userId || 
+           groupData.members?.some(m => m.userId === userId && m.role === 'admin');
+}
+
+export function canUserManageGroup(groupData, userId) {
+    if (!groupData || !userId) return false;
+    
+    return groupData.createdBy === userId || 
+           groupData.members?.some(m => m.userId === userId && m.role === 'admin');
+}
+
+export function canUserAddMembers(groupData, userId) {
+    if (!groupData || !userId) return false;
+    
+    return groupData.createdBy === userId || 
+           groupData.members?.some(m => m.userId === userId && (m.role === 'admin' || m.role === 'moderator'));
+}
+
+export function canUserRemoveMembers(groupData, userId, targetUserId) {
+    if (!groupData || !userId || !targetUserId) return false;
+    
+    // Cannot remove creator
+    if (groupData.createdBy === targetUserId) return false;
+    
+    // Creator can remove anyone
+    if (groupData.createdBy === userId) return true;
+    
+    // Admins can remove members and moderators
+    const userRole = getUserRoleInGroup(groupData, userId);
+    const targetRole = getUserRoleInGroup(groupData, targetUserId);
+    
+    if (userRole === 'admin') {
+        return targetRole !== 'admin' && targetRole !== 'creator';
+    }
+    
+    if (userRole === 'moderator') {
+        return targetRole === 'member';
+    }
+    
+    return false;
+}
+
+export function canUserChangeRole(groupData, userId, targetUserId) {
+    if (!groupData || !userId || !targetUserId) return false;
+    
+    // Cannot change creator's role
+    if (groupData.createdBy === targetUserId) return false;
+    
+    // Only creator can change admin roles
+    if (groupData.createdBy === userId) return true;
+    
+    return false;
+}
+
+export function canUserDeleteGroup(groupData, userId) {
+    if (!groupData || !userId) return false;
+    
+    return groupData.createdBy === userId;
+}
+
+export function addMemberToGroup(groupId, userId, role = 'member') {
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId) ||
+                  joinedGroups.find(g => g.id === groupId);
+    
+    if (!group) return { success: false, reason: 'group_not_found' };
+    
+    if (!canUserAddMembers(group, currentUser?.uid || currentUser?.id)) {
+        return { success: false, reason: 'permission_denied' };
+    }
+    
+    if (!group.members) {
+        group.members = [];
+    }
+    
+    if (group.members.some(m => m.userId === userId)) {
+        return { success: false, reason: 'already_member' };
+    }
+    
+    const newMember = {
+        userId,
+        role,
+        joinedAt: Date.now()
+    };
+    
+    group.members.push(newMember);
+    group.memberCount = group.members.length;
+    
+    // Update all group arrays
+    updateGroupInAllLists(group);
+    
+    // Save to storage
+    saveGroupsToLocalStorage();
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_ADDED, {
+        groupId: group.id,
+        member: newMember,
+        timestamp: Date.now()
+    }).catch(() => {});
+    
+    return { success: true, member: newMember };
+}
+
+export function removeMemberFromGroup(groupId, userId) {
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId) ||
+                  joinedGroups.find(g => g.id === groupId);
+    
+    if (!group) return { success: false, reason: 'group_not_found' };
+    
+    if (!canUserRemoveMembers(group, currentUser?.uid || currentUser?.id, userId)) {
+        return { success: false, reason: 'permission_denied' };
+    }
+    
+    if (!group.members) {
+        return { success: false, reason: 'no_members' };
+    }
+    
+    const memberIndex = group.members.findIndex(m => m.userId === userId);
+    if (memberIndex === -1) {
+        return { success: false, reason: 'not_member' };
+    }
+    
+    const removedMember = group.members[memberIndex];
+    group.members.splice(memberIndex, 1);
+    group.memberCount = group.members.length;
+    
+    // Update all group arrays
+    updateGroupInAllLists(group);
+    
+    // Save to storage
+    saveGroupsToLocalStorage();
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_REMOVED, {
+        groupId: group.id,
+        userId,
+        removedMember,
+        timestamp: Date.now()
+    }).catch(() => {});
+    
+    return { success: true };
+}
+
+export function changeMemberRole(groupId, userId, newRole) {
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId) ||
+                  joinedGroups.find(g => g.id === groupId);
+    
+    if (!group) return { success: false, reason: 'group_not_found' };
+    
+    if (!canUserChangeRole(group, currentUser?.uid || currentUser?.id, userId)) {
+        return { success: false, reason: 'permission_denied' };
+    }
+    
+    if (!group.members) {
+        return { success: false, reason: 'no_members' };
+    }
+    
+    const member = group.members.find(m => m.userId === userId);
+    if (!member) {
+        return { success: false, reason: 'not_member' };
+    }
+    
+    const oldRole = member.role;
+    member.role = newRole;
+    
+    // Update all group arrays
+    updateGroupInAllLists(group);
+    
+    // Save to storage
+    saveGroupsToLocalStorage();
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_ROLE_CHANGED, {
+        groupId: group.id,
+        userId,
+        oldRole,
+        newRole,
+        timestamp: Date.now()
+    }).catch(() => {});
+    
+    return { success: true };
+}
+
+export function deleteGroup(groupId) {
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId);
+    
+    if (!group) return { success: false, reason: 'group_not_found' };
+    
+    if (!canUserDeleteGroup(group, currentUser?.uid || currentUser?.id)) {
+        return { success: false, reason: 'permission_denied' };
+    }
+    
+    // Remove from all lists
+    groups = groups.filter(g => g.id !== groupId);
+    myGroups = myGroups.filter(g => g.id !== groupId);
+    adminGroups = adminGroups.filter(g => g.id !== groupId);
+    joinedGroups = joinedGroups.filter(g => g.id !== groupId);
+    groupInvites = groupInvites.filter(invite => invite.groupId !== groupId && invite.id !== groupId);
+    
+    // Remove messages
+    delete groupMessages[groupId];
+    delete groupUnreadCounts[groupId];
+    
+    // Remove from storage
+    try {
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId);
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId);
+    } catch (e) {}
+    
+    // Save to storage
+    saveGroupsToLocalStorage();
+    
+    // If this is the currently open chat, close it
+    if (currentChatGroup && currentChatGroup.id === groupId) {
+        if (typeof closeGroupChatMobile === 'function') {
+            closeGroupChatMobile();
+        }
+        currentChatGroup = null;
+    }
+    
+    // Notify parent
+    sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_DELETED, {
+        groupId,
+        timestamp: Date.now()
+    }).catch(() => {});
+    
+    return { success: true };
+}
+
+export function updateGroupInAllLists(updatedGroup) {
+    // Update in groups
+    const groupIndex = groups.findIndex(g => g.id === updatedGroup.id);
+    if (groupIndex !== -1) {
+        groups[groupIndex] = updatedGroup;
+    }
+    
+    // Update in myGroups
+    const myIndex = myGroups.findIndex(g => g.id === updatedGroup.id);
+    if (myIndex !== -1) {
+        myGroups[myIndex] = updatedGroup;
+    }
+    
+    // Update in adminGroups
+    const adminIndex = adminGroups.findIndex(g => g.id === updatedGroup.id);
+    if (adminIndex !== -1) {
+        adminGroups[adminIndex] = updatedGroup;
+    }
+    
+    // Update in joinedGroups
+    const joinedIndex = joinedGroups.findIndex(g => g.id === updatedGroup.id);
+    if (joinedIndex !== -1) {
+        joinedGroups[joinedIndex] = updatedGroup;
+    }
+    
+    // Update currentChatGroup if it's this group
+    if (currentChatGroup && currentChatGroup.id === updatedGroup.id) {
+        currentChatGroup = updatedGroup;
+    }
+    
+    // Update selectedGroup if it's this group
+    if (selectedGroup && selectedGroup.id === updatedGroup.id) {
+        selectedGroup = updatedGroup;
+    }
+}
+
+// =============================================
+// ONLINE OPERATIONS (API)
+// =============================================
+
+export const addMemberOnline = async function(groupId, userId, role = 'member') {
+    if (!isGroupOperationReady()) {
+        queueGroupAction({ type: 'addMember', groupId, userId, role });
+        return;
+    }
+    
+    try {
+        const response = await secureApiCall(`/groups/${groupId}/members`, {
+            method: 'POST',
+            body: { userId, role }
+        });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.message || 'Failed to add member');
+        }
+        
+        // Update local state
+        const group = groups.find(g => g.id === groupId) || 
+                      myGroups.find(g => g.id === groupId) || 
+                      adminGroups.find(g => g.id === groupId);
+        
+        if (group) {
+            if (!group.members) group.members = [];
+            
+            if (!group.members.some(m => m.userId === userId)) {
+                group.members.push({
+                    userId,
+                    role,
+                    joinedAt: Date.now()
+                });
+                group.memberCount = group.members.length;
+                updateGroupInAllLists(group);
+                saveGroupsToLocalStorage();
+            }
+        }
+        
+    } catch (error) {
+        console.error('Failed to add member online:', error);
+    }
+};
+
+export const removeMemberOnline = async function(groupId, userId) {
+    if (!isGroupOperationReady()) {
+        queueGroupAction({ type: 'removeMember', groupId, userId });
+        return;
+    }
+    
+    try {
+        const response = await secureApiCall(`/groups/${groupId}/members/${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.message || 'Failed to remove member');
+        }
+        
+        // Update local state
+        const group = groups.find(g => g.id === groupId) || 
+                      myGroups.find(g => g.id === groupId) || 
+                      adminGroups.find(g => g.id === groupId);
+        
+        if (group && group.members) {
+            group.members = group.members.filter(m => m.userId !== userId);
+            group.memberCount = group.members.length;
+            updateGroupInAllLists(group);
+            saveGroupsToLocalStorage();
+        }
+        
+    } catch (error) {
+        console.error('Failed to remove member online:', error);
+    }
+};
+
+export const changeMemberRoleOnline = async function(groupId, userId, role) {
+    if (!isGroupOperationReady()) {
+        queueGroupAction({ type: 'changeMemberRole', groupId, userId, role });
+        return;
+    }
+    
+    try {
+        const response = await secureApiCall(`/groups/${groupId}/members/${userId}/role`, {
+            method: 'PUT',
+            body: { role }
+        });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.message || 'Failed to change role');
+        }
+        
+        // Update local state
+        const group = groups.find(g => g.id === groupId) || 
+                      myGroups.find(g => g.id === groupId) || 
+                      adminGroups.find(g => g.id === groupId);
+        
+        if (group && group.members) {
+            const member = group.members.find(m => m.userId === userId);
+            if (member) {
+                member.role = role;
+                updateGroupInAllLists(group);
+                saveGroupsToLocalStorage();
+            }
+        }
+        
+    } catch (error) {
+        console.error('Failed to change role online:', error);
+    }
+};
+
+export const deleteGroupOnline = async function(groupId) {
+    if (!isGroupOperationReady()) {
+        queueGroupAction({ type: 'deleteGroup', groupId });
+        return;
+    }
+    
+    try {
+        const response = await secureApiCall(`/groups/${groupId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.message || 'Failed to delete group');
+        }
+        
+        // Update local state
+        deleteGroup(groupId);
+        
+    } catch (error) {
+        console.error('Failed to delete group online:', error);
+    }
+};
+
+// =============================================
 // CHAT AND GROUP MANAGEMENT FUNCTIONS
 // =============================================
 
@@ -4609,6 +5411,9 @@ export const openGroupChat = async function(groupData) {
         }
         
         currentChatGroup = groupData;
+        
+        // Reset unread count for this group
+        resetGroupUnreadCount(groupData.id);
         
         const chatTitle = safeGetElement('#chatTitle');
         const chatMemberCount = safeGetElement('#chatMemberCount');
@@ -5380,6 +6185,24 @@ export function saveMessageToCache(groupId, message) {
     } catch (error) {}
 }
 
+export const sendGroupMessageOnline = async function(groupId, messageData) {
+    try {
+        const response = await secureApiCall(`/groups/${groupId}/messages`, {
+            method: 'POST',
+            body: messageData
+        });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.message || 'Failed to send message');
+        }
+        
+        return response.data;
+    } catch (error) {
+        console.error('Failed to send message online:', error);
+        throw error;
+    }
+};
+
 export const sendGroupMessage = async function() {
     if (!isGroupOperationReady()) {
         queueGroupAction({ type: 'sendMessage', fn: sendGroupMessage });
@@ -5432,10 +6255,14 @@ export const sendGroupMessage = async function() {
             });
             
             if (response && response.success) {
-                saveMessageToCache(currentChatGroup.id, {
+                const finalMessage = {
                     ...tempMessage,
                     id: response.data?.id || tempMessage.id
-                });
+                };
+                saveMessageToCache(currentChatGroup.id, finalMessage);
+                
+                // Add to group messages
+                addGroupMessage(currentChatGroup.id, finalMessage);
                 
                 if (isAnonymousMode) {
                     toggleAnonymousMode();
@@ -5443,7 +6270,14 @@ export const sendGroupMessage = async function() {
             } else {
                 throw new Error(response?.message || 'Failed to send message');
             }
-        } catch (error) {}
+        } catch (error) {
+            // Add to offline queue
+            queueGroupAction({
+                type: 'sendMessage',
+                groupId: currentChatGroup.id,
+                message: message
+            });
+        }
         
         stopTypingIndicator();
     } catch (error) {}
@@ -5516,10 +6350,15 @@ export function setupTypingListener(groupId) {
         const chatInput = safeGetElement('#chatInput');
         if (!chatInput) return;
         
-        chatInput.addEventListener('input', () => {
+        // Remove existing listeners to avoid duplicates
+        const newChatInput = chatInput.cloneNode(true);
+        chatInput.parentNode.replaceChild(newChatInput, chatInput);
+        
+        newChatInput.addEventListener('input', () => {
             try {
                 if (!isTyping) {
                     isTyping = true;
+                    handleGroupTyping(groupId, currentUser?.uid || currentUser?.id, true);
                     secureApiCall(`/groups/${groupId}/typing`, { 
                         method: 'POST',
                         body: { typing: true },
@@ -5531,6 +6370,7 @@ export function setupTypingListener(groupId) {
                 typingTimeout = setTimeout(() => {
                     try {
                         isTyping = false;
+                        handleGroupTyping(groupId, currentUser?.uid || currentUser?.id, false);
                         secureApiCall(`/groups/${groupId}/typing`, { 
                             method: 'POST',
                             body: { typing: false },
@@ -5742,24 +6582,31 @@ export async function handleMemberAction(action, memberId, groupData) {
     try {
         if (!groupData) return;
         
+        let success = false;
+        
         switch(action) {
             case 'promote':
-                await secureApiCall(`/groups/${groupData.id}/members/${memberId}/promote`, { method: 'POST' });
+                success = changeMemberRole(groupData.id, memberId, 'admin').success;
+                await secureApiCall(`/groups/${groupData.id}/members/${memberId}/promote`, { method: 'POST' }).catch(() => {});
                 logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
                 break;
             case 'demote':
-                await secureApiCall(`/groups/${groupData.id}/members/${memberId}/demote`, { method: 'POST' });
+                success = changeMemberRole(groupData.id, memberId, 'member').success;
+                await secureApiCall(`/groups/${groupData.id}/members/${memberId}/demote`, { method: 'POST' }).catch(() => {});
                 logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
                 break;
             case 'remove':
                 if (confirm('Are you sure you want to remove this member from the group?')) {
-                    await secureApiCall(`/groups/${groupData.id}/members/${memberId}`, { method: 'DELETE' });
+                    success = removeMemberFromGroup(groupData.id, memberId).success;
+                    await secureApiCall(`/groups/${groupData.id}/members/${memberId}`, { method: 'DELETE' }).catch(() => {});
                     logTransparencyAction(groupData.id, 'Removed member from group', memberId);
                 }
                 break;
         }
         
-        loadGroupMembersForManagement(groupData);
+        if (success) {
+            loadGroupMembersForManagement(groupData);
+        }
     } catch (error) {}
 }
 
@@ -5942,6 +6789,9 @@ export const saveGroupSettings = async function(groupData) {
         if (response && response.success) {
             Object.assign(groupData, settings);
             
+            // Update in all lists
+            updateGroupInAllLists(groupData);
+            
             logTransparencyAction(groupData.id, 'Updated group settings');
             
             if (currentChatGroup && currentChatGroup.id === groupData.id) {
@@ -5951,6 +6801,9 @@ export const saveGroupSettings = async function(groupData) {
             
             const adminManagementModal = safeGetElement('#adminManagementModal');
             if (adminManagementModal) adminManagementModal.classList.remove('active');
+            
+            // Save to storage
+            saveGroupsToLocalStorage();
         } else {
             throw new Error(response?.message || 'Failed to save settings');
         }
@@ -6159,6 +7012,18 @@ export const createGroupOnline = async function(groupData) {
         
         const newGroup = response.data;
         
+        // Add creator info
+        newGroup.createdBy = currentUser?.uid || currentUser?.id;
+        newGroup.createdAt = Date.now();
+        newGroup.members = members.map(userId => ({
+            userId,
+            role: userId === (currentUser?.uid || currentUser?.id) ? 'admin' : 'member',
+            joinedAt: Date.now()
+        }));
+        newGroup.memberCount = members.length;
+        newGroup.isAdmin = true;
+        newGroup.isCreator = true;
+        
         groups.push(newGroup);
         myGroups.push(newGroup);
         adminGroups.push(newGroup);
@@ -6183,6 +7048,12 @@ export const createGroupOnline = async function(groupData) {
         
         selectedFriends = [];
         showGroupDetails(newGroup, 'my_group');
+        
+        // Notify parent
+        sendMessageToParent(PARENT_MESSAGE_TYPES.GROUP_CREATED, {
+            group: newGroup,
+            timestamp: Date.now()
+        }).catch(() => {});
         
     } catch (error) {}
 };
@@ -6225,6 +7096,17 @@ export const joinGroupOnline = async function(groupId) {
         const groupInviteModal = safeGetElement('#groupInviteModal');
         if (groupInviteModal) groupInviteModal.classList.remove('active');
         
+        // Notify parent
+        sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_ADDED, {
+            groupId,
+            member: {
+                userId: currentUser?.uid || currentUser?.id,
+                role: 'member',
+                joinedAt: Date.now()
+            },
+            timestamp: Date.now()
+        }).catch(() => {});
+        
     } catch (error) {}
 };
 
@@ -6261,12 +7143,27 @@ export const leaveGroupOnline = async function(groupId) {
             selectedGroup = null;
         }
         
+        // If this is the currently open chat, close it
+        if (currentChatGroup && currentChatGroup.id === groupId) {
+            if (typeof closeGroupChatMobile === 'function') {
+                closeGroupChatMobile();
+            }
+            currentChatGroup = null;
+        }
+        
+        // Notify parent
+        sendMessageToParent(PARENT_MESSAGE_TYPES.MEMBER_REMOVED, {
+            groupId,
+            userId: currentUser?.uid || currentUser?.id,
+            timestamp: Date.now()
+        }).catch(() => {});
+        
     } catch (error) {}
 };
 
-export async function acceptGroupInviteLocal(inviteData) {
+export async function acceptGroupInvite(inviteData) {
     if (!isGroupOperationReady()) {
-        queueGroupAction(() => acceptGroupInviteLocal(inviteData));
+        queueGroupAction(() => acceptGroupInvite(inviteData));
         return;
     }
     
@@ -6290,9 +7187,9 @@ export async function acceptGroupInviteLocal(inviteData) {
     } catch (error) {}
 }
 
-export async function declineGroupInviteLocal(inviteData) {
+export async function declineGroupInvite(inviteData) {
     if (!isGroupOperationReady()) {
-        queueGroupAction(() => declineGroupInviteLocal(inviteData));
+        queueGroupAction(() => declineGroupInvite(inviteData));
         return;
     }
     
@@ -6934,6 +7831,176 @@ export function updateCreateGroupPostingRulesUI() {
 }
 
 // =============================================
+// PARENT MESSAGE HANDLERS
+// =============================================
+
+export function handleGroupCreatedFromParent(groupData) {
+    if (!groupData) return;
+    
+    if (!groups.some(g => g.id === groupData.id)) {
+        groups.push(groupData);
+        if (groupData.createdBy === (currentUser?.uid || currentUser?.id)) {
+            myGroups.push(groupData);
+            adminGroups.push(groupData);
+        } else {
+            joinedGroups.push(groupData);
+        }
+        
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
+    }
+}
+
+export function handleGroupUpdatedFromParent(groupData) {
+    if (!groupData) return;
+    
+    updateGroupInAllLists(groupData);
+    saveGroupsToLocalStorage();
+    updateGroupCounts();
+    updateCurrentSection();
+}
+
+export function handleGroupDeletedFromParent(groupId) {
+    if (!groupId) return;
+    
+    groups = groups.filter(g => g.id !== groupId);
+    myGroups = myGroups.filter(g => g.id !== groupId);
+    adminGroups = adminGroups.filter(g => g.id !== groupId);
+    joinedGroups = joinedGroups.filter(g => g.id !== groupId);
+    groupInvites = groupInvites.filter(invite => invite.groupId !== groupId && invite.id !== groupId);
+    
+    delete groupMessages[groupId];
+    delete groupUnreadCounts[groupId];
+    
+    try {
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_MESSAGES + groupId);
+        localStorage.removeItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId);
+    } catch (e) {}
+    
+    if (currentChatGroup && currentChatGroup.id === groupId) {
+        if (typeof closeGroupChatMobile === 'function') {
+            closeGroupChatMobile();
+        }
+        currentChatGroup = null;
+    }
+    
+    saveGroupsToLocalStorage();
+    updateGroupCounts();
+    updateCurrentSection();
+}
+
+export function handleMemberAddedFromParent(groupId, member) {
+    if (!groupId || !member) return;
+    
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId) ||
+                  joinedGroups.find(g => g.id === groupId);
+    
+    if (group) {
+        if (!group.members) group.members = [];
+        
+        if (!group.members.some(m => m.userId === member.userId)) {
+            group.members.push(member);
+            group.memberCount = group.members.length;
+            updateGroupInAllLists(group);
+            saveGroupsToLocalStorage();
+            updateGroupCounts();
+        }
+    }
+}
+
+export function handleMemberRemovedFromParent(groupId, userId) {
+    if (!groupId || !userId) return;
+    
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId) ||
+                  joinedGroups.find(g => g.id === groupId);
+    
+    if (group && group.members) {
+        group.members = group.members.filter(m => m.userId !== userId);
+        group.memberCount = group.members.length;
+        updateGroupInAllLists(group);
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+    }
+    
+    // If the removed user is the current user, handle leaving
+    if (userId === (currentUser?.uid || currentUser?.id)) {
+        groups = groups.filter(g => g.id !== groupId);
+        myGroups = myGroups.filter(g => g.id !== groupId);
+        adminGroups = adminGroups.filter(g => g.id !== groupId);
+        joinedGroups = joinedGroups.filter(g => g.id !== groupId);
+        
+        if (currentChatGroup && currentChatGroup.id === groupId) {
+            if (typeof closeGroupChatMobile === 'function') {
+                closeGroupChatMobile();
+            }
+            currentChatGroup = null;
+        }
+        
+        saveGroupsToLocalStorage();
+        updateGroupCounts();
+        updateCurrentSection();
+    }
+}
+
+export function handleMemberRoleChangedFromParent(groupId, userId, role) {
+    if (!groupId || !userId || !role) return;
+    
+    const group = groups.find(g => g.id === groupId) || 
+                  myGroups.find(g => g.id === groupId) || 
+                  adminGroups.find(g => g.id === groupId) ||
+                  joinedGroups.find(g => g.id === groupId);
+    
+    if (group && group.members) {
+        const member = group.members.find(m => m.userId === userId);
+        if (member) {
+            member.role = role;
+            updateGroupInAllLists(group);
+            saveGroupsToLocalStorage();
+        }
+    }
+}
+
+export function handleGroupMessageFromParent(groupId, messageData) {
+    if (!groupId || !messageData) return;
+    
+    addGroupMessage(groupId, messageData);
+    
+    if (currentChatGroup && currentChatGroup.id === groupId) {
+        addMessageToChat(messageData, true);
+        saveMessageToCache(groupId, messageData);
+    }
+}
+
+export function handleUnreadCountUpdatedFromParent(groupId, count) {
+    if (!groupId) return;
+    
+    groupUnreadCounts[groupId] = count;
+    
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.GROUP_UNREAD + groupId, count.toString());
+    } catch (e) {}
+}
+
+export function handleGroupTypingFromParent(groupId, userId, isTyping) {
+    if (!groupId || !userId) return;
+    
+    if (!groupTypingUsers[groupId]) {
+        groupTypingUsers[groupId] = {};
+    }
+    
+    if (isTyping) {
+        groupTypingUsers[groupId][userId] = Date.now();
+    } else {
+        delete groupTypingUsers[groupId][userId];
+    }
+}
+
+// =============================================
 // MISSING FUNCTION EXPORTS
 // =============================================
 
@@ -7043,14 +8110,6 @@ export function renderAdminGroups() {
             }
         });
     } catch (error) {}
-}
-
-export function acceptGroupInvite(inviteData) {
-    return acceptGroupInviteLocal(inviteData);
-}
-
-export function declineGroupInvite(inviteData) {
-    return declineGroupInviteLocal(inviteData);
 }
 
 export function downloadQRCode() {
@@ -7240,26 +8299,33 @@ if (typeof window !== 'undefined') {
         session: SessionMirror.getState(),
         connection: ParentConnectionManager.getStatus(),
         transport: TransportAgent.getStats(),
-        api: API_WRAPPER.getStats()
+        api: API_WRAPPER.getStats(),
+        handshake: HandshakeClient.getState()
     }));
 }
 
 // =============================================
-// EXPORTS FOR group-ui.js - ALL REQUIRED EXPORTS
+// COMPREHENSIVE EXPORTS - ALL REQUIRED EXPORTS
 // =============================================
 
-export { 
-    authReady, 
-    authCheckComplete, 
-    apiInitialized,
-    isPageInitialized,
-    syncIntervalId,
-    tokenQueue,
-    isProcessingTokenQueue,
-    tokenReadyPromise,
-    tokenReadyResolve,
-    tokenReadyReject,
-    backgroundSyncRunning
+
+export {
+     // Flags and state
+        isPageInitialized,
+        authReady,
+        authCheckComplete,
+        backgroundSyncRunning,
+        syncIntervalId,
+        apiInitialized,
+        tokenReadyPromise,
+        tokenReadyResolve,
+        tokenReadyReject,
+        tokenQueue,
+        isProcessingTokenQueue,
+    
+        // Parent connection
+        PARENT_MESSAGE_TYPES,
+        HandshakeClient,
 };
 
 // =============================================

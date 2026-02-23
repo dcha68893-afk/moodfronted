@@ -36,7 +36,7 @@ const SECURITY_CONFIG = {
 };
 
 // =============================================
-// DIAGNOSTICS CONTROLLER (Silent by default)
+// DIAGNOSTICS CONTROLLER (Completely disabled)
 // =============================================
 
 const DIAGNOSTICS = {
@@ -45,46 +45,20 @@ const DIAGNOSTICS = {
     maxLogs: 100,
     
     enable(flag = true) {
-        this.enabled = flag;
+        // Completely disabled - no operation
     },
     
     log(level, message, data = null) {
-        if (!this.enabled) return;
-        
-        const entry = {
-            timestamp: Date.now(),
-            level,
-            message,
-            data: data ? JSON.parse(JSON.stringify(data)) : null
-        };
-        
-        this.logs.push(entry);
-        if (this.logs.length > this.maxLogs) {
-            this.logs.shift();
-        }
+        // Completely disabled - no operation
     },
     
     getState() {
         return {
-            enabled: this.enabled,
-            logCount: this.logs.length
+            enabled: false,
+            logCount: 0
         };
     }
 };
-
-// Expose debug toggle via window (disabled by default)
-if (typeof window !== 'undefined') {
-    Object.defineProperty(window, '__UI_DEBUG__', {
-        get: () => DIAGNOSTICS.enabled,
-        set: (val) => {
-            DIAGNOSTICS.enable(val);
-            if (val) {
-                console.log('[UI DIAGNOSTICS] Enabled');
-            }
-        },
-        configurable: false
-    });
-}
 
 // =============================================
 // IMPORT VERIFICATION - ALL SYMBOLS VALIDATED
@@ -500,7 +474,6 @@ export function sanitizeHTML(str, preserveTags = false) {
         
         return container.innerHTML;
     } catch (error) {
-        logUIDiagnostic('error', 'sanitizeHTML', error);
         return '';
     }
 }
@@ -544,7 +517,6 @@ export function createUIErrorBoundary(componentId, fallbackRenderer) {
                 const errorKey = `UI:${safeComponentId}:${error.message}`;
                 if (!_UI_ERRORS.has(errorKey)) {
                     _UI_ERRORS.add(errorKey);
-                    logUIDiagnostic('error', safeComponentId, error);
                 }
                 
                 if (fallbackRenderer && typeof fallbackRenderer === 'function') {
@@ -602,69 +574,22 @@ export function createSecureErrorFallback(componentId, error) {
 }
 
 // =============================================
-// UI DIAGNOSTICS & LOGGING - SECURE
+// UI DIAGNOSTICS & LOGGING - COMPLETELY DISABLED
 // =============================================
 
 /**
- * Log UI diagnostic information (no console noise)
+ * Log UI diagnostic information (completely disabled - no console noise)
  */
 export function logUIDiagnostic(level, component, data = null) {
-    const safeComponent = validateInput(component);
-    const safeData = data ? sanitizeInput(JSON.stringify(data)) : null;
-    const key = `${level}:${safeComponent}:${safeData}`;
-    
-    if (level === 'error' && !_UI_ERRORS.has(key)) {
-        _UI_ERRORS.add(key);
-        DIAGNOSTICS.log('error', `${safeComponent}`, data);
-    } else if (level === 'warn' && !_UI_WARNINGS.has(key)) {
-        _UI_WARNINGS.add(key);
-        DIAGNOSTICS.log('warn', `${safeComponent}`, data);
-    }
-    
-    if (window.parent && ParentConnectionManager && ParentConnectionManager.isConnected && DIAGNOSTICS.enabled) {
-        try {
-            sendMessageToParent('UI_DIAGNOSTIC', {
-                level,
-                component: safeComponent,
-                timestamp: Date.now(),
-                viewport: {
-                    width: window.innerWidth,
-                    height: window.innerHeight,
-                    isMobile: _UI_STATE.isMobile,
-                    isTablet: _UI_STATE.isTablet
-                }
-            }).catch(() => {});
-        } catch (e) {}
-    }
+    // Completely disabled - no operation
+    return;
 }
 
 /**
- * Measure render performance
+ * Measure render performance (silent)
  */
 export function measureRenderTime(component, fn) {
-    const safeComponent = validateInput(component);
-    const start = performance.now();
     const result = fn();
-    const end = performance.now();
-    const duration = end - start;
-    
-    _UI_STATE.renderTimings.push({
-        component: safeComponent,
-        duration,
-        timestamp: Date.now()
-    });
-    
-    if (_UI_STATE.renderTimings.length > 100) {
-        _UI_STATE.renderTimings.shift();
-    }
-    
-    if (duration > 100 && DIAGNOSTICS.enabled) {
-        logUIDiagnostic('warn', 'renderPerformance', {
-            component: safeComponent,
-            duration
-        });
-    }
-    
     return result;
 }
 
@@ -691,7 +616,6 @@ export const safeGetElement = createUIErrorBoundary('safeGetElement', () => null
             
             return element;
         } catch (error) {
-            logUIDiagnostic('error', 'safeGetElement', error);
             return null;
         }
     }
@@ -715,7 +639,6 @@ export const safeGetElements = createUIErrorBoundary('safeGetElements', () => []
             const elements = context.querySelectorAll(safeSelector);
             return Array.from(elements);
         } catch (error) {
-            logUIDiagnostic('error', 'safeGetElements', error);
             return [];
         }
     }
@@ -730,8 +653,6 @@ export const safeGetElements = createUIErrorBoundary('safeGetElements', () => []
  */
 export function renderSkeletonUI() {
     if (_UI_STATE.skeletonRendered) return;
-    
-    const start = performance.now();
     
     const containers = [
         'allGroupsList',
@@ -769,9 +690,6 @@ export function renderSkeletonUI() {
     }
     
     _UI_STATE.skeletonRendered = true;
-    
-    const end = performance.now();
-    DIAGNOSTICS.log('info', 'skeletonRender', { duration: end - start });
 }
 
 /**
@@ -1053,8 +971,6 @@ export function hideAllLoadingOverlays() {
             el.style.display = 'none';
         }
     });
-    
-    DIAGNOSTICS.log('info', 'All loading overlays hidden');
 }
 
 // =============================================
@@ -1119,11 +1035,6 @@ export function setupResponsiveBehavior() {
  * Handle responsive change
  */
 export function handleResponsiveChange(prevState, newState) {
-    DIAGNOSTICS.log('info', 'responsiveChange', {
-        from: prevState.isMobile ? 'mobile' : prevState.isTablet ? 'tablet' : 'desktop',
-        to: newState.isMobile ? 'mobile' : newState.isTablet ? 'tablet' : 'desktop'
-    });
-    
     const sidebar = safeGetElement('#sidebar');
     const groupChatPanel = safeGetElement('#groupChatPanel');
     const groupDetailsPanel = safeGetElement('#groupDetailsPanel');
@@ -1407,7 +1318,6 @@ export function registerUIEventListener(element, type, handler, options = {}) {
         
         return true;
     } catch (error) {
-        logUIDiagnostic('error', 'registerUIEventListener', error);
         return false;
     }
 }
@@ -1419,9 +1329,7 @@ export function removeAllUIEventListeners() {
     _UI_STATE.eventListeners.forEach(({ element, type, handler, options }) => {
         try {
             element.removeEventListener(type, handler, options);
-        } catch (error) {
-            logUIDiagnostic('warn', 'removeAllUIEventListeners', error);
-        }
+        } catch (error) {}
     });
     
     _UI_STATE.eventListeners.clear();
@@ -1445,9 +1353,7 @@ export function clearAllUITimers() {
         try {
             clearTimeout(timerId);
             clearInterval(timerId);
-        } catch (error) {
-            logUIDiagnostic('warn', 'clearAllUITimers', error);
-        }
+        } catch (error) {}
     });
     
     _UI_STATE.timers.clear();
@@ -1462,8 +1368,6 @@ export function clearAllUITimers() {
  * Complete rendering pipeline (silent)
  */
 export function renderPipeline() {
-    const start = performance.now();
-    
     try {
         // Hide all loading overlays first
         hideAllLoadingOverlays();
@@ -1491,26 +1395,13 @@ export function renderPipeline() {
         });
         _UI_STATE.liveUpdateEnabled = true;
         
-        const end = performance.now();
-        DIAGNOSTICS.log('info', 'renderPipeline', {
-            duration: end - start,
-            stages: {
-                skeleton: _UI_STATE.skeletonRendered,
-                initialRender: _UI_STATE.initialRenderComplete,
-                progressive: _UI_STATE.progressiveEnhancementComplete,
-                live: _UI_STATE.liveUpdateEnabled
-            }
-        });
-        
         document.dispatchEvent(new CustomEvent('uiRenderComplete', {
             detail: {
-                timestamp: Date.now(),
-                duration: end - start
+                timestamp: Date.now()
             }
         }));
         
     } catch (error) {
-        logUIDiagnostic('error', 'renderPipeline', error);
         renderSecureFallbackUI();
     }
 }
@@ -1580,9 +1471,7 @@ export function progressiveEnhancement() {
             
             enhanceUIComponents();
             
-        } catch (error) {
-            logUIDiagnostic('error', 'progressiveEnhancement', error);
-        }
+        } catch (error) {}
     }, 500);
     
     registerTimer(timer);
@@ -1769,9 +1658,7 @@ export function registerMessageHandlers() {
             } else if (message.type === PARENT_MESSAGE_TYPES.UI_THEME) {
                 handleUITheme(message.payload);
             }
-        } catch (error) {
-            logUIDiagnostic('error', 'messageHandler', error);
-        }
+        } catch (error) {}
     });
     
     window._uiMessageHandlersRegistered = true;
@@ -1980,7 +1867,6 @@ export function createSecureGroupItemElement(groupData, type) {
         
         return groupItem;
     } catch (error) {
-        logUIDiagnostic('error', 'createSecureGroupItemElement', error);
         return createSecureErrorFallback('groupItem', error);
     }
 }
@@ -3064,8 +2950,6 @@ export function initGroupUI() {
         return;
     }
     
-    const start = performance.now();
-    
     try {
         // Hide all loading overlays first
         hideAllLoadingOverlays();
@@ -3076,13 +2960,9 @@ export function initGroupUI() {
         
         _UI_STATE.isInitialized = true;
         
-        const end = performance.now();
-        DIAGNOSTICS.log('info', 'UI init', { duration: end - start });
-        
         document.dispatchEvent(new CustomEvent('groupsUIReady', {
             detail: {
                 timestamp: Date.now(),
-                duration: end - start,
                 isMobile: _UI_STATE.isMobile,
                 isTablet: _UI_STATE.isTablet,
                 isDesktop: _UI_STATE.isDesktop
@@ -3090,7 +2970,6 @@ export function initGroupUI() {
         }));
         
     } catch (error) {
-        logUIDiagnostic('error', 'initGroupUI', error);
         renderSecureFallbackUI();
     }
 }
@@ -3172,8 +3051,6 @@ if (typeof window !== 'undefined') {
     secureExpose('createEvent', createEvent);
     secureExpose('createPoll', createPoll);
 }
-
-
 
 // =============================================
 // AUTO-INITIALIZATION

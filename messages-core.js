@@ -1,28 +1,12 @@
 // =============================================
-// MESSAGES-CORE.js - DETERMINISTIC STATE MACHINE v4.0.1
-// PARENT-SYNCHRONIZED MESSAGING ENGINE
-// WITH PROPER CONSOLE LOGGING
+// MESSAGES-CORE.js - DETERMINISTIC STATE MACHINE v5.0.0
+// STABILIZED REAL-TIME MESSAGING ENGINE
+// PRODUCTION-READY WITH SESSION GATES & ACK PROTOCOL
 // =============================================
 
 (function() {
     'use strict';
 
-    // =============================================
-    // STATE MACHINE DEFINITION
-    // =============================================
-    /**
-     * STATE MACHINE TRANSITIONS:
-     * 
-     * UNINITIALIZED → REGISTERING → REGISTERED → WAITING_FOR_SESSION → SESSION_ACTIVE → WAITING_FOR_TOKEN → TOKEN_READY → WS_INITIALIZING → WS_READY → SERVICES_INITIALIZING → READY
-     *                                              ↓                      ↓                      ↓
-     *                                         SESSION_FAILED         TOKEN_FAILED          WS_FAILED → ERROR_RECOVERABLE
-     *                                              ↓                      ↓                      ↓
-     *                                         ERROR_RECOVERABLE      ERROR_RECOVERABLE     ERROR_FATAL (after max retries)
-     * 
-     * ERROR_RECOVERABLE → REGISTERING (with backoff)
-     * ERROR_FATAL → (terminal state, requires reload)
-     */
-    
     // =============================================
     // ENVIRONMENT DETECTION
     // =============================================
@@ -38,7 +22,7 @@
                 if (parts.length >= 3) {
                     return `https://${parts.slice(-3).join('.')}`;
                 }
-                return 'https://api.onrender.com';
+                return 'https://moodchat-fy56.onrender.com';
             }
             return '';
         }
@@ -47,13 +31,13 @@
     // =============================================
     // CONSTANTS & CONFIGURATION
     // =============================================
-    const VERSION = '4.0.1';
+    const VERSION = '5.0.0';
     const APP_NAME = 'kynecta-messages';
     const SOURCE_IFRAME = 'iframe';
     const FRAME_ID = 'messagesIframe';
     
     const PROTOCOL = {
-        VERSION: 'KYN-2.0'
+        VERSION: 'KYN-3.0'
     };
 
     const MESSAGE_TYPES = {
@@ -75,10 +59,20 @@
         SESSION_VERIFIED: 'SESSION_VERIFIED',
         TOKEN_UPDATE: 'TOKEN_UPDATE',
         TOKEN_RESPONSE: 'TOKEN_RESPONSE',
+        REQUEST_TOKEN: 'REQUEST_TOKEN',
         
-        // API
-        API_REQUEST: 'API_REQUEST',
-        API_RESPONSE: 'API_RESPONSE',
+        // Friends
+        GET_FRIEND_LIST: 'GET_FRIEND_LIST',
+        FRIEND_LIST_RESPONSE: 'FRIEND_LIST_RESPONSE',
+        FRIEND_UPDATED: 'FRIEND_UPDATED',
+        FRIEND_ONLINE: 'FRIEND_ONLINE',
+        FRIEND_OFFLINE: 'FRIEND_OFFLINE',
+        
+        // Chats
+        CREATE_CHAT: 'CREATE_CHAT',
+        CHAT_CREATED: 'CHAT_CREATED',
+        GET_CHAT_HISTORY: 'GET_CHAT_HISTORY',
+        CHAT_HISTORY_RESPONSE: 'CHAT_HISTORY_RESPONSE',
         
         // Messages
         SEND_MESSAGE: 'SEND_MESSAGE',
@@ -87,6 +81,10 @@
         MESSAGE_READ: 'MESSAGE_READ',
         TYPING_START: 'TYPING_START',
         TYPING_STOP: 'TYPING_STOP',
+        
+        // API
+        API_REQUEST: 'API_REQUEST',
+        API_RESPONSE: 'API_RESPONSE',
         
         // WebSocket
         WS_CONNECT: 'WS_CONNECT',
@@ -102,7 +100,6 @@
         HEARTBEAT_ACK: 'HEARTBEAT_ACK',
         PAGE_ACTIVATED: 'PAGE_ACTIVATED',
         FORCE_RELOAD: 'FORCE_RELOAD',
-        MESSAGES_STATUS_WARNING: 'MESSAGES_STATUS_WARNING',
         LOGOUT: 'LOGOUT',
         NAVIGATE: 'NAVIGATE',
         PING: 'PING',
@@ -110,24 +107,27 @@
     };
 
     const LOCAL_STORAGE_KEYS = {
-        SESSION_CACHE: 'kynecta_session_cache',
-        USER_CACHE: 'kynecta_user_cache',
-        MESSAGES_PREFIX: 'kynecta_messages_',
-        CHATS_CACHE: 'kynecta_chats_cache',
-        CONTACTS_CACHE: 'kynecta_contacts_cache',
-        CHAT_THEMES: 'kynecta_chat_themes',
-        DRAFTS: 'kynecta_message_drafts',
-        OFFLINE_QUEUE: 'kynecta_offline_queue',
-        SCHEDULED_MESSAGES: 'kynecta_scheduled_messages',
-        USER_SETTINGS: 'kynecta_user_settings',
-        BLOCKED_USERS: 'kynecta_blocked_users',
-        ARCHIVED_CHATS: 'kynecta_archived_chats',
-        STARRED_MESSAGES: 'kynecta_starred_messages',
-        UI_STATE: 'kynecta_ui_state',
-        MESSAGE_QUEUE: 'kynecta_message_queue'
+        SESSION_CACHE: 'kynecta_session_cache_v5',
+        USER_CACHE: 'kynecta_user_cache_v5',
+        FRIENDS_CACHE: 'kynecta_friends_cache_v5',
+        CHATS_CACHE: 'kynecta_chats_cache_v5',
+        MESSAGES_PREFIX: 'kynecta_messages_v5_',
+        CONTACTS_CACHE: 'kynecta_contacts_cache_v5',
+        CHAT_THEMES: 'kynecta_chat_themes_v5',
+        DRAFTS: 'kynecta_message_drafts_v5',
+        OFFLINE_QUEUE: 'kynecta_offline_queue_v5',
+        SCHEDULED_MESSAGES: 'kynecta_scheduled_messages_v5',
+        USER_SETTINGS: 'kynecta_user_settings_v5',
+        BLOCKED_USERS: 'kynecta_blocked_users_v5',
+        ARCHIVED_CHATS: 'kynecta_archived_chats_v5',
+        STARRED_MESSAGES: 'kynecta_starred_messages_v5',
+        UI_STATE: 'kynecta_ui_state_v5',
+        MESSAGE_QUEUE: 'kynecta_message_queue_v5'
     };
 
-    // FIXED: Log levels - show INFO in all environments for initialization
+    // =============================================
+    // LOG LEVELS - SHOW INITIALIZATION IN CONSOLE
+    // =============================================
     const LOG_LEVELS = {
         DEBUG: 0,
         INFO: 1,
@@ -136,212 +136,10 @@
         NONE: 4
     };
     
-    // Show INFO logs in all environments, DEBUG only in local
-    const CURRENT_LOG_LEVEL = ENV.isLocal ? LOG_LEVELS.DEBUG : LOG_LEVELS.INFO;
-
-    // Heartbeat configuration
-    const HEARTBEAT = {
-        failures: 0,
-        maxFailures: 3,
-        lastHeartbeat: 0,
-        interval: null
-    };
+    const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO;
 
     // =============================================
-    // STATE MACHINE - SINGLE SOURCE OF TRUTH
-    // =============================================
-    const StateMachine = {
-        // States
-        UNINITIALIZED: 'UNINITIALIZED',
-        REGISTERING: 'REGISTERING',
-        REGISTERED: 'REGISTERED',
-        WAITING_FOR_SESSION: 'WAITING_FOR_SESSION',
-        SESSION_ACTIVE: 'SESSION_ACTIVE',
-        WAITING_FOR_TOKEN: 'WAITING_FOR_TOKEN',
-        TOKEN_READY: 'TOKEN_READY',
-        WS_INITIALIZING: 'WS_INITIALIZING',
-        WS_READY: 'WS_READY',
-        SERVICES_INITIALIZING: 'SERVICES_INITIALIZING',
-        READY: 'READY',
-        ERROR_RECOVERABLE: 'ERROR_RECOVERABLE',
-        ERROR_FATAL: 'ERROR_FATAL',
-        SESSION_FAILED: 'SESSION_FAILED',
-        TOKEN_FAILED: 'TOKEN_FAILED',
-        WS_FAILED: 'WS_FAILED',
-        
-        _currentState: 'UNINITIALIZED',
-        _stateLock: false,
-        _stateChangeListeners: new Set(),
-        _transitionHistory: [],
-        _maxHistory: 20,
-        _initPromise: null,
-        _initResolve: null,
-        _initReject: null,
-        
-        init() {
-            if (this._initPromise) return this._initPromise;
-            
-            this._initPromise = new Promise((resolve, reject) => {
-                this._initResolve = resolve;
-                this._initReject = reject;
-            });
-            
-            return this._initPromise;
-        },
-        
-        getState() {
-            return this._currentState;
-        },
-        
-        async transition(newState, reason = '') {
-            // Atomic state transition with lock
-            while (this._stateLock) {
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-            
-            this._stateLock = true;
-            
-            try {
-                const oldState = this._currentState;
-                
-                // Validate transition
-                if (!this._isValidTransition(oldState, newState)) {
-                    Logger.error('StateMachine', `Invalid transition: ${oldState} → ${newState}${reason ? ' - ' + reason : ''}`);
-                    this._stateLock = false;
-                    return false;
-                }
-                
-                // Log state changes
-                if (newState === this.READY) {
-                    Logger.success('StateMachine', `✅ ${oldState} → ${newState}${reason ? ' - ' + reason : ''}`);
-                } else if (newState.includes('ERROR')) {
-                    Logger.error('StateMachine', `❌ ${oldState} → ${newState}${reason ? ' - ' + reason : ''}`);
-                } else {
-                    Logger.info('StateMachine', `🔄 ${oldState} → ${newState}${reason ? ' - ' + reason : ''}`);
-                }
-                
-                this._currentState = newState;
-                
-                // Record transition
-                this._transitionHistory.push({
-                    from: oldState,
-                    to: newState,
-                    reason,
-                    timestamp: Date.now()
-                });
-                
-                if (this._transitionHistory.length > this._maxHistory) {
-                    this._transitionHistory.shift();
-                }
-                
-                // Notify listeners
-                this._notifyListeners(oldState, newState, reason);
-                
-                // Resolve init promise when READY
-                if (newState === this.READY && this._initResolve) {
-                    this._initResolve(true);
-                    this._initResolve = null;
-                    this._initReject = null;
-                }
-                
-                // Reject init promise on fatal error
-                if (newState === this.ERROR_FATAL && this._initReject) {
-                    this._initReject(new Error(`Fatal error: ${reason}`));
-                    this._initResolve = null;
-                    this._initReject = null;
-                }
-                
-                return true;
-            } finally {
-                this._stateLock = false;
-            }
-        },
-        
-        _isValidTransition(from, to) {
-            const validTransitions = {
-                [this.UNINITIALIZED]: [this.REGISTERING, this.ERROR_FATAL],
-                [this.REGISTERING]: [this.REGISTERED, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.REGISTERED]: [this.WAITING_FOR_SESSION, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.WAITING_FOR_SESSION]: [this.SESSION_ACTIVE, this.SESSION_FAILED, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.SESSION_ACTIVE]: [this.WAITING_FOR_TOKEN, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.WAITING_FOR_TOKEN]: [this.TOKEN_READY, this.TOKEN_FAILED, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.TOKEN_READY]: [this.WS_INITIALIZING, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.WS_INITIALIZING]: [this.WS_READY, this.WS_FAILED, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.WS_READY]: [this.SERVICES_INITIALIZING, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.SERVICES_INITIALIZING]: [this.READY, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.READY]: [this.ERROR_RECOVERABLE, this.ERROR_FATAL, this.WAITING_FOR_SESSION], // Session expiry
-                [this.ERROR_RECOVERABLE]: [this.REGISTERING, this.ERROR_FATAL], // Retry
-                [this.ERROR_FATAL]: [], // Terminal
-                [this.SESSION_FAILED]: [this.REGISTERING, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.TOKEN_FAILED]: [this.REGISTERING, this.ERROR_RECOVERABLE, this.ERROR_FATAL],
-                [this.WS_FAILED]: [this.REGISTERING, this.ERROR_RECOVERABLE, this.ERROR_FATAL]
-            };
-            
-            return validTransitions[from]?.includes(to) || false;
-        },
-        
-        isInState(state) {
-            return this._currentState === state;
-        },
-        
-        isAtLeast(state) {
-            const stateOrder = [
-                this.UNINITIALIZED,
-                this.REGISTERING,
-                this.REGISTERED,
-                this.WAITING_FOR_SESSION,
-                this.SESSION_ACTIVE,
-                this.WAITING_FOR_TOKEN,
-                this.TOKEN_READY,
-                this.WS_INITIALIZING,
-                this.WS_READY,
-                this.SERVICES_INITIALIZING,
-                this.READY
-            ];
-            
-            const currentIndex = stateOrder.indexOf(this._currentState);
-            const targetIndex = stateOrder.indexOf(state);
-            
-            return currentIndex >= targetIndex && this._currentState !== this.ERROR_FATAL && this._currentState !== this.ERROR_RECOVERABLE;
-        },
-        
-        canTransitionTo(state) {
-            return this._isValidTransition(this._currentState, state);
-        },
-        
-        onStateChange(callback) {
-            this._stateChangeListeners.add(callback);
-            return () => this._stateChangeListeners.delete(callback);
-        },
-        
-        _notifyListeners(oldState, newState, reason) {
-            this._stateChangeListeners.forEach(cb => {
-                try {
-                    cb(oldState, newState, reason);
-                } catch (e) {}
-            });
-            
-            // Dispatch event for UI
-            window.dispatchEvent(new CustomEvent('messagesStateChanged', {
-                detail: { oldState, newState, reason }
-            }));
-        },
-        
-        getTransitionHistory() {
-            return [...this._transitionHistory];
-        },
-        
-        reset() {
-            this._currentState = this.UNINITIALIZED;
-            this._transitionHistory = [];
-            this._initPromise = null;
-            this._initResolve = null;
-            this._initReject = null;
-        }
-    };
-
-    // =============================================
-    // SILENT LOGGER - FIXED TO SHOW INITIALIZATION
+    // SILENT LOGGER WITH STATE VISIBILITY
     // =============================================
     const Logger = {
         _warned: new Set(),
@@ -357,7 +155,7 @@
         
         info(module, message, data = null) {
             if (CURRENT_LOG_LEVEL <= LOG_LEVELS.INFO) {
-                console.log(`[${module}] ${message}`, data || '');
+                console.log(`[${module}] ℹ️ ${message}`, data || '');
             }
         },
         
@@ -366,12 +164,7 @@
             if (!this._success.has(key)) {
                 console.log(`[${module}] ✅ ${message}`, data || '');
                 this._success.add(key);
-                // Keep success messages visible longer
                 setTimeout(() => this._success.delete(key), 5000);
-            } else {
-                if (CURRENT_LOG_LEVEL <= LOG_LEVELS.DEBUG) {
-                    console.log(`[${module}] ✅ ${message}`, data || '');
-                }
             }
         },
         
@@ -399,6 +192,13 @@
             }
         },
         
+        state(module, oldState, newState, reason = '') {
+            if (CURRENT_LOG_LEVEL <= LOG_LEVELS.INFO) {
+                const arrow = oldState === newState ? '=' : '→';
+                console.log(`[${module}] 📊 ${oldState} ${arrow} ${newState}${reason ? ` (${reason})` : ''}`);
+            }
+        },
+        
         once(module, message, data = null) {
             const key = `${module}:${message}`;
             if (!this._logged.has(key)) {
@@ -409,7 +209,258 @@
     };
 
     // =============================================
-    // TOKEN AUTHORITY - PROMISE-BASED GOVERNANCE
+    // DETERMINISTIC SESSION MANAGER - PROMISE-BASED GATE
+    // =============================================
+    const SessionManager = {
+        // States
+        UNINITIALIZED: 'UNINITIALIZED',
+        REGISTERING: 'REGISTERING',
+        REGISTERED: 'REGISTERED',
+        SESSION_PENDING: 'SESSION_PENDING',
+        SESSION_ACTIVE: 'SESSION_ACTIVE',
+        READY: 'READY',
+        ERROR: 'ERROR',
+        
+        _state: 'UNINITIALIZED',
+        _stateLock: false,
+        _stateChangeListeners: new Set(),
+        _transitionHistory: [],
+        _maxHistory: 50,
+        
+        _readyPromise: null,
+        _readyResolve: null,
+        _readyReject: null,
+        _readyResolved: false,
+        
+        _session: null,
+        _token: null,
+        _user: null,
+        _userId: null,
+        _authenticated: false,
+        
+        _initPromise: null,
+        _initResolve: null,
+        
+        init() {
+            if (this._initPromise) return this._initPromise;
+            
+            this._initPromise = new Promise((resolve) => {
+                this._initResolve = resolve;
+                this._createReadyPromise();
+                this._loadFromCache();
+            });
+            
+            return this._initPromise;
+        },
+        
+        _createReadyPromise() {
+            this._readyPromise = new Promise((resolve, reject) => {
+                this._readyResolve = resolve;
+                this._readyReject = reject;
+            });
+            this._readyResolved = false;
+        },
+        
+        _loadFromCache() {
+            try {
+                const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE);
+                if (cached && cached.expiresAt > Date.now()) {
+                    this._session = cached;
+                    this._token = cached.token;
+                    this._user = cached.user;
+                    this._userId = cached.userId || cached.user?.id;
+                    this._authenticated = true;
+                    Logger.info('SessionManager', 'Session loaded from cache');
+                }
+            } catch (e) {}
+        },
+        
+        async transition(newState, reason = '') {
+            while (this._stateLock) {
+                await new Promise(resolve => setTimeout(resolve, 5));
+            }
+            
+            this._stateLock = true;
+            
+            try {
+                const oldState = this._state;
+                
+                if (!this._isValidTransition(oldState, newState)) {
+                    Logger.error('SessionManager', `Invalid transition: ${oldState} → ${newState}`);
+                    return false;
+                }
+                
+                Logger.state('SessionManager', oldState, newState, reason);
+                
+                this._state = newState;
+                
+                this._transitionHistory.push({
+                    from: oldState,
+                    to: newState,
+                    reason,
+                    timestamp: Date.now()
+                });
+                
+                if (this._transitionHistory.length > this._maxHistory) {
+                    this._transitionHistory.shift();
+                }
+                
+                this._notifyListeners(oldState, newState, reason);
+                
+                if (newState === this.READY && !this._readyResolved) {
+                    this._readyResolve?.(this.getSession());
+                    this._readyResolved = true;
+                }
+                
+                if (newState === this.ERROR && !this._readyResolved) {
+                    this._readyReject?.(new Error('Session error: ' + reason));
+                    this._readyResolved = true;
+                }
+                
+                return true;
+            } finally {
+                this._stateLock = false;
+            }
+        },
+        
+        _isValidTransition(from, to) {
+            const validTransitions = {
+                [this.UNINITIALIZED]: [this.REGISTERING, this.ERROR],
+                [this.REGISTERING]: [this.REGISTERED, this.ERROR],
+                [this.REGISTERED]: [this.SESSION_PENDING, this.ERROR],
+                [this.SESSION_PENDING]: [this.SESSION_ACTIVE, this.ERROR],
+                [this.SESSION_ACTIVE]: [this.READY, this.ERROR],
+                [this.READY]: [this.ERROR, this.SESSION_PENDING],
+                [this.ERROR]: [this.REGISTERING]
+            };
+            
+            return validTransitions[from]?.includes(to) || false;
+        },
+        
+        whenReady() {
+            if (this._readyResolved) {
+                return Promise.resolve(this.getSession());
+            }
+            return this._readyPromise;
+        },
+        
+        async waitForSession(timeout = 10000) {
+            if (this._authenticated && this._state === this.READY) {
+                return this.getSession();
+            }
+            
+            return Promise.race([
+                this.whenReady(),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Session ready timeout')), timeout)
+                )
+            ]);
+        },
+        
+        setSession(session) {
+            this._session = session;
+            this._token = session?.token;
+            this._user = session?.user;
+            this._userId = session?.userId || session?.user?.id;
+            this._authenticated = !!(session?.user && session?.token);
+            
+            if (this._authenticated) {
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
+                    ...session,
+                    expiresAt: session.expiresAt || Date.now() + 3600000
+                });
+                
+                if (this._state === this.SESSION_PENDING) {
+                    this.transition(this.SESSION_ACTIVE, 'session-received');
+                }
+            }
+            
+            this._notifyListeners(this._state, this._state, 'session-updated');
+        },
+        
+        getSession() {
+            return this._session ? { ...this._session } : null;
+        },
+        
+        getToken() {
+            return this._token;
+        },
+        
+        getUser() {
+            return this._user ? { ...this._user } : null;
+        },
+        
+        getUserId() {
+            return this._userId;
+        },
+        
+        isAuthenticated() {
+            return this._authenticated;
+        },
+        
+        getState() {
+            return this._state;
+        },
+        
+        isReady() {
+            return this._state === this.READY;
+        },
+        
+        isAtLeast(state) {
+            const stateOrder = [
+                this.UNINITIALIZED,
+                this.REGISTERING,
+                this.REGISTERED,
+                this.SESSION_PENDING,
+                this.SESSION_ACTIVE,
+                this.READY
+            ];
+            
+            const currentIndex = stateOrder.indexOf(this._state);
+            const targetIndex = stateOrder.indexOf(state);
+            
+            return currentIndex >= targetIndex && this._state !== this.ERROR;
+        },
+        
+        onStateChange(callback) {
+            this._stateChangeListeners.add(callback);
+            return () => this._stateChangeListeners.delete(callback);
+        },
+        
+        _notifyListeners(oldState, newState, reason) {
+            this._stateChangeListeners.forEach(cb => {
+                try {
+                    cb(oldState, newState, reason, this.getSession());
+                } catch (e) {}
+            });
+            
+            window.dispatchEvent(new CustomEvent('sessionStateChanged', {
+                detail: { oldState, newState, reason, session: this.getSession() }
+            }));
+        },
+        
+        clear() {
+            this._session = null;
+            this._token = null;
+            this._user = null;
+            this._userId = null;
+            this._authenticated = false;
+            this._readyResolved = false;
+            this._createReadyPromise();
+            
+            SafeStorage.remove(LOCAL_STORAGE_KEYS.SESSION_CACHE);
+            SafeStorage.remove(LOCAL_STORAGE_KEYS.USER_CACHE);
+            
+            Logger.info('SessionManager', 'Session cleared');
+        },
+        
+        getTransitionHistory() {
+            return [...this._transitionHistory];
+        }
+    };
+
+    // =============================================
+    // TOKEN AUTHORITY - PROMISE-BASED
     // =============================================
     const TokenAuthority = {
         _token: null,
@@ -419,7 +470,7 @@
         _tokenReceived: false,
         _waitingForToken: false,
         _tokenTimeout: null,
-        _maxWaitTime: 10000, // 10 seconds
+        _maxWaitTime: 10000,
         
         init() {
             this._resetPromise();
@@ -432,29 +483,28 @@
                 this._tokenReject = reject;
             });
             
-            // Set timeout for token receipt
             if (this._tokenTimeout) clearTimeout(this._tokenTimeout);
-            this._tokenTimeout = setTimeout(() => {
-                if (!this._tokenReceived && this._waitingForToken) {
-                    this._tokenReject(new Error('Token timeout'));
-                    Logger.error('TokenAuthority', 'Token timeout - no token received');
-                    StateMachine.transition(StateMachine.ERROR_RECOVERABLE, 'token-timeout');
-                }
-            }, this._maxWaitTime);
         },
         
-        waitForToken() {
+        waitForToken(timeout = 10000) {
             if (this._tokenReceived) {
                 return Promise.resolve(this._token);
             }
-            Logger.info('TokenAuthority', 'Waiting for token from parent');
+            
+            Logger.info('TokenAuthority', 'Waiting for token');
             this._waitingForToken = true;
-            return this._tokenPromise;
+            
+            return Promise.race([
+                this._tokenPromise,
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Token timeout')), timeout)
+                )
+            ]);
         },
         
         receiveToken(token, source = 'parent') {
             if (this._tokenReceived && this._token === token) {
-                return; // Idempotent
+                return;
             }
             
             this._token = token;
@@ -468,14 +518,11 @@
             
             if (this._tokenResolve) {
                 this._tokenResolve(token);
+                this._tokenResolve = null;
+                this._tokenReject = null;
             }
             
             Logger.success('TokenAuthority', `Token received from ${source}`);
-            
-            // Transition state if waiting for token
-            if (StateMachine.isInState(StateMachine.WAITING_FOR_TOKEN)) {
-                StateMachine.transition(StateMachine.TOKEN_READY, 'token-received');
-            }
         },
         
         getToken() {
@@ -498,609 +545,374 @@
     }.init();
 
     // =============================================
-    // SESSION AUTHORITY - SINGLETON WITH PROMISE
+    // ACK CONTROLLER - PROPER REQUEST CORRELATION
     // =============================================
-    const SessionAuthority = {
-        _session: null,
-        _sessionPromise: null,
-        _sessionResolve: null,
-        _sessionReject: null,
-        _sessionReceived: false,
-        _verificationInProgress: false,
-        _verificationRequestId: null,
-        _verificationResolve: null,
-        _verificationReject: null,
+    const AckController = {
+        _pendingAcks: new Map(),
+        _processedIds: new Set(),
+        _maxRetries: 3,
+        _baseTimeout: 7000,
+        _retryBackoff: 1.5,
+        _maxPending: 1000,
         
-        init() {
-            this._resetPromise();
-            return this;
-        },
-        
-        _resetPromise() {
-            this._sessionPromise = new Promise((resolve, reject) => {
-                this._sessionResolve = resolve;
-                this._sessionReject = reject;
-            });
-        },
-        
-        waitForSession() {
-            if (this._sessionReceived) {
-                return Promise.resolve(this._session);
+        register(requestId, message, sendFn, options = {}) {
+            if (this._processedIds.has(requestId)) {
+                Logger.debug('AckController', `Duplicate request: ${requestId}`);
+                return { success: false, duplicate: true };
             }
-            Logger.info('SessionAuthority', 'Waiting for session from parent');
-            return this._sessionPromise;
+            
+            if (this._pendingAcks.size >= this._maxPending) {
+                this._cleanupOldest();
+            }
+            
+            const maxRetries = options.maxRetries ?? this._maxRetries;
+            const timeout = options.timeout ?? this._baseTimeout;
+            
+            const record = {
+                requestId,
+                message,
+                sendFn,
+                attempts: 0,
+                maxRetries,
+                timeout,
+                timers: [],
+                startTime: Date.now(),
+                lastAttempt: Date.now(),
+                status: 'pending'
+            };
+            
+            this._scheduleRetry(record, 0);
+            
+            this._pendingAcks.set(requestId, record);
+            
+            Logger.debug('AckController', `Registered ${message.type} (${requestId})`);
+            
+            return { success: true, requestId };
         },
         
-        receiveSession(session) {
-            if (this._sessionReceived) {
-                // Update existing session
-                this._session = { ...this._session, ...session };
-                Logger.info('SessionAuthority', 'Session updated');
+        _scheduleRetry(record, delay) {
+            const timer = setTimeout(() => {
+                this._sendWithRetry(record);
+            }, delay);
+            
+            record.timers.push(timer);
+        },
+        
+        async _sendWithRetry(record) {
+            if (record.attempts >= record.maxRetries) {
+                this._handleFailure(record, 'Max retries exceeded');
                 return;
             }
             
-            this._session = session;
-            this._sessionReceived = true;
+            record.attempts++;
+            record.lastAttempt = Date.now();
+            record.status = 'sending';
             
-            if (this._sessionResolve) {
-                this._sessionResolve(session);
-            }
-            
-            Logger.success('SessionAuthority', 'Session received');
-            
-            // Transition state
-            if (StateMachine.isInState(StateMachine.WAITING_FOR_SESSION)) {
-                StateMachine.transition(StateMachine.SESSION_ACTIVE, 'session-received');
+            try {
+                await record.sendFn();
+                
+                const timeoutTimer = setTimeout(() => {
+                    if (this._pendingAcks.has(record.requestId)) {
+                        this._handleTimeout(record);
+                    }
+                }, record.timeout);
+                
+                record.timers.push(timeoutTimer);
+                
+            } catch (error) {
+                this._handleFailure(record, error.message);
             }
         },
         
-        async verifyWithParent() {
-            if (this._verificationInProgress) {
-                Logger.info('SessionAuthority', 'Verification already in progress');
-                return this._verificationPromise;
+        _handleTimeout(record) {
+            if (record.attempts >= record.maxRetries) {
+                this._handleFailure(record, 'Timeout - max retries');
+                return;
             }
             
-            this._verificationInProgress = true;
-            this._verificationPromise = new Promise((resolve, reject) => {
-                this._verificationResolve = resolve;
-                this._verificationReject = reject;
+            const delay = record.timeout * Math.pow(this._retryBackoff, record.attempts - 1);
+            Logger.debug('AckController', `Retry ${record.attempts}/${record.maxRetries} for ${record.requestId} in ${delay}ms`);
+            
+            this._scheduleRetry(record, delay);
+        },
+        
+        _handleFailure(record, reason) {
+            record.status = 'failed';
+            record.failureReason = reason;
+            
+            this._pendingAcks.delete(record.requestId);
+            this._processedIds.add(record.requestId);
+            
+            Logger.warn('AckController', `Message ${record.requestId} failed: ${reason}`);
+            
+            window.dispatchEvent(new CustomEvent('messageFailed', {
+                detail: { requestId: record.requestId, message: record.message, reason }
+            }));
+            
+            this._cleanupTimers(record);
+        },
+        
+        handleAck(requestId, payload) {
+            if (this._processedIds.has(requestId)) {
+                return { success: false, duplicate: true };
+            }
+            
+            const record = this._pendingAcks.get(requestId);
+            if (!record) {
+                this._processedIds.add(requestId);
+                return { success: false, notFound: true };
+            }
+            
+            record.status = 'acknowledged';
+            record.ackTime = Date.now();
+            
+            this._cleanupTimers(record);
+            this._pendingAcks.delete(requestId);
+            this._processedIds.add(requestId);
+            
+            Logger.debug('AckController', `ACK received for ${requestId} (${record.message.type})`);
+            
+            window.dispatchEvent(new CustomEvent('messageAcknowledged', {
+                detail: { requestId, message: record.message, payload }
+            }));
+            
+            return { success: true, record };
+        },
+        
+        handleNack(requestId, reason) {
+            const record = this._pendingAcks.get(requestId);
+            if (!record) return { success: false };
+            
+            this._handleFailure(record, reason || 'NACK received');
+            
+            return { success: true };
+        },
+        
+        _cleanupTimers(record) {
+            record.timers.forEach(timer => clearTimeout(timer));
+            record.timers = [];
+        },
+        
+        _cleanupOldest() {
+            const entries = Array.from(this._pendingAcks.entries());
+            entries.sort((a, b) => a[1].startTime - b[1].startTime);
+            
+            const toRemove = entries.slice(0, Math.floor(this._pendingAcks.size * 0.2));
+            toRemove.forEach(([id, record]) => {
+                this._cleanupTimers(record);
+                this._pendingAcks.delete(id);
+                this._processedIds.add(id);
             });
-            
-            this._verificationRequestId = SecurityUtils.generateMessageId();
-            
-            Logger.info('SessionAuthority', `Verifying session with parent (${this._verificationRequestId})`);
-            
-            const result = await MessageFirewall.send(
-                MESSAGE_TYPES.VERIFY_SESSION,
-                {
-                    timestamp: Date.now(),
-                    frameId: FRAME_ID,
-                    requestId: this._verificationRequestId
-                },
-                { 
-                    requiresAck: true, 
-                    timeout: 5000,
-                    requestId: this._verificationRequestId
-                }
-            );
-            
-            if (result.success && result.payload?.valid) {
-                Logger.success('SessionAuthority', 'Session verification successful');
-                this._verificationResolve(true);
-            } else {
-                Logger.warn('SessionAuthority', 'Session verification failed');
-                this._verificationReject(new Error('Session verification failed'));
-            }
-            
-            this._verificationInProgress = false;
-            return this._verificationPromise;
         },
         
-        handleVerificationResponse(message) {
-            const requestId = message.requestId || message.payload?.requestId;
+        cleanup() {
+            const now = Date.now();
+            const maxAge = 3600000;
             
-            if (requestId === this._verificationRequestId && this._verificationResolve) {
-                const valid = message.payload?.valid === true;
-                
-                if (valid) {
-                    Logger.success('SessionAuthority', `Verification response received (valid: true)`);
-                    this._verificationResolve(true);
-                } else {
-                    Logger.warn('SessionAuthority', `Verification response received (valid: false)`);
-                    this._verificationReject(new Error('Session invalid'));
+            for (const [id, record] of this._pendingAcks) {
+                if (now - record.startTime > maxAge) {
+                    this._cleanupTimers(record);
+                    this._pendingAcks.delete(id);
+                    this._processedIds.add(id);
                 }
-                
-                this._verificationRequestId = null;
-                this._verificationResolve = null;
-                this._verificationReject = null;
-                this._verificationInProgress = false;
+            }
+            
+            if (this._processedIds.size > 10000) {
+                this._processedIds.clear();
             }
         },
         
-        getSession() {
-            return this._session;
+        getPendingCount() {
+            return this._pendingAcks.size;
         },
         
-        hasSession() {
-            return !!this._session;
-        },
-        
-        clearSession() {
-            this._session = null;
-            this._sessionReceived = false;
-            this._resetPromise();
+        getStats() {
+            return {
+                pending: this._pendingAcks.size,
+                processed: this._processedIds.size,
+                oldest: this._pendingAcks.size ? 
+                    Math.min(...Array.from(this._pendingAcks.values()).map(r => r.startTime)) : 0
+            };
         }
-    }.init();
+    };
 
     // =============================================
-    // WEBSOCKET CONTROLLER - SINGLE INSTANCE
+    // MESSAGE TRANSPORT WITH PROPER ACK
     // =============================================
-    const WSController = {
-        // States
-        UNINITIALIZED: 'UNINITIALIZED',
-        CONNECTING: 'CONNECTING',
-        CONNECTED: 'CONNECTED',
-        AUTHENTICATING: 'AUTHENTICATING',
-        READY: 'READY',
-        RECONNECTING: 'RECONNECTING',
-        CLOSED: 'CLOSED',
-        ERROR: 'ERROR',
-        
-        _state: 'UNINITIALIZED',
-        _ws: null,
-        _connectPromise: null,
-        _connectResolve: null,
-        _connectReject: null,
-        _reconnectAttempts: 0,
-        _maxReconnectAttempts: 5,
-        _baseDelay: 1000,
-        _maxDelay: 30000,
-        _heartbeatInterval: null,
-        _heartbeatTimeout: null,
-        _pendingMessages: [],
-        _authenticated: false,
-        _url: null,
+    const MessageTransport = {
+        _sequence: 0,
+        _outboundQueue: [],
+        _parentOrigin: window.location.origin,
+        _maxQueueSize: 100,
+        _processingQueue: false,
         
         init() {
+            setInterval(() => this._processQueue(), 5000);
+            setInterval(() => AckController.cleanup(), 60000);
             return this;
         },
         
-        async connect(url) {
-            this._url = url;
-            
-            if (this._state === this.CONNECTING || this._state === this.AUTHENTICATING) {
-                Logger.info('WSController', 'Connection already in progress');
-                return this._connectPromise;
-            }
-            
-            if (this._state === this.READY) {
-                Logger.info('WSController', 'Already connected');
-                return Promise.resolve(true);
-            }
-            
-            this._state = this.CONNECTING;
-            Logger.info('WSController', `Connecting to WebSocket: ${url}`);
-            
-            this._connectPromise = new Promise((resolve, reject) => {
-                this._connectResolve = resolve;
-                this._connectReject = reject;
-            });
-            
-            try {
-                // Wait for token before connecting
-                const token = await TokenAuthority.waitForToken();
-                Logger.info('WSController', 'Token available, establishing connection');
-                
-                this._ws = new WebSocket(url);
-                
-                this._ws.onopen = () => {
-                    Logger.success('WSController', 'WebSocket connected');
-                    this._state = this.CONNECTED;
-                    this._authenticate(token);
-                };
-                
-                this._ws.onmessage = (event) => {
-                    this._handleMessage(event);
-                };
-                
-                this._ws.onerror = (error) => {
-                    Logger.error('WSController', 'WebSocket error', error);
-                    this._state = this.ERROR;
-                    
-                    if (this._connectReject) {
-                        this._connectReject(error);
-                        this._connectResolve = null;
-                        this._connectReject = null;
+        send(type, payload = {}, options = {}) {
+            return new Promise(async (resolve) => {
+                if (!SessionManager.isReady() && !options.bypassReady) {
+                    try {
+                        await SessionManager.whenReady();
+                    } catch (e) {
+                        resolve({ success: false, error: 'Session not ready', state: SessionManager.getState() });
+                        return;
                     }
-                    
-                    this._scheduleReconnect();
-                };
-                
-                this._ws.onclose = () => {
-                    Logger.warn('WSController', 'WebSocket closed');
-                    
-                    if (this._state === this.READY || this._state === this.CONNECTED || this._state === this.AUTHENTICATING) {
-                        this._state = this.CLOSED;
-                        this._scheduleReconnect();
-                    }
-                    
-                    this._cleanup();
-                };
-                
-            } catch (error) {
-                Logger.error('WSController', 'Connection failed', error);
-                this._connectReject(error);
-                this._connectResolve = null;
-                this._connectReject = null;
-                this._scheduleReconnect();
-            }
-            
-            return this._connectPromise;
-        },
-        
-        _authenticate(token) {
-            if (this._state !== this.CONNECTED) return;
-            
-            this._state = this.AUTHENTICATING;
-            Logger.info('WSController', 'Authenticating with token');
-            
-            const authMessage = {
-                type: 'auth',
-                token: token,
-                frameId: FRAME_ID,
-                timestamp: Date.now()
-            };
-            
-            try {
-                this._ws.send(JSON.stringify(authMessage));
-                
-                // Wait for authentication response (handled in _handleMessage)
-                this._authTimeout = setTimeout(() => {
-                    if (this._state === this.AUTHENTICATING) {
-                        Logger.error('WSController', 'Authentication timeout');
-                        this._ws.close();
-                        this._scheduleReconnect();
-                    }
-                }, 5000);
-                
-            } catch (error) {
-                Logger.error('WSController', 'Authentication failed', error);
-                this._ws.close();
-                this._scheduleReconnect();
-            }
-        },
-        
-        _handleMessage(event) {
-            try {
-                const data = JSON.parse(event.data);
-                
-                // Handle authentication response
-                if (data.type === 'auth_success' && this._state === this.AUTHENTICATING) {
-                    clearTimeout(this._authTimeout);
-                    this._state = this.READY;
-                    this._authenticated = true;
-                    
-                    Logger.success('WSController', 'WebSocket authenticated');
-                    
-                    if (this._connectResolve) {
-                        this._connectResolve(true);
-                        this._connectResolve = null;
-                        this._connectReject = null;
-                    }
-                    
-                    this._startHeartbeat();
-                    this._flushPendingMessages();
-                    
-                    // Transition state
-                    if (StateMachine.isInState(StateMachine.WS_INITIALIZING)) {
-                        StateMachine.transition(StateMachine.WS_READY, 'websocket-ready');
-                    }
-                    
-                    return;
                 }
                 
-                // Handle heartbeat
-                if (data.type === 'pong') {
-                    this._handleHeartbeatResponse();
-                    return;
+                const requestId = options.requestId || this._generateRequestId();
+                const messageId = options.messageId || this._generateMessageId();
+                const timestamp = Date.now();
+                
+                const message = {
+                    protocol: PROTOCOL.VERSION,
+                    messageId,
+                    requestId,
+                    type,
+                    source: SOURCE_IFRAME,
+                    target: 'parent',
+                    frameId: FRAME_ID,
+                    module: 'messages',
+                    timestamp,
+                    payload: SecurityUtils.sanitizePayload(payload || {}),
+                    app: APP_NAME,
+                    version: VERSION,
+                    requiresAck: options.requiresAck !== false,
+                    sequence: ++this._sequence
+                };
+                
+                const sendFn = () => this._postMessage(message);
+                
+                if (options.requiresAck !== false) {
+                    const ackResult = AckController.register(requestId, message, sendFn, {
+                        maxRetries: options.maxRetries,
+                        timeout: options.timeout
+                    });
+                    
+                    if (ackResult.duplicate) {
+                        resolve({ success: false, duplicate: true, requestId });
+                        return;
+                    }
                 }
                 
-                // Dispatch message to appropriate handler
-                this._dispatchMessage(data);
-                
-            } catch (error) {
-                Logger.error('WSController', 'Message parse error', error);
-            }
-        },
-        
-        _dispatchMessage(data) {
-            switch (data.type) {
-                case 'message':
-                    this._handleIncomingMessage(data);
-                    break;
-                    
-                case 'typing':
-                    this._handleTypingIndicator(data);
-                    break;
-                    
-                case 'read_receipt':
-                    this._handleReadReceipt(data);
-                    break;
-                    
-                case 'delivery_receipt':
-                    this._handleDeliveryReceipt(data);
-                    break;
-                    
-                default:
-                    // Unknown message type - ignore
-                    break;
-            }
-        },
-        
-        _handleIncomingMessage(data) {
-            const message = {
-                id: data.id || SecurityUtils.generateMessageId(),
-                chatId: data.chatId,
-                senderId: data.senderId,
-                content: SecurityUtils.sanitizeString(data.content || ''),
-                type: data.type || 'text',
-                timestamp: data.timestamp || Date.now(),
-                status: 'received'
-            };
-            
-            // Add to messages array
-            const idx = messages.findIndex(m => m.id === message.id);
-            if (idx === -1) {
-                messages.push(message);
-                Logger.debug('WSController', `Received message: ${message.id}`);
-            }
-            
-            // Save to storage
-            if (currentChat && message.chatId === currentChat.id) {
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-            }
-            
-            // Dispatch event
-            window.dispatchEvent(new CustomEvent('messageReceived', {
-                detail: { message }
-            }));
-            
-            // Play notification sound if not from self
-            if (message.senderId !== SessionMirror.getUser()?.id) {
-                playNotificationSound();
-            }
-        },
-        
-        _handleTypingIndicator(data) {
-            const chatId = data.chatId;
-            
-            if (currentChat && currentChat.id === chatId) {
-                window.dispatchEvent(new CustomEvent('typingIndicator', {
-                    detail: {
-                        userId: data.userId,
-                        isTyping: data.isTyping,
-                        chatId: chatId
-                    }
-                }));
-            }
-        },
-        
-        _handleReadReceipt(data) {
-            const messageId = data.messageId;
-            
-            const idx = messages.findIndex(m => m.id === messageId);
-            if (idx !== -1) {
-                messages[idx].status = 'read';
-                messages[idx].readAt = data.timestamp;
-                
-                window.dispatchEvent(new CustomEvent('messageStatusChanged', {
-                    detail: { message: messages[idx] }
-                }));
-            }
-        },
-        
-        _handleDeliveryReceipt(data) {
-            const messageId = data.messageId;
-            
-            const idx = messages.findIndex(m => m.id === messageId);
-            if (idx !== -1 && messages[idx].status === 'sent') {
-                messages[idx].status = 'delivered';
-                messages[idx].deliveredAt = data.timestamp;
-                
-                window.dispatchEvent(new CustomEvent('messageStatusChanged', {
-                    detail: { message: messages[idx] }
-                }));
-            }
-        },
-        
-        send(data) {
-            if (this._state === this.READY && this._ws && this._ws.readyState === WebSocket.OPEN) {
                 try {
-                    this._ws.send(JSON.stringify(data));
-                    return true;
+                    await sendFn();
+                    
+                    if (options.requiresAck === false) {
+                        resolve({ success: true, messageId, requestId, async: false });
+                    } else {
+                        const waitForAck = (e) => {
+                            if (e.detail.requestId === requestId) {
+                                window.removeEventListener('messageAcknowledged', waitForAck);
+                                window.removeEventListener('messageFailed', waitForFail);
+                                resolve({ success: true, requestId, ack: e.detail.payload });
+                            }
+                        };
+                        
+                        const waitForFail = (e) => {
+                            if (e.detail.requestId === requestId) {
+                                window.removeEventListener('messageAcknowledged', waitForAck);
+                                window.removeEventListener('messageFailed', waitForFail);
+                                resolve({ success: false, error: e.detail.reason, requestId });
+                            }
+                        };
+                        
+                        window.addEventListener('messageAcknowledged', waitForAck);
+                        window.addEventListener('messageFailed', waitForFail);
+                        
+                        setTimeout(() => {
+                            window.removeEventListener('messageAcknowledged', waitForAck);
+                            window.removeEventListener('messageFailed', waitForFail);
+                            resolve({ success: false, error: 'Timeout', requestId });
+                        }, options.timeout || 10000);
+                    }
                 } catch (error) {
-                    Logger.error('WSController', 'Send failed', error);
-                    this._queueMessage(data);
-                    return false;
+                    if (options.requiresAck === false) {
+                        this._queueMessage(message);
+                        resolve({ success: false, queued: true, error: error.message, requestId });
+                    } else {
+                        resolve({ success: false, error: error.message, requestId });
+                    }
                 }
-            } else {
-                this._queueMessage(data);
-                return false;
-            }
+            });
         },
         
-        _queueMessage(data) {
-            this._pendingMessages.push({
-                data,
-                timestamp: Date.now(),
-                attempts: 0
+        _postMessage(message) {
+            return new Promise((resolve, reject) => {
+                if (!window.parent || window.parent === window) {
+                    reject(new Error('No parent window'));
+                    return;
+                }
+                
+                try {
+                    window.parent.postMessage(message, this._parentOrigin);
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        },
+        
+        _queueMessage(message) {
+            if (this._outboundQueue.length >= this._maxQueueSize) {
+                this._outboundQueue.shift();
+            }
+            
+            this._outboundQueue.push({
+                message,
+                timestamp: Date.now()
             });
             
-            // Limit queue size
-            if (this._pendingMessages.length > 100) {
-                this._pendingMessages.shift();
-            }
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MESSAGE_QUEUE, this._outboundQueue);
         },
         
-        _flushPendingMessages() {
-            if (this._state !== this.READY) return;
+        async _processQueue() {
+            if (this._processingQueue || this._outboundQueue.length === 0) return;
+            
+            this._processingQueue = true;
             
             const now = Date.now();
             const oneHour = 3600000;
             
-            let flushed = 0;
-            this._pendingMessages = this._pendingMessages.filter(msg => {
-                if (now - msg.timestamp > oneHour) {
-                    return false; // Expired
-                }
-                
-                try {
-                    this._ws.send(JSON.stringify(msg.data));
-                    flushed++;
-                    return false; // Remove from queue
-                } catch (error) {
-                    msg.attempts++;
-                    return msg.attempts < 3; // Keep if under max attempts
-                }
-            });
-            
-            if (flushed > 0) {
-                Logger.debug('WSController', `Flushed ${flushed} pending messages`);
-            }
-        },
-        
-        _startHeartbeat() {
-            if (this._heartbeatInterval) clearInterval(this._heartbeatInterval);
-            
-            this._heartbeatInterval = setInterval(() => {
-                if (this._state === this.READY && this._ws && this._ws.readyState === WebSocket.OPEN) {
-                    try {
-                        this._ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-                        
-                        // Set timeout for heartbeat response
-                        this._heartbeatTimeout = setTimeout(() => {
-                            Logger.warn('WSController', 'Heartbeat timeout');
-                            this._ws.close();
-                        }, 10000);
-                        
-                    } catch (error) {
-                        Logger.error('WSController', 'Heartbeat failed', error);
-                    }
-                }
-            }, 30000);
-        },
-        
-        _handleHeartbeatResponse() {
-            if (this._heartbeatTimeout) {
-                clearTimeout(this._heartbeatTimeout);
-                this._heartbeatTimeout = null;
-            }
-        },
-        
-        _scheduleReconnect() {
-            if (this._reconnectAttempts >= this._maxReconnectAttempts) {
-                Logger.error('WSController', 'Max reconnection attempts reached');
-                StateMachine.transition(StateMachine.ERROR_FATAL, 'websocket-max-retries');
-                return;
-            }
-            
-            this._reconnectAttempts++;
-            
-            const delay = Math.min(
-                this._baseDelay * Math.pow(1.5, this._reconnectAttempts - 1),
-                this._maxDelay
+            const freshQueue = this._outboundQueue.filter(item => 
+                now - item.timestamp < oneHour
             );
             
-            Logger.warn('WSController', `Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts}/${this._maxReconnectAttempts})`);
-            
-            this._state = this.RECONNECTING;
-            
-            setTimeout(() => {
-                if (StateMachine.isAtLeast(StateMachine.TOKEN_READY)) {
-                    Logger.info('WSController', 'Attempting to reconnect...');
-                    this.connect(this._url).catch(() => {});
-                }
-            }, delay);
-        },
-        
-        _cleanup() {
-            if (this._heartbeatInterval) {
-                clearInterval(this._heartbeatInterval);
-                this._heartbeatInterval = null;
+            for (const item of freshQueue) {
+                try {
+                    await this._postMessage(item.message);
+                } catch (e) {}
             }
             
-            if (this._heartbeatTimeout) {
-                clearTimeout(this._heartbeatTimeout);
-                this._heartbeatTimeout = null;
-            }
+            this._outboundQueue = freshQueue.filter(item => 
+                now - item.timestamp < 300000
+            );
             
-            if (this._authTimeout) {
-                clearTimeout(this._authTimeout);
-                this._authTimeout = null;
-            }
-        },
-        
-        disconnect() {
-            if (this._ws) {
-                this._ws.close();
-                this._ws = null;
-            }
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MESSAGE_QUEUE, this._outboundQueue);
             
-            this._cleanup();
-            this._state = this.CLOSED;
-            this._authenticated = false;
-            Logger.info('WSController', 'Disconnected');
+            this._processingQueue = false;
         },
         
-        getState() {
-            return this._state;
+        _generateMessageId() {
+            return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${++this._sequence}`;
         },
         
-        isReady() {
-            return this._state === this.READY;
+        _generateRequestId() {
+            return `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${++this._sequence}`;
+        },
+        
+        getStats() {
+            return {
+                sequence: this._sequence,
+                queued: this._outboundQueue.length,
+                pendingAcks: AckController.getPendingCount(),
+                ackStats: AckController.getStats()
+            };
         }
     }.init();
-
-    // =============================================
-    // MINIMAL STATUS INDICATOR
-    // =============================================
-    const StatusIndicator = {
-        currentStatus: null,
-        statusMap: {
-            'FAILED': '❌',
-            'WARNING': '⚠️',
-            'DISCONNECTED': '🔴',
-            'CONNECTED': '🟢',
-            'RECOVERING': '🟡'
-        },
-        
-        show(status, reason = '') {
-            if (!this.statusMap[status]) return;
-            if (this.currentStatus === status) return;
-            
-            this.currentStatus = status;
-            const emoji = this.statusMap[status];
-            
-            // Log status changes
-            if (status === 'CONNECTED') {
-                Logger.success('Status', `${emoji} ${status}${reason ? ': ' + reason : ''}`);
-            } else if (status === 'FAILED' || status === 'DISCONNECTED') {
-                Logger.error('Status', `${emoji} ${status}${reason ? ': ' + reason : ''}`);
-            } else if (status === 'RECOVERING') {
-                Logger.warn('Status', `${emoji} ${status}${reason ? ': ' + reason : ''}`);
-            } else {
-                Logger.info('Status', `${emoji} ${status}${reason ? ': ' + reason : ''}`);
-            }
-            
-            window.dispatchEvent(new CustomEvent('statusChange', {
-                detail: { status, emoji, reason }
-            }));
-        },
-        
-        reset() {
-            this.currentStatus = null;
-        }
-    };
 
     // =============================================
     // SAFE STORAGE LAYER
@@ -1161,7 +973,7 @@
         },
         
         getJSON(key, fallback = null) {
-            const value = this.get(key, null);
+            const value = this.get(key);
             if (!value) return fallback;
             try {
                 return JSON.parse(value);
@@ -1187,7 +999,7 @@
     }.init();
 
     // =============================================
-    // SECURITY & VALIDATION UTILITIES
+    // SECURITY UTILITIES
     // =============================================
     const SecurityUtils = {
         allowedOrigins: new Set([
@@ -1197,10 +1009,8 @@
         ]),
 
         messageIdCounter: 0,
-        replayWindow: 300000,
-        replayCache: new Map(),
-        maxReplayEntries: 1000,
         processedMessageIds: new Set(),
+        replayWindow: 300000,
 
         initOriginTrust() {
             const hostname = window.location.hostname;
@@ -1211,17 +1021,15 @@
             if (hostname.endsWith('.onrender.com')) {
                 this.allowedOrigins.add(`https://${hostname}`);
             }
-            Logger.debug('SecurityUtils', `Trusted origins: ${Array.from(this.allowedOrigins).join(', ')}`);
         },
 
         validateOrigin(origin) {
             if (!origin || origin === 'null') return true;
-            if (this.allowedOrigins.has(origin)) return true;
-            return origin === window.location.origin;
+            return this.allowedOrigins.has(origin) || origin === window.location.origin;
         },
 
         validateMessageStructure(data) {
-            return !!(data && typeof data === 'object' && data.type && typeof data.type === 'string');
+            return !!(data && typeof data === 'object' && data.type);
         },
 
         generateMessageId() {
@@ -1245,9 +1053,7 @@
                 .replace(/'/g, '&#039;')
                 .replace(/javascript:/gi, '')
                 .replace(/onload/gi, 'data-onload')
-                .replace(/onerror/gi, 'data-onerror')
-                .replace(/<script/gi, '&lt;script')
-                .replace(/<\/script/gi, '&lt;/script');
+                .replace(/onerror/gi, 'data-onerror');
         },
 
         sanitizePayload(payload) {
@@ -1296,30 +1102,6 @@
             return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         },
 
-        checkReplay(messageId, timestamp) {
-            if (!messageId) return false;
-            
-            if (this.processedMessageIds.has(messageId)) {
-                Logger.debug('SecurityUtils', `Replay detected: ${messageId}`);
-                return true;
-            }
-            
-            const now = Date.now();
-            const age = now - timestamp;
-            
-            if (age > this.replayWindow) return true;
-            if (timestamp > now + 120000) return true;
-            
-            this.processedMessageIds.add(messageId);
-            
-            // Cleanup old IDs
-            setTimeout(() => {
-                this.processedMessageIds.delete(messageId);
-            }, this.replayWindow);
-            
-            return false;
-        },
-
         isForThisFrame(message) {
             const targetFrame = message.target || message.frameId;
             return !targetFrame || targetFrame === 'iframe' || targetFrame === FRAME_ID;
@@ -1329,574 +1111,40 @@
     SecurityUtils.initOriginTrust();
 
     // =============================================
-    // MINIMAL DIAGNOSTICS AGENT
-    // =============================================
-    const DiagnosticsAgent = {
-        enabled: ENV.isLocal,
-        metrics: {
-            messagesSent: 0,
-            messagesReceived: 0,
-            acksReceived: 0,
-            acksSent: 0,
-            errors: [],
-            startTime: Date.now(),
-            pingRtt: [],
-            sessionRefreshes: 0,
-            cacheHits: 0,
-            cacheMisses: 0
-        },
-        loggedErrors: new Set(),
-        
-        init(enabled = false) {
-            this.enabled = enabled && (window.location.hostname === 'localhost' || 
-                                       window.location.hostname === '127.0.0.1' ||
-                                       window.__IFRAME_DEBUG__ === true);
-            return this;
-        },
-
-        increment(counter) {
-            if (this.enabled && this.metrics.hasOwnProperty(counter)) {
-                this.metrics[counter]++;
-            }
-        },
-
-        recordError(error, context) {
-            if (!this.enabled) return;
-            const errorKey = error.message + context;
-            if (this.loggedErrors.has(errorKey)) return;
-            this.loggedErrors.add(errorKey);
-            
-            this.metrics.errors.push({
-                timestamp: Date.now(),
-                error: error.message || String(error),
-                context,
-                stack: error.stack
-            });
-            if (this.metrics.errors.length > 100) {
-                this.metrics.errors.shift();
-            }
-        },
-
-        recordPingRtt(rtt) {
-            if (!this.enabled) return;
-            this.metrics.pingRtt.push(rtt);
-            if (this.metrics.pingRtt.length > 20) {
-                this.metrics.pingRtt.shift();
-            }
-        },
-
-        getMetrics() {
-            return {
-                ...this.metrics,
-                uptime: Date.now() - this.metrics.startTime,
-                avgPingRtt: this.metrics.pingRtt.length ? 
-                    Math.round(this.metrics.pingRtt.reduce((a, b) => a + b, 0) / this.metrics.pingRtt.length) : 0,
-                timestamp: Date.now()
-            };
-        },
-
-        getUptime() {
-            const ms = Date.now() - this.metrics.startTime;
-            const seconds = Math.floor(ms / 1000);
-            const minutes = Math.floor(seconds / 60);
-            const hours = Math.floor(minutes / 60);
-            return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-        },
-
-        reset() {
-            this.metrics = {
-                messagesSent: 0,
-                messagesReceived: 0,
-                acksReceived: 0,
-                acksSent: 0,
-                errors: [],
-                startTime: Date.now(),
-                pingRtt: [],
-                sessionRefreshes: 0,
-                cacheHits: 0,
-                cacheMisses: 0
-            };
-            this.loggedErrors.clear();
-        }
-    };
-
-    // =============================================
-    // MESSAGE LIFECYCLE MANAGER WITH ACK TRACKING
-    // =============================================
-    const MessageLifecycle = {
-        TIMEOUT_DURATION: 7000,
-        MAX_RETRIES: 1,
-        pendingMessages: new Map(),
-        outgoingRegistry: new Map(), // requestId -> message info
-        maxRegistrySize: 1000,
-
-        createMessage(messageData) {
-            return {
-                id: messageData.id || SecurityUtils.generateMessageId(),
-                requestId: messageData.requestId || SecurityUtils.generateRequestId(),
-                status: "sending",
-                reason: null,
-                timestamp: Date.now(),
-                retryCount: 0,
-                timeoutRef: null,
-                ...messageData
-            };
-        },
-
-        registerOutgoing(message, sendFn) {
-            const requestId = message.requestId || message.id;
-            
-            // Check for duplicate
-            if (this.outgoingRegistry.has(requestId)) {
-                Logger.debug('MessageLifecycle', `Duplicate outgoing message: ${requestId}`);
-                return this.outgoingRegistry.get(requestId).message;
-            }
-            
-            const timeoutRef = setTimeout(() => {
-                this.handleTimeout(requestId);
-            }, this.TIMEOUT_DURATION);
-
-            message.timeoutRef = timeoutRef;
-            
-            this.outgoingRegistry.set(requestId, { 
-                message, 
-                sendFn,
-                timestamp: Date.now(),
-                attempts: 0
-            });
-            
-            Logger.debug('MessageLifecycle', `Registered outgoing message: ${requestId} (${message.type})`);
-            
-            // Cleanup old entries
-            this._cleanupRegistry();
-            
-            return message;
-        },
-
-        handleAck(requestId) {
-            const pending = this.outgoingRegistry.get(requestId);
-            if (pending) {
-                clearTimeout(pending.message.timeoutRef);
-                pending.message.status = "delivered";
-                pending.message.reason = null;
-                this.updateMessageUI(pending.message);
-                this.outgoingRegistry.delete(requestId);
-                DiagnosticsAgent.increment('acksReceived');
-                Logger.debug('MessageLifecycle', `ACK received for ${requestId}`);
-                return true;
-            }
-            return false;
-        },
-
-        handleTimeout(requestId) {
-            const pending = this.outgoingRegistry.get(requestId);
-            if (!pending) return;
-
-            const message = pending.message;
-            
-            // Determine failure reason
-            if (!SessionMirror || !SessionMirror.isAuthenticated()) {
-                message.reason = "No session";
-            } else if (!TokenAuthority.hasToken()) {
-                message.reason = "No token";
-            } else if (!navigator.onLine) {
-                message.reason = "Offline";
-            } else if (!ParentDetector || !ParentDetector.isReady) {
-                message.reason = "Parent unavailable";
-            } else if (!WSController.isReady()) {
-                message.reason = "WebSocket not ready";
-            } else {
-                message.reason = "No response";
-            }
-
-            if (pending.attempts < this.MAX_RETRIES) {
-                pending.attempts++;
-                message.retryCount = pending.attempts;
-                message.status = "sending";
-                message.reason = null;
-                clearTimeout(message.timeoutRef);
-                
-                Logger.debug('MessageLifecycle', `Retrying message ${requestId} (attempt ${pending.attempts})`);
-                
-                try {
-                    pending.sendFn();
-                    message.timeoutRef = setTimeout(() => {
-                        this.handleTimeout(requestId);
-                    }, this.TIMEOUT_DURATION);
-                    return;
-                } catch (e) {}
-            }
-
-            message.status = "failed";
-            clearTimeout(message.timeoutRef);
-            
-            // Show failure reason
-            Logger.warn('MessageLifecycle', `Message ${requestId} failed: ${message.reason}`);
-            StatusIndicator.show('FAILED', message.reason);
-            
-            this.updateMessageUI(message);
-            this.outgoingRegistry.delete(requestId);
-        },
-
-        updateMessageUI(message) {
-            const index = messages.findIndex(m => m.id === message.id);
-            if (index !== -1) {
-                messages[index] = { ...messages[index], ...message };
-                
-                window.dispatchEvent(new CustomEvent('messageStatusChanged', {
-                    detail: { message: messages[index] }
-                }));
-            }
-        },
-
-        isReadyToSend() {
-            if (!SessionMirror || !SessionMirror.isAuthenticated()) {
-                return { ready: false, reason: "No session" };
-            }
-            if (!TokenAuthority.hasToken()) {
-                return { ready: false, reason: "No token" };
-            }
-            if (!ParentDetector || !ParentDetector.isReady) {
-                return { ready: false, reason: "Parent not ready" };
-            }
-            if (!WSController.isReady()) {
-                return { ready: false, reason: "WebSocket not ready" };
-            }
-            if (!navigator.onLine) {
-                return { ready: false, reason: "Offline" };
-            }
-            return { ready: true };
-        },
-
-        _cleanupRegistry() {
-            if (this.outgoingRegistry.size > this.maxRegistrySize) {
-                const now = Date.now();
-                const oldest = now - 3600000; // 1 hour
-                
-                for (const [id, data] of this.outgoingRegistry) {
-                    if (data.timestamp < oldest) {
-                        this.outgoingRegistry.delete(id);
-                    }
-                    
-                    if (this.outgoingRegistry.size <= this.maxRegistrySize) break;
-                }
-            }
-        },
-
-        getPendingCount() {
-            return this.outgoingRegistry.size;
-        }
-    };
-
-    // =============================================
-    // MESSAGE TRANSPORT LAYER WITH ACK PROTOCOL
-    // =============================================
-    const MessageTransport = {
-        pendingAcks: new Map(),
-        messageQueue: [],
-        sequenceNumber: 0,
-        outboundMessages: new Map(),
-        maxRetries: 0,
-        maxQueueSize: 100,
-        requestIdMap: new Map(), // Maps requestId to messageId
-        parentOrigin: window.location.origin,
-        
-        init() {
-            return this;
-        },
-        
-        send(type, payload = {}, options = {}) {
-            const messageId = options.messageId || SecurityUtils.generateMessageId();
-            const requestId = options.requestId || SecurityUtils.generateRequestId();
-            const timestamp = Date.now();
-
-            // Store mapping
-            this.requestIdMap.set(requestId, messageId);
-            setTimeout(() => this.requestIdMap.delete(requestId), 60000);
-
-            const readyCheck = MessageLifecycle.isReadyToSend();
-            if (!readyCheck.ready) {
-                const failedMessage = {
-                    id: messageId,
-                    requestId: requestId,
-                    status: "failed",
-                    reason: readyCheck.reason,
-                    timestamp,
-                    type,
-                    payload
-                };
-                MessageLifecycle.updateMessageUI(failedMessage);
-                StatusIndicator.show('FAILED', readyCheck.reason);
-                Logger.warn('MessageTransport', `Send failed: ${readyCheck.reason}`);
-                return Promise.resolve({ 
-                    success: false, 
-                    error: readyCheck.reason,
-                    messageId,
-                    requestId,
-                    status: "failed",
-                    reason: readyCheck.reason
-                });
-            }
-            
-            const message = {
-                protocol: PROTOCOL.VERSION,
-                messageId: messageId,
-                requestId: requestId,
-                type: type,
-                source: SOURCE_IFRAME,
-                target: 'parent',
-                frameId: FRAME_ID,
-                timestamp: timestamp,
-                payload: SecurityUtils.sanitizePayload(payload),
-                app: APP_NAME,
-                version: VERSION,
-                requiresAck: options.requiresAck !== false,
-                sequence: ++this.sequenceNumber
-            };
-
-            Logger.debug('MessageTransport', `Sending ${type} (${requestId})`);
-            return this._postMessage(message, options);
-        },
-        
-        _postMessage(message, options = {}) {
-            const targetOrigin = options.targetOrigin || this.parentOrigin;
-            const requiresAck = options.requiresAck !== false;
-            
-            return new Promise((resolve) => {
-                if (!window.parent || window.parent === window) {
-                    Logger.debug('MessageTransport', 'No parent, queueing message');
-                    this._queueMessage(message, requiresAck, resolve);
-                    return;
-                }
-
-                if (requiresAck) {
-                    const lifecycleMessage = MessageLifecycle.createMessage({
-                        id: message.messageId,
-                        requestId: message.requestId,
-                        type: message.type,
-                        payload: message.payload,
-                        timestamp: message.timestamp
-                    });
-
-                    MessageLifecycle.registerOutgoing(lifecycleMessage, () => {
-                        this._sendWithAck(message, targetOrigin, resolve, true);
-                    });
-
-                    this._sendWithAck(message, targetOrigin, resolve, false);
-                } else {
-                    try {
-                        window.parent.postMessage(message, targetOrigin);
-                        Logger.debug('MessageTransport', `Sent ${message.type} (no ack)`);
-                        resolve({ success: true, messageId: message.messageId, requestId: message.requestId });
-                    } catch (error) {
-                        Logger.error('MessageTransport', 'PostMessage error', error);
-                        this._queueMessage(message, false, resolve);
-                    }
-                }
-            });
-        },
-        
-        _sendWithAck(message, targetOrigin, resolve, isRetry = false) {
-            const requestId = message.requestId;
-            
-            const timer = setTimeout(() => {
-                const pending = this.pendingAcks.get(requestId);
-                if (pending) {
-                    this.pendingAcks.delete(requestId);
-                    this.outboundMessages.delete(message.messageId);
-                    
-                    if (!isRetry) {
-                        MessageLifecycle.handleTimeout(requestId);
-                    }
-                    
-                    Logger.warn('MessageTransport', `Timeout for ${requestId}`);
-                    
-                    resolve({ 
-                        success: false, 
-                        error: 'timeout', 
-                        messageId: message.messageId,
-                        requestId: requestId,
-                        status: 'failed',
-                        reason: 'No response'
-                    });
-                }
-            }, MessageLifecycle.TIMEOUT_DURATION);
-
-            this.pendingAcks.set(requestId, {
-                resolve,
-                timer,
-                type: message.type,
-                timestamp: Date.now(),
-                message
-            });
-
-            try {
-                window.parent.postMessage(message, targetOrigin);
-                Logger.debug('MessageTransport', `Sent ${message.type} with ack (${requestId})`);
-            } catch (error) {
-                clearTimeout(timer);
-                this.pendingAcks.delete(requestId);
-                
-                if (!isRetry) {
-                    MessageLifecycle.handleTimeout(requestId);
-                }
-                
-                this._queueMessage(message, true, resolve);
-            }
-        },
-        
-        _queueMessage(message, requiresAck, resolve) {
-            if (this.messageQueue.length >= this.maxQueueSize) {
-                Logger.warn('MessageTransport', 'Queue full, dropping message');
-                resolve({ 
-                    success: false, 
-                    error: 'queue_full', 
-                    messageId: message.messageId,
-                    requestId: message.requestId,
-                    status: 'failed',
-                    reason: 'Queue full'
-                });
-                return;
-            }
-
-            this.messageQueue.push({
-                message,
-                requiresAck,
-                timestamp: Date.now(),
-                messageId: message.messageId,
-                requestId: message.requestId,
-                resolve
-            });
-            
-            Logger.debug('MessageTransport', `Queued message ${message.requestId} (queue size: ${this.messageQueue.length})`);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MESSAGE_QUEUE, this.messageQueue);
-        },
-        
-        handleAck(ackMessage) {
-            const originalRequestId = ackMessage.payload?.requestId || 
-                                      ackMessage.payload?.messageId || 
-                                      ackMessage.requestId || 
-                                      ackMessage.messageId;
-            
-            if (!originalRequestId) return false;
-
-            // Find messageId from requestId if needed
-            const messageId = this.requestIdMap.get(originalRequestId) || originalRequestId;
-            
-            // Handle in lifecycle
-            MessageLifecycle.handleAck(originalRequestId);
-
-            const pending = this.pendingAcks.get(originalRequestId);
-            if (pending) {
-                clearTimeout(pending.timer);
-                this.pendingAcks.delete(originalRequestId);
-                this.outboundMessages.delete(messageId);
-                
-                pending.resolve({ 
-                    success: true, 
-                    ack: ackMessage.payload,
-                    receivedAt: Date.now(),
-                    status: 'delivered'
-                });
-                
-                DiagnosticsAgent.increment('acksReceived');
-                Logger.debug('MessageTransport', `ACK handled for ${originalRequestId}`);
-                return true;
-            }
-            return false;
-        },
-        
-        async processQueue() {
-            if (this.messageQueue.length === 0 || !window.parent || window.parent === window) return;
-
-            Logger.debug('MessageTransport', `Processing queue (${this.messageQueue.length} messages)`);
-
-            const now = Date.now();
-            const oneHour = 3600000;
-            
-            const freshQueue = this.messageQueue.filter(msg => msg.timestamp > now - oneHour);
-
-            for (const queued of freshQueue) {
-                try {
-                    await this._postMessage(
-                        queued.message,
-                        { requiresAck: queued.requiresAck }
-                    );
-                    
-                    const index = freshQueue.findIndex(q => q.requestId === queued.requestId);
-                    if (index !== -1) freshQueue.splice(index, 1);
-                } catch (error) {}
-            }
-
-            this.messageQueue = freshQueue;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MESSAGE_QUEUE, this.messageQueue);
-        },
-        
-        clearPending(requestId) {
-            if (requestId) {
-                const pending = this.pendingAcks.get(requestId);
-                if (pending) {
-                    clearTimeout(pending.timer);
-                    this.pendingAcks.delete(requestId);
-                }
-                const messageId = this.requestIdMap.get(requestId);
-                if (messageId) {
-                    this.outboundMessages.delete(messageId);
-                }
-                MessageLifecycle.outgoingRegistry.delete(requestId);
-                Logger.debug('MessageTransport', `Cleared pending for ${requestId}`);
-            } else {
-                for (const [_, pending] of this.pendingAcks) {
-                    clearTimeout(pending.timer);
-                }
-                this.pendingAcks.clear();
-                this.outboundMessages.clear();
-                MessageLifecycle.outgoingRegistry.clear();
-                this.requestIdMap.clear();
-                Logger.debug('MessageTransport', 'Cleared all pending messages');
-            }
-        },
-        
-        getStats() {
-            return {
-                pendingAcks: this.pendingAcks.size,
-                queuedMessages: this.messageQueue.length,
-                outboundMessages: this.outboundMessages.size,
-                sequenceNumber: this.sequenceNumber,
-                pendingLifecycle: MessageLifecycle.getPendingCount(),
-                requestIdMap: this.requestIdMap.size
-            };
-        }
-    }.init();
-
-    // =============================================
-    // MESSAGE FIREWALL WITH IDEMPOTENCY
+    // MESSAGE FIREWALL
     // =============================================
     const MessageFirewall = {
         processedMessages: new Set(),
         messageSequence: 0,
-        transport: MessageTransport,
 
         validate(event) {
             if (!SecurityUtils.validateOrigin(event.origin)) {
-                Logger.debug('MessageFirewall', `Invalid origin: ${event.origin}`);
                 return false;
             }
+            
             if (!event.source || event.source === window) return false;
+            
             if (!SecurityUtils.validateMessageStructure(event.data)) return false;
-
+            
             const data = event.data;
             if (!SecurityUtils.isForThisFrame(data)) return false;
-
+            
             const messageId = data.messageId || data.id;
-            if (messageId && SecurityUtils.checkReplay(messageId, data.timestamp || 0)) return false;
-
+            if (messageId && this.processedMessages.has(messageId)) {
+                return false;
+            }
+            
+            if (messageId) {
+                this.processedMessages.add(messageId);
+                setTimeout(() => this.processedMessages.delete(messageId), 60000);
+            }
+            
             return true;
         },
 
         parse(event) {
             if (!this.validate(event)) return null;
-
+            
             const data = event.data;
             
             if (data.protocol === PROTOCOL.VERSION) {
@@ -1910,15 +1158,15 @@
             if (!data.sequence) {
                 data.sequence = ++this.messageSequence;
             }
-
+            
             if (!data.timestamp) {
                 data.timestamp = Date.now();
             }
-
+            
             if (data.payload) {
                 data.payload = SecurityUtils.sanitizePayload(data.payload);
             }
-
+            
             const normalized = {
                 protocol: data.protocol,
                 messageId: data.messageId || data.id,
@@ -1934,21 +1182,11 @@
                 sequence: data.sequence,
                 receivedAt: Date.now()
             };
-
-            // Handle ACKs
-            if (data.type === MESSAGE_TYPES.ACK || 
-                data.type === MESSAGE_TYPES.HEARTBEAT_ACK || 
-                data.type === MESSAGE_TYPES.SESSION_ACK ||
-                data.type === MESSAGE_TYPES.REGISTRATION_ACK) {
-                
-                this.transport.handleAck(data);
-                
-                // Handle session verification response
-                if (data.payload?.requestId && data.type === MESSAGE_TYPES.ACK && data.originalType === MESSAGE_TYPES.VERIFY_SESSION) {
-                    SessionAuthority.handleVerificationResponse(data);
-                }
+            
+            if (data.type === MESSAGE_TYPES.ACK) {
+                AckController.handleAck(data.requestId || data.payload?.requestId, data.payload);
             }
-
+            
             return normalized;
         },
 
@@ -1959,14 +1197,14 @@
 
             const canonical = {
                 protocol: 'LEGACY',
-                messageId: messageId,
-                requestId: requestId,
+                messageId,
+                requestId,
                 type: data.type,
                 source: data.source || 'PARENT',
                 target: 'iframe',
                 frameId: data.frameId || FRAME_ID,
-                timestamp: timestamp,
-                payload: data.payload || {},
+                timestamp,
+                payload: SecurityUtils.sanitizePayload(data.payload || {}),
                 token: data.token,
                 signature: data.signature,
                 sequence: ++this.messageSequence,
@@ -1975,1575 +1213,1317 @@
                 receivedAt: Date.now()
             };
 
-            if (canonical.payload) {
-                canonical.payload = SecurityUtils.sanitizePayload(canonical.payload);
-            }
-
-            // Handle ACKs
-            if (data.type === MESSAGE_TYPES.ACK || 
-                data.type === MESSAGE_TYPES.HEARTBEAT_ACK ||
-                data.type === MESSAGE_TYPES.SESSION_ACK) {
-                this.transport.handleAck(data);
-                
-                // Handle session verification response
-                if (data.payload?.requestId && data.type === MESSAGE_TYPES.ACK && data.originalType === MESSAGE_TYPES.VERIFY_SESSION) {
-                    SessionAuthority.handleVerificationResponse(data);
-                }
+            if (data.type === MESSAGE_TYPES.ACK) {
+                AckController.handleAck(requestId, data.payload);
             }
 
             return canonical;
         },
 
         createOutbound(type, payload = {}, options = {}) {
-            const messageId = options.messageId || SecurityUtils.generateMessageId();
-            const requestId = options.requestId || SecurityUtils.generateRequestId();
-            const timestamp = Date.now();
-            
-            const message = {
+            return {
                 protocol: PROTOCOL.VERSION,
-                messageId,
-                requestId,
+                messageId: options.messageId || SecurityUtils.generateMessageId(),
+                requestId: options.requestId || SecurityUtils.generateRequestId(),
                 type,
                 source: SOURCE_IFRAME,
                 target: 'parent',
                 frameId: FRAME_ID,
-                timestamp,
+                timestamp: Date.now(),
                 payload: SecurityUtils.sanitizePayload(payload),
                 app: APP_NAME,
                 version: VERSION,
                 requiresAck: options.requiresAck !== false,
                 sequence: ++this.messageSequence
             };
-
-            return message;
         },
 
         send(type, payload = {}, options = {}) {
-            return this.transport.send(type, payload, options);
-        },
-
-        processQueue() {
-            return this.transport.processQueue();
+            return MessageTransport.send(type, payload, options);
         },
 
         getStats() {
             return {
-                processedMessages: this.processedMessages.size,
-                messageSequence: this.messageSequence,
-                transport: this.transport.getStats()
+                processed: this.processedMessages.size,
+                sequence: this.messageSequence
             };
         }
     };
 
     // =============================================
-    // REGISTRATION CONTROLLER - IDEMPOTENT
+    // FRIEND MANAGER - CACHED FRIEND LIST
     // =============================================
-    let registrationSent = false;
-    let registrationPromise = null;
-    let registrationResolve = null;
-    let registrationReject = null;
-    let parentOrigin = window.location.origin;
-
-    function registerWithParent() {
-    if (registrationSent && registrationPromise) {
-        Logger.debug('Registration', 'Registration already in progress');
-        return registrationPromise;
-    }
-    
-    if (!window.parent || window.parent === window) {
-        Logger.warn('Registration', 'No parent window detected');
-        return Promise.resolve({ success: false, reason: 'no-parent' });
-    }
-
-    registrationSent = true;
-
-    registrationPromise = new Promise((resolve, reject) => {
-        registrationResolve = resolve;
-        registrationReject = reject;
-        
-        const timeout = setTimeout(() => {
-            if (registrationResolve) {
-                Logger.warn('Registration', 'Registration timeout - assuming success');
-                // Don't reject, assume success
-                registrationResolve({ success: true, assumed: true, reason: 'timeout' });
-                registrationResolve = null;
-                registrationReject = null;
-            }
-        }, 3000);
-
-        try {
-            const requestId = SecurityUtils.generateRequestId();
-            Logger.info('Registration', `Registering with parent (${requestId})`);
-            
-            window.parent.postMessage({
-                type: MESSAGE_TYPES.IFRAME_REGISTERED,
-                module: "messages",
-                frameId: FRAME_ID,
-                version: VERSION,
-                timestamp: Date.now(),
-                requestId: requestId,
-                expectAck: true
-            }, parentOrigin);
-            
-            // Store timeout
-            MessageTransport.pendingAcks.set(requestId, {
-                resolve: (result) => {
-                    clearTimeout(timeout);
-                    if (registrationResolve) {
-                        Logger.success('Registration', 'Registration successful');
-                        registrationResolve(result);
-                        registrationResolve = null;
-                        registrationReject = null;
-                    }
-                },
-                reject: (error) => {
-                    clearTimeout(timeout);
-                    if (registrationReject) {
-                        // Don't reject, assume success
-                        Logger.warn('Registration', 'Registration rejected - assuming success');
-                        registrationResolve({ success: true, assumed: true, reason: 'rejected' });
-                        registrationResolve = null;
-                        registrationReject = null;
-                    }
-                },
-                timer: timeout,
-                type: 'REGISTRATION'
-            });
-            
-        } catch (e) {
-            clearTimeout(timeout);
-            Logger.error('Registration', 'Registration failed', e);
-            // Don't reject, assume success
-            registrationResolve({ success: true, assumed: true, reason: 'error' });
-            registrationResolve = null;
-            registrationReject = null;
-        }
-    });
-
-    return registrationPromise;
-}
-    // =============================================
-    // PARENT DETECTOR & HEARTBEAT
-    // =============================================
-    // =============================================
-// PARENT DETECTOR & HEARTBEAT
-// =============================================
-const ParentDetector = {
-    isReady: false,
-    pingInterval: null,
-    lastPong: 0,
-    listeners: new Set(),
-    pingIntervalMs: 30000,
-    connectionQuality: 'unknown',
-    lastPingTime: 0,
-    heartbeatEnabled: true,
-    lastWarningTime: 0,
-    lastDisconnectTime: 0,
-    registrationAckReceived: false,
-    _pendingSession: null,
-
-    init() {
-        this._checkParent();
-        this._startPing(); // This will now work
-        return this;
-    },
-
-    _checkParent() {
-        const hasParent = window.parent && window.parent !== window;
-        const canPostMessage = typeof window.parent?.postMessage === 'function';
-        
-        // Be optimistic - assume parent is ready even if we can't verify
-        this.isReady = hasParent && canPostMessage;
-        
-        if (!this.isReady && !this.lastDisconnectTime) {
-            this.lastDisconnectTime = Date.now();
-            StatusIndicator.show('DISCONNECTED');
-            Logger.warn('ParentDetector', 'Parent not available');
-        } else if (this.isReady) {
-            Logger.debug('ParentDetector', 'Parent detected');
-        }
-    },
-
-    _startPing() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-        }
-        this.pingInterval = setInterval(() => {
-            if (!this.isReady) {
-                this._checkParent();
-                return;
-            }
-
-            this._sendPing();
-        }, this.pingIntervalMs);
-        Logger.debug('ParentDetector', 'Ping interval started');
-    },
-
-    _sendPing() {
-        if (!this.heartbeatEnabled) return;
-        
-        try {
-            this.lastPingTime = Date.now();
-            
-            const message = {
-                protocol: PROTOCOL.VERSION,
-                type: MESSAGE_TYPES.HEARTBEAT,
-                source: SOURCE_IFRAME,
-                target: 'parent',
-                frameId: FRAME_ID,
-                messageId: SecurityUtils.generateMessageId(),
-                requestId: SecurityUtils.generateRequestId(),
-                timestamp: this.lastPingTime,
-                payload: { 
-                    timestamp: this.lastPingTime,
-                    frameId: FRAME_ID
-                },
-                expectAck: true
-            };
-            
-            window.parent.postMessage(message, parentOrigin);
-            Logger.debug('ParentDetector', 'Heartbeat sent');
-            
-        } catch (e) {
-            Logger.debug('ParentDetector', 'Heartbeat send failed', e);
-        }
-    },
-
-    handleHeartbeatAck(ackMessage) {
-        const now = Date.now();
-        const rtt = now - (ackMessage.payload?.timestamp || this.lastPingTime || now);
-        
-        this.lastPong = now;
-        HEARTBEAT.failures = 0;
-        HEARTBEAT.lastHeartbeat = now;
-        
-        if (!this.isReady) {
-            this.isReady = true;
-            this._notifyListeners();
-        }
-        
-        DiagnosticsAgent.recordPingRtt(rtt);
-        Logger.debug('ParentDetector', `Heartbeat ACK received (RTT: ${rtt}ms)`);
-    },
-
-    handleRegistrationAck() {
-        this.registrationAckReceived = true;
-        Logger.success('ParentDetector', 'Registration ACK received');
-        
-        // Transition state
-        if (StateMachine.isInState(StateMachine.REGISTERING)) {
-            StateMachine.transition(StateMachine.REGISTERED, 'registration-ack');
-        }
-    },
-
-    handleHeartbeatMiss() {
-        HEARTBEAT.failures++;
-        HEARTBEAT.lastHeartbeat = Date.now();
-
-        if (HEARTBEAT.failures < HEARTBEAT.maxFailures) {
-            const now = Date.now();
-            if (now - this.lastWarningTime > 30000) {
-                StatusIndicator.show('WARNING');
-                this.lastWarningTime = now;
-                Logger.warn('ParentDetector', `Heartbeat miss (${HEARTBEAT.failures}/${HEARTBEAT.maxFailures})`);
-            }
-            return;
-        }
-
-        if (HEARTBEAT.failures === HEARTBEAT.maxFailures) {
-            const now = Date.now();
-            if (now - this.lastDisconnectTime > 60000) {
-                StatusIndicator.show('DISCONNECTED');
-                this.lastDisconnectTime = now;
-                Logger.error('ParentDetector', 'Max heartbeat failures reached');
-            }
-            this._requestStatusRefresh();
-        }
-    },
-
-    _requestStatusRefresh() {
-        if (!window.parent || window.parent === window) return;
-
-        try {
-            window.parent.postMessage({
-                type: MESSAGE_TYPES.MESSAGES_STATUS_WARNING,
-                severity: "soft",
-                frameId: FRAME_ID,
-                timestamp: Date.now()
-            }, parentOrigin);
-        } catch (e) {}
-    },
-
-    subscribe(callback) {
-        this.listeners.add(callback);
-        if (this.isReady) callback({ ready: true, connectionQuality: this.connectionQuality });
-        return () => this.listeners.delete(callback);
-    },
-
-    _notifyListeners() {
-        const data = { 
-            ready: this.isReady, 
-            connectionQuality: this.connectionQuality,
-            lastPong: this.lastPong
-        };
-        
-        this.listeners.forEach(cb => {
-            try {
-                cb(data);
-            } catch (e) {}
-        });
-        
-        window.dispatchEvent(new CustomEvent('parentStatusChanged', { detail: data }));
-    },
-
-    waitForParentReady(timeoutMs = 5000) {
-        return new Promise((resolve) => {
-            if (this.isReady) {
-                resolve(true);
-                return;
-            }
-            
-            const timeout = setTimeout(() => {
-                window.removeEventListener('parentReady', handler);
-                // Don't reject, just resolve with false
-                resolve(false);
-            }, timeoutMs);
-            
-            const handler = () => {
-                clearTimeout(timeout);
-                window.removeEventListener('parentReady', handler);
-                resolve(true);
-            };
-            
-            window.addEventListener('parentReady', handler);
-            
-            // Also check periodically
-            let attempts = 0;
-            const interval = setInterval(() => {
-                attempts++;
-                if (this.isReady) {
-                    clearInterval(interval);
-                    clearTimeout(timeout);
-                    window.removeEventListener('parentReady', handler);
-                    resolve(true);
-                } else if (attempts > 10) {
-                    clearInterval(interval);
-                }
-            }, 500);
-        });
-    },
-
-    getStats() {
-        return {
-            isReady: this.isReady,
-            connectionQuality: this.connectionQuality,
-            lastPong: this.lastPong,
-            heartbeatFailures: HEARTBEAT.failures,
-            registrationAckReceived: this.registrationAckReceived
-        };
-    },
-
-    destroy() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
-        }
-        this.listeners.clear();
-    }
-}.init();
-
-    // =============================================
-    // SESSION MIRROR
-    // =============================================
-    const SessionMirror = {
-        _state: {
-            authenticated: false,
-            user: null,
-            token: null,
-            permissions: [],
-            capabilities: [],
-            expiresAt: 0,
-            receivedAt: 0,
-            fromCache: false,
-            version: null,
-            userId: null,
-            sessionId: null,
-            lastActivity: Date.now()
-        },
-        
+    const FriendManager = {
+        _friends: [],
+        _friendsMap: new Map(),
+        _loaded: false,
+        _loading: false,
+        _loadPromise: null,
         _subscribers: new Set(),
-        _refreshTimer: null,
-        _initPromise: null,
-        _expiryCheckInterval: null,
-        _refreshPromise: null,
-        _tokenRefreshBuffer: 60000,
-
-        init() {
-            if (this._initPromise) return this._initPromise;
-            
-            this._initPromise = new Promise((resolve) => {
-                const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE);
-                if (cached && cached.expiresAt > Date.now()) {
-                    this._state = {
-                        ...cached,
-                        fromCache: true,
-                        receivedAt: Date.now(),
-                        lastActivity: Date.now()
-                    };
-                    this._state.authenticated = !!cached.user && !!cached.token && 
-                                                 cached.expiresAt > Date.now();
-                    this._state.userId = cached.user?.id || cached.user?.userId;
-                    
-                    // Provide token to TokenAuthority
-                    if (this._state.token) {
-                        TokenAuthority.receiveToken(this._state.token, 'cache');
-                    }
-                    
-                    // Provide session to SessionAuthority
-                    if (this._state.authenticated) {
-                        SessionAuthority.receiveSession(this._state);
-                    }
-                    
-                    Logger.info('SessionMirror', 'Session restored from cache');
-                }
-                
-                this._startExpiryCheck();
-                resolve(this._state);
-            });
-            
-            return this._initPromise;
-        },
-
-        _startExpiryCheck() {
-            if (this._expiryCheckInterval) clearInterval(this._expiryCheckInterval);
-            
-            this._expiryCheckInterval = setInterval(() => {
-                const now = Date.now();
-                
-                if (this._state.authenticated && this._state.expiresAt < now) {
-                    Logger.warn('SessionMirror', 'Session expired');
-                    this.clearSession();
-                    return;
-                }
-                
-                if (this._state.authenticated && 
-                    this._state.expiresAt - now < this._tokenRefreshBuffer) {
-                    Logger.debug('SessionMirror', 'Session expiring soon, requesting refresh');
-                    this._requestRefresh();
-                }
-                
-                this._state.lastActivity = now;
-            }, 30000);
-        },
-
-        acceptSession(snapshot) {
-            if (!snapshot || typeof snapshot !== 'object') return false;
-
-            const oldState = { ...this._state };
-            
-            this._state = {
-                authenticated: !!(snapshot.user && snapshot.token),
-                user: snapshot.user ? { ...snapshot.user } : null,
-                token: snapshot.token || null,
-                permissions: snapshot.permissions || [],
-                capabilities: snapshot.capabilities || [],
-                expiresAt: snapshot.expiresAt || (Date.now() + 3600000),
-                receivedAt: Date.now(),
-                fromCache: false,
-                version: snapshot.version || VERSION,
-                userId: snapshot.user?.id || snapshot.user?.userId || snapshot.userId,
-                sessionId: snapshot.sessionId || this._generateSessionId(),
-                lastActivity: Date.now()
-            };
-
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
-                user: this._state.user,
-                token: this._state.token,
-                permissions: this._state.permissions,
-                capabilities: this._state.capabilities,
-                expiresAt: this._state.expiresAt,
-                version: this._state.version,
-                sessionId: this._state.sessionId
-            });
-
-            if (this._state.user) {
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user);
-            }
-
-            // Provide token to TokenAuthority
-            if (this._state.token) {
-                TokenAuthority.receiveToken(this._state.token, 'session');
-            }
-            
-            // Provide session to SessionAuthority
-            SessionAuthority.receiveSession(this._state);
-
-            this._setupRefreshTimer();
-            this._notifySubscribers('session-accepted', { old: oldState, new: this._state });
-            
-            Logger.success('SessionMirror', 'Session accepted');
-            
-            return true;
-        },
-
-        updateSession(update) {
-            if (!update) return false;
-
-            let changed = false;
-            const oldState = { ...this._state };
-            
-            if (update.user) {
-                this._state.user = { ...this._state.user, ...update.user };
-                this._state.userId = this._state.user?.id || this._state.user?.userId;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user);
-                changed = true;
-            }
-            
-            if (update.token) {
-                this._state.token = update.token;
-                TokenAuthority.receiveToken(update.token, 'update');
-                changed = true;
-            }
-            
-            if (update.permissions) {
-                this._state.permissions = update.permissions;
-                changed = true;
-            }
-            
-            if (update.capabilities) {
-                this._state.capabilities = update.capabilities;
-                changed = true;
-            }
-            
-            if (update.expiresAt) {
-                this._state.expiresAt = update.expiresAt;
-                changed = true;
-            }
-            
-            if (update.sessionId) {
-                this._state.sessionId = update.sessionId;
-                changed = true;
-            }
-
-            if (changed) {
-                this._state.authenticated = !!this._state.user && !!this._state.token;
-                this._state.receivedAt = Date.now();
-                this._state.lastActivity = Date.now();
-                
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
-                    user: this._state.user,
-                    token: this._state.token,
-                    permissions: this._state.permissions,
-                    capabilities: this._state.capabilities,
-                    expiresAt: this._state.expiresAt,
-                    version: this._state.version,
-                    sessionId: this._state.sessionId
-                });
-                
-                this._setupRefreshTimer();
-                this._notifySubscribers('session-updated', { old: oldState, new: this._state });
-                
-                Logger.info('SessionMirror', 'Session updated');
-            }
-            
-            return changed;
-        },
-
-        clearSession() {
-            const oldState = { ...this._state };
-            
-            this._state = {
-                authenticated: false,
-                user: null,
-                token: null,
-                permissions: [],
-                capabilities: [],
-                expiresAt: 0,
-                receivedAt: 0,
-                fromCache: false,
-                version: null,
-                userId: null,
-                sessionId: null,
-                lastActivity: Date.now()
-            };
-            
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.SESSION_CACHE);
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.USER_CACHE);
-            TokenAuthority.clearToken();
-            
-            if (this._refreshTimer) {
-                clearTimeout(this._refreshTimer);
-                this._refreshTimer = null;
-            }
-            
-            this._notifySubscribers('session-cleared', { old: oldState });
-            
-            Logger.warn('SessionMirror', 'Session cleared');
-        },
-
-        _generateSessionId() {
-            return 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
-        },
-
-        _setupRefreshTimer() {
-            if (this._refreshTimer) {
-                clearTimeout(this._refreshTimer);
-                this._refreshTimer = null;
-            }
-            
-            const timeUntilExpiry = this._state.expiresAt - Date.now();
-            if (timeUntilExpiry > 0 && timeUntilExpiry < 300000) {
-                this._refreshTimer = setTimeout(() => {
-                    this._requestRefresh();
-                }, Math.max(timeUntilExpiry - this._tokenRefreshBuffer, 1000));
-            }
-        },
-
-        _requestRefresh() {
-            if (this._refreshPromise) return this._refreshPromise;
-            
-            if (!window.parent || window.parent === window) return;
-            
-            DiagnosticsAgent.increment('sessionRefreshes');
-            
-            this._refreshPromise = new Promise((resolve) => {
-                try {
-                    const message = MessageFirewall.createOutbound(
-                        MESSAGE_TYPES.SESSION_SYNC,
-                        { 
-                            timestamp: Date.now(),
-                            frameId: FRAME_ID,
-                            sessionId: this._state.sessionId
-                        },
-                        { requiresAck: true, timeout: 5000 }
-                    );
-                    
-                    if (message) {
-                        window.parent.postMessage(message, parentOrigin);
-                        setTimeout(() => {
-                            this._refreshPromise = null;
-                            resolve(false);
-                        }, 5000);
-                    } else {
-                        resolve(false);
-                    }
-                } catch (e) {
-                    this._refreshPromise = null;
-                    resolve(false);
-                }
-            });
-            
-            return this._refreshPromise;
-        },
-
-        subscribe(callback) {
-            this._subscribers.add(callback);
-            try {
-                callback({
-                    type: 'initial',
-                    state: this.getState()
-                });
-            } catch (e) {}
-            return () => this._subscribers.delete(callback);
-        },
-
-        _notifySubscribers(type, data = {}) {
-            const state = this.getState();
-            const event = { type, state, ...data };
-            
-            this._subscribers.forEach(cb => {
-                try {
-                    cb(event);
-                } catch (e) {}
-            });
-            
-            window.dispatchEvent(new CustomEvent('sessionUpdated', { 
-                detail: { session: state, changeType: type, ...data }
-            }));
-        },
-
-        getState() {
-            return {
-                authenticated: this._state.authenticated,
-                user: this._state.user ? { ...this._state.user } : null,
-                token: this._state.token,
-                permissions: [...this._state.permissions],
-                capabilities: [...this._state.capabilities],
-                expiresAt: this._state.expiresAt,
-                receivedAt: this._state.receivedAt,
-                fromCache: this._state.fromCache,
-                userId: this._state.userId,
-                sessionId: this._state.sessionId,
-                lastActivity: this._state.lastActivity
-            };
-        },
-
-        getUser() {
-            return this._state.user ? { ...this._state.user } : null;
-        },
-
-        getToken() {
-            return this._state.token;
-        },
-
-        getSessionId() {
-            return this._state.sessionId;
-        },
-
-        isAuthenticated() {
-            return this._state.authenticated && this._state.expiresAt > Date.now();
-        },
-
-        getTimeUntilExpiry() {
-            if (!this._state.authenticated) return 0;
-            return Math.max(0, this._state.expiresAt - Date.now());
-        },
-
-        isExpiringSoon(threshold = 300000) {
-            return this._state.authenticated && this.getTimeUntilExpiry() < threshold;
-        }
-    };
-// Add this after SessionMirror is defined
-if (StateMachine.onStateChange) {
-    StateMachine.onStateChange((oldState, newState, reason) => {
-        // When we reach WAITING_FOR_SESSION, check if we have pending session data
-        if (newState === StateMachine.WAITING_FOR_SESSION && ParentDetector._pendingSession) {
-            Logger.info('MessagingClient', 'Processing pending session data');
-            const pendingSession = ParentDetector._pendingSession;
-            ParentDetector._pendingSession = null;
-            
-            // Process the session
-            SessionMirror.acceptSession(pendingSession);
-            
-            // Move to next state
-            if (StateMachine.canTransitionTo(StateMachine.SESSION_ACTIVE)) {
-                StateMachine.transition(StateMachine.SESSION_ACTIVE, 'pending-session');
-            }
-        }
+        _lastLoadTime: 0,
+        _cacheTTL: 300000,
         
-        // When we reach SESSION_ACTIVE, check if we have pending token
-        if (newState === StateMachine.SESSION_ACTIVE && !TokenAuthority.hasToken()) {
-            // Request token
-            MessageFirewall.send(MESSAGE_TYPES.REQUEST_TOKEN, {
-                frameId: FRAME_ID,
-                timestamp: Date.now()
-            }, { requiresAck: false });
-        }
-    });
-}
-
-    // =============================================
-    // SESSION CLIENT - PASSIVE
-    // =============================================
-    const SessionClient = {
-        syncInProgress: false,
-        lastSyncTime: 0,
-        syncInterval: 120000,
-        syncTimer: null,
-        pendingSessionRequests: new Map(),
-        expiryCheckTimer: null,
-        refreshInProgress: false,
-
         init() {
-            this._startSyncTimer();
-            this._startExpiryCheck();
+            this._loadFromCache();
             return this;
         },
-
-        _startSyncTimer() {
-            if (this.syncTimer) clearInterval(this.syncTimer);
-            this.syncTimer = setInterval(() => this.sync(), this.syncInterval);
-            Logger.debug('SessionClient', 'Sync timer started');
+        
+        _loadFromCache() {
+            const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
+            if (cached && Array.isArray(cached.friends) && cached.timestamp > Date.now() - this._cacheTTL) {
+                this._friends = cached.friends;
+                this._rebuildMap();
+                this._loaded = true;
+                this._lastLoadTime = cached.timestamp;
+                Logger.info('FriendManager', `Loaded ${this._friends.length} friends from cache`);
+            }
         },
-
-        _startExpiryCheck() {
-            if (this.expiryCheckTimer) clearInterval(this.expiryCheckTimer);
-            this.expiryCheckTimer = setInterval(() => {
-                if (SessionMirror && SessionMirror.isAuthenticated()) {
-                    const timeUntilExpiry = SessionMirror.getTimeUntilExpiry();
-                    if (timeUntilExpiry < 60000) {
-                        this._handleExpiringSoon();
-                    }
+        
+        _rebuildMap() {
+            this._friendsMap.clear();
+            this._friends.forEach(friend => {
+                if (friend.id || friend.uid) {
+                    this._friendsMap.set(friend.id || friend.uid, friend);
                 }
-            }, 30000);
+            });
         },
-
-        async sync(force = false) {
-            if (this.syncInProgress) return false;
-            
+        
+        async loadFriends(force = false) {
             const now = Date.now();
-            if (!force && now - this.lastSyncTime < this.syncInterval) return false;
-            if (!window.parent || window.parent === window) return false;
-
-            this.syncInProgress = true;
-
+            
+            if (!force && this._loaded && now - this._lastLoadTime < this._cacheTTL) {
+                return this._friends;
+            }
+            
+            if (this._loading) {
+                return this._loadPromise;
+            }
+            
+            this._loading = true;
+            this._loadPromise = this._doLoadFriends();
+            
             try {
-                Logger.debug('SessionClient', 'Syncing session with parent');
-                const result = await MessageFirewall.send(
-                    MESSAGE_TYPES.SESSION_SYNC,
-                    {
-                        timestamp: now,
-                        frameId: FRAME_ID,
-                        sessionId: SessionMirror.getSessionId(),
-                        lastActivity: SessionMirror.getState().lastActivity,
-                        force
-                    },
-                    { requiresAck: true, timeout: 5000 }
-                );
-
-                if (result.success) {
-                    this.lastSyncTime = now;
-                    Logger.debug('SessionClient', 'Sync successful');
-                }
-                return result.success;
-            } catch (error) {
-                Logger.warn('SessionClient', 'Sync failed', error);
-                return false;
+                const friends = await this._loadPromise;
+                return friends;
             } finally {
-                this.syncInProgress = false;
+                this._loading = false;
+                this._loadPromise = null;
             }
         },
-
-        handleSessionData(message) {
-            const payload = message.payload;
-            if (!payload) return false;
-
-            const requestId = payload.requestId || message.requestId || message.messageId;
-            if (requestId && this.pendingSessionRequests.has(requestId)) {
-                const resolver = this.pendingSessionRequests.get(requestId);
-                resolver(payload);
-                this.pendingSessionRequests.delete(requestId);
+        
+        async _doLoadFriends() {
+            Logger.info('FriendManager', 'Loading friends from parent');
+            
+            try {
+                const result = await MessageTransport.send(MESSAGE_TYPES.GET_FRIEND_LIST, {
+                    timestamp: Date.now(),
+                    frameId: FRAME_ID
+                }, { requiresAck: true, timeout: 5000 });
+                
+                if (result.success && result.ack?.friends) {
+                    this._friends = result.ack.friends;
+                    this._rebuildMap();
+                    this._loaded = true;
+                    this._lastLoadTime = Date.now();
+                    
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
+                        friends: this._friends,
+                        timestamp: this._lastLoadTime
+                    });
+                    
+                    Logger.success('FriendManager', `Loaded ${this._friends.length} friends`);
+                    this._notifySubscribers();
+                    
+                    return this._friends;
+                }
+                
+                if (this._friends.length > 0) {
+                    Logger.warn('FriendManager', 'Using cached friends');
+                    return this._friends;
+                }
+                
+                return [];
+            } catch (error) {
+                Logger.error('FriendManager', 'Failed to load friends', error);
+                
+                if (this._friends.length > 0) {
+                    return this._friends;
+                }
+                
+                return [];
             }
-
-            SessionMirror.acceptSession(payload);
-
-            MessageFirewall.send(
-                MESSAGE_TYPES.SESSION_ACK,
-                {
-                    messageId: message.messageId,
-                    requestId: message.requestId || message.messageId,
-                    sessionId: SessionMirror.getSessionId(),
-                    timestamp: Date.now()
-                },
-                { requiresAck: false }
-            );
-
+        },
+        
+        getFriends() {
+            return [...this._friends];
+        },
+        
+        getFriend(id) {
+            return this._friendsMap.get(id) || null;
+        },
+        
+        updateFriend(update) {
+            const id = update.id || update.uid;
+            if (!id) return false;
+            
+            const existing = this._friendsMap.get(id);
+            if (!existing) {
+                this._friends.push(update);
+            } else {
+                Object.assign(existing, update);
+            }
+            
+            this._rebuildMap();
+            this._notifySubscribers();
+            
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
+                friends: this._friends,
+                timestamp: Date.now()
+            });
+            
             return true;
         },
-
-        async requestSession(force = false) {
-            return new Promise((resolve) => {
-                const requestId = SecurityUtils.generateRequestId();
-                
-                this.pendingSessionRequests.set(requestId, resolve);
-                
-                Logger.info('SessionClient', `Requesting session (${requestId})`);
-                
-                MessageFirewall.send(
-                    MESSAGE_TYPES.REQUEST_SESSION,
-                    {
-                        timestamp: Date.now(),
-                        frameId: FRAME_ID,
-                        force,
-                        requestId
-                    },
-                    { requiresAck: true, timeout: 8000, requestId }
-                ).catch(() => {
-                    this.pendingSessionRequests.delete(requestId);
-                    resolve(null);
-                });
-
-                setTimeout(() => {
-                    if (this.pendingSessionRequests.has(requestId)) {
-                        Logger.warn('SessionClient', `Session request timeout (${requestId})`);
-                        this.pendingSessionRequests.delete(requestId);
-                        resolve(null);
-                    }
-                }, 10000);
-            });
-        },
-
-        handleSessionExpired() {
-            Logger.warn('SessionClient', 'Session expired');
-            SessionMirror.clearSession();
-            this.requestSession(true);
-            window.dispatchEvent(new CustomEvent('sessionExpired'));
-        },
-
-        _handleExpiringSoon() {
-            if (this.refreshInProgress) return;
-            
-            this.refreshInProgress = true;
-            Logger.debug('SessionClient', 'Session expiring soon, refreshing');
-            
-            MessageFirewall.send(
-                MESSAGE_TYPES.SESSION_SYNC,
-                {
-                    timestamp: Date.now(),
-                    frameId: FRAME_ID,
-                    sessionId: SessionMirror.getSessionId()
-                },
-                { requiresAck: true, timeout: 5000 }
-            ).finally(() => {
-                this.refreshInProgress = false;
-            });
-        },
-
-        stop() {
-            if (this.syncTimer) {
-                clearInterval(this.syncTimer);
-                this.syncTimer = null;
+        
+        subscribe(callback) {
+            this._subscribers.add(callback);
+            if (this._loaded) {
+                try { callback(this._friends); } catch (e) {}
             }
-            if (this.expiryCheckTimer) {
-                clearInterval(this.expiryCheckTimer);
-                this.expiryCheckTimer = null;
-            }
+            return () => this._subscribers.delete(callback);
+        },
+        
+        _notifySubscribers() {
+            const friends = this.getFriends();
+            this._subscribers.forEach(cb => {
+                try { cb(friends); } catch (e) {}
+            });
+            
+            window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                detail: { friends }
+            }));
+        },
+        
+        isLoaded() {
+            return this._loaded;
+        },
+        
+        clear() {
+            this._friends = [];
+            this._friendsMap.clear();
+            this._loaded = false;
+            SafeStorage.remove(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
         }
     }.init();
 
     // =============================================
-    // MESSAGING CLIENT - MAIN ORCHESTRATOR
+    // CHAT MANAGER - ACTIVE CHAT STATE
     // =============================================
-    class MessagingClient {
-        constructor() {
-            this.listeners = new Map();
-            this.parentDetector = ParentDetector;
-            this.sessionMirror = SessionMirror;
-            this.sessionClient = SessionClient;
-            this.messageFirewall = MessageFirewall;
-            this.transport = MessageTransport;
-            this._pendingPromises = new Map();
-            this._initPromise = null;
-            this._initialized = false;
-        }
-        // Add this method to the MessagingClient class (around line 3200-3300)
-getHealth() {
-    return {
-        parentReady: ParentDetector?.isReady || false,
-        connectionQuality: this._getConnectionQuality(),
-        handshake: {
-            state: StateMachine.getState(),
-            version: VERSION,
-            duration: StateMachine.getTransitionHistory().length > 0 ? 
-                Date.now() - (StateMachine.getTransitionHistory()[0]?.timestamp || Date.now()) : 0
+    const ChatManager = {
+        _chats: [],
+        _chatsMap: new Map(),
+        _activeChat: null,
+        _messages: [],
+        _messagesMap: new Map(),
+        _subscribers: new Set(),
+        _loaded: false,
+        
+        init() {
+            this._loadFromCache();
+            return this;
         },
-        sessionValid: SessionMirror?.isAuthenticated?.() || false,
-        tokenValid: TokenAuthority?.hasToken?.() || false,
-        wsState: WSController?.getState?.() || 'UNKNOWN',
-        pendingMessages: MessageLifecycle?.getPendingCount?.() || 0,
-        queuedMessages: MessageTransport?.messageQueue?.length || 0,
-        uptime: DiagnosticsAgent?.getUptime?.() || 0,
-        timestamp: Date.now()
-    };
-}
-
-// Add this helper method to determine connection quality
-_getConnectionQuality() {
-    if (!ParentDetector?.isReady) return 'dead';
-    
-    const health = HEARTBEAT;
-    const now = Date.now();
-    
-    if (health.failures >= health.maxFailures) return 'dead';
-    if (health.failures > 0) return 'poor';
-    if (now - health.lastHeartbeat > 20000) return 'poor';
-    
-    // Check WebSocket state
-    const wsState = WSController?.getState?.();
-    if (wsState === 'READY') return 'excellent';
-    if (wsState === 'CONNECTED' || wsState === 'AUTHENTICATING') return 'good';
-    if (wsState === 'CONNECTING' || wsState === 'RECONNECTING') return 'fair';
-    
-    return 'unknown';
-}
-
-        async initialize() {
-            if (this._initialized) {
-                Logger.debug('MessagingClient', 'Already initialized');
-                return this._initPromise;
+        
+        _loadFromCache() {
+            const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
+            if (cached && Array.isArray(cached.chats)) {
+                this._chats = cached.chats;
+                this._rebuildMap();
             }
-
-            this._initPromise = this._doInitialize();
-            return this._initPromise;
-        }
-
-        async _doInitialize() {
-            Logger.info('MessagingClient', `🚀 INIT: Messages Core v${VERSION} (${ENV.isLocal ? 'LOCAL' : ENV.isRender ? 'RENDER' : 'PRODUCTION'})`);
+        },
+        
+        _rebuildMap() {
+            this._chatsMap.clear();
+            this._chats.forEach(chat => {
+                if (chat.id) {
+                    this._chatsMap.set(chat.id, chat);
+                }
+            });
+        },
+        
+        async loadChats(force = false) {
+            if (!SessionManager.isReady()) {
+                try {
+                    await SessionManager.whenReady();
+                } catch (e) {
+                    return this._chats;
+                }
+            }
             
             try {
-                // State: UNINITIALIZED → REGISTERING
-                await StateMachine.transition(StateMachine.REGISTERING, 'starting-init');
+                const result = await MessageTransport.send(MESSAGE_TYPES.GET_CHAT_HISTORY, {
+                    timestamp: Date.now(),
+                    frameId: FRAME_ID,
+                    all: true
+                }, { requiresAck: true, timeout: 5000 });
                 
-                // Wait for core to be ready
-                await StateMachine.init();
-                
-                // Initialize session mirror
-                await SessionMirror.init();
-                
-                // Register with parent
-                this._initMessageListener();
-                this._initVisibilityHandler();
-                this._initNetworkHandler();
-                this._initHeartbeatMonitor();
-                
-                // Send registration
+                if (result.success && result.ack?.chats) {
+                    this._chats = result.ack.chats;
+                    this._rebuildMap();
+                    
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, {
+                        chats: this._chats,
+                        timestamp: Date.now()
+                    });
+                    
+                    this._notifySubscribers();
+                }
+            } catch (error) {
+                Logger.warn('ChatManager', 'Failed to load chats', error);
+            }
+            
+            return this._chats;
+        },
+        
+        async openChat(chatId) {
+            if (!chatId) return null;
+            
+            let chat = this._chatsMap.get(chatId);
+            
+            if (!chat) {
                 try {
-                    await registerWithParent();
-                    ParentDetector.handleRegistrationAck();
-                } catch (e) {
-                    Logger.warn('MessagingClient', 'Registration failed, continuing in degraded mode', e);
-                    // Continue in degraded mode
-                }
-                
-                // State: REGISTERED → WAITING_FOR_SESSION
-                await StateMachine.transition(StateMachine.WAITING_FOR_SESSION, 'registered');
-                
-                // Verify session with parent
-                try {
-                    await SessionAuthority.verifyWithParent();
-                } catch (e) {
-                    Logger.warn('MessagingClient', 'Session verification failed, using cache', e);
-                }
-                
-                // Wait for session
-                const session = await SessionAuthority.waitForSession();
-                
-                if (!session || !session.authenticated) {
-                    Logger.warn('MessagingClient', 'No valid session, proceeding with limited functionality');
-                    await StateMachine.transition(StateMachine.SESSION_ACTIVE, 'limited-session');
-                } else {
-                    await StateMachine.transition(StateMachine.SESSION_ACTIVE, 'session-verified');
-                }
-                
-                // State: SESSION_ACTIVE → WAITING_FOR_TOKEN
-                await StateMachine.transition(StateMachine.WAITING_FOR_TOKEN, 'session-active');
-                
-                // Wait for token
-                try {
-                    const token = await TokenAuthority.waitForToken();
-                    Logger.success('MessagingClient', 'Token ready');
-                } catch (e) {
-                    Logger.error('MessagingClient', 'Token timeout', e);
-                    await StateMachine.transition(StateMachine.ERROR_RECOVERABLE, 'token-timeout');
-                    return;
-                }
-                
-                // State: TOKEN_READY → WS_INITIALIZING
-                await StateMachine.transition(StateMachine.WS_INITIALIZING, 'token-ready');
-                
-                // Connect WebSocket
-                const wsUrl = ENV.isLocal ? 'ws://localhost:4000/ws' : 'wss://' + window.location.hostname + '/ws';
-                
-                try {
-                    await WSController.connect(wsUrl);
-                } catch (e) {
-                    Logger.error('MessagingClient', 'WebSocket connection failed', e);
-                    await StateMachine.transition(StateMachine.ERROR_RECOVERABLE, 'websocket-failed');
-                    return;
-                }
-                
-                // State: WS_READY → SERVICES_INITIALIZING
-                await StateMachine.transition(StateMachine.SERVICES_INITIALIZING, 'websocket-ready');
-                
-                // Load cached data
-                loadCachedData();
-                
-                // Load core data if authenticated
-                if (SessionMirror.isAuthenticated()) {
-                    await loadCoreData();
-                }
-                
-                // State: READY
-                await StateMachine.transition(StateMachine.READY, 'initialization-complete');
-                
-                this._initialized = true;
-                
-                // Dispatch ready event
-                window.dispatchEvent(new CustomEvent('coreReady', {
-                    detail: {
-                        authenticated: SessionMirror.isAuthenticated(),
-                        user: SessionMirror.getUser(),
-                        frameId: FRAME_ID,
-                        registered: registrationSent,
-                        state: StateMachine.getState()
+                    const result = await MessageTransport.send(MESSAGE_TYPES.GET_CHAT_HISTORY, {
+                        chatId,
+                        timestamp: Date.now()
+                    }, { requiresAck: true, timeout: 5000 });
+                    
+                    if (result.success && result.ack?.chat) {
+                        chat = result.ack.chat;
+                        if (!this._chatsMap.has(chatId)) {
+                            this._chats.push(chat);
+                            this._chatsMap.set(chatId, chat);
+                        }
                     }
-                }));
+                } catch (error) {
+                    Logger.error('ChatManager', `Failed to open chat ${chatId}`, error);
+                    return null;
+                }
+            }
+            
+            if (!chat) return null;
+            
+            this._activeChat = chat;
+            
+            await this.loadMessages(chatId);
+            
+            window.dispatchEvent(new CustomEvent('chatOpened', {
+                detail: { chat }
+            }));
+            
+            return chat;
+        },
+        
+        async loadMessages(chatId) {
+            if (!chatId) return [];
+            
+            const cachedKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${chatId}`;
+            const cached = SafeStorage.getJSON(cachedKey);
+            if (cached && Array.isArray(cached)) {
+                this._messages = cached;
+                this._rebuildMessagesMap();
+            }
+            
+            if (!SessionManager.isReady()) {
+                return this._messages;
+            }
+            
+            try {
+                const result = await MessageTransport.send(MESSAGE_TYPES.GET_CHAT_HISTORY, {
+                    chatId,
+                    timestamp: Date.now()
+                }, { requiresAck: true, timeout: 5000 });
                 
-                Logger.success('MessagingClient', `✅ READY: Messages core initialized successfully`);
-                StatusIndicator.show('CONNECTED', 'Ready');
+                if (result.success && result.ack?.messages) {
+                    this._messages = result.ack.messages;
+                    this._rebuildMessagesMap();
+                    SafeStorage.setJSON(cachedKey, this._messages);
+                }
+            } catch (error) {
+                Logger.warn('ChatManager', `Failed to load messages for ${chatId}`, error);
+            }
+            
+            return this._messages;
+        },
+        
+        _rebuildMessagesMap() {
+            this._messagesMap.clear();
+            this._messages.forEach(msg => {
+                if (msg.id) {
+                    this._messagesMap.set(msg.id, msg);
+                }
+            });
+        },
+        
+        addMessage(message) {
+            if (!message.id) {
+                message.id = SecurityUtils.generateMessageId();
+            }
+            
+            const existing = this._messagesMap.get(message.id);
+            if (existing) {
+                Object.assign(existing, message);
+            } else {
+                this._messages.push(message);
+                this._messagesMap.set(message.id, message);
+            }
+            
+            this._messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            
+            if (this._activeChat && message.chatId === this._activeChat.id) {
+                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${this._activeChat.id}`, this._messages);
+            }
+            
+            window.dispatchEvent(new CustomEvent('messageAdded', {
+                detail: { message }
+            }));
+            
+            return message;
+        },
+        
+        updateMessageStatus(messageId, status, details = {}) {
+            const message = this._messagesMap.get(messageId);
+            if (!message) return false;
+            
+            message.status = status;
+            if (details.deliveredAt) message.deliveredAt = details.deliveredAt;
+            if (details.readAt) message.readAt = details.readAt;
+            
+            window.dispatchEvent(new CustomEvent('messageStatusChanged', {
+                detail: { messageId, status, message }
+            }));
+            
+            return true;
+        },
+        
+        getActiveChat() {
+            return this._activeChat ? { ...this._activeChat } : null;
+        },
+        
+        getMessages() {
+            return [...this._messages];
+        },
+        
+        getChats() {
+            return [...this._chats];
+        },
+        
+        subscribe(callback) {
+            this._subscribers.add(callback);
+            return () => this._subscribers.delete(callback);
+        },
+        
+        _notifySubscribers() {
+            this._subscribers.forEach(cb => {
+                try { cb(this._chats, this._activeChat); } catch (e) {}
+            });
+        },
+        
+        clear() {
+            this._chats = [];
+            this._chatsMap.clear();
+            this._activeChat = null;
+            this._messages = [];
+            this._messagesMap.clear();
+        }
+    }.init();
+
+    // =============================================
+    // WEBSOCKET CONTROLLER - SINGLE INSTANCE
+    // =============================================
+    const WSController = {
+        WS_UNINITIALIZED: 'UNINITIALIZED',
+        WS_CONNECTING: 'CONNECTING',
+        WS_CONNECTED: 'CONNECTED',
+        WS_AUTHENTICATING: 'AUTHENTICATING',
+        WS_READY: 'READY',
+        WS_RECONNECTING: 'RECONNECTING',
+        WS_CLOSED: 'CLOSED',
+        WS_ERROR: 'ERROR',
+        
+        _state: 'UNINITIALIZED',
+        _ws: null,
+        _connectPromise: null,
+        _connectResolve: null,
+        _reconnectAttempts: 0,
+        _maxReconnectAttempts: 5,
+        _baseDelay: 1000,
+        _maxDelay: 30000,
+        _heartbeatInterval: null,
+        _pendingMessages: [],
+        _authenticated: false,
+        _url: null,
+        _messageHandlers: new Map(),
+        _initialized: false,
+        
+        init() {
+            if (this._initialized) return this;
+            this._initialized = true;
+            
+            this._setupMessageHandlers();
+            return this;
+        },
+        
+        _setupMessageHandlers() {
+            this._messageHandlers.set('message', (data) => {
+                const message = {
+                    id: data.id || SecurityUtils.generateMessageId(),
+                    chatId: data.chatId,
+                    senderId: data.senderId,
+                    content: SecurityUtils.sanitizeString(data.content || ''),
+                    type: data.type || 'text',
+                    timestamp: data.timestamp || Date.now(),
+                    status: 'received'
+                };
                 
-                // Process any queued messages
-                this.processQueue();
+                ChatManager.addMessage(message);
+                
+                if (message.senderId !== SessionManager.getUserId()) {
+                    this._playNotificationSound();
+                }
+            });
+            
+            this._messageHandlers.set('typing', (data) => {
+                if (ChatManager.getActiveChat()?.id === data.chatId) {
+                    window.dispatchEvent(new CustomEvent('typingIndicator', {
+                        detail: { userId: data.userId, isTyping: data.isTyping, chatId: data.chatId }
+                    }));
+                }
+            });
+            
+            this._messageHandlers.set('read_receipt', (data) => {
+                ChatManager.updateMessageStatus(data.messageId, 'read', { readAt: data.timestamp });
+            });
+            
+            this._messageHandlers.set('delivery_receipt', (data) => {
+                ChatManager.updateMessageStatus(data.messageId, 'delivered', { deliveredAt: data.timestamp });
+            });
+            
+            this._messageHandlers.set('friend_online', (data) => {
+                FriendManager.updateFriend({ id: data.userId, online: true, lastSeen: data.timestamp });
+            });
+            
+            this._messageHandlers.set('friend_offline', (data) => {
+                FriendManager.updateFriend({ id: data.userId, online: false, lastSeen: data.timestamp });
+            });
+        },
+        
+        async connect(url) {
+            if (this._state === this.WS_READY) {
+                return Promise.resolve(true);
+            }
+            
+            if (this._state === this.WS_CONNECTING || this._state === this.WS_AUTHENTICATING) {
+                if (this._connectPromise) return this._connectPromise;
+            }
+            
+            this._url = url;
+            this._state = this.WS_CONNECTING;
+            
+            this._connectPromise = new Promise((resolve, reject) => {
+                this._connectResolve = resolve;
+                this._connectReject = reject;
+            });
+            
+            try {
+                const token = await TokenAuthority.waitForToken();
+                Logger.info('WSController', 'Token available, connecting');
+                
+                this._ws = new WebSocket(url);
+                
+                this._ws.onopen = () => {
+                    Logger.success('WSController', 'WebSocket connected');
+                    this._state = this.WS_CONNECTED;
+                    this._authenticate(token);
+                };
+                
+                this._ws.onmessage = (event) => {
+                    this._handleMessage(event);
+                };
+                
+                this._ws.onerror = (error) => {
+                    Logger.error('WSController', 'WebSocket error', error);
+                    this._state = this.WS_ERROR;
+                    
+                    if (this._connectReject) {
+                        this._connectReject(error);
+                        this._connectResolve = null;
+                        this._connectReject = null;
+                    }
+                    
+                    this._scheduleReconnect();
+                };
+                
+                this._ws.onclose = () => {
+                    Logger.warn('WSController', 'WebSocket closed');
+                    
+                    if (this._state === this.WS_READY || this._state === this.WS_CONNECTED || 
+                        this._state === this.WS_AUTHENTICATING) {
+                        this._state = this.WS_CLOSED;
+                        this._scheduleReconnect();
+                    }
+                    
+                    this._cleanup();
+                };
                 
             } catch (error) {
-                Logger.error('MessagingClient', 'Initialization failed', error);
-                StatusIndicator.show('FAILED', error.message);
-                await StateMachine.transition(StateMachine.ERROR_FATAL, error.message);
-                throw error;
-            }
-        }
-
-        _initMessageListener() {
-            window.addEventListener('message', this._receive.bind(this));
-            Logger.debug('MessagingClient', 'Message listener initialized');
-        }
-
-        _initVisibilityHandler() {
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') {
-                    this._onPageActivated();
-                }
-            });
-        }
-
-        _initNetworkHandler() {
-            window.addEventListener('online', () => {
-                this._onNetworkRestored();
-            });
-
-            window.addEventListener('offline', () => {
-                window.dispatchEvent(new CustomEvent('networkOffline'));
-                StatusIndicator.show('DISCONNECTED', 'Offline');
-                Logger.warn('MessagingClient', 'Network offline');
-            });
-        }
-
-        _initHeartbeatMonitor() {
-            setInterval(() => {
-                const now = Date.now();
-                if (HEARTBEAT.lastHeartbeat > 0 && 
-                    now - HEARTBEAT.lastHeartbeat > 20000 && 
-                    HEARTBEAT.failures < HEARTBEAT.maxFailures) {
-                    ParentDetector.handleHeartbeatMiss();
-                }
-            }, 10000);
-        }
-
-        _onPageActivated() {
-            Logger.debug('MessagingClient', 'Page activated');
-            this.send(MESSAGE_TYPES.PAGE_ACTIVATED, {
-                timestamp: Date.now(),
-                frameId: FRAME_ID
-            }, { requiresAck: false });
-            
-            this.messageFirewall.processQueue();
-            this.transport.processQueue();
-            
-            if (SessionMirror && SessionMirror.isAuthenticated()) {
-                this.sessionClient.sync(true);
-            }
-        }
-
-        _onNetworkRestored() {
-            Logger.info('MessagingClient', 'Network restored');
-            this.messageFirewall.processQueue();
-            this.transport.processQueue();
-            StatusIndicator.show('CONNECTED', 'Online');
-            
-            if (SessionMirror && SessionMirror.isAuthenticated() && SessionMirror.isExpiringSoon()) {
-                this.sessionClient.sync(true);
+                Logger.error('WSController', 'Connection failed', error);
+                this._connectReject?.(error);
+                this._connectResolve = null;
+                this._connectReject = null;
+                this._scheduleReconnect();
             }
             
-            window.dispatchEvent(new CustomEvent('networkRestored'));
-        }
-
-        // In the _receive method, around line 3130, add this case:
-
-async _receive(event) {
-    try {
-        if (!SecurityUtils.validateOrigin(event.origin)) {
-            Logger.debug('MessagingClient', `Invalid origin: ${event.origin}`);
-            return;
-        }
+            return this._connectPromise;
+        },
         
-        const message = this.messageFirewall.parse(event);
-        if (!message) return;
-
-        DiagnosticsAgent.increment('messagesReceived');
-        Logger.debug('MessagingClient', `Received: ${message.type} (${message.messageId})`);
-
-        switch (message.type) {
-            case MESSAGE_TYPES.ACK:
-            case MESSAGE_TYPES.HEARTBEAT_ACK:
-            case MESSAGE_TYPES.SESSION_ACK:
-            case MESSAGE_TYPES.REGISTRATION_ACK:
-                this.transport.handleAck(message);
-                return;
-
-            case MESSAGE_TYPES.PONG:
-                ParentDetector.handleHeartbeatAck(message);
-                return;
-
-            case MESSAGE_TYPES.PARENT_READY:
-                parentReady = true;
-                ParentDetector.isReady = true;
-                ParentDetector._notifyListeners();
-                SecurityUtils.allowedOrigins.add(event.origin);
-                Logger.info('MessagingClient', 'Parent ready');
-                window.dispatchEvent(new CustomEvent('parentReady'));
-                return;
-
-            // FIX: Add handler for SESSION_VERIFIED
-            case MESSAGE_TYPES.SESSION_VERIFIED:
-                Logger.info('MessagingClient', 'SESSION_VERIFIED received', message.payload);
+        _authenticate(token) {
+            if (this._state !== this.WS_CONNECTED) return;
+            
+            this._state = this.WS_AUTHENTICATING;
+            Logger.info('WSController', 'Authenticating');
+            
+            const authMessage = {
+                type: 'auth',
+                token: token,
+                frameId: FRAME_ID,
+                timestamp: Date.now()
+            };
+            
+            try {
+                this._ws.send(JSON.stringify(authMessage));
                 
-                // Check if verification was successful
-                if (message.payload?.valid) {
-                    // If we have session data, use it
-                    if (message.payload.session) {
-                        SessionMirror.acceptSession(message.payload.session);
-                    } else {
-                        // Request full session data
-                        this.send(MESSAGE_TYPES.REQUEST_SESSION, {
-                            timestamp: Date.now(),
-                            frameId: FRAME_ID,
-                            requestId: message.requestId
-                        }, { requiresAck: true });
+                this._authTimeout = setTimeout(() => {
+                    if (this._state === this.WS_AUTHENTICATING) {
+                        Logger.error('WSController', 'Authentication timeout');
+                        this._ws.close();
+                        this._scheduleReconnect();
+                    }
+                }, 5000);
+                
+            } catch (error) {
+                Logger.error('WSController', 'Authentication failed', error);
+                this._ws.close();
+                this._scheduleReconnect();
+            }
+        },
+        
+        _handleMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'auth_success' && this._state === this.WS_AUTHENTICATING) {
+                    clearTimeout(this._authTimeout);
+                    this._state = this.WS_READY;
+                    this._authenticated = true;
+                    
+                    Logger.success('WSController', 'Authenticated');
+                    
+                    if (this._connectResolve) {
+                        this._connectResolve(true);
+                        this._connectResolve = null;
+                        this._connectReject = null;
+                    }
+                    
+                    this._startHeartbeat();
+                    this._flushPendingMessages();
+                    
+                    SessionManager.transition(SessionManager.READY, 'websocket-ready');
+                    
+                    return;
+                }
+                
+                if (data.type === 'pong') {
+                    this._handleHeartbeatResponse();
+                    return;
+                }
+                
+                const handler = this._messageHandlers.get(data.type);
+                if (handler) {
+                    handler(data);
+                }
+                
+            } catch (error) {
+                Logger.error('WSController', 'Message parse error', error);
+            }
+        },
+        
+        send(data) {
+            if (this._state === this.WS_READY && this._ws && this._ws.readyState === WebSocket.OPEN) {
+                try {
+                    this._ws.send(JSON.stringify(data));
+                    return true;
+                } catch (error) {
+                    Logger.error('WSController', 'Send failed', error);
+                    this._queueMessage(data);
+                    return false;
+                }
+            } else {
+                this._queueMessage(data);
+                return false;
+            }
+        },
+        
+        _queueMessage(data) {
+            this._pendingMessages.push({
+                data,
+                timestamp: Date.now(),
+                attempts: 0
+            });
+            
+            if (this._pendingMessages.length > 100) {
+                this._pendingMessages.shift();
+            }
+        },
+        
+        _flushPendingMessages() {
+            if (this._state !== this.WS_READY) return;
+            
+            const now = Date.now();
+            const oneHour = 3600000;
+            
+            this._pendingMessages = this._pendingMessages.filter(msg => {
+                if (now - msg.timestamp > oneHour) {
+                    return false;
+                }
+                
+                try {
+                    this._ws.send(JSON.stringify(msg.data));
+                    return false;
+                } catch (error) {
+                    msg.attempts++;
+                    return msg.attempts < 3;
+                }
+            });
+        },
+        
+        _startHeartbeat() {
+            if (this._heartbeatInterval) clearInterval(this._heartbeatInterval);
+            
+            this._heartbeatInterval = setInterval(() => {
+                if (this._state === this.WS_READY && this._ws && this._ws.readyState === WebSocket.OPEN) {
+                    try {
+                        this._ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+                        
+                        this._heartbeatTimeout = setTimeout(() => {
+                            Logger.warn('WSController', 'Heartbeat timeout');
+                            this._ws.close();
+                        }, 10000);
+                        
+                    } catch (error) {
+                        Logger.error('WSController', 'Heartbeat failed', error);
+                    }
+                }
+            }, 30000);
+        },
+        
+        _handleHeartbeatResponse() {
+            if (this._heartbeatTimeout) {
+                clearTimeout(this._heartbeatTimeout);
+                this._heartbeatTimeout = null;
+            }
+        },
+        
+        _scheduleReconnect() {
+            if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+                Logger.error('WSController', 'Max reconnection attempts reached');
+                return;
+            }
+            
+            this._reconnectAttempts++;
+            
+            const delay = Math.min(
+                this._baseDelay * Math.pow(1.5, this._reconnectAttempts - 1),
+                this._maxDelay
+            );
+            
+            Logger.warn('WSController', `Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
+            
+            this._state = this.WS_RECONNECTING;
+            
+            setTimeout(() => {
+                if (SessionManager.isReady()) {
+                    Logger.info('WSController', 'Reconnecting...');
+                    this.connect(this._url).catch(() => {});
+                }
+            }, delay);
+        },
+        
+        _cleanup() {
+            if (this._heartbeatInterval) {
+                clearInterval(this._heartbeatInterval);
+                this._heartbeatInterval = null;
+            }
+            
+            if (this._heartbeatTimeout) {
+                clearTimeout(this._heartbeatTimeout);
+                this._heartbeatTimeout = null;
+            }
+            
+            if (this._authTimeout) {
+                clearTimeout(this._authTimeout);
+                this._authTimeout = null;
+            }
+        },
+        
+        _playNotificationSound() {
+            const settings = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_SETTINGS, {});
+            if (settings.notificationSound !== false) {
+                const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ');
+                audio.volume = 0.3;
+                audio.play().catch(() => {});
+            }
+        },
+        
+        disconnect() {
+            if (this._ws) {
+                this._ws.close();
+                this._ws = null;
+            }
+            
+            this._cleanup();
+            this._state = this.WS_CLOSED;
+            this._authenticated = false;
+            Logger.info('WSController', 'Disconnected');
+        },
+        
+        getState() {
+            return this._state;
+        },
+        
+        isReady() {
+            return this._state === this.WS_READY;
+        }
+    }.init();
+
+    // =============================================
+    // MESSAGE LIFECYCLE MANAGER
+    // =============================================
+    const MessageLifecycle = {
+        _pendingMessages: new Map(),
+        _optimisticMessages: new Map(),
+        
+        async sendMessage(content, options = {}) {
+            if (!SessionManager.isReady()) {
+                try {
+                    await SessionManager.whenReady();
+                } catch (e) {
+                    return { success: false, error: 'Session not ready' };
+                }
+            }
+            
+            const activeChat = ChatManager.getActiveChat();
+            if (!activeChat) {
+                return { success: false, error: 'No active chat' };
+            }
+            
+            const messageId = options.id || SecurityUtils.generateMessageId();
+            const requestId = SecurityUtils.generateRequestId();
+            const timestamp = Date.now();
+            
+            const optimisticMessage = {
+                id: messageId,
+                requestId,
+                chatId: activeChat.id,
+                senderId: SessionManager.getUserId(),
+                content: SecurityUtils.escapeHtml(content || ''),
+                type: options.type || 'text',
+                timestamp,
+                status: 'sending',
+                local: true,
+                ...options
+            };
+            
+            ChatManager.addMessage(optimisticMessage);
+            this._optimisticMessages.set(messageId, optimisticMessage);
+            
+            const payload = {
+                chatId: activeChat.id,
+                content,
+                type: options.type || 'text',
+                attachment: options.attachment,
+                replyTo: options.replyTo,
+                messageId,
+                requestId,
+                timestamp
+            };
+            
+            const result = await MessageTransport.send(MESSAGE_TYPES.SEND_MESSAGE, payload, {
+                requiresAck: true,
+                maxRetries: 3,
+                timeout: 7000,
+                requestId
+            });
+            
+            if (result.success) {
+                ChatManager.updateMessageStatus(messageId, 'sent');
+                this._optimisticMessages.delete(messageId);
+                
+                if (this._optimisticMessages.size === 0) {
+                    const messages = ChatManager.getMessages();
+                    const msgIndex = messages.findIndex(m => m.id === messageId);
+                    if (msgIndex !== -1) {
+                        messages[msgIndex].status = 'sent';
                     }
                 }
                 
-                // Handle verification response
-                SessionAuthority.handleVerificationResponse(message);
-                return;
-
-            case MESSAGE_TYPES.SESSION_DATA:
-            case MESSAGE_TYPES.SESSION_INIT:
-                // Store session data
-                Logger.info('MessagingClient', 'Session data received', message.payload);
-                if (!SessionMirror.isAuthenticated()) {
-                    ParentDetector._pendingSession = message.payload;
-                    Logger.info('MessagingClient', 'Session data received early, storing');
+                if (WSController.isReady()) {
+                    WSController.send({
+                        type: 'send_message',
+                        messageId,
+                        chatId: activeChat.id,
+                        content,
+                        timestamp
+                    });
                 }
-                this.sessionClient.handleSessionData(message);
-                return;
-
-            // ... rest of the switch cases ...
-        }
-    } catch (e) {
-        Logger.error('MessagingClient', 'Message handling error', e);
-    }
-}
-// In SessionMirror.acceptSession method (around line 2620), make sure token is passed to TokenAuthority:
-
-acceptSession(snapshot) {
-    if (!snapshot || typeof snapshot !== 'object') return false;
-
-    const oldState = { ...this._state };
-    
-    this._state = {
-        authenticated: !!(snapshot.user && snapshot.token),
-        user: snapshot.user ? { ...snapshot.user } : null,
-        token: snapshot.token || null,
-        permissions: snapshot.permissions || [],
-        capabilities: snapshot.capabilities || [],
-        expiresAt: snapshot.expiresAt || (Date.now() + 3600000),
-        receivedAt: Date.now(),
-        fromCache: false,
-        version: snapshot.version || VERSION,
-        userId: snapshot.user?.id || snapshot.user?.userId || snapshot.userId,
-        sessionId: snapshot.sessionId || this._generateSessionId(),
-        lastActivity: Date.now()
-    };
-
-    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SESSION_CACHE, {
-        user: this._state.user,
-        token: this._state.token,
-        permissions: this._state.permissions,
-        capabilities: this._state.capabilities,
-        expiresAt: this._state.expiresAt,
-        version: this._state.version,
-        sessionId: this._state.sessionId
-    });
-
-    if (this._state.user) {
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_CACHE, this._state.user);
-    }
-
-    // FIX: Provide token to TokenAuthority
-    if (this._state.token) {
-        TokenAuthority.receiveToken(this._state.token, 'session');
-    }
-    
-    // Provide session to SessionAuthority
-    SessionAuthority.receiveSession(this._state);
-
-    this._setupRefreshTimer();
-    this._notifySubscribers('session-accepted', { old: oldState, new: this._state });
-    
-    Logger.success('SessionMirror', 'Session accepted');
-    
-    return true;
-}
+                
+                return { success: true, messageId, requestId };
+            } else {
+                ChatManager.updateMessageStatus(messageId, 'failed', { reason: result.error });
+                this._optimisticMessages.delete(messageId);
+                
+                return { success: false, error: result.error, messageId };
+            }
+        },
         
-async send(type, payload = {}, options = {}) {
-    // Don't wait for ready for critical messages
-    const criticalTypes = [
-        MESSAGE_TYPES.IFRAME_REGISTERED,
-        MESSAGE_TYPES.VERIFY_SESSION,
-        MESSAGE_TYPES.REQUEST_SESSION,
-        MESSAGE_TYPES.HEARTBEAT,
-        MESSAGE_TYPES.PAGE_ACTIVATED
-    ];
-    
-    if (!criticalTypes.includes(type)) {
-        // Wait for ready state
-        if (!StateMachine.isAtLeast(StateMachine.READY)) {
-            await StateMachine.init();
+        retryMessage(messageId) {
+            const messages = ChatManager.getMessages();
+            const message = messages.find(m => m.id === messageId);
+            if (!message || message.status !== 'failed') return false;
             
-            // If still not ready after waiting, queue it
-            if (!StateMachine.isAtLeast(StateMachine.READY)) {
-                Logger.debug('MessagingClient', `Queueing ${type}: core not ready (${StateMachine.getState()})`);
-                // Queue the message for later
-                setTimeout(() => {
-                    this.send(type, payload, options).catch(() => {});
-                }, 1000);
-                return { 
-                    success: false, 
-                    queued: true,
-                    error: 'core-not-ready',
-                    state: StateMachine.getState()
-                };
-            }
-        }
-    }
-
-    try {
-        Logger.debug('MessagingClient', `Sending: ${type}`);
-        const result = await this.transport.send(type, payload, options);
-        if (result.success) {
-            DiagnosticsAgent.increment('messagesSent');
-        }
-        return result;
-    } catch (error) {
-        Logger.error('MessagingClient', `Send error for ${type}`, error);
-        return { success: false, error: error.message };
-    }
-}
-}
-    // Create singleton instance
-    const messagingClient = new MessagingClient();
-
-
-    // =============================================
-    // SAFE FETCH UTILITY
-    // =============================================
-    async function safeFetch(url, options = {}) {
-        try {
-            const response = await fetch(url, {
-                credentials: "include",
-                ...options
+            message.status = 'sending';
+            ChatManager.updateMessageStatus(messageId, 'sending');
+            
+            return this.sendMessage(message.content, {
+                type: message.type,
+                attachment: message.attachment,
+                replyTo: message.replyTo,
+                id: messageId
             });
-
-            if (!response.ok) {
-                throw new Error("HTTP error " + response.status);
-            }
-
-            return await response.json();
-        } catch (error) {
-            DiagnosticsAgent.recordError(error, 'safeFetch');
-            return { success: false, message: "Network issue" };
+        },
+        
+        getPendingCount() {
+            return this._optimisticMessages.size;
         }
-    }
+    };
 
     // =============================================
     // API CLIENT
     // =============================================
-    let apiBaseUrl = ENV.getApiBaseUrl();
-
     const APIClient = {
-        pendingRequests: new Map(),
-        baseUrl: apiBaseUrl,
-        defaultTimeout: 30000,
-
-        setBaseUrl(url) {
-            this.baseUrl = url;
-            Logger.debug('APIClient', `Base URL set to: ${url}`);
-        },
-
+        _pendingRequests: new Map(),
+        _baseUrl: ENV.getApiBaseUrl(),
+        
         async request(endpoint, options = {}) {
-            try {
-                if (!endpoint || typeof endpoint !== 'string') return null;
-
-                // Normalize endpoint
-                if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
-                    Logger.warn('APIClient', `External URL blocked: ${endpoint}`);
-                    return null;
-                }
-
-                if (!endpoint.startsWith('/api/')) {
-                    endpoint = '/api/' + endpoint.replace(/^\/+/, '');
-                }
-
-                // Wait for token if needed
-                let token = SessionMirror.getToken();
-                if (!token) {
-                    try {
-                        token = await TokenAuthority.waitForToken();
-                    } catch (e) {
-                        token = null;
-                    }
-                }
-
-                const requestId = options.requestId || SecurityUtils.generateRequestId();
-                
-                const headers = {
-                    'Content-Type': 'application/json',
-                    'X-Client-Version': VERSION,
-                    'X-Request-ID': requestId,
-                    'X-Frame-ID': FRAME_ID
-                };
-
-                if (token) {
-                    headers['Authorization'] = `Bearer ${token}`;
-                }
-
-                // Try parent first if available
-                if (ParentDetector.isReady && options.useParent !== false) {
-                    return this._requestViaParent(endpoint, options, requestId, headers);
-                }
-
-                // Fallback to direct API call
-                return this._requestDirect(endpoint, options, headers, requestId);
-            } catch (error) {
-                Logger.error('APIClient', `Request failed: ${error.message}`);
+            if (!endpoint || typeof endpoint !== 'string') return null;
+            
+            if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+                Logger.warn('APIClient', `External URL blocked: ${endpoint}`);
                 return null;
             }
+            
+            if (!endpoint.startsWith('/api/')) {
+                endpoint = '/api/' + endpoint.replace(/^\/+/, '');
+            }
+            
+            const token = await TokenAuthority.waitForToken().catch(() => null);
+            const requestId = options.requestId || SecurityUtils.generateRequestId();
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-Client-Version': VERSION,
+                'X-Request-ID': requestId,
+                'X-Frame-ID': FRAME_ID
+            };
+            
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            
+            if (SessionManager.isReady() && options.useParent !== false) {
+                return this._requestViaParent(endpoint, options, requestId, headers);
+            }
+            
+            return this._requestDirect(endpoint, options, headers, requestId);
         },
-
+        
         async _requestViaParent(endpoint, options, requestId, headers) {
             return new Promise((resolve) => {
-                const timeout = options.timeout || this.defaultTimeout;
+                const timeout = options.timeout || 30000;
                 
                 const timer = setTimeout(() => {
-                    if (this.pendingRequests.has(requestId)) {
-                        Logger.debug('APIClient', `Parent request timeout, falling back to direct: ${endpoint}`);
-                        this.pendingRequests.delete(requestId);
+                    if (this._pendingRequests.has(requestId)) {
+                        Logger.debug('APIClient', `Parent timeout, falling back to direct: ${endpoint}`);
+                        this._pendingRequests.delete(requestId);
                         this._requestDirect(endpoint, options, headers, requestId).then(resolve);
                     }
                 }, timeout);
-
-                this.pendingRequests.set(requestId, { resolve, timer });
-
-                messagingClient.send(
-                    MESSAGE_TYPES.API_REQUEST,
-                    {
-                        endpoint,
-                        method: options.method || 'GET',
-                        headers: options.headers || {},
-                        body: options.body,
-                        requestId
-                    },
-                    { requiresAck: true, timeout, requestId }
-                ).catch(() => {
+                
+                this._pendingRequests.set(requestId, { resolve, timer });
+                
+                MessageTransport.send(MESSAGE_TYPES.API_REQUEST, {
+                    endpoint,
+                    method: options.method || 'GET',
+                    headers: options.headers || {},
+                    body: options.body,
+                    requestId
+                }, { requiresAck: true, timeout, requestId }).catch(() => {
                     clearTimeout(timer);
-                    this.pendingRequests.delete(requestId);
+                    this._pendingRequests.delete(requestId);
                     this._requestDirect(endpoint, options, headers, requestId).then(resolve);
                 });
             });
         },
-
+        
         async _requestDirect(endpoint, options, headers, requestId) {
             try {
-                // Build full URL
                 let url = endpoint;
-                if (this.baseUrl && !endpoint.startsWith('http')) {
-                    url = this.baseUrl + endpoint;
+                if (this._baseUrl && !endpoint.startsWith('http')) {
+                    url = this._baseUrl + endpoint;
                 }
-
-                // Don't try to call API if no baseUrl (standalone mode)
+                
                 if (!url.startsWith('http')) {
                     return { error: 'No API endpoint configured', offline: true };
                 }
-
+                
                 const fetchOptions = {
                     method: options.method || 'GET',
-                    headers: headers || {
-                        'Content-Type': 'application/json',
-                        'X-Client-Version': VERSION,
-                        'X-Request-ID': requestId,
-                        'X-Frame-ID': FRAME_ID
-                    },
+                    headers,
                     credentials: 'same-origin',
                     mode: 'cors',
                     cache: 'no-cache',
                     signal: options.signal
                 };
-
+                
                 if (options.method && options.method !== 'GET' && options.body) {
                     fetchOptions.body = typeof options.body === 'string' 
                         ? options.body 
                         : JSON.stringify(SecurityUtils.sanitizePayload(options.body));
                 }
-
-                Logger.debug('APIClient', `Direct request: ${options.method || 'GET'} ${url}`);
+                
                 const response = await fetch(url, fetchOptions);
                 
                 if (!response.ok) {
-                    Logger.warn('APIClient', `HTTP ${response.status}: ${endpoint}`);
-                    return { 
-                        error: `HTTP ${response.status}`, 
-                        status: response.status,
-                        offline: response.status === 404,
-                        endpoint 
-                    };
+                    return { error: `HTTP ${response.status}`, status: response.status, offline: response.status === 404 };
                 }
-
-                const data = await response.json();
-                Logger.debug('APIClient', `Request successful: ${endpoint}`);
-                return data;
+                
+                return await response.json();
             } catch (error) {
                 Logger.warn('APIClient', `Network error: ${endpoint}`, error);
-                return { error: 'Network error', offline: true, endpoint };
+                return { error: 'Network error', offline: true };
             }
         },
-
-        async fetchWithFallback(endpoint, options = {}, fallback = null) {
-            const result = await this.request(endpoint, options);
-            
-            // If we got a 404 or network error and have fallback data, use it
-            if (result && (result.error || result.offline)) {
-                // Try to get from cache
-                const cacheKey = `api_cache_${endpoint.replace(/\//g, '_')}`;
-                const cached = SafeStorage.getJSON(cacheKey);
-                if (cached) {
-                    DiagnosticsAgent.increment('cacheHits');
-                    Logger.debug('APIClient', `Cache hit for ${endpoint}`);
-                    return cached;
-                }
-                
-                DiagnosticsAgent.increment('cacheMisses');
-                Logger.debug('APIClient', `Cache miss for ${endpoint}`);
-                
-                // Use provided fallback
-                if (fallback !== null) return fallback;
-                
-                // Return empty array/object based on endpoint
-                if (endpoint.includes('/chats') || endpoint.includes('/contacts') || endpoint.includes('/messages')) {
-                    return [];
-                }
-                return fallback;
-            }
-            
-            // Cache successful responses
-            if (result && !result.error) {
-                const cacheKey = `api_cache_${endpoint.replace(/\//g, '_')}`;
-                SafeStorage.setJSON(cacheKey, result);
-            }
-            
-            return result;
-        },
-
+        
         handleParentResponse(payload) {
             const requestId = payload.requestId;
-            if (requestId && this.pendingRequests.has(requestId)) {
-                const { resolve, timer } = this.pendingRequests.get(requestId);
+            if (requestId && this._pendingRequests.has(requestId)) {
+                const { resolve, timer } = this._pendingRequests.get(requestId);
                 clearTimeout(timer);
                 resolve(payload.data || payload.result);
-                this.pendingRequests.delete(requestId);
-                Logger.debug('APIClient', `Parent response received for ${requestId}`);
+                this._pendingRequests.delete(requestId);
             }
         }
     };
+
+    // =============================================
+    // PARENT MESSAGE HANDLER
+    // =============================================
+    const ParentMessageHandler = {
+        init() {
+            window.addEventListener('message', this._handleMessage.bind(this));
+            return this;
+        },
+        
+        _handleMessage(event) {
+            if (!SecurityUtils.validateOrigin(event.origin)) return;
+            
+            const message = MessageFirewall.parse(event);
+            if (!message) return;
+            
+            switch (message.type) {
+                case MESSAGE_TYPES.SESSION_DATA:
+                case MESSAGE_TYPES.SESSION_UPDATE:
+                    this._handleSessionData(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.TOKEN_UPDATE:
+                case MESSAGE_TYPES.TOKEN_RESPONSE:
+                    this._handleTokenData(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.SESSION_VERIFIED:
+                    this._handleSessionVerified(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.FRIEND_LIST_RESPONSE:
+                    this._handleFriendList(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.FRIEND_UPDATED:
+                case MESSAGE_TYPES.FRIEND_ONLINE:
+                case MESSAGE_TYPES.FRIEND_OFFLINE:
+                    this._handleFriendUpdate(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.CHAT_HISTORY_RESPONSE:
+                    this._handleChatHistory(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.MESSAGE_RECEIVED:
+                    this._handleIncomingMessage(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.MESSAGE_DELIVERED:
+                    this._handleDeliveryReceipt(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.MESSAGE_READ:
+                    this._handleReadReceipt(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.API_RESPONSE:
+                    APIClient.handleParentResponse(message.payload);
+                    break;
+                    
+                case MESSAGE_TYPES.PONG:
+                case MESSAGE_TYPES.HEARTBEAT_ACK:
+                    this._handleHeartbeatAck(message);
+                    break;
+                    
+                case MESSAGE_TYPES.ACK:
+                    // Already handled by MessageFirewall
+                    break;
+                    
+                case MESSAGE_TYPES.ERROR:
+                    Logger.error('Parent', 'Error from parent', message.payload);
+                    break;
+                    
+                default:
+                    Logger.debug('Parent', `Unhandled message: ${message.type}`);
+            }
+        },
+        
+        _handleSessionData(payload) {
+            if (!payload) return;
+            
+            Logger.info('Parent', 'Session data received');
+            
+            const session = {
+                user: payload.user,
+                token: payload.token || payload.accessToken,
+                userId: payload.userId || payload.user?.id,
+                authenticated: !!(payload.user && (payload.token || payload.accessToken)),
+                expiresAt: payload.expiresAt || Date.now() + 3600000
+            };
+            
+            SessionManager.setSession(session);
+            
+            if (session.token) {
+                TokenAuthority.receiveToken(session.token, 'parent');
+            }
+            
+            if (session.authenticated && SessionManager.getState() === SessionManager.SESSION_PENDING) {
+                SessionManager.transition(SessionManager.SESSION_ACTIVE, 'session-received');
+            }
+        },
+        
+        _handleTokenData(payload) {
+            if (payload?.token) {
+                TokenAuthority.receiveToken(payload.token, 'parent');
+            }
+        },
+        
+        _handleSessionVerified(payload) {
+            if (payload?.valid && payload?.session) {
+                this._handleSessionData(payload.session);
+            }
+        },
+        
+        _handleFriendList(payload) {
+            if (payload?.friends && Array.isArray(payload.friends)) {
+                payload.friends.forEach(friend => FriendManager.updateFriend(friend));
+            }
+        },
+        
+        _handleFriendUpdate(payload) {
+            FriendManager.updateFriend(payload);
+        },
+        
+        _handleChatHistory(payload) {
+            if (payload?.messages && Array.isArray(payload.messages)) {
+                payload.messages.forEach(msg => ChatManager.addMessage(msg));
+            }
+        },
+        
+        _handleIncomingMessage(payload) {
+            const message = {
+                id: payload.id || payload.messageId,
+                chatId: payload.chatId,
+                senderId: payload.senderId,
+                content: SecurityUtils.sanitizeString(payload.content || ''),
+                type: payload.type || 'text',
+                timestamp: payload.timestamp || Date.now(),
+                status: 'received'
+            };
+            
+            ChatManager.addMessage(message);
+            
+            if (message.senderId !== SessionManager.getUserId()) {
+                this._playNotificationSound();
+            }
+            
+            MessageTransport.send(MESSAGE_TYPES.MESSAGE_DELIVERED, {
+                messageId: message.id,
+                timestamp: Date.now()
+            }, { requiresAck: false });
+        },
+        
+        _handleDeliveryReceipt(payload) {
+            ChatManager.updateMessageStatus(payload.messageId, 'delivered', {
+                deliveredAt: payload.timestamp
+            });
+        },
+        
+        _handleReadReceipt(payload) {
+            ChatManager.updateMessageStatus(payload.messageId, 'read', {
+                readAt: payload.timestamp
+            });
+        },
+        
+        _handleHeartbeatAck(message) {
+            window.dispatchEvent(new CustomEvent('heartbeatAck', {
+                detail: { timestamp: Date.now(), rtt: Date.now() - (message.payload?.timestamp || Date.now()) }
+            }));
+        },
+        
+        _playNotificationSound() {
+            const settings = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_SETTINGS, {});
+            if (settings.notificationSound !== false) {
+                const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ');
+                audio.volume = 0.3;
+                audio.play().catch(() => {});
+            }
+        }
+    }.init();
+
+    // =============================================
+    // REGISTRATION WITH PARENT
+    // =============================================
+    let registrationSent = false;
+    let registrationPromise = null;
+
+    async function registerWithParent() {
+        if (registrationSent && registrationPromise) {
+            return registrationPromise;
+        }
+        
+        if (!window.parent || window.parent === window) {
+            Logger.warn('Registration', 'No parent window');
+            return { success: false, reason: 'no-parent' };
+        }
+        
+        registrationSent = true;
+        
+        registrationPromise = new Promise((resolve) => {
+            Logger.info('Registration', 'Registering with parent');
+            
+            const requestId = SecurityUtils.generateRequestId();
+            
+            MessageTransport.send(MESSAGE_TYPES.IFRAME_REGISTERED, {
+                module: 'messages',
+                frameId: FRAME_ID,
+                version: VERSION,
+                timestamp: Date.now()
+            }, {
+                requiresAck: true,
+                timeout: 3000,
+                requestId
+            }).then(result => {
+                if (result.success) {
+                    Logger.success('Registration', 'Registration successful');
+                    SessionManager.transition(SessionManager.REGISTERED, 'registration-ack');
+                } else {
+                    Logger.warn('Registration', 'Registration timeout - continuing');
+                    SessionManager.transition(SessionManager.REGISTERED, 'assumed');
+                }
+                resolve(result);
+            }).catch(() => {
+                Logger.warn('Registration', 'Registration failed - continuing');
+                SessionManager.transition(SessionManager.REGISTERED, 'assumed');
+                resolve({ success: true, assumed: true });
+            });
+        });
+        
+        return registrationPromise;
+    }
+
+    // =============================================
+    // SESSION ACQUISITION
+    // =============================================
+    async function acquireSession() {
+        Logger.info('Session', 'Acquiring session');
+        
+        SessionManager.transition(SessionManager.SESSION_PENDING, 'acquiring');
+        
+        try {
+            const result = await MessageTransport.send(MESSAGE_TYPES.REQUEST_SESSION, {
+                timestamp: Date.now(),
+                frameId: FRAME_ID
+            }, { requiresAck: true, timeout: 5000 });
+            
+            if (result.success && result.ack?.session) {
+                SessionManager.setSession(result.ack.session);
+                Logger.success('Session', 'Session acquired');
+                return true;
+            }
+            
+            if (SessionManager.isAuthenticated()) {
+                Logger.info('Session', 'Using cached session');
+                SessionManager.transition(SessionManager.SESSION_ACTIVE, 'cached');
+                return true;
+            }
+            
+            Logger.warn('Session', 'No session available');
+            return false;
+            
+        } catch (error) {
+            Logger.error('Session', 'Session acquisition failed', error);
+            
+            if (SessionManager.isAuthenticated()) {
+                Logger.info('Session', 'Using cached session after error');
+                SessionManager.transition(SessionManager.SESSION_ACTIVE, 'cached-fallback');
+                return true;
+            }
+            
+            return false;
+        }
+    }
+
+    // =============================================
+    // UI INITIALIZATION
+    // =============================================
+    async function initializeUI() {
+        Logger.info('UI', 'Initializing UI');
+        
+        try {
+            if (window.messagesUI && typeof window.messagesUI.init === 'function') {
+                window.messagesUI.init();
+            }
+        } catch (e) {
+            Logger.error('UI', 'UI initialization error', e);
+        }
+        
+        window.dispatchEvent(new CustomEvent('uiReady', {
+            detail: { frameId: FRAME_ID, version: VERSION }
+        }));
+    }
 
     // =============================================
     // CORE STATE
@@ -3584,108 +2564,24 @@ async send(type, payload = {}, options = {}) {
     let dragStartY = 0;
     let isDraggingToCancel = false;
 
-    // Subscribe to session changes
-    SessionMirror.subscribe((event) => {
-        currentUser = event.state.user;
-        window.dispatchEvent(new CustomEvent('sessionUpdated', { 
-            detail: { session: event.state, changeType: event.type }
+    // Session state subscription
+    SessionManager.onStateChange((oldState, newState, reason, session) => {
+        if (session?.user) {
+            currentUser = session.user;
+        }
+        
+        window.dispatchEvent(new CustomEvent('sessionStateChanged', {
+            detail: { oldState, newState, reason, session }
         }));
+        
+        if (newState === SessionManager.READY) {
+            FriendManager.loadFriends().catch(() => {});
+            ChatManager.loadChats().catch(() => {});
+        }
     });
 
-    ParentDetector.subscribe((data) => {
-        window.dispatchEvent(new CustomEvent('parentStatusChanged', { detail: data }));
-    });
-
     // =============================================
-    // INITIALIZATION
-    // =============================================
-    async function initialize() {
-        try {
-            DiagnosticsAgent.init(ENV.isLocal || window.__IFRAME_DEBUG__);
-            
-            // Initialize messaging client
-            await messagingClient.initialize();
-
-        } catch (error) {
-            DiagnosticsAgent.recordError(error, 'Init.fatal');
-            StatusIndicator.show('FAILED', error.message);
-            Logger.error('Init', 'Fatal initialization error', error);
-
-            window.dispatchEvent(new CustomEvent('coreReady', {
-                detail: {
-                    authenticated: false,
-                    user: null,
-                    fallback: true,
-                    error: error.message,
-                    state: StateMachine.getState()
-                }
-            }));
-        }
-    }
-
-    // =============================================
-    // DATA MANAGEMENT
-    // =============================================
-    function loadCachedData() {
-        try {
-            const cachedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
-            if (cachedChats) {
-                chats = cachedChats;
-                Logger.debug('Data', `Loaded ${chats.length} chats from cache`);
-            }
-
-            const cachedContacts = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CONTACTS_CACHE);
-            if (cachedContacts) {
-                contacts = cachedContacts;
-                Logger.debug('Data', `Loaded ${contacts.length} contacts from cache`);
-            }
-
-            const cachedDrafts = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.DRAFTS);
-            if (cachedDrafts) {
-                messageDrafts = cachedDrafts;
-                Logger.debug('Data', `Loaded drafts from cache`);
-            }
-
-            const cachedOffline = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
-            if (cachedOffline) {
-                offlineQueue = cachedOffline;
-                Logger.debug('Data', `Loaded ${offlineQueue.length} offline messages`);
-            }
-        } catch (error) {
-            Logger.warn('Data', 'Error loading cached data', error);
-        }
-    }
-
-    async function loadCoreData() {
-        try {
-            if (!SessionMirror.isAuthenticated()) return false;
-
-            Logger.info('Data', 'Loading core data from API');
-
-            // Use fetchWithFallback which handles 404s gracefully
-            const chatsData = await APIClient.fetchWithFallback('/api/chats', {}, []);
-            if (Array.isArray(chatsData)) {
-                chats = chatsData;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
-                Logger.info('Data', `Loaded ${chats.length} chats`);
-            }
-
-            const contactsData = await APIClient.fetchWithFallback('/api/contacts', {}, []);
-            if (Array.isArray(contactsData)) {
-                contacts = contactsData;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CONTACTS_CACHE, contacts);
-                Logger.info('Data', `Loaded ${contacts.length} contacts`);
-            }
-
-            return true;
-        } catch (error) {
-            Logger.warn('Data', 'Error loading core data', error);
-            return false;
-        }
-    }
-
-    // =============================================
-    // EXPORTED FUNCTIONS (All preserved)
+    // SETTERS (PRESERVED)
     // =============================================
     function setCurrentUser(user) { currentUser = user; }
     function setCurrentChat(chat) { currentChat = chat; }
@@ -3723,30 +2619,33 @@ async send(type, payload = {}, options = {}) {
     function setDragStartY(y) { dragStartY = y; }
     function setIsDraggingToCancel(value) { isDraggingToCancel = value; }
 
+    // =============================================
+    // EXPORTED FUNCTIONS (PRESERVED)
+    // =============================================
     function getCurrentSession() {
-        const session = SessionMirror.getState();
+        const session = SessionManager.getSession();
         return {
-            user: session.user,
-            authenticated: session.authenticated,
-            token: session.token,
-            fromCache: session.fromCache,
-            userId: session.userId
+            user: session?.user || null,
+            authenticated: SessionManager.isAuthenticated(),
+            token: SessionManager.getToken(),
+            fromCache: false,
+            userId: SessionManager.getUserId()
         };
     }
 
     function requestSessionUpdate() {
-        return SessionClient.requestSession(true);
+        return acquireSession();
     }
 
     function initChildSession() {
         return new Promise((resolve) => {
-            if (SessionMirror.isAuthenticated() && currentUser) {
-                resolve({ user: currentUser, sessionData: SessionMirror.getState() });
+            if (SessionManager.isReady() && currentUser) {
+                resolve({ user: currentUser, sessionData: SessionManager.getSession() });
             } else {
                 const checkInterval = setInterval(() => {
-                    if (SessionMirror.isAuthenticated() && currentUser) {
+                    if (SessionManager.isReady() && currentUser) {
                         clearInterval(checkInterval);
-                        resolve({ user: currentUser, sessionData: SessionMirror.getState() });
+                        resolve({ user: currentUser, sessionData: SessionManager.getSession() });
                     }
                 }, 100);
 
@@ -3759,7 +2658,7 @@ async send(type, payload = {}, options = {}) {
     }
 
     function sendToParent(type, data = null, options = {}) {
-        return messagingClient.send(type, data, options);
+        return MessageTransport.send(type, data, options);
     }
 
     async function apiRequest(endpoint, options = {}) {
@@ -3768,76 +2667,86 @@ async send(type, payload = {}, options = {}) {
 
     async function fetchData(type) {
         switch (type) {
-            case 'friendsList': return APIClient.fetchWithFallback('/api/friends', {}, []);
-            case 'groupsList': return APIClient.fetchWithFallback('/api/groups', {}, []);
+            case 'friendsList': 
+                return FriendManager.getFriends();
+            case 'groupsList': 
+                return [];
             case 'chatHistory': 
-                if (!currentChat) return [];
-                return APIClient.fetchWithFallback(`/api/chat-history/${currentChat.id}`, {}, []);
-            case 'notifications': return APIClient.fetchWithFallback('/api/notifications', {}, []);
-            case 'settings': return APIClient.fetchWithFallback('/api/settings', {}, {});
-            default: return null;
+                return ChatManager.getMessages();
+            case 'notifications': 
+                return [];
+            case 'settings': 
+                return SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_SETTINGS, {});
+            default: 
+                return null;
         }
     }
 
     async function loadContacts() {
-        contacts = await APIClient.fetchWithFallback('/api/contacts', {}, []);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CONTACTS_CACHE, contacts);
-        return contacts;
+        return FriendManager.getFriends();
     }
 
     async function loadChats() {
-        chats = await APIClient.fetchWithFallback('/api/chats', {}, []);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
-        return chats;
+        return ChatManager.getChats();
     }
 
     async function loadMessages(chatId = null) {
         const targetChat = chatId || currentChat?.id;
         if (!targetChat) return [];
-
-        const data = await APIClient.fetchWithFallback(`/api/messages/${targetChat}`, {}, []);
-        if (Array.isArray(data)) {
-            messages = data;
-            SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${targetChat}`, messages);
+        
+        if (targetChat === ChatManager.getActiveChat()?.id) {
+            return ChatManager.getMessages();
         }
-        return messages;
+        
+        return ChatManager.loadMessages(targetChat);
     }
 
     async function openChat(chat) {
         if (!chat) return false;
-
-        currentChat = chat;
-        currentFriend = chat.friend ? { ...chat.friend } : null;
-
-        await loadMessages(chat.id);
-
-        window.dispatchEvent(new CustomEvent('chatOpened', { 
-            detail: { chat } 
-        }));
-
-        return true;
+        
+        const opened = await ChatManager.openChat(chat.id);
+        if (opened) {
+            currentChat = opened;
+            currentFriend = opened.friend ? { ...opened.friend } : null;
+            return true;
+        }
+        
+        return false;
     }
 
     async function loadChatByFriendId(friendId) {
-        const chat = chats.find(c => c.friendId === friendId);
-        if (chat) {
-            await openChat(chat);
-            return chat;
+        const friend = FriendManager.getFriend(friendId);
+        if (!friend) return null;
+        
+        const existingChat = ChatManager.getChats().find(c => c.friendId === friendId);
+        if (existingChat) {
+            await openChat(existingChat);
+            return existingChat;
         }
-
-        const newChat = await APIClient.request('/api/chats', {
-            method: 'POST',
-            body: JSON.stringify({ friendId })
-        });
-
-        if (newChat && !newChat.error) {
-            chats.unshift(newChat);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
-            await openChat(newChat);
-            return newChat;
-        }
-
-        return null;
+        
+        const newChat = {
+            id: `chat_${Date.now()}`,
+            friendId: friendId,
+            friendName: friend.displayName || friend.username || 'User',
+            friendUsername: friend.username || '',
+            friendAvatar: friend.photoURL || friend.avatar || '',
+            lastMessage: '',
+            lastMessageAt: new Date().toISOString(),
+            unreadCount: 0,
+            type: 'direct',
+            archived: false,
+            blocked: false,
+            local: true
+        };
+        
+        const chats = ChatManager.getChats();
+        chats.unshift(newChat);
+        
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
+        
+        await openChat(newChat);
+        
+        return newChat;
     }
 
     function createLocalChat(friendId, friendData) {
@@ -3856,124 +2765,20 @@ async send(type, payload = {}, options = {}) {
             local: true
         };
 
+        const chats = ChatManager.getChats();
         chats.unshift(newChat);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
+        
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
+        
         openChat(newChat);
     }
 
     async function sendMessage(content, type = 'text', options = {}) {
-        if (!currentChat) return false;
-
-        const messageData = {
-            id: SecurityUtils.generateMessageId(),
-            requestId: SecurityUtils.generateRequestId(),
-            chatId: currentChat.id,
-            senderId: SessionMirror.getUser()?.id || 'local',
-            content: SecurityUtils.escapeHtml(content || ''),
-            type,
-            timestamp: new Date().toISOString(),
-            status: 'sending',
-            reason: null,
-            frameId: FRAME_ID,
-            ...options
-        };
-
-        messages.push(messageData);
-        Logger.debug('sendMessage', `Sending message ${messageData.id}`);
-
-        // Listen for status changes
-        const handleStatusChange = (event) => {
-            const updatedMessage = event.detail.message;
-            if (updatedMessage.id === messageData.id) {
-                const idx = messages.findIndex(m => m.id === updatedMessage.id);
-                if (idx !== -1) {
-                    messages[idx] = updatedMessage;
-                    
-                    window.dispatchEvent(new CustomEvent('messagesUpdated', {
-                        detail: { messages }
-                    }));
-                    
-                    if (updatedMessage.status === 'failed' && updatedMessage.reason) {
-                        showStatusMessage(`❌ Message failed: ${updatedMessage.reason}`);
-                    } else if (updatedMessage.status === 'delivered') {
-                        Logger.debug('sendMessage', `Message ${messageData.id} delivered`);
-                    }
-                }
-            }
-        };
-
-        window.addEventListener('messageStatusChanged', handleStatusChange, { once: true });
-
-        if (SessionMirror.isAuthenticated() && TokenAuthority.hasToken() && WSController.isReady()) {
-            // Send via WebSocket for real-time
-            const wsSent = WSController.send({
-                type: 'send_message',
-                message: messageData
-            });
-            
-            if (wsSent) {
-                const idx = messages.findIndex(m => m.id === messageData.id);
-                if (idx !== -1) {
-                    messages[idx].status = 'sent';
-                    Logger.debug('sendMessage', `Message ${messageData.id} sent via WebSocket`);
-                }
-            }
-            
-            // Also send via parent as backup
-            const result = await APIClient.request('/api/messages/send', {
-                method: 'POST',
-                body: JSON.stringify(messageData)
-            });
-
-            if (result && !result.error) {
-                const idx = messages.findIndex(m => m.id === messageData.id);
-                if (idx !== -1) {
-                    messages[idx] = { ...result, status: 'sent' };
-                    
-                    const sendResult = await messagingClient.send(MESSAGE_TYPES.SEND_MESSAGE, messages[idx]);
-                    
-                    if (!sendResult.success) {
-                        messages[idx].status = 'failed';
-                        messages[idx].reason = sendResult.reason || 'Failed';
-                        showStatusMessage(`❌ ${messages[idx].reason}`);
-                        Logger.warn('sendMessage', `Message ${messageData.id} failed: ${messages[idx].reason}`);
-                    } else {
-                        Logger.debug('sendMessage', `Message ${messageData.id} confirmed by parent`);
-                    }
-                }
-
-                const chatIdx = chats.findIndex(c => c.id === currentChat.id);
-                if (chatIdx !== -1) {
-                    chats[chatIdx].lastMessage = content;
-                    chats[chatIdx].lastMessageAt = new Date().toISOString();
-                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
-                }
-
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-
-                return true;
-            }
-
-            const idx = messages.findIndex(m => m.id === messageData.id);
-            if (idx !== -1) {
-                messages[idx].status = 'failed';
-                messages[idx].reason = 'Server rejected';
-                showStatusMessage(`❌ Server rejected`);
-                Logger.warn('sendMessage', `Message ${messageData.id} rejected by server`);
-            }
-
-            return false;
-        }
-
-        // Offline mode - queue message
-        offlineQueue.push(messageData);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
-        Logger.info('sendMessage', `Message ${messageData.id} queued for offline delivery`);
-        return true;
+        return MessageLifecycle.sendMessage(content, { type, ...options });
     }
 
     async function sendMessageWithOptions(content, options = {}) {
-        return sendMessage(content, options.type || 'text', options);
+        return MessageLifecycle.sendMessage(content, options);
     }
 
     async function sendToMultipleChats(content, chatIds) {
@@ -3982,18 +2787,15 @@ async send(type, payload = {}, options = {}) {
         let successCount = 0;
 
         for (const chatId of chatIds) {
-            const result = await APIClient.request('/api/messages/send', {
-                method: 'POST',
-                body: JSON.stringify({
-                    chatId,
-                    content: SecurityUtils.escapeHtml(content || ''),
-                    type: currentAttachment?.type || 'text',
-                    attachment: currentAttachment,
-                    frameId: FRAME_ID
-                })
+            const result = await MessageLifecycle.sendMessage(content, {
+                type: currentAttachment?.type || 'text',
+                attachment: currentAttachment,
+                chatId
             });
-
-            if (result && !result.error) successCount++;
+            
+            if (result.success) successCount++;
+            
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         Logger.info('sendToMultipleChats', `Sent to ${successCount}/${chatIds.length} chats`);
@@ -4001,24 +2803,29 @@ async send(type, payload = {}, options = {}) {
     }
 
     async function editMessage(messageId, newContent) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
-        const result = await APIClient.request('/api/messages/edit', {
-            method: 'POST',
-            body: JSON.stringify({ messageId, content: newContent })
-        });
+        const result = await MessageTransport.send('EDIT_MESSAGE', {
+            messageId,
+            content: newContent,
+            timestamp: Date.now()
+        }, { requiresAck: true, timeout: 5000 });
 
-        if (result && !result.error) {
+        if (result.success) {
+            const messages = ChatManager.getMessages();
             const idx = messages.findIndex(m => m.id === messageId);
             if (idx !== -1) {
                 messages[idx].content = SecurityUtils.escapeHtml(newContent);
                 messages[idx].edited = true;
                 messages[idx].editedAt = new Date().toISOString();
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-                Logger.debug('editMessage', `Message ${messageId} edited`);
+                
+                if (ChatManager.getActiveChat()) {
+                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                }
             }
             return true;
         }
+        
         return false;
     }
 
@@ -4035,65 +2842,72 @@ async send(type, payload = {}, options = {}) {
     }
 
     async function deleteMessage(messageId, forEveryone = false) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
         if (forEveryone) {
-            const result = await APIClient.request('/api/messages/delete', {
-                method: 'POST',
-                body: JSON.stringify({ messageId })
-            });
+            const result = await MessageTransport.send('DELETE_MESSAGE', {
+                messageId,
+                forEveryone,
+                timestamp: Date.now()
+            }, { requiresAck: true, timeout: 5000 });
 
-            if (result && !result.error) {
+            if (result.success) {
+                const messages = ChatManager.getMessages();
                 const idx = messages.findIndex(m => m.id === messageId);
                 if (idx !== -1) {
                     messages[idx].deleted = true;
                     messages[idx].deletedAt = new Date().toISOString();
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-                    Logger.info('deleteMessage', `Message ${messageId} deleted for everyone`);
+                    
+                    if (ChatManager.getActiveChat()) {
+                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                    }
                 }
                 return true;
             }
         } else {
+            const messages = ChatManager.getMessages();
             const idx = messages.findIndex(m => m.id === messageId);
             if (idx !== -1) {
                 messages.splice(idx, 1);
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-                Logger.debug('deleteMessage', `Message ${messageId} deleted locally`);
+                
+                if (ChatManager.getActiveChat()) {
+                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                }
                 return true;
             }
         }
+        
         return false;
     }
 
     async function markChatAsRead(chatId) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
-        const result = await APIClient.request('/api/chats/read', {
-            method: 'POST',
-            body: JSON.stringify({ chatId })
-        });
+        const result = await MessageTransport.send('MARK_READ', {
+            chatId,
+            timestamp: Date.now()
+        }, { requiresAck: false });
 
-        if (result && !result.error) {
-            const idx = chats.findIndex(c => c.id === chatId);
-            if (idx !== -1) {
-                chats[idx].unreadCount = 0;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
-                Logger.debug('markChatAsRead', `Chat ${chatId} marked as read`);
-            }
-            return true;
+        const chats = ChatManager.getChats();
+        const idx = chats.findIndex(c => c.id === chatId);
+        if (idx !== -1) {
+            chats[idx].unreadCount = 0;
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
         }
-        return false;
+
+        return true;
     }
 
     async function addReaction(messageId, emoji, silent = false) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
+        const messages = ChatManager.getMessages();
         const idx = messages.findIndex(m => m.id === messageId);
         if (idx === -1) return false;
 
         if (!messages[idx].reactions) messages[idx].reactions = {};
 
-        const userId = SessionMirror.getUser()?.id;
+        const userId = SessionManager.getUserId();
         if (!userId) return false;
 
         if (!messages[idx].reactions[emoji]) {
@@ -4112,12 +2926,24 @@ async send(type, payload = {}, options = {}) {
             delete messages[idx].reactions[emoji];
         }
 
-        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
+        if (ChatManager.getActiveChat()) {
+            SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+        }
+
+        if (!silent) {
+            await MessageTransport.send('ADD_REACTION', {
+                messageId,
+                emoji,
+                add: userIndex === -1,
+                timestamp: Date.now()
+            }, { requiresAck: false });
+        }
+
         return userIndex > -1 ? 'removed' : 'added';
     }
 
     async function toggleBlockUser(friendId, block) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
         const blockedUsers = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, []);
 
@@ -4130,18 +2956,24 @@ async send(type, payload = {}, options = {}) {
 
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, blockedUsers);
 
+        const chats = ChatManager.getChats();
         chats.forEach(chat => {
             if (chat.friendId === friendId) chat.blocked = block;
         });
 
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
-        await loadChats();
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
+
+        await MessageTransport.send('BLOCK_USER', {
+            friendId,
+            block,
+            timestamp: Date.now()
+        }, { requiresAck: false });
 
         return true;
     }
 
     async function toggleArchiveChat(chatId, archive) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
         const archivedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
 
@@ -4154,10 +2986,11 @@ async send(type, payload = {}, options = {}) {
 
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, archivedChats);
 
+        const chats = ChatManager.getChats();
         const idx = chats.findIndex(chat => chat.id === chatId);
         if (idx !== -1) {
             chats[idx].archived = archive;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
             return true;
         }
 
@@ -4165,46 +2998,50 @@ async send(type, payload = {}, options = {}) {
     }
 
     async function toggleReadOnly(chatId, readOnly) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
+        const chats = ChatManager.getChats();
         const idx = chats.findIndex(chat => chat.id === chatId);
         if (idx !== -1) {
             chats[idx].readOnly = readOnly;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
             return true;
         }
+        
         return false;
     }
 
     async function clearChatHistory(chatId) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
         SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${chatId}`);
 
+        const chats = ChatManager.getChats();
         const idx = chats.findIndex(chat => chat.id === chatId);
         if (idx !== -1) {
             chats[idx].lastMessage = '';
             chats[idx].unreadCount = 0;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats, timestamp: Date.now() });
         }
 
-        if (currentChat?.id === chatId) {
-            messages = [];
+        if (ChatManager.getActiveChat()?.id === chatId) {
+            ChatManager._messages = [];
         }
 
         return true;
     }
 
     async function voteInPoll(messageId, optionIndex) {
-        if (!SessionMirror.isAuthenticated()) return false;
+        if (!SessionManager.isReady()) return false;
 
+        const messages = ChatManager.getMessages();
         const idx = messages.findIndex(m => m.id === messageId);
         if (idx === -1) return false;
 
         const poll = messages[idx];
         if (!poll.options || !Array.isArray(poll.options)) return false;
 
-        const userId = SessionMirror.getUser()?.id;
+        const userId = SessionManager.getUserId();
         if (!userId) return false;
 
         if (poll.userVote !== undefined && poll.userVote !== null) {
@@ -4223,7 +3060,16 @@ async send(type, payload = {}, options = {}) {
         poll.options[optionIndex].voters.push(userId);
         poll.userVote = optionIndex;
 
-        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
+        if (ChatManager.getActiveChat()) {
+            SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+        }
+
+        await MessageTransport.send('VOTE_POLL', {
+            messageId,
+            optionIndex,
+            timestamp: Date.now()
+        }, { requiresAck: false });
+
         return true;
     }
 
@@ -4349,7 +3195,7 @@ async send(type, payload = {}, options = {}) {
     }
 
     function validateMessageStructure(message) {
-        return SecurityUtils.validateMessageStructure(message);
+        return !!(message && typeof message === 'object' && message.type);
     }
 
     function validateMessagePayload(payload, messageType) {
@@ -4420,14 +3266,14 @@ async send(type, payload = {}, options = {}) {
     }
 
     function validateSessionData(data) {
-        return !!(data && typeof data === 'object' && (data.user || data.token || data.mode));
+        return !!(data && typeof data === 'object' && (data.user || data.token));
     }
 
     function getData(type) {
         switch (type) {
-            case 'friendsList': return contacts;
+            case 'friendsList': return FriendManager.getFriends();
             case 'groupsList': return [];
-            case 'chatHistory': return messages;
+            case 'chatHistory': return ChatManager.getMessages();
             case 'notifications': return [];
             case 'settings': return SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_SETTINGS, {});
             default: return null;
@@ -4437,14 +3283,10 @@ async send(type, payload = {}, options = {}) {
     function updateData(type, payload) {
         switch (type) {
             case 'friendsList':
-                contacts = payload;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CONTACTS_CACHE, contacts);
+                payload.forEach(friend => FriendManager.updateFriend(friend));
                 break;
             case 'chatHistory':
-                messages = payload;
-                if (currentChat) {
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
-                }
+                payload.forEach(msg => ChatManager.addMessage(msg));
                 break;
             case 'settings':
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER_SETTINGS, payload);
@@ -4455,16 +3297,26 @@ async send(type, payload = {}, options = {}) {
     }
 
     function isCoreReady() {
-        return StateMachine.isInState(StateMachine.READY);
+        return SessionManager.isReady();
     }
 
     function getConnectionHealth() {
-        return messagingClient.getHealth();
+        return {
+            parentReady: true,
+            connectionQuality: WSController.isReady() ? 'excellent' : 'unknown',
+            handshake: { state: SessionManager.getState(), version: VERSION },
+            sessionValid: SessionManager.isAuthenticated(),
+            tokenValid: TokenAuthority.hasToken(),
+            wsState: WSController.getState(),
+            pendingMessages: MessageLifecycle.getPendingCount(),
+            queuedMessages: MessageTransport.getStats().queued,
+            uptime: 0,
+            timestamp: Date.now()
+        };
     }
 
     function showMessageActions(message, x, y) {
         selectedMessage = message;
-
         window.dispatchEvent(new CustomEvent('showMessageActions', {
             detail: { message, x, y }
         }));
@@ -4477,11 +3329,9 @@ async send(type, payload = {}, options = {}) {
 
     function handleMessageAction(action) {
         if (!selectedMessage) return false;
-
         window.dispatchEvent(new CustomEvent('handleMessageAction', {
             detail: { action, message: selectedMessage }
         }));
-
         return true;
     }
 
@@ -4538,7 +3388,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         const reportData = {
             message: SafeStorage.getJSON('reported_message', {}),
             reason: reportText.value.trim(),
-            reporterId: SessionMirror.getUser()?.id || 'unknown',
+            reporterId: SessionManager.getUserId() || 'unknown',
             timestamp: new Date().toISOString()
         };
 
@@ -4546,11 +3396,8 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         reports.push(reportData);
         SafeStorage.setJSON('reports', reports);
 
-        if (SessionMirror.isAuthenticated()) {
-            APIClient.request('/api/reports', {
-                method: 'POST',
-                body: JSON.stringify(reportData)
-            }).catch(() => {});
+        if (SessionManager.isReady()) {
+            MessageTransport.send('SUBMIT_REPORT', reportData, { requiresAck: false });
         }
 
         return true;
@@ -5007,7 +3854,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
             return [];
         }
 
-        searchResults = messages.filter(msg => 
+        searchResults = ChatManager.getMessages().filter(msg => 
             !msg.deleted && 
             msg.content && 
             msg.content.toLowerCase().includes(query.toLowerCase())
@@ -5144,13 +3991,12 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
 
     function startBackgroundSync() {
         let syncInterval = setInterval(async () => {
-            if (!SessionMirror.isAuthenticated() || isSyncing) return;
+            if (!SessionManager.isReady() || isSyncing) return;
 
             isSyncing = true;
             try {
-                await loadChats();
-                await loadContacts();
-                await messagingClient.processQueue();
+                await FriendManager.loadFriends();
+                await ChatManager.loadChats();
             } catch (error) {
             } finally {
                 isSyncing = false;
@@ -5158,10 +4004,10 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         }, 30000);
 
         let saveInterval = setInterval(() => {
-            if (currentChat) {
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
+            if (ChatManager.getActiveChat()) {
+                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, ChatManager.getMessages());
             }
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats: ChatManager.getChats(), timestamp: Date.now() });
         }, 60000);
 
         return { syncInterval, saveInterval };
@@ -5199,19 +4045,22 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     async function checkOfflineQueue() {
-        if (!navigator.onLine || offlineQueue.length === 0 || !SessionMirror.isAuthenticated()) return;
+        if (!navigator.onLine || offlineQueue.length === 0 || !SessionManager.isReady()) return;
 
         const failedMessages = [];
 
         for (const message of offlineQueue) {
-            const result = await APIClient.request('/api/messages/send', {
-                method: 'POST',
-                body: JSON.stringify(message)
+            const result = await MessageLifecycle.sendMessage(message.content, {
+                type: message.type,
+                attachment: message.attachment,
+                chatId: message.chatId
             });
 
-            if (!result || result.error) {
+            if (!result || !result.success) {
                 failedMessages.push(message);
             }
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         offlineQueue = failedMessages;
@@ -5219,7 +4068,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     function loadMultiSendChats() {
-        return chats.filter(chat => 
+        return ChatManager.getChats().filter(chat => 
             !chat.archived && 
             !chat.blocked && 
             chat.type !== 'note'
@@ -5275,28 +4124,36 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     function retryConnection() {
-        // Trigger state machine recovery
-        if (StateMachine.canTransitionTo(StateMachine.REGISTERING)) {
-            StateMachine.transition(StateMachine.REGISTERING, 'manual-retry');
+        if (SessionManager.getState() === SessionManager.ERROR) {
+            SessionManager.transition(SessionManager.REGISTERING, 'manual-retry');
             initialize().catch(() => {});
         }
     }
 
     function renderMessages() {
         window.dispatchEvent(new CustomEvent('renderMessages', {
-            detail: { messages, currentChat, currentUser }
+            detail: { 
+                messages: ChatManager.getMessages(), 
+                currentChat: ChatManager.getActiveChat(), 
+                currentUser: SessionManager.getUser() 
+            }
         }));
     }
 
     function renderChatsList() {
         window.dispatchEvent(new CustomEvent('renderChatsList', {
-            detail: { chats, currentChat, currentCategory, messageDrafts }
+            detail: { 
+                chats: ChatManager.getChats(), 
+                currentChat: ChatManager.getActiveChat(), 
+                currentCategory, 
+                messageDrafts 
+            }
         }));
     }
 
     function renderContactsList() {
         window.dispatchEvent(new CustomEvent('renderContactsList', {
-            detail: { contacts }
+            detail: { contacts: FriendManager.getFriends() }
         }));
     }
 
@@ -5305,17 +4162,31 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     function initializeAudioWaveforms() {}
 
     function viewMedia(url, fileName) {
+        window.open(url, '_blank');
         return { url, fileName };
     }
 
     function playVideo(url) {
+        window.open(url, '_blank');
         return url;
     }
 
     function playAudio(messageId, url, duration) {
         try {
+            if (activeAudioElement) {
+                activeAudioElement.pause();
+            }
+            
             const audio = new Audio(url);
+            activeAudioElement = audio;
             audio.play();
+            
+            audio.onended = () => {
+                if (activeAudioElement === audio) {
+                    activeAudioElement = null;
+                }
+            };
+            
             return 'playing';
         } catch (error) {
             return 'error';
@@ -5347,11 +4218,15 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     function cleanupAudioPlayers() {
+        if (activeAudioElement) {
+            activeAudioElement.pause();
+            activeAudioElement = null;
+        }
         audioPlayers.clear();
     }
 
     function syncChatList() {
-        return Promise.resolve([]);
+        return ChatManager.loadChats();
     }
 
     function updateUnreadCounts() {
@@ -5359,7 +4234,124 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     }
 
     function updateTypingIndicator(isTyping) {
-        return false;
+        if (!currentChat) return false;
+        
+        MessageTransport.send(isTyping ? MESSAGE_TYPES.TYPING_START : MESSAGE_TYPES.TYPING_STOP, {
+            chatId: currentChat.id,
+            timestamp: Date.now()
+        }, { requiresAck: false });
+        
+        return true;
+    }
+
+    // =============================================
+    // MAIN INITIALIZATION
+    // =============================================
+    async function initialize() {
+        Logger.info('Init', `🚀 Messages Core v${VERSION} (${ENV.isLocal ? 'LOCAL' : ENV.isRender ? 'RENDER' : 'PRODUCTION'})`);
+        
+        try {
+            // UNINITIALIZED → REGISTERING
+            await SessionManager.transition(SessionManager.REGISTERING, 'starting');
+            
+            // Initialize session manager
+            await SessionManager.init();
+            
+            // Register with parent
+            await registerWithParent();
+            
+            // REGISTERED → SESSION_PENDING
+            await SessionManager.transition(SessionManager.SESSION_PENDING, 'registered');
+            
+            // Acquire session
+            const sessionAcquired = await acquireSession();
+            
+            if (sessionAcquired) {
+                // SESSION_PENDING → SESSION_ACTIVE
+                await SessionManager.transition(SessionManager.SESSION_ACTIVE, 'session-acquired');
+                
+                // Wait for token if needed
+                try {
+                    const token = await TokenAuthority.waitForToken().catch(() => null);
+                    if (token) {
+                        Logger.success('Init', 'Token ready');
+                    }
+                } catch (e) {
+                    Logger.warn('Init', 'Token not available, continuing');
+                }
+            }
+            
+            // Connect WebSocket
+            if (TokenAuthority.hasToken()) {
+                const wsUrl = ENV.isLocal ? 'ws://localhost:4000/ws' : 'wss://' + window.location.hostname + '/ws';
+                WSController.connect(wsUrl).catch(() => {});
+            }
+            
+            // SESSION_ACTIVE → READY
+            await SessionManager.transition(SessionManager.READY, 'ready');
+            
+            // Load cached data
+            loadCachedData();
+            
+            // Initialize UI
+            await initializeUI();
+            
+            // Load friends (cached first)
+            FriendManager.loadFriends().catch(() => {});
+            ChatManager.loadChats().catch(() => {});
+            
+            Logger.success('Init', '✅ Messages Core ready');
+            
+            window.dispatchEvent(new CustomEvent('coreReady', {
+                detail: {
+                    authenticated: SessionManager.isAuthenticated(),
+                    user: SessionManager.getUser(),
+                    frameId: FRAME_ID,
+                    state: SessionManager.getState(),
+                    version: VERSION
+                }
+            }));
+            
+        } catch (error) {
+            Logger.error('Init', 'Fatal initialization error', error);
+            
+            await SessionManager.transition(SessionManager.ERROR, error.message);
+            
+            window.dispatchEvent(new CustomEvent('coreReady', {
+                detail: {
+                    authenticated: false,
+                    user: null,
+                    error: error.message,
+                    state: SessionManager.getState()
+                }
+            }));
+        }
+    }
+
+    function loadCachedData() {
+        try {
+            const cachedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
+            if (cachedChats?.chats) {
+                cachedChats.chats.forEach(chat => {
+                    if (!ChatManager._chatsMap.has(chat.id)) {
+                        ChatManager._chats.push(chat);
+                        ChatManager._chatsMap.set(chat.id, chat);
+                    }
+                });
+            }
+
+            const cachedDrafts = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.DRAFTS);
+            if (cachedDrafts) {
+                messageDrafts = cachedDrafts;
+            }
+
+            const cachedOffline = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
+            if (cachedOffline) {
+                offlineQueue = cachedOffline;
+            }
+        } catch (error) {
+            Logger.warn('Init', 'Error loading cached data', error);
+        }
     }
 
     // =============================================
@@ -5367,10 +4359,10 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
     // =============================================
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(initialize, 100);
+            setTimeout(initialize, 50);
         });
     } else {
-        setTimeout(initialize, 100);
+        setTimeout(initialize, 50);
     }
 
     window.addEventListener('beforeunload', () => {
@@ -5380,12 +4372,12 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         saveMessageDraft();
         saveUIState();
 
-        if (currentChat) {
-            SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${currentChat.id}`, messages);
+        if (ChatManager.getActiveChat()) {
+            SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, ChatManager.getMessages());
         }
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, chats);
         
-        // Clean up WebSocket
+        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE, { chats: ChatManager.getChats(), timestamp: Date.now() });
+        
         WSController.disconnect();
     });
 
@@ -5400,25 +4392,33 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         SOURCE_IFRAME,
         FRAME_ID,
         
-        // Status
-        StatusIndicator,
+        // Session Manager
+        SessionManager,
         
-        // State Machine
-        StateMachine,
+        // Token Authority
+        TokenAuthority,
         
-        // Lifecycle
+        // Friend Manager
+        FriendManager,
+        
+        // Chat Manager
+        ChatManager,
+        
+        // WS Controller
+        WSController,
+        
+        // Message Lifecycle
         MessageLifecycle,
+        MessageTransport,
+        AckController,
         
-        getConnectionHealth: () => {
-        return {
-            parentReady: ParentDetector?.isReady || false,
-            connectionQuality: 'unknown', // This will be replaced by the method above
-            handshake: { state: StateMachine.getState() },
-            sessionValid: SessionMirror?.isAuthenticated?.() || false,
-            timestamp: Date.now()
-        };
-    },
-        // State
+        // Utilities
+        SecurityUtils,
+        SafeStorage,
+        
+        getConnectionHealth,
+        
+        // State (preserved)
         currentUser, currentChat, currentFriend, messages, chats, contacts,
         isRecording, mediaRecorder, recordingTimer, recordingStartTime,
         typingTimeout, isTyping, selectedMessage, currentThread, chatThemes,
@@ -5428,7 +4428,7 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         currentAttachment, searchResults, currentSearchIndex, multiSendSelectedChats,
         recordingCancelTimeout, dragStartY, isDraggingToCancel,
 
-        // Setters
+        // Setters (preserved)
         setCurrentUser, setCurrentChat, setCurrentFriend, setMessages, setChats, setContacts,
         setIsRecording, setMediaRecorder, setRecordingTimer, setRecordingStartTime,
         setTypingTimeout, setIsTyping, setSelectedMessage, setCurrentThread,
@@ -5441,19 +4441,10 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         setIsDraggingToCancel,
 
         // Session & Communication
-        SessionMirror,
-        ParentDetector,
-        SessionClient,
-        messagingClient,
-        MessageTransport,
-        TokenAuthority,
-        WSController,
-        
         getCurrentSession,
         requestSessionUpdate,
         initChildSession,
         isCoreReady,
-        getConnectionHealth,
         sendToParent,
         
         // API
@@ -5464,7 +4455,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         // Data management
         getData,
         updateData,
-        loadCoreData,
         loadContacts,
         loadChats,
         loadMessages,
@@ -5505,8 +4495,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         escapeRegex,
         preserveFormatting,
         sanitizePayload,
-        SecurityUtils,
-        SafeStorage,
 
         // Message actions
         showMessageActions,
@@ -5608,10 +4596,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
         syncChatList,
         updateUnreadCounts,
         updateTypingIndicator,
-
-        // Diagnostics
-        DiagnosticsAgent,
-        getHealthStatus: getConnectionHealth,
         
         // Registration
         registerWithParent,
@@ -5622,7 +4606,6 @@ ${message.fileSize ? `Size: ${formatFileSize(message.fileSize)}\n` : ''}`;
 
     if (window.location.hash === '#debug' || localStorage.getItem('kynecta_debug') === 'true') {
         window.__IFRAME_DEBUG__ = true;
-        DiagnosticsAgent.enabled = true;
     }
 
     if (typeof module !== 'undefined' && module.exports) {
