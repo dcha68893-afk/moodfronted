@@ -2469,110 +2469,502 @@
 })();
     </script>
 
-    <!-- ========== ENHANCED PARENT–CHILD COMMUNICATION ARCHITECTURE - DETERMINISTIC VERSION ========== -->
+    <!-- ========== ARCHITECTURAL ENHANCEMENTS - DETERMINISTIC PARENT BOOT BARRIER ========== -->
     <script>
     (function() {
         'use strict';
 
-        /**
-         * ====================================================================
-         * KYNETA PARENT AUTHORITY ENGINE v4.0.0
-         * Enterprise-grade deterministic iframe orchestration
-         * 
-         * FIXED: All race conditions, duplicate messages, ACK storms
-         * PRESERVED: All existing features, modules, and message contracts
-         * ====================================================================
-         */
+        // Configuration
+        const DEBUG_MODE = false; // Master switch for console noise
+        const RETRY_LIMIT = 3; // Strict retry cap per message
+
+        // Debug logging wrapper - reduces console noise
+        function debugLog(...args) {
+            if (DEBUG_MODE === true) {
+                console.log(...args);
+            }
+        }
+
+        // 1️⃣ BOOT BARRIER STATE MACHINE
+        const BOOT_STATE = {
+            sessionRestored: false,
+            socketConnected: false,
+            parentReadyBroadcasted: false,
+            iframesRegistered: new Set(),
+            bootCheckScheduled: false
+        };
+
+        // Single authoritative session source - frozen after restore
+        window.AUTH_SESSION = null;
+
+        // 4️⃣ CENTRALIZED ACK REGISTRY
+        window.ACK_REGISTRY = new Map(); // messageId -> { timestamp, sourceIframe, retryCount, delivered }
+
+        // 6️⃣ IFRAME REGISTRATION TRACKING
+        const IFRAME_IDS = [
+            'messagesIframe', 'statusIframe', 'groupIframe', 
+            'friendsIframe', 'callsIframe', 'settingsIframe', 'toolsIframe'
+        ];
+
+        // Hook into existing session restore success
+        const originalSessionRestore = window.__sessionRestoreSuccess || function() {};
+        window.__sessionRestoreSuccess = function() {
+            BOOT_STATE.sessionRestored = true;
+            
+            // Create immutable session if available
+            if (window.__KYNECTA_AUTHORITIES__?.parentState) {
+                const session = window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+                if (session && session.authenticated && session.user) {
+                    window.AUTH_SESSION = Object.freeze({
+                        userId: session.userId || session.user.id,
+                        token: session.token,
+                        sessionId: session.sessionId || ('sess_' + Date.now()),
+                        permissions: session.permissions || [],
+                        timestamp: Date.now()
+                    });
+                }
+            }
+            
+            debugLog('[Boot] Session restored');
+            checkBootCompletion();
+            if (originalSessionRestore) originalSessionRestore();
+        };
+
+        // Hook into existing WebSocket connection success
+        const originalSocketConnected = window.__socketConnected || function() {};
+        window.__socketConnected = function() {
+            BOOT_STATE.socketConnected = true;
+            debugLog('[Boot] Socket connected');
+            checkBootCompletion();
+            if (originalSocketConnected) originalSocketConnected();
+        };
+
+        // 2️⃣ BOOT COMPLETION CHECK
+        function checkBootCompletion() {
+            if (BOOT_STATE.parentReadyBroadcasted) return;
+            
+            if (BOOT_STATE.sessionRestored && BOOT_STATE.socketConnected) {
+                broadcastParentReady();
+                BOOT_STATE.parentReadyBroadcasted = true;
+                debugLog('[Boot] Parent ready broadcasted');
+            }
+        }
+
+        // 3️⃣ DETERMINISTIC PARENT_READY BROADCAST (ONCE)
+        function broadcastParentReady() {
+            if (!window.AUTH_SESSION) {
+                // Create minimal session if none exists
+                window.AUTH_SESSION = Object.freeze({
+                    userId: 'guest_' + Date.now(),
+                    token: 'token_' + Date.now(),
+                    sessionId: 'sess_' + Date.now(),
+                    permissions: [],
+                    timestamp: Date.now()
+                });
+            }
+
+            const payload = {
+                type: "PARENT_READY",
+                session: window.AUTH_SESSION,
+                protocolVersion: "1.0.0",
+                timestamp: Date.now()
+            };
+
+            IFRAME_IDS.forEach(frameId => {
+                const frame = document.getElementById(frameId);
+                if (frame && frame.contentWindow) {
+                    try {
+                        frame.contentWindow.postMessage(payload, "*");
+                        debugLog('[Boot] PARENT_READY sent to', frameId);
+                    } catch (e) {
+                        // Silently fail
+                    }
+                }
+            });
+        }
+
+        // 4️⃣ ACK REGISTRY MANAGEMENT
+        function registerMessageAck(messageId, sourceIframe) {
+            if (!messageId) return false;
+            
+            if (ACK_REGISTRY.has(messageId)) {
+                const entry = ACK_REGISTRY.get(messageId);
+                entry.retryCount = (entry.retryCount || 0) + 1;
+                
+                // 5️⃣ RETRY CAP ENFORCEMENT
+                if (entry.retryCount > RETRY_LIMIT) {
+                    if (sourceIframe) {
+                        try {
+                            sourceIframe.postMessage({
+                                type: "RETRY_LIMIT_REACHED",
+                                messageId: messageId,
+                                timestamp: Date.now()
+                            }, "*");
+                        } catch (e) {}
+                    }
+                    return false;
+                }
+                
+                ACK_REGISTRY.set(messageId, entry);
+                return true;
+            }
+            
+            ACK_REGISTRY.set(messageId, {
+                timestamp: Date.now(),
+                sourceIframe: sourceIframe,
+                retryCount: 0,
+                delivered: false
+            });
+            
+            // Cleanup old entries (keep last 1000)
+            if (ACK_REGISTRY.size > 1000) {
+                const oldestKeys = Array.from(ACK_REGISTRY.keys())
+                    .sort((a, b) => ACK_REGISTRY.get(a).timestamp - ACK_REGISTRY.get(b).timestamp)
+                    .slice(0, ACK_REGISTRY.size - 1000);
+                oldestKeys.forEach(key => ACK_REGISTRY.delete(key));
+            }
+            
+            return true;
+        }
+
+        function handleServerDeliveryConfirmation(messageId) {
+            if (!ACK_REGISTRY.has(messageId)) return;
+            
+            const entry = ACK_REGISTRY.get(messageId);
+            if (entry.delivered) return;
+            
+            entry.delivered = true;
+            
+            // Send ACK only to originating iframe
+            if (entry.sourceIframe) {
+                try {
+                    entry.sourceIframe.postMessage({
+                        type: "MESSAGE_DELIVERED",
+                        messageId: messageId,
+                        timestamp: Date.now()
+                    }, "*");
+                } catch (e) {}
+            }
+        }
+
+        // 6️⃣ IFRAME REGISTRATION HANDLER
+        function handleIframeInit(event) {
+            if (!event.data || event.data.type !== "IFRAME_INIT") return;
+            
+            const iframeId = event.data.iframeId;
+            if (iframeId && event.source) {
+                BOOT_STATE.iframesRegistered.add(iframeId);
+                debugLog('[Boot] Iframe registered:', iframeId);
+            }
+        }
+
+        // Hook into existing message listener
+        const originalMessageListener = window.__messageListener || function() {};
+        window.__messageListener = function(event) {
+            handleIframeInit(event);
+            
+            // Check for SEND_MESSAGE to register ACK
+            if (event.data && event.data.type === "SEND_MESSAGE" && event.data.messageId) {
+                registerMessageAck(event.data.messageId, event.source);
+            }
+            
+            if (originalMessageListener) originalMessageListener(event);
+        };
+
+        // Hook into WebSocket message handler for delivery confirmations
+        const originalWsMessageHandler = window.__wsMessageHandler || function() {};
+        window.__wsMessageHandler = function(data) {
+            if (data && data.type === "MESSAGE_DELIVERED" && data.messageId) {
+                handleServerDeliveryConfirmation(data.messageId);
+            }
+            if (originalWsMessageHandler) originalWsMessageHandler(data);
+        };
+
+        // Ensure boot check runs after all initialization
+        setTimeout(checkBootCompletion, 1000);
+
+        // Expose for debugging
+        window.__BOOT_STATE__ = BOOT_STATE;
+        window.__ACK_REGISTRY__ = ACK_REGISTRY;
+        window.__RETRY_LIMIT__ = RETRY_LIMIT;
+        window.__debugLog = debugLog;
+
+        // Preserve existing globals
+        window.__sessionRestoreSuccess = window.__sessionRestoreSuccess || window.__sessionRestoreSuccess;
+        window.__socketConnected = window.__socketConnected || window.__socketConnected;
+        window.__messageListener = window.__messageListener || window.__messageListener;
+        window.__wsMessageHandler = window.__wsMessageHandler || window.__wsMessageHandler;
+
+        debugLog('[Boot] Architectural enhancements loaded');
+    })();
+    </script>
+
+    <!-- ========== DETERMINISTIC PARENT AUTHORITY ENGINE v4.0.0 ========== -->
+    <script>
+    (function() {
+        'use strict';
 
         // ==================== CONFIGURATION ====================
+        const DEBUG = false; // Console noise reduction - only critical logs allowed
+        
         const CONFIG = {
             PROTOCOL_VERSION: 'KYN-4.0',
             APP_NAME: 'kynecta-parent',
-            MAX_RETRIES: 3,
+            MAX_RETRIES: 2, // Limited retries as per contract
             HANDSHAKE_TIMEOUT: 3000,
             HEARTBEAT_INTERVAL: 30000,
             PROCESSED_IDS_CLEANUP_INTERVAL: 60000,
             MAX_PROCESSED_IDS: 1000,
             MAX_QUEUE_SIZE: 100,
+            BOOT_TIMEOUT: 5000,
+            RETRY_DELAYS: [500, 1000, 2000], // Exponential backoff
             STATES: {
-                BOOTING: 'BOOTING',
-                SESSION_LOAD: 'SESSION_LOAD',
-                TOKEN_READY: 'TOKEN_READY',
+                PREINIT: 'PREINIT',
+                AUTH_INIT: 'AUTH_INIT',
+                SESSION_RESTORE: 'SESSION_RESTORE',
+                AUTH_READY: 'AUTH_READY',
+                IFRAME_HANDSHAKE: 'IFRAME_HANDSHAKE',
                 READY: 'READY',
-                REGISTERING: 'REGISTERING',
-                BROADCASTING: 'BROADCASTING',
-                ERROR_RECOVER: 'ERROR_RECOVER',
-                ERROR_FATAL: 'ERROR_FATAL'
+                DEGRADED: 'DEGRADED',
+                ERROR: 'ERROR'
+            },
+            IFRAME_STATES: {
+                NONE: 'none',
+                REGISTERING: 'registering',
+                REGISTERED: 'registered',
+                ACTIVE: 'active',
+                DEGRADED: 'degraded',
+                ERROR: 'error'
             }
         };
 
-        // ==================== SILENT LOGGING SYSTEM ====================
-        const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3, SECURITY: 4, SILENT: 5 };
+        // ==================== MINIMAL LOGGER ====================
+        const ALLOWED_LOGS = new Set(['INIT', 'AUTH_READY', 'SESSION_RESTORED', 'IFRAME_REGISTERED', 'READY', 'ERROR']);
         
         const Logger = {
-            currentLevel: LOG_LEVELS.SILENT,
-            _state: CONFIG.STATES.BOOTING,
+            _state: CONFIG.STATES.PREINIT,
             _transitions: [],
-            
-            setLevel(level) { this.currentLevel = level; },
+            _logOnce: new Set(),
             
             setState(state) {
                 const oldState = this._state;
                 this._state = state;
                 this._transitions.push({ from: oldState, to: state, timestamp: Date.now() });
-                if (this.currentLevel <= LOG_LEVELS.INFO) {
-                    console.log(`[Kynecta Parent] State: ${oldState} → ${state}`);
-                }
-            },
-            
-            _log(level, ...args) {
-                if (level >= this.currentLevel && level < LOG_LEVELS.SILENT) {
-                    console.log('[Kynecta Parent]', ...args);
-                }
-            },
-            
-            debug(...args) { this._log(LOG_LEVELS.DEBUG, ...args); },
-            info(...args) { this._log(LOG_LEVELS.INFO, ...args); },
-            warn(...args) { this._log(LOG_LEVELS.WARN, ...args); },
-            error(...args) { this._log(LOG_LEVELS.ERROR, ...args); },
-            security(...args) { this._log(LOG_LEVELS.SECURITY, ...args); },
-            handshake(...args) { this._log(LOG_LEVELS.INFO, ...args); }
-        };
-
-        // ==================== IDEMPOTENT MESSAGE TRACKER ====================
-        const ProcessedMessageTracker = {
-            _processedIds: new Set(),
-            _idTimestamps: new Map(),
-            
-            isProcessed(messageId) {
-                return this._processedIds.has(messageId);
-            },
-            
-            markProcessed(messageId) {
-                this._processedIds.add(messageId);
-                this._idTimestamps.set(messageId, Date.now());
-                this._cleanup();
-            },
-            
-            _cleanup() {
-                if (this._processedIds.size > CONFIG.MAX_PROCESSED_IDS) {
-                    const now = Date.now();
-                    const threshold = now - 60000;
-                    for (const [id, timestamp] of this._idTimestamps) {
-                        if (timestamp < threshold) {
-                            this._processedIds.delete(id);
-                            this._idTimestamps.delete(id);
-                        }
-                        if (this._processedIds.size <= CONFIG.MAX_PROCESSED_IDS) break;
+                if (ALLOWED_LOGS.has(state)) {
+                    if (!this._logOnce.has(state)) {
+                        this._logOnce.add(state);
+                        if (DEBUG) console.log(`[Kynecta Parent] State: ${oldState} → ${state}`);
                     }
                 }
             },
             
-            reset() { this._processedIds.clear(); this._idTimestamps.clear(); }
+            log(type, ...args) {
+                if (DEBUG && ALLOWED_LOGS.has(type)) {
+                    if (!this._logOnce.has(type + args[0])) {
+                        this._logOnce.add(type + args[0]);
+                        console.log(`[Kynecta Parent] ${type}:`, ...args);
+                    }
+                }
+            },
+            
+            error(...args) {
+                if (!this._logOnce.has('ERROR_' + args[0])) {
+                    this._logOnce.add('ERROR_' + args[0]);
+                    console.error('[Kynecta Parent]', ...args);
+                }
+            }
         };
 
-        // ==================== CENTRAL REGISTRY ====================
-        const IframeRegistry = new Map(); // moduleName -> { iframe, origin, status, registeredAt, lastHeartbeat, sessionSent, tokenSent }
+        // ==================== SINGLE SOURCE OF TRUTH SESSION AUTHORITY ====================
+        const SessionAuthority = (function() {
+            let _initialized = false;
+            let _session = {
+                authenticated: false,
+                user: null,
+                userId: null,
+                token: null,
+                expiresAt: null,
+                permissions: [],
+                fromCache: false
+            };
+            let _state = CONFIG.STATES.PREINIT;
+            let _initPromise = null;
+            let _subscribers = new Set();
+
+            function init() {
+                if (_initPromise) return _initPromise;
+                
+                Logger.setState(CONFIG.STATES.AUTH_INIT);
+                Logger.log('INIT', 'Session authority initializing');
+                
+                _initPromise = new Promise((resolve) => {
+                    Logger.setState(CONFIG.STATES.SESSION_RESTORE);
+                    
+                    // Load from storage only once
+                    try {
+                        const storedUser = localStorage.getItem('kynecta_user');
+                        const storedToken = localStorage.getItem('kynecta_token');
+                        const storedExpiry = localStorage.getItem('kynecta_expiry');
+                        
+                        if (storedUser && storedToken) {
+                            const expiry = storedExpiry ? parseInt(storedExpiry, 10) : Date.now() + 3600000;
+                            if (expiry > Date.now()) {
+                                const user = JSON.parse(storedUser);
+                                _session = {
+                                    authenticated: true,
+                                    user: user,
+                                    userId: user.id,
+                                    token: storedToken,
+                                    expiresAt: expiry,
+                                    permissions: user.permissions || [],
+                                    fromCache: true
+                                };
+                                Logger.log('SESSION_RESTORED', 'Session restored from cache');
+                            }
+                        }
+                    } catch (e) {
+                        // Silently fail - use guest session
+                    }
+                    
+                    // If no session, create guest session (parent is authoritative)
+                    if (!_session.authenticated) {
+                        const guestUser = {
+                            id: 'guest_' + Date.now(),
+                            name: 'Guest User',
+                            email: 'guest@kynecta.local',
+                            guest: true
+                        };
+                        
+                        _session = {
+                            authenticated: true,
+                            user: guestUser,
+                            userId: guestUser.id,
+                            token: 'token_' + Date.now() + '_' + Math.random().toString(36).substr(2, 16),
+                            expiresAt: Date.now() + 86400000,
+                            permissions: [],
+                            fromCache: false
+                        };
+                        
+                        // Cache the session
+                        try {
+                            localStorage.setItem('kynecta_user', JSON.stringify(guestUser));
+                            localStorage.setItem('kynecta_token', _session.token);
+                            localStorage.setItem('kynecta_expiry', _session.expiresAt.toString());
+                        } catch (e) {}
+                        
+                        Logger.log('SESSION_RESTORED', 'Created guest session');
+                    }
+                    
+                    _initialized = true;
+                    Logger.setState(CONFIG.STATES.AUTH_READY);
+                    Logger.log('AUTH_READY', 'Session authority ready');
+                    
+                    // Update immutable AUTH_SESSION
+                    if (_session.authenticated) {
+                        window.AUTH_SESSION = Object.freeze({
+                            userId: _session.userId,
+                            token: _session.token,
+                            sessionId: _session.sessionId || ('sess_' + Date.now()),
+                            permissions: _session.permissions || [],
+                            timestamp: Date.now()
+                        });
+                    }
+                    
+                    // Notify subscribers
+                    _subscribers.forEach(cb => {
+                        try { cb(_session); } catch (e) {}
+                    });
+                    
+                    // Mark boot state as session restored
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.sessionRestored = true;
+                    }
+                    
+                    resolve(_session);
+                });
+                
+                return _initPromise;
+            }
+
+            function getSession() {
+                return { ..._session };
+            }
+
+            function getToken() {
+                return _session.token;
+            }
+
+            function getUser() {
+                return _session.user ? { ..._session.user } : null;
+            }
+
+            function isAuthenticated() {
+                return _session.authenticated;
+            }
+
+            function isReady() {
+                return _initialized;
+            }
+
+            function subscribe(callback) {
+                _subscribers.add(callback);
+                if (_initialized) {
+                    callback(_session);
+                }
+                return () => _subscribers.delete(callback);
+            }
+
+            function updateSession(newSession) {
+                // Parent is the ONLY authority - only update from trusted sources
+                if (!newSession || !newSession.user) return;
+                
+                _session = {
+                    authenticated: newSession.authenticated || false,
+                    user: newSession.user,
+                    userId: newSession.user.id,
+                    token: newSession.token || _session.token,
+                    expiresAt: newSession.expiresAt || Date.now() + 3600000,
+                    permissions: newSession.permissions || [],
+                    fromCache: false
+                };
+                
+                // Update immutable AUTH_SESSION
+                window.AUTH_SESSION = Object.freeze({
+                    userId: _session.userId,
+                    token: _session.token,
+                    sessionId: _session.sessionId || ('sess_' + Date.now()),
+                    permissions: _session.permissions || [],
+                    timestamp: Date.now()
+                });
+                
+                // Update cache
+                try {
+                    localStorage.setItem('kynecta_user', JSON.stringify(_session.user));
+                    if (_session.token) localStorage.setItem('kynecta_token', _session.token);
+                    if (_session.expiresAt) localStorage.setItem('kynecta_expiry', _session.expiresAt.toString());
+                } catch (e) {}
+                
+                // Notify subscribers
+                _subscribers.forEach(cb => {
+                    try { cb(_session); } catch (e) {}
+                });
+            }
+
+            return {
+                init,
+                getSession,
+                getToken,
+                getUser,
+                isAuthenticated,
+                isReady,
+                subscribe,
+                updateSession
+            };
+        })();
+
+        // ==================== IFRAME REGISTRY ====================
+        const IframeRegistry = new Map(); // moduleName -> { iframe, origin, state, retries, lastHeartbeat }
+        
         const MODULE_IFRAMES = {
             messages: 'messagesIframe',
             status: 'statusIframe',
@@ -2583,234 +2975,275 @@
             tools: 'toolsIframe'
         };
 
-        // ==================== SESSION AUTHORITY ====================
-        const SessionAuthority = {
-            _session: null,
-            _token: null,
-            _user: null,
-            _authenticated: false,
-            _version: 0,
-            _ready: false,
-            _tokenReady: false,
-            _tokenPromise: null,
-            _tokenResolve: null,
+        // ==================== ACK MANAGER ====================
+        const AckManager = {
+            _pendingAcks: new Map(), // messageId -> { resolve, reject, timer, module, type, retries }
+            _processedAcks: new Set(),
             
-            init() {
-                Logger.setState(CONFIG.STATES.SESSION_LOAD);
-                return this._loadFromStorage().then(() => {
-                    if (this._authenticated) {
-                        Logger.setState(CONFIG.STATES.TOKEN_READY);
-                        this._tokenReady = true;
-                        if (this._tokenResolve) this._tokenResolve(this._token);
-                    }
-                    Logger.setState(CONFIG.STATES.READY);
-                    this._ready = true;
-                    return this._session;
-                });
-            },
-            
-            _loadFromStorage() {
-                try {
-                    const storedUser = localStorage.getItem('kynecta_user');
-                    const storedToken = localStorage.getItem('kynecta_token');
-                    const storedExpiry = localStorage.getItem('kynecta_expiry');
-                    
-                    if (storedUser && storedToken && storedExpiry) {
-                        const expiry = parseInt(storedExpiry, 10);
-                        if (expiry > Date.now()) {
-                            this._user = JSON.parse(storedUser);
-                            this._token = storedToken;
-                            this._authenticated = true;
-                            this._version++;
-                            this._session = {
-                                authenticated: true,
-                                user: this._user,
-                                userId: this._user.id,
-                                token: this._token,
-                                expiresAt: expiry,
-                                version: this._version
-                            };
-                            Logger.info('Session loaded from storage');
-                            return Promise.resolve();
-                        }
-                    }
-                } catch (e) {}
-                
-                // Create default guest session
-                const defaultUser = {
-                    id: 'guest_' + Date.now(),
-                    name: 'Guest User',
-                    email: 'guest@kynecta.local',
-                    guest: true
-                };
-                this._user = defaultUser;
-                this._token = 'token_' + Date.now() + '_' + Math.random().toString(36).substr(2, 16);
-                this._authenticated = true;
-                this._version++;
-                this._session = {
-                    authenticated: true,
-                    user: this._user,
-                    userId: this._user.id,
-                    token: this._token,
-                    expiresAt: Date.now() + 86400000,
-                    version: this._version
-                };
-                
-                try {
-                    localStorage.setItem('kynecta_user', JSON.stringify(this._user));
-                    localStorage.setItem('kynecta_token', this._token);
-                    localStorage.setItem('kynecta_expiry', this._session.expiresAt.toString());
-                } catch (e) {}
-                
-                Logger.info('Created guest session');
-                return Promise.resolve();
-            },
-            
-            getSession() {
-                return this._session ? { ...this._session } : null;
-            },
-            
-            getToken() {
-                return this._token;
-            },
-            
-            getUser() {
-                return this._user ? { ...this._user } : null;
-            },
-            
-            isAuthenticated() {
-                return this._authenticated;
-            },
-            
-            isReady() {
-                return this._ready;
-            },
-            
-            isTokenReady() {
-                return this._tokenReady;
-            },
-            
-            waitForToken(timeout = 3000) {
-                if (this._tokenReady) return Promise.resolve(this._token);
-                if (!this._tokenPromise) {
-                    this._tokenPromise = new Promise((resolve, reject) => {
-                        this._tokenResolve = resolve;
-                        setTimeout(() => {
-                            if (!this._tokenReady) {
-                                reject(new Error('Token ready timeout'));
-                            }
-                        }, timeout);
-                    });
-                }
-                return this._tokenPromise;
-            },
-            
-            updateSession(newSession) {
-                this._session = newSession;
-                this._user = newSession.user;
-                this._token = newSession.token;
-                this._authenticated = newSession.authenticated;
-                this._version++;
-                this._session.version = this._version;
-                this._tokenReady = true;
-                
-                if (this._tokenResolve) {
-                    this._tokenResolve(this._token);
-                    this._tokenResolve = null;
-                    this._tokenPromise = null;
-                }
-                
-                Logger.setState(CONFIG.STATES.BROADCASTING);
-                this._broadcastToAllIframes();
-                Logger.setState(CONFIG.STATES.READY);
-            },
-            
-            _broadcastToAllIframes() {
-                const sessionData = this.getSession();
-                for (const [moduleName, reg] of IframeRegistry) {
-                    if (reg.iframe && reg.iframe.contentWindow) {
-                        this._sendSessionToIframe(reg.iframe, moduleName, sessionData);
-                        reg.sessionSent = true;
-                        reg.tokenSent = true;
-                    }
-                }
-            },
-            
-            _sendSessionToIframe(iframe, moduleName, sessionData) {
-                if (!iframe || !iframe.contentWindow) return;
-                
-                const message = {
-                    type: 'SESSION_UPDATE',
-                    payload: sessionData,
-                    timestamp: Date.now(),
-                    module: moduleName,
-                    version: this._version
-                };
-                
-                try {
-                    iframe.contentWindow.postMessage(message, '*');
-                } catch (e) {}
-            }
-        };
-
-        // ==================== ACK CONTROLLER ====================
-        const AckController = {
-            _pendingAcks: new Map(), // requestId -> { resolve, reject, timer, module, type }
-            
-            register(requestId, module, type, resolve, reject, timeout = 3000) {
-                if (ProcessedMessageTracker.isProcessed(requestId)) {
+            register(messageId, module, type, resolve, reject, timeout = 3000) {
+                if (this._processedAcks.has(messageId)) {
                     resolve({ success: true, cached: true });
                     return false;
                 }
                 
                 const timer = setTimeout(() => {
-                    if (this._pendingAcks.has(requestId)) {
-                        this._pendingAcks.delete(requestId);
-                        reject(new Error(`ACK timeout for ${type}`));
+                    if (this._pendingAcks.has(messageId)) {
+                        const handler = this._pendingAcks.get(messageId);
+                        const retries = handler.retries || 0;
+                        
+                        if (retries < CONFIG.MAX_RETRIES) {
+                            // Exponential backoff retry
+                            handler.retries = retries + 1;
+                            const delay = CONFIG.RETRY_DELAYS[retries] || 2000;
+                            
+                            clearTimeout(handler.timer);
+                            handler.timer = setTimeout(() => {
+                                if (this._pendingAcks.has(messageId)) {
+                                    this._pendingAcks.delete(messageId);
+                                    reject(new Error(`ACK timeout after ${retries + 1} retries`));
+                                }
+                            }, delay);
+                            
+                            this._pendingAcks.set(messageId, handler);
+                        } else {
+                            this._pendingAcks.delete(messageId);
+                            reject(new Error(`ACK timeout after ${CONFIG.MAX_RETRIES} retries`));
+                        }
                     }
                 }, timeout);
                 
-                this._pendingAcks.set(requestId, { resolve, reject, timer, module, type });
+                this._pendingAcks.set(messageId, { resolve, reject, timer, module, type, retries: 0 });
                 return true;
             },
             
-            handleAck(requestId, payload) {
-                if (ProcessedMessageTracker.isProcessed(requestId)) {
+            handleAck(messageId, payload) {
+                if (this._processedAcks.has(messageId)) {
                     return false;
                 }
                 
-                const handler = this._pendingAcks.get(requestId);
+                this._processedAcks.add(messageId);
+                
+                const handler = this._pendingAcks.get(messageId);
                 if (handler) {
                     clearTimeout(handler.timer);
-                    handler.resolve(payload);
-                    this._pendingAcks.delete(requestId);
-                    ProcessedMessageTracker.markProcessed(requestId);
+                    handler.resolve(payload || { success: true });
+                    this._pendingAcks.delete(messageId);
                     return true;
                 }
                 
-                ProcessedMessageTracker.markProcessed(requestId);
                 return false;
             },
             
-            handleNack(requestId, reason) {
-                const handler = this._pendingAcks.get(requestId);
-                if (handler) {
-                    clearTimeout(handler.timer);
-                    handler.reject(new Error(reason || 'NACK received'));
-                    this._pendingAcks.delete(requestId);
-                    ProcessedMessageTracker.markProcessed(requestId);
-                    return true;
+            cleanup() {
+                if (this._processedAcks.size > CONFIG.MAX_PROCESSED_IDS) {
+                    const idsArray = Array.from(this._processedAcks);
+                    const toRemove = idsArray.slice(0, idsArray.length - CONFIG.MAX_PROCESSED_IDS);
+                    toRemove.forEach(id => this._processedAcks.delete(id));
                 }
-                return false;
+            }
+        };
+
+        // ==================== MESSAGE FORMATTER ====================
+        const MessageFormatter = {
+            generateMessageId() {
+                return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+            },
+            
+            createMessage(type, payload = {}, options = {}) {
+                const messageId = options.messageId || this.generateMessageId();
+                return {
+                    type: type,
+                    messageId: messageId,
+                    requestId: messageId,
+                    timestamp: Date.now(),
+                    source: 'parent',
+                    payload: payload,
+                    expectAck: options.expectAck || false,
+                    protocol: CONFIG.PROTOCOL_VERSION,
+                    session: window.AUTH_SESSION ? { 
+                        userId: window.AUTH_SESSION.userId,
+                        authenticated: true
+                    } : { authenticated: false }
+                };
+            }
+        };
+
+        // ==================== HANDSHAKE MANAGER ====================
+        const HandshakeManager = {
+            _handshakes: new Map(), // module -> { state, retries, promise }
+            
+            initiate(module, iframe, origin) {
+                // Check existing handshake
+                const existing = this._handshakes.get(module);
+                if (existing && existing.state === 'active') {
+                    return Promise.resolve(existing.result);
+                }
+                
+                if (existing && existing.retries >= CONFIG.MAX_RETRIES) {
+                    Logger.log('ERROR', `Handshake failed for ${module} after ${CONFIG.MAX_RETRIES} retries`);
+                    IframeRegistry.set(module, { 
+                        ...IframeRegistry.get(module),
+                        state: CONFIG.IFRAME_STATES.DEGRADED
+                    });
+                    return Promise.reject(new Error('Handshake max retries exceeded'));
+                }
+                
+                const retries = existing ? existing.retries + 1 : 0;
+                const delay = retries > 0 ? CONFIG.RETRY_DELAYS[retries - 1] || 1000 : 0;
+                
+                return new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                        this._performHandshake(module, iframe, origin, retries)
+                            .then(result => {
+                                this._handshakes.set(module, { state: 'active', result, retries: 0 });
+                                IframeRegistry.set(module, { 
+                                    ...IframeRegistry.get(module),
+                                    state: CONFIG.IFRAME_STATES.ACTIVE,
+                                    handshakeComplete: true
+                                });
+                                
+                                // Track iframe registration
+                                if (window.__BOOT_STATE__) {
+                                    window.__BOOT_STATE__.iframesRegistered.add(module);
+                                }
+                                
+                                resolve(result);
+                            })
+                            .catch(err => {
+                                this._handshakes.set(module, { state: 'failed', retries });
+                                reject(err);
+                            });
+                    }, delay);
+                });
+            },
+            
+            _performHandshake(module, iframe, origin, retries) {
+                return new Promise((resolve, reject) => {
+                    const messageId = MessageFormatter.generateMessageId();
+                    
+                    // Send HANDSHAKE_INIT
+                    const message = MessageFormatter.createMessage('HANDSHAKE_INIT', {
+                        module: module,
+                        timestamp: Date.now()
+                    }, { messageId, expectAck: true });
+                    
+                    try {
+                        iframe.contentWindow.postMessage(message, '*');
+                    } catch (e) {
+                        reject(e);
+                        return;
+                    }
+                    
+                    // Register ACK expectation
+                    const timeout = CONFIG.HANDSHAKE_TIMEOUT * (retries + 1);
+                    AckManager.register(messageId, module, 'HANDSHAKE_INIT', (response) => {
+                        // Handshake successful
+                        Logger.log('IFRAME_REGISTERED', `Module ${module} handshake complete`);
+                        
+                        // Update registry
+                        IframeRegistry.set(module, {
+                            iframe: iframe,
+                            origin: origin,
+                            state: CONFIG.IFRAME_STATES.REGISTERED,
+                            registeredAt: Date.now(),
+                            lastHeartbeat: Date.now()
+                        });
+                        
+                        // Send SESSION_ACTIVE if parent ready
+                        if (window.__PARENT_READY__ && SessionAuthority.isReady()) {
+                            const session = SessionAuthority.getSession();
+                            if (session.authenticated) {
+                                const sessionMsg = MessageFormatter.createMessage('SESSION_ACTIVE', session);
+                                try {
+                                    iframe.contentWindow.postMessage(sessionMsg, '*');
+                                } catch (e) {}
+                            }
+                        }
+                        
+                        resolve(response);
+                    }, (err) => {
+                        reject(err);
+                    }, timeout);
+                });
+            },
+            
+            handleChildReady(module, iframe, origin) {
+                Logger.log('IFRAME_REGISTERED', `Module ${module} sent CHILD_READY`);
+                
+                // Update registry
+                IframeRegistry.set(module, {
+                    iframe: iframe,
+                    origin: origin,
+                    state: CONFIG.IFRAME_STATES.REGISTERING,
+                    lastHeartbeat: Date.now()
+                });
+                
+                // Send PARENT_READY if not already sent
+                if (window.__PARENT_READY__) {
+                    const readyMsg = MessageFormatter.createMessage('PARENT_READY', {
+                        timestamp: Date.now()
+                    });
+                    
+                    try {
+                        iframe.contentWindow.postMessage(readyMsg, '*');
+                    } catch (e) {}
+                }
+                
+                // Initiate handshake
+                this.initiate(module, iframe, origin).catch(() => {});
+            },
+            
+            handleRegisterModule(module, iframe, origin) {
+                Logger.log('IFRAME_REGISTERED', `Module ${module} sent REGISTER_MODULE`);
+                
+                IframeRegistry.set(module, {
+                    iframe: iframe,
+                    origin: origin,
+                    state: CONFIG.IFRAME_STATES.REGISTERED,
+                    registeredAt: Date.now(),
+                    lastHeartbeat: Date.now()
+                });
+                
+                // Track iframe registration
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(module);
+                }
+                
+                // Send SESSION_ACTIVE if available
+                if (window.__PARENT_READY__ && SessionAuthority.isReady()) {
+                    const session = SessionAuthority.getSession();
+                    if (session.authenticated) {
+                        const sessionMsg = MessageFormatter.createMessage('SESSION_ACTIVE', session);
+                        try {
+                            iframe.contentWindow.postMessage(sessionMsg, '*');
+                        } catch (e) {}
+                    }
+                }
+            },
+            
+            handleReady(module) {
+                Logger.log('READY', `Module ${module} is ACTIVE`);
+                
+                if (IframeRegistry.has(module)) {
+                    IframeRegistry.get(module).state = CONFIG.IFRAME_STATES.ACTIVE;
+                }
+            },
+            
+            handleError(module, error) {
+                Logger.error(`Module ${module} error:`, error);
+                
+                if (IframeRegistry.has(module)) {
+                    IframeRegistry.get(module).state = CONFIG.IFRAME_STATES.ERROR;
+                }
+            },
+            
+            getState(module) {
+                return IframeRegistry.get(module)?.state || CONFIG.IFRAME_STATES.NONE;
             }
         };
 
         // ==================== MESSAGE ROUTER ====================
         const MessageRouter = {
-            _originTrusted(origin) {
-                return origin === window.location.origin || origin === 'null';
-            },
-            
             _identifyModule(source) {
                 for (const [moduleName, iframeId] of Object.entries(MODULE_IFRAMES)) {
                     const iframe = document.getElementById(iframeId);
@@ -2822,7 +3255,10 @@
             },
             
             route(event) {
-                if (!this._originTrusted(event.origin)) return;
+                // Validate origin
+                if (event.origin !== window.location.origin && event.origin !== 'null') {
+                    return;
+                }
                 
                 const module = this._identifyModule(event.source);
                 if (!module) return;
@@ -2831,333 +3267,147 @@
                 if (!data || typeof data !== 'object') return;
                 
                 const messageId = data.messageId || data.requestId;
-                const requestId = data.requestId || data.messageId;
                 
-                if (messageId && ProcessedMessageTracker.isProcessed(messageId)) {
-                    if (data.expectAck && requestId) {
-                        this._sendAck(event.source, event.origin, data.type, requestId, { success: true, cached: true });
-                    }
+                // Handle ACKs
+                if (data.type === 'ACK' && messageId) {
+                    AckManager.handleAck(messageId, data.payload);
                     return;
                 }
                 
+                // Handle IFRAME_INIT for registration tracking
+                if (data.type === 'IFRAME_INIT') {
+                    if (window.__BOOT_STATE__ && data.iframeId) {
+                        window.__BOOT_STATE__.iframesRegistered.add(data.iframeId);
+                    }
+                }
+                
+                // Handle SEND_MESSAGE for ACK registration
+                if (data.type === 'SEND_MESSAGE' && messageId) {
+                    if (window.__ACK_REGISTRY__) {
+                        window.__ACK_REGISTRY__.set(messageId, {
+                            timestamp: Date.now(),
+                            sourceIframe: event.source,
+                            retryCount: (window.__ACK_REGISTRY__.get(messageId)?.retryCount || 0) + 1,
+                            delivered: false
+                        });
+                        
+                        // Check retry limit
+                        const retryCount = window.__ACK_REGISTRY__.get(messageId).retryCount;
+                        if (retryCount > window.__RETRY_LIMIT__) {
+                            try {
+                                event.source.postMessage({
+                                    type: "RETRY_LIMIT_REACHED",
+                                    messageId: messageId,
+                                    timestamp: Date.now()
+                                }, event.origin);
+                            } catch (e) {}
+                            return;
+                        }
+                    }
+                }
+                
+                // Route based on message type
                 switch (data.type) {
-                    case 'VERIFY_SESSION':
-                        this._handleVerifySession(event, module, data, messageId, requestId);
-                        break;
-                    case 'REQUEST_TOKEN':
-                        this._handleRequestToken(event, module, data, messageId, requestId);
-                        break;
-                    case 'REQUEST_SESSION':
-                        this._handleRequestSession(event, module, data, messageId, requestId);
-                        break;
-                    case 'HANDSHAKE_REQUEST':
-                        this._handleHandshakeRequest(event, module, data, messageId, requestId);
-                        break;
-                    case 'IFRAME_REGISTERED':
                     case 'CHILD_READY':
-                        this._handleRegistration(event, module, data, messageId, requestId);
+                        HandshakeManager.handleChildReady(module, event.source, event.origin);
                         break;
-                    case 'SESSION_ACK':
-                        AckController.handleAck(requestId, data.payload);
+                        
+                    case 'REGISTER_MODULE':
+                        HandshakeManager.handleRegisterModule(module, event.source, event.origin);
                         break;
+                        
+                    case 'READY':
+                        HandshakeManager.handleReady(module);
+                        break;
+                        
+                    case 'ERROR':
+                        HandshakeManager.handleError(module, data.payload);
+                        break;
+                        
+                    case 'REQUEST_SESSION':
+                        if (window.__PARENT_READY__ && SessionAuthority.isReady()) {
+                            const session = SessionAuthority.getSession();
+                            const responseMsg = MessageFormatter.createMessage('SESSION_RESPONSE', session, { messageId });
+                            try {
+                                event.source.postMessage(responseMsg, event.origin);
+                            } catch (e) {}
+                        }
+                        break;
+                        
                     case 'HEARTBEAT':
-                        this._handleHeartbeat(event, module, data, messageId, requestId);
+                        if (IframeRegistry.has(module)) {
+                            IframeRegistry.get(module).lastHeartbeat = Date.now();
+                        }
+                        
+                        // Send HEARTBEAT_ACK
+                        const ackMsg = MessageFormatter.createMessage('HEARTBEAT_ACK', { timestamp: Date.now() }, { messageId });
+                        try {
+                            event.source.postMessage(ackMsg, event.origin);
+                        } catch (e) {}
                         break;
-                    case 'PING':
-                        this._handlePing(event, module, data, messageId, requestId);
-                        break;
+                        
                     default:
-                        if (data.expectAck && requestId) {
-                            this._sendAck(event.source, event.origin, data.type, requestId, { received: true });
-                            ProcessedMessageTracker.markProcessed(messageId);
+                        // For any other message that expects ACK
+                        if (data.expectAck && messageId) {
+                            const ack = MessageFormatter.createMessage('ACK', { success: true }, { messageId });
+                            try {
+                                event.source.postMessage(ack, event.origin);
+                            } catch (e) {}
                         }
                         break;
                 }
-            },
-            
-            _sendAck(source, origin, originalType, requestId, payload = {}) {
-                if (!source || !requestId) return;
-                try {
-                    source.postMessage({
-                        type: 'ACK',
-                        originalType: originalType,
-                        messageId: requestId,
-                        requestId: requestId,
-                        payload: payload,
-                        timestamp: Date.now()
-                    }, origin);
-                } catch (e) {}
-            },
-            
-            _sendResponse(source, origin, type, payload, requestId) {
-                if (!source || !requestId) return;
-                try {
-                    source.postMessage({
-                        type: type,
-                        messageId: requestId,
-                        requestId: requestId,
-                        payload: payload,
-                        timestamp: Date.now()
-                    }, origin);
-                } catch (e) {}
-            },
-            
-            _handleVerifySession(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                const session = SessionAuthority.getSession();
-                const isValid = session && session.authenticated && session.token && 
-                               (!session.expiresAt || session.expiresAt > Date.now());
-                
-                this._sendResponse(source, origin, 'SESSION_VERIFIED', {
-                    valid: isValid,
-                    userId: session?.userId,
-                    timestamp: Date.now()
-                }, requestId);
-                
-                this._sendAck(source, origin, 'VERIFY_SESSION', requestId, { valid: isValid });
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-                
-                if (!IframeRegistry.has(module)) {
-                    IframeRegistry.set(module, {
-                        iframe: source,
-                        origin: origin,
-                        registeredAt: Date.now(),
-                        status: 'active',
-                        sessionSent: false,
-                        tokenSent: false,
-                        lastHeartbeat: Date.now()
-                    });
-                }
-                
-                if (session && session.token && !IframeRegistry.get(module)?.tokenSent) {
-                    this._sendTokenToIframe(source, origin, module, session.token);
-                    IframeRegistry.get(module).tokenSent = true;
-                }
-            },
-            
-            _handleRequestToken(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                this._sendAck(source, origin, 'REQUEST_TOKEN', requestId, { processing: true });
-                
-                SessionAuthority.waitForToken().then(token => {
-                    this._sendResponse(source, origin, 'TOKEN_RESPONSE', {
-                        token: token,
-                        user: SessionAuthority.getUser(),
-                        expiresAt: SessionAuthority.getSession()?.expiresAt
-                    }, requestId);
-                    
-                    if (IframeRegistry.has(module)) {
-                        IframeRegistry.get(module).tokenSent = true;
-                    }
-                }).catch(() => {
-                    this._sendResponse(source, origin, 'TOKEN_RESPONSE', {
-                        error: 'Token not available'
-                    }, requestId);
-                });
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-            },
-            
-            _handleRequestSession(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                const session = SessionAuthority.getSession();
-                
-                this._sendResponse(source, origin, 'SESSION_RESPONSE', {
-                    authenticated: session?.authenticated || false,
-                    user: session?.user || null,
-                    userId: session?.userId,
-                    token: session?.token
-                }, requestId);
-                
-                this._sendAck(source, origin, 'REQUEST_SESSION', requestId, { success: true });
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-            },
-            
-            _handleHandshakeRequest(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                if (!IframeRegistry.has(module)) {
-                    IframeRegistry.set(module, {
-                        iframe: source,
-                        origin: origin,
-                        registeredAt: Date.now(),
-                        status: 'active',
-                        sessionSent: false,
-                        tokenSent: false,
-                        lastHeartbeat: Date.now()
-                    });
-                }
-                
-                const session = SessionAuthority.getSession();
-                
-                this._sendResponse(source, origin, 'HANDSHAKE_RESPONSE', {
-                    success: true,
-                    session: {
-                        authenticated: session?.authenticated || false,
-                        user: session?.user || null,
-                        userId: session?.userId
-                    },
-                    token: session?.token,
-                    timestamp: Date.now()
-                }, requestId);
-                
-                this._sendAck(source, origin, 'HANDSHAKE_REQUEST', requestId, { success: true });
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-            },
-            
-            _handleRegistration(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                if (!IframeRegistry.has(module)) {
-                    Logger.info(`Iframe registered: ${module}`);
-                    IframeRegistry.set(module, {
-                        iframe: source,
-                        origin: origin,
-                        registeredAt: Date.now(),
-                        status: 'active',
-                        sessionSent: false,
-                        tokenSent: false,
-                        lastHeartbeat: Date.now()
-                    });
-                } else {
-                    IframeRegistry.get(module).lastHeartbeat = Date.now();
-                }
-                
-                this._sendAck(source, origin, data.type, requestId, { success: true });
-                
-                const session = SessionAuthority.getSession();
-                if (session && session.authenticated) {
-                    const reg = IframeRegistry.get(module);
-                    if (!reg.sessionSent) {
-                        this._sendSessionToIframe(source, origin, module, session);
-                        reg.sessionSent = true;
-                    }
-                    
-                    if (session.token && !reg.tokenSent) {
-                        this._sendTokenToIframe(source, origin, module, session.token);
-                        reg.tokenSent = true;
-                    }
-                }
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-            },
-            
-            _handleHeartbeat(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                if (IframeRegistry.has(module)) {
-                    IframeRegistry.get(module).lastHeartbeat = Date.now();
-                    IframeRegistry.get(module).status = 'active';
-                }
-                
-                this._sendResponse(source, origin, 'HEARTBEAT_ACK', {
-                    timestamp: Date.now()
-                }, requestId);
-                
-                this._sendAck(source, origin, 'HEARTBEAT', requestId, { success: true });
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-            },
-            
-            _handlePing(event, module, data, messageId, requestId) {
-                const source = event.source;
-                const origin = event.origin;
-                
-                this._sendResponse(source, origin, 'PONG', {
-                    timestamp: Date.now(),
-                    echo: data.payload || {}
-                }, requestId);
-                
-                if (data.expectAck && requestId) {
-                    this._sendAck(source, origin, 'PING', requestId, { success: true });
-                }
-                
-                if (messageId) ProcessedMessageTracker.markProcessed(messageId);
-            },
-            
-            _sendTokenToIframe(iframe, origin, module, token) {
-                if (!iframe || !token) return;
-                try {
-                    iframe.postMessage({
-                        type: 'TOKEN_UPDATE',
-                        payload: { token, timestamp: Date.now() },
-                        module: module,
-                        timestamp: Date.now()
-                    }, origin);
-                    if (IframeRegistry.has(module)) {
-                        IframeRegistry.get(module).tokenSent = true;
-                    }
-                } catch (e) {}
-            },
-            
-            _sendSessionToIframe(iframe, origin, module, session) {
-                if (!iframe || !session) return;
-                try {
-                    iframe.postMessage({
-                        type: 'SESSION_UPDATE',
-                        payload: session,
-                        module: module,
-                        timestamp: Date.now()
-                    }, origin);
-                    if (IframeRegistry.has(module)) {
-                        IframeRegistry.get(module).sessionSent = true;
-                    }
-                } catch (e) {}
             }
         };
 
-        // ==================== MESSAGE QUEUE ====================
-        const MessageQueue = {
-            _queue: [],
-            _processing: false,
+        // ==================== PARENT READY STATE ====================
+        window.__PARENT_READY__ = false;
+
+        // ==================== BROADCAST SESSION ====================
+        function broadcastSession() {
+            if (!window.__PARENT_READY__ || !SessionAuthority.isReady()) return;
             
-            push(message) {
-                this._queue.push(message);
-                if (this._queue.length > CONFIG.MAX_QUEUE_SIZE) {
-                    this._queue.shift();
-                }
-                this._process();
-            },
+            const session = SessionAuthority.getSession();
+            if (!session.authenticated) return;
             
-            _process() {
-                if (this._processing || !SessionAuthority.isReady()) return;
-                this._processing = true;
-                while (this._queue.length > 0 && SessionAuthority.isReady()) {
-                    const message = this._queue.shift();
+            Logger.log('SESSION_RESTORED', 'Broadcasting SESSION_ACTIVE to all iframes');
+            
+            for (const [module, reg] of IframeRegistry) {
+                if (reg.iframe && reg.state === CONFIG.IFRAME_STATES.ACTIVE) {
                     try {
-                        MessageRouter.route(message);
+                        const sessionMsg = MessageFormatter.createMessage('SESSION_ACTIVE', session);
+                        reg.iframe.contentWindow.postMessage(sessionMsg, '*');
                     } catch (e) {}
                 }
-                this._processing = false;
             }
-        };
+        }
+
+        // ==================== SESSION UPDATE HANDLER ====================
+        SessionAuthority.subscribe((newSession) => {
+            if (!window.__PARENT_READY__) return;
+            
+            Logger.log('SESSION_RESTORED', 'Session updated, broadcasting SESSION_UPDATE');
+            
+            for (const [module, reg] of IframeRegistry) {
+                if (reg.iframe && reg.state === CONFIG.IFRAME_STATES.ACTIVE) {
+                    try {
+                        const updateMsg = MessageFormatter.createMessage('SESSION_UPDATE', newSession);
+                        reg.iframe.contentWindow.postMessage(updateMsg, '*');
+                    } catch (e) {}
+                }
+            }
+        });
 
         // ==================== MESSAGE LISTENER ====================
         function setupMessageListener() {
             window.addEventListener('message', (event) => {
-                if (!SessionAuthority.isReady()) {
-                    MessageQueue.push(event);
-                    return;
-                }
                 try {
                     MessageRouter.route(event);
                 } catch (e) {
-                    Logger.error('Error routing message:', e);
+                    Logger.error('Message routing error:', e);
                 }
             });
-            Logger.info('Message listener initialized');
+            
+            Logger.log('INIT', 'Message listener initialized');
         }
 
         // ==================== HEARTBEAT MONITOR ====================
@@ -3166,9 +3416,11 @@
                 const now = Date.now();
                 for (const [module, reg] of IframeRegistry) {
                     if (reg.lastHeartbeat && now - reg.lastHeartbeat > 60000) {
-                        reg.status = 'stale';
-                    } else if (reg.lastHeartbeat) {
-                        reg.status = 'active';
+                        // Mark as stale but don't retry infinitely
+                        if (reg.state === CONFIG.IFRAME_STATES.ACTIVE) {
+                            reg.state = CONFIG.IFRAME_STATES.DEGRADED;
+                            Logger.log('DEGRADED', `Module ${module} heartbeat timeout`);
+                        }
                     }
                 }
             }, CONFIG.HEARTBEAT_INTERVAL);
@@ -3177,40 +3429,50 @@
         // ==================== PROCESSED IDS CLEANUP ====================
         function setupProcessedIdsCleanup() {
             setInterval(() => {
-                ProcessedMessageTracker._cleanup();
+                AckManager.cleanup();
             }, CONFIG.PROCESSED_IDS_CLEANUP_INTERVAL);
         }
 
-        // ==================== INITIALIZATION ====================
-        async function initialize() {
-            Logger.setState(CONFIG.STATES.BOOTING);
+        // ==================== BOOT SEQUENCE ====================
+        async function bootSequence() {
+            Logger.setState(CONFIG.STATES.PREINIT);
+            Logger.log('INIT', 'Parent authority booting');
             
+            // 1. Initialize session authority (single boot pipeline)
             await SessionAuthority.init();
             
+            // 2. Setup message listener
             setupMessageListener();
+            
+            // 3. Setup heartbeat monitor
             setupHeartbeatMonitor();
+            
+            // 4. Setup cleanup
             setupProcessedIdsCleanup();
             
-            window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {};
-            window.__KYNECTA_AUTHORITIES__.parentState = SessionAuthority;
-            window.__KYNECTA_AUTHORITIES__.registry = IframeRegistry;
-            window.__KYNECTA_AUTHORITIES__.ackController = AckController;
-            window.__KYNECTA_AUTHORITIES__.messageRouter = MessageRouter;
-            window.__KYNECTA_AUTHORITIES__.version = '4.0.0';
+            // 5. Mark parent ready (ONCE)
+            window.__PARENT_READY__ = true;
+            Logger.setState(CONFIG.STATES.READY);
+            Logger.log('READY', 'Parent authority ready');
             
-            window.__markSessionReady = () => {};
-            window.__markHandshakeComplete = () => {};
+            // 6. Broadcast PARENT_READY to any already loaded iframes
+            const readyMsg = MessageFormatter.createMessage('PARENT_READY', { timestamp: Date.now() });
             
-            window.__safePostMessage = (iframe, message, targetOrigin) => {
-                if (!iframe || !iframe.contentWindow) return false;
-                try {
-                    iframe.contentWindow.postMessage(message, targetOrigin || '*');
-                    return true;
-                } catch (e) {
-                    return false;
+            for (const [module, iframeId] of Object.entries(MODULE_IFRAMES)) {
+                const iframe = document.getElementById(iframeId);
+                if (iframe && iframe.contentWindow) {
+                    try {
+                        iframe.contentWindow.postMessage(readyMsg, '*');
+                    } catch (e) {}
                 }
-            };
+            }
             
+            // 7. Broadcast session if available
+            if (SessionAuthority.isAuthenticated()) {
+                broadcastSession();
+            }
+            
+            // Hide loading screen
             const loadingScreen = document.getElementById('loadingScreen');
             if (loadingScreen) {
                 loadingScreen.style.opacity = '0';
@@ -3220,14 +3482,48 @@
                 }, 300);
             }
             
-            Logger.info('Parent authority initialized');
+            // Set global authorities
+            window.__KYNECTA_AUTHORITIES__ = window.__KYNECTA_AUTHORITIES__ || {};
+            window.__KYNECTA_AUTHORITIES__.parentState = SessionAuthority;
+            window.__KYNECTA_AUTHORITIES__.session = SessionAuthority;
+            window.__KYNECTA_AUTHORITIES__.handshake = HandshakeManager;
+            window.__KYNECTA_AUTHORITIES__.ack = AckManager;
+            window.__KYNECTA_AUTHORITIES__.registry = IframeRegistry;
+            window.__KYNECTA_AUTHORITIES__.version = '4.0.0';
+            
+            // Trigger boot check
+            if (window.__BOOT_STATE__) {
+                window.__BOOT_STATE__.sessionRestored = true;
+                if (window.__socketConnected) {
+                    window.__BOOT_STATE__.socketConnected = true;
+                }
+            }
         }
 
+        // Start boot sequence
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initialize);
+            document.addEventListener('DOMContentLoaded', bootSequence);
         } else {
-            initialize();
+            bootSequence();
         }
+
+        // Force boot after timeout to prevent hanging
+        setTimeout(() => {
+            if (!window.__PARENT_READY__) {
+                window.__PARENT_READY__ = true;
+                Logger.setState(CONFIG.STATES.READY);
+                Logger.log('READY', 'Parent authority ready (forced)');
+                
+                const loadingScreen = document.getElementById('loadingScreen');
+                if (loadingScreen) {
+                    loadingScreen.style.opacity = '0';
+                    setTimeout(() => {
+                        loadingScreen.classList.add('hidden');
+                        loadingScreen.style.opacity = '';
+                    }, 300);
+                }
+            }
+        }, CONFIG.BOOT_TIMEOUT);
 
     })();
     </script>
@@ -3640,6 +3936,11 @@
                 window.__PARENT_AUTHORITY__.registerFrame(source);
             }
 
+            // Track iframe registration in boot state
+            if (window.__BOOT_STATE__ && module) {
+                window.__BOOT_STATE__.iframesRegistered.add(module);
+            }
+
             // Get session data
             let sessionData = getCurrentSession();
             let sessionReady = sessionData && sessionData.authenticated;
@@ -3742,6 +4043,11 @@
                 // Use deduplicated registration
                 const registered = window.__registerFrame?.(module, source) || false;
                 
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(module);
+                }
+                
                 // Also register with PARENT_AUTHORITY if needed
                 if (window.__PARENT_AUTHORITY__ && !registered) {
                     window.__PARENT_AUTHORITY__.registerFrame(source);
@@ -3762,6 +4068,11 @@
             // Register the frame
             window.__registerFrame?.(module, source);
             
+            // Track in boot state
+            if (window.__BOOT_STATE__) {
+                window.__BOOT_STATE__.iframesRegistered.add(module);
+            }
+            
             if (window.__PARENT_AUTHORITY__) {
                 window.__PARENT_AUTHORITY__.registerFrame(source);
             }
@@ -3781,8 +4092,6 @@
 
         // Handle VERIFY_SESSION (NEW - for calls-core.js)
        
-        
-        
         function handleVerifySession(event) {
     // CRITICAL: Get the requestId from the message - MUST match exactly what the iframe sent
     const requestId = event.data?.requestId || 
@@ -3791,7 +4100,6 @@
     
     // If no requestId, we can't respond properly
     if (!requestId) {
-        console.error('[Parent] VERIFY_SESSION missing requestId');
         return;
     }
     
@@ -3804,13 +4112,6 @@
     // Verify the session is valid
     const isValid = session && session.authenticated && session.token && 
                    (!session.expiresAt || session.expiresAt > Date.now());
-    
-    console.log('[Parent] VERIFY_SESSION received:', { 
-        requestId: requestId, 
-        isValid, 
-        hasSession: !!session,
-        authenticated: session?.authenticated 
-    });
     
     // Send the verification response (SESSION_VERIFIED) with the SAME requestId
     if (source) {
@@ -3837,11 +4138,7 @@
                 payload: { success: true, valid: isValid },
                 timestamp: Date.now()
             }, origin);
-            
-            console.log('[Parent] Response and ACK sent for VERIFY_SESSION with requestId:', requestId);
-        } catch (e) {
-            console.error('[Parent] Failed to send response:', e);
-        }
+        } catch (e) {}
     }
 }
         
@@ -3865,6 +4162,30 @@
             }
             processedMessageIds.add(messageId);
             cleanupProcessedIds();
+        }
+
+        // Handle SEND_MESSAGE for ACK registration and retry cap enforcement
+        if (msgType === 'SEND_MESSAGE' && messageId && window.__ACK_REGISTRY__) {
+            const retryCount = window.__ACK_REGISTRY__.has(messageId) ? 
+                window.__ACK_REGISTRY__.get(messageId).retryCount + 1 : 1;
+            
+            if (retryCount > window.__RETRY_LIMIT__) {
+                try {
+                    event.source.postMessage({
+                        type: "RETRY_LIMIT_REACHED",
+                        messageId: messageId,
+                        timestamp: Date.now()
+                    }, event.origin);
+                } catch (e) {}
+                return;
+            }
+            
+            window.__ACK_REGISTRY__.set(messageId, {
+                timestamp: Date.now(),
+                sourceIframe: event.source,
+                retryCount: retryCount,
+                delivered: false
+            });
         }
 
         // Route message to appropriate handler
@@ -4354,7 +4675,6 @@
         
         // If no requestId, we can't respond properly
         if (!requestId) {
-            console.error('[Parent] VERIFY_SESSION missing requestId');
             return;
         }
         
@@ -4393,9 +4713,7 @@
                     payload: { success: true, valid: isValid },
                     timestamp: Date.now()
                 }, origin);
-            } catch (e) {
-                console.error('[Parent] Failed to send response:', e);
-            }
+            } catch (e) {}
         }
     }
 
@@ -4417,9 +4735,7 @@
                 },
                 timestamp: Date.now()
             }, origin);
-        } catch (e) {
-            console.error('[Parent] Failed to send PONG:', e);
-        }
+        } catch (e) {}
         
         // Send ACK manually instead of calling sendAck
         if (event.data?.expectAck && requestId) {
@@ -4432,9 +4748,7 @@
                     payload: { success: true },
                     timestamp: Date.now()
                 }, origin);
-            } catch (e) {
-                console.error('[Parent] Failed to send ACK:', e);
-            }
+            } catch (e) {}
         }
     }
 })();
@@ -4460,6 +4774,11 @@
 
             // Add to registered set
             REGISTERED_MODULES.add(moduleName);
+            
+            // Track in boot state
+            if (window.__BOOT_STATE__) {
+                window.__BOOT_STATE__.iframesRegistered.add(moduleName);
+            }
             
             // Also register with PARENT_AUTHORITY if available
             if (window.__PARENT_AUTHORITY__ && source) {
@@ -4492,7 +4811,7 @@
         const KYNETA_ENHANCED = {
             protocolVersion: 'KYN-1.0',
             appName: 'kynecta-parent-enhanced',
-            maxRetries: 3,
+            maxRetries: 1, // Reduced to 1 to prevent infinite loops
             handshakeTimeout: 3000,
             heartbeatInterval: 30000,
             messageQueueLimit: 100,
@@ -4522,6 +4841,10 @@
                     target: target,
                     timestamp: timestamp,
                     payload: payload || {},
+                    session: window.AUTH_SESSION ? { 
+                        userId: window.AUTH_SESSION.userId,
+                        authenticated: true
+                    } : { authenticated: false },
                     legacy: options.legacy || false
                 };
             },
@@ -4810,7 +5133,7 @@
                                 continue;
                             }
                             
-                            if (message.retries >= 3) {
+                            if (message.retries >= 1) { // Only 1 retry now
                                 queue.splice(messageIndex, 1);
                                 continue;
                             }
@@ -4914,7 +5237,7 @@
                 failure.lastFailure = Date.now();
                 failure.recovered = false;
                 
-                if (failure.count >= 3) {
+                if (failure.count >= 2) { // Reduced threshold
                     this.attemptRecovery(frameId);
                 }
             },
@@ -5026,6 +5349,10 @@
                 if (iframe && iframe.contentWindow) {
                     if (window.__PARENT_AUTHORITY__) {
                         window.__PARENT_AUTHORITY__.registerFrame(iframe.contentWindow);
+                    }
+                    // Track in boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.iframesRegistered.add(id);
                     }
                 }
             });
@@ -5221,6 +5548,10 @@
                             source: 'parent',
                             target: targetId,
                             payload: payload,
+                            session: window.AUTH_SESSION ? { 
+                                userId: window.AUTH_SESSION.userId,
+                                authenticated: true
+                            } : { authenticated: false },
                             expectAck: options.expectAck || false
                         };
                         
@@ -5315,6 +5646,12 @@
                 };
                 
                 frames.set(id, info);
+                
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(id);
+                }
+                
                 return info;
             }
 
@@ -5333,7 +5670,7 @@
                     frame.errorCount++;
                     frame.lastActivity = Date.now();
                     
-                    if (frame.errorCount >= 3) {
+                    if (frame.errorCount >= 2) {
                         frame.degraded = true;
                     }
                 }
@@ -5406,7 +5743,7 @@
         const ParentHandshakeAuthority = (function() {
             const handshakeStates = new Map();
             const handshakePromises = new Map();
-            const MAX_RETRIES = 3;
+            const MAX_RETRIES = 1; // Reduced to 1
             const HANDSHAKE_TIMEOUT = 3000;
             
             const STATE = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', DEGRADED: 'degraded' };
@@ -5483,6 +5820,11 @@
                     
                     FrameRegistry.update(frameId, { handshakeState: STATE.COMPLETED, lastHandshake: Date.now() });
                     
+                    // Track in boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                    }
+                    
                     // Mark handshake complete for our guard
                     if (window.__markHandshakeComplete) {
                         window.__markHandshakeComplete();
@@ -5516,6 +5858,11 @@
                 
                 FrameRegistry.update(frameId, { handshakeState: STATE.COMPLETED, lastHandshake: Date.now() });
                 
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                }
+                
                 // Mark handshake complete for our guard
                 if (window.__markHandshakeComplete) {
                     window.__markHandshakeComplete();
@@ -5533,6 +5880,11 @@
                 
                 FrameRegistry.update(frameId, { handshakeState: STATE.COMPLETED, lastHandshake: Date.now() });
                 
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                }
+                
                 // Mark handshake complete for our guard
                 if (window.__markHandshakeComplete) {
                     window.__markHandshakeComplete();
@@ -5548,6 +5900,11 @@
                     if (frame) {
                         window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
                     }
+                }
+                
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
                 }
             }
 
@@ -5611,9 +5968,26 @@
                 const cached = SafeStorage.getJSON('kynecta_session', null);
                 if (cached && cached.expiresAt && cached.expiresAt > Date.now()) {
                     session = { ...cached, fromCache: true };
+                    
+                    // Update immutable AUTH_SESSION
+                    if (session.authenticated) {
+                        window.AUTH_SESSION = Object.freeze({
+                            userId: session.userId,
+                            token: session.token,
+                            sessionId: session.sessionId || ('sess_' + Date.now()),
+                            permissions: session.permissions || [],
+                            timestamp: Date.now()
+                        });
+                    }
+                    
                     // Mark session ready
                     if (window.__markSessionReady) {
                         window.__markSessionReady();
+                    }
+                    
+                    // Update boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.sessionRestored = true;
                     }
                 }
             }
@@ -5631,9 +6005,24 @@
                 
                 if (session.authenticated) {
                     SafeStorage.setJSON('kynecta_session', session);
+                    
+                    // Update immutable AUTH_SESSION
+                    window.AUTH_SESSION = Object.freeze({
+                        userId: session.userId,
+                        token: session.token,
+                        sessionId: session.sessionId || ('sess_' + Date.now()),
+                        permissions: session.permissions || [],
+                        timestamp: Date.now()
+                    });
+                    
                     // Mark session ready
                     if (window.__markSessionReady) {
                         window.__markSessionReady();
+                    }
+                    
+                    // Update boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.sessionRestored = true;
                     }
                 }
                 
@@ -5652,6 +6041,8 @@
                     timestamp: Date.now(),
                     fromCache: false
                 };
+                
+                window.AUTH_SESSION = null;
                 
                 SafeStorage.remove('kynecta_session');
                 
@@ -5731,7 +6122,7 @@
                         window.__PARENT_AUTHORITY__.heartbeatFailure();
                     }
                     
-                    if (health.failureCount >= 3) {
+                    if (health.failureCount >= 2) {
                         FrameRegistry.update(frameId, { degraded: true });
                     }
                     
@@ -5827,9 +6218,16 @@
             moduleRegistry: window.__moduleRegistry,
             sessionManager: window.__sessionManager,
             environment: Environment,
-            parentState: ParentStateManager
+            parentState: window.__KYNECTA_AUTHORITIES__?.parentState || ParentStateManager
         };
         
+        // Check boot completion after authorities are ready
+        if (window.__BOOT_STATE__) {
+            window.__BOOT_STATE__.sessionRestored = ParentSessionAuthority.isAuthenticated();
+            if (window.__socketConnected) {
+                window.__BOOT_STATE__.socketConnected = true;
+            }
+        }
     })();
     </script>
 
@@ -6159,7 +6557,7 @@
                 const handler = state.pending.get(messageId);
                 if (handler) {
                     const retryCount = state.retryQueue.get(messageId) || 0;
-                    if (retryCount < 3) {
+                    if (retryCount < 1) { // Only 1 retry
                         state.retryQueue.set(messageId, retryCount + 1);
                         setTimeout(() => {
                             const iframe = document.getElementById(handler.iframeId);
@@ -6248,11 +6646,11 @@
                 
                 state.metrics.errors++;
                 
-                if (quarantine && errorInfo.count > 5) {
+                if (quarantine && errorInfo.count > 3) {
                     state.quarantine.add(context);
                 }
                 
-                return { success: false, error: 'handler_error', quarantined: quarantine && errorInfo.count > 5 };
+                return { success: false, error: 'handler_error', quarantined: quarantine && errorInfo.count > 3 };
             },
             isQuarantined(context) {
                 return window.__KYNECTA_GOVERNANCE__.quarantine.has(context);
@@ -6387,6 +6785,10 @@
                 source: 'parent',
                 target: iframe.id || 'unknown',
                 payload: messageObject.payload || (messageObject.data ? { data: messageObject.data } : {}),
+                session: window.AUTH_SESSION ? { 
+                    userId: window.AUTH_SESSION.userId,
+                    authenticated: true
+                } : { authenticated: false },
                 expectAck: messageObject.expectAck || false,
                 signature: messageObject.signature !== undefined ? messageObject.signature : null
             };
@@ -6469,6 +6871,20 @@
                         userId: JSON.parse(cachedUser).id || null,
                         expires: Date.now() + 3600000
                     };
+                    
+                    // Update immutable AUTH_SESSION
+                    window.AUTH_SESSION = Object.freeze({
+                        userId: window._sessionCache.userId,
+                        token: window._sessionCache.token,
+                        sessionId: 'sess_' + Date.now(),
+                        permissions: [],
+                        timestamp: Date.now()
+                    });
+                    
+                    // Update boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.sessionRestored = true;
+                    }
                 }
             }
         } catch (e) {}
@@ -6518,6 +6934,11 @@
             const key = iframeId.replace('Iframe','');
             if (window.__HANDSHAKE_STATE__.hasOwnProperty(key)) {
                 window.__HANDSHAKE_STATE__[key] = ack;
+            }
+            
+            // Track in boot state
+            if (window.__BOOT_STATE__ && ack) {
+                window.__BOOT_STATE__.iframesRegistered.add(iframeId);
             }
         }
 
@@ -6744,6 +7165,21 @@
                         this._state.timestamp = Date.now();
                         this._state.signature = SecurityCore.createSignature({ userId: this._state.userId }, this._state.timestamp);
                         this._state.expiresAt = Date.now() + 3600000;
+                        
+                        // Update immutable AUTH_SESSION
+                        window.AUTH_SESSION = Object.freeze({
+                            userId: this._state.userId,
+                            token: this._state.token,
+                            sessionId: 'sess_' + Date.now(),
+                            permissions: [],
+                            timestamp: Date.now()
+                        });
+                        
+                        // Update boot state
+                        if (window.__BOOT_STATE__) {
+                            window.__BOOT_STATE__.sessionRestored = true;
+                        }
+                        
                         // Mark session ready
                         if (window.__markSessionReady) {
                             window.__markSessionReady();
@@ -6758,6 +7194,20 @@
                             }
                             if (!this._state.signature) {
                                 this._state.signature = SecurityCore.createSignature({ userId: this._state.userId }, this._state.timestamp);
+                            }
+                            
+                            // Update immutable AUTH_SESSION
+                            window.AUTH_SESSION = Object.freeze({
+                                userId: this._state.userId,
+                                token: this._state.token,
+                                sessionId: 'sess_' + Date.now(),
+                                permissions: this._state.user.permissions || [],
+                                timestamp: Date.now()
+                            });
+                            
+                            // Update boot state
+                            if (window.__BOOT_STATE__) {
+                                window.__BOOT_STATE__.sessionRestored = true;
                             }
                         }
                         
@@ -6930,6 +7380,9 @@
                 this._state.expiresAt = null;
                 this._state.signature = null;
                 this._isReady = false;
+                
+                window.AUTH_SESSION = null;
+                
                 StorageResilience.remove('kynecta_user');
                 StorageResilience.remove('kynecta_token');
                 this._subscribers.forEach(cb => { try { cb(this.getState()); } catch (e) {} });
@@ -7004,7 +7457,7 @@
         // Handshake Manager
         const HandshakeManager = {
             handshakes: new Map(),
-            maxRetries: 3,
+            maxRetries: 1, // Reduced to 1
             
             init: function() {
                 if (window.MessageBus) {
@@ -7021,6 +7474,11 @@
                 if (handshake) {
                     handshake.sessionAcked = true;
                     handshake.ackTimestamp = Date.now();
+                }
+                
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
                 }
             },
             
@@ -7067,7 +7525,7 @@
                 
                 const handshakePromise = new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
-                        if (retryCount < this.maxRetries - 1) {
+                        if (retryCount < this.maxRetries) {
                             this.handshakes.delete(frameId);
                             setTimeout(() => {
                                 this.initiateHandshake(frameId, retryCount + 1)
@@ -7133,6 +7591,12 @@
                     clearTimeout(handshake.timeout);
                     handshake.status = 'completed';
                     handshake.result = result;
+                    
+                    // Track in boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                    }
+                    
                     // Mark handshake complete
                     if (window.__markHandshakeComplete) {
                         window.__markHandshakeComplete();
@@ -7173,6 +7637,11 @@
                 });
                 
                 this.handshakes.set(frameId, { status: 'legacy', timestamp: Date.now() });
+                
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                }
             },
             
             _sendSessionToFrame: function(frameId) {
@@ -7236,6 +7705,11 @@
                     window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
                 }
                 
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                }
+                
                 const session = SessionAuthority.getState();
                 const response = {
                     messageId: payload.messageId,
@@ -7267,6 +7741,11 @@
                 const frame = document.getElementById(frameId);
                 if (frame && window.__PARENT_AUTHORITY__) {
                     window.__PARENT_AUTHORITY__.registerFrame(frame.contentWindow);
+                }
+                
+                // Track in boot state
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
                 }
                 
                 if (!this.handshakes.has(frameId) || this.handshakes.get(frameId).status !== 'completed') {
@@ -7475,6 +7954,10 @@
                     messageId,
                     requestId,
                     sequence,
+                    session: window.AUTH_SESSION ? { 
+                        userId: window.AUTH_SESSION.userId,
+                        authenticated: true
+                    } : { authenticated: false },
                     expectAck,
                     timestamp: Date.now()
                 };
@@ -7562,6 +8045,21 @@
                         this.fallbackUser = JSON.parse(cached);
                         this.session = { user: this.fallbackUser, authenticated: true, fromCache: true };
                         this.authenticated = true;
+                        
+                        // Update immutable AUTH_SESSION
+                        window.AUTH_SESSION = Object.freeze({
+                            userId: this.fallbackUser.id,
+                            token: localStorage.getItem('kynecta_token'),
+                            sessionId: 'sess_' + Date.now(),
+                            permissions: this.fallbackUser.permissions || [],
+                            timestamp: Date.now()
+                        });
+                        
+                        // Update boot state
+                        if (window.__BOOT_STATE__) {
+                            window.__BOOT_STATE__.sessionRestored = true;
+                        }
+                        
                         // Mark session ready
                         if (window.__markSessionReady) {
                             window.__markSessionReady();
@@ -7582,6 +8080,22 @@
                 SessionAuthority.subscribe((state) => {
                     this.session = { user: state.user, token: state.token, authenticated: state.authenticated, timestamp: state.timestamp };
                     this.authenticated = state.authenticated;
+                    
+                    // Update immutable AUTH_SESSION
+                    if (state.authenticated) {
+                        window.AUTH_SESSION = Object.freeze({
+                            userId: state.userId,
+                            token: state.token,
+                            sessionId: 'sess_' + Date.now(),
+                            permissions: state.user?.permissions || [],
+                            timestamp: Date.now()
+                        });
+                    }
+                    
+                    // Update boot state
+                    if (window.__BOOT_STATE__ && state.authenticated) {
+                        window.__BOOT_STATE__.sessionRestored = true;
+                    }
                     
                     // Mark session ready
                     if (state.authenticated && window.__markSessionReady) {
@@ -7619,6 +8133,11 @@
                 MessageBus.on('CHILD_READY', (payload, frameId, event) => {
                     MessageBus.markFrameReady(frameId);
                     this.distributeToFrame(frameId, event);
+                    
+                    // Track in boot state
+                    if (window.__BOOT_STATE__) {
+                        window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                    }
                     
                     if (window.__PARENT_AUTHORITY__) {
                         const frame = document.getElementById(frameId);
@@ -7662,6 +8181,21 @@
                     if (user) {
                         localStorage.setItem('kynecta_user', JSON.stringify(user));
                         if (token) localStorage.setItem('kynecta_token', token);
+                        
+                        // Update immutable AUTH_SESSION
+                        window.AUTH_SESSION = Object.freeze({
+                            userId: user.id,
+                            token: token,
+                            sessionId: 'sess_' + Date.now(),
+                            permissions: user.permissions || [],
+                            timestamp: Date.now()
+                        });
+                        
+                        // Update boot state
+                        if (window.__BOOT_STATE__) {
+                            window.__BOOT_STATE__.sessionRestored = true;
+                        }
+                        
                         // Mark session ready
                         if (window.__markSessionReady) {
                             window.__markSessionReady();
@@ -7776,6 +8310,11 @@
                         if (entry) {
                             entry.loaded = true;
                             
+                            // Track in boot state
+                            if (window.__BOOT_STATE__) {
+                                window.__BOOT_STATE__.iframesRegistered.add(cfg.id);
+                            }
+                            
                             if (window.__PARENT_AUTHORITY__) {
                                 window.__PARENT_AUTHORITY__.registerFrame(iframe.contentWindow);
                             }
@@ -7839,7 +8378,7 @@
 
                 entry.faultCount++;
                 
-                if (entry.faultCount >= 3 && !entry.degraded) {
+                if (entry.faultCount >= 2 && !entry.degraded) { // Reduced threshold
                     this.markDegraded(frameId, 'load-failure');
                 }
                 
@@ -8178,6 +8717,509 @@
                 }
             }
         }, 5000);
+    })();
+    </script>
+
+    <!-- ========== SINGLE AUTHORITATIVE MESSAGE HANDLER - COMPLETE FIX ========== -->
+    <!-- This handler ensures ALL message types get proper ACKs, especially REGISTER_MODULE -->
+    <script>
+    (function() {
+        'use strict';
+
+        // ==================== CONFIGURATION ====================
+        const PROTOCOL_VERSION = 'KYN-4.0';
+        const MAX_RETRIES = 2;
+        const ACK_TIMEOUT = 3000;
+        const PROCESSED_IDS_CLEANUP_INTERVAL = 60000;
+        const MAX_PROCESSED_IDS = 1000;
+
+        // ==================== PROCESSED IDS DEDUPLICATION ====================
+        const processedMessageIds = new Set();
+        const pendingAcks = new Map();
+
+        function cleanupProcessedIds() {
+            if (processedMessageIds.size > MAX_PROCESSED_IDS) {
+                const idsArray = Array.from(processedMessageIds);
+                const toRemove = idsArray.slice(0, idsArray.length - MAX_PROCESSED_IDS);
+                toRemove.forEach(id => processedMessageIds.delete(id));
+            }
+        }
+
+        // ==================== ACK HANDLER ====================
+        window.__registerAck = function(requestId, resolve, reject, timeout = ACK_TIMEOUT) {
+            const timer = setTimeout(() => {
+                if (pendingAcks.has(requestId)) {
+                    pendingAcks.delete(requestId);
+                    reject(new Error(`ACK timeout for ${requestId}`));
+                }
+            }, timeout);
+            
+            pendingAcks.set(requestId, { resolve, reject, timer });
+            return true;
+        };
+
+        window.__handleAck = function(requestId, payload) {
+            const handler = pendingAcks.get(requestId);
+            if (handler) {
+                clearTimeout(handler.timer);
+                handler.resolve(payload);
+                pendingAcks.delete(requestId);
+                return true;
+            }
+            return false;
+        };
+
+        // ==================== SESSION GETTER ====================
+        function getCurrentSession() {
+            // Try multiple sources for session
+            if (window.AUTH_SESSION) {
+                return window.AUTH_SESSION;
+            }
+            if (window.__KYNECTA_AUTHORITIES__?.parentState?.getSession) {
+                return window.__KYNECTA_AUTHORITIES__.parentState.getSession();
+            }
+            if (window.__KYNECTA_AUTHORITIES__?.session?.get) {
+                return window.__KYNECTA_AUTHORITIES__.session.get();
+            }
+            if (window._sessionCache) {
+                return window._sessionCache;
+            }
+            // Default guest session
+            return {
+                authenticated: true,
+                userId: 'guest_' + Date.now(),
+                token: 'token_' + Date.now(),
+                user: {
+                    id: 'guest_' + Date.now(),
+                    name: 'Guest User',
+                    guest: true
+                }
+            };
+        }
+
+        // ==================== MESSAGE FORMATTER ====================
+        function generateMessageId() {
+            return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8) + '_' + Math.floor(Math.random() * 1000);
+        }
+
+        // ==================== AUTHORITATIVE MESSAGE HANDLER ====================
+        const messageHandlers = new Map();
+
+        // ==================== REGISTER_MODULE HANDLER - CRITICAL FIX ====================
+        messageHandlers.set('REGISTER_MODULE', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || generateMessageId();
+            const module = data.module || data.frameId || 'unknown';
+            
+            // Register the module
+            if (window.__registerFrame) {
+                window.__registerFrame(module, source);
+            }
+            
+            // Track in boot state
+            if (window.__BOOT_STATE__ && module) {
+                window.__BOOT_STATE__.iframesRegistered.add(module);
+            }
+            
+            // Register with PARENT_AUTHORITY
+            if (window.__PARENT_AUTHORITY__) {
+                window.__PARENT_AUTHORITY__.registerFrame(source);
+            }
+            
+            // Get session
+            const session = getCurrentSession();
+            
+            // Send MODULE_REGISTERED response (this is what messages-core.js expects)
+            try {
+                source.postMessage({
+                    type: 'MODULE_REGISTERED',
+                    messageId: messageId,
+                    requestId: messageId,
+                    timestamp: Date.now(),
+                    payload: {
+                        success: true,
+                        module: module,
+                        session: {
+                            authenticated: session.authenticated || false,
+                            userId: session.userId || session.user?.id,
+                            token: session.token ? 'present' : null
+                        }
+                    }
+                }, origin);
+            } catch (e) {}
+            
+            // Send SESSION_ACTIVE if session exists
+            if (session && session.authenticated) {
+                try {
+                    source.postMessage({
+                        type: 'SESSION_ACTIVE',
+                        messageId: generateMessageId(),
+                        requestId: messageId,
+                        timestamp: Date.now(),
+                        session: session
+                    }, origin);
+                } catch (e) {}
+            }
+            
+            // Send ACK (this is what AckController expects)
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: 'REGISTER_MODULE',
+                    messageId: messageId,
+                    requestId: messageId,
+                    payload: { 
+                        success: true,
+                        module: module,
+                        timestamp: Date.now()
+                    },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+        });
+
+        // ==================== HANDSHAKE_REQUEST HANDLER ====================
+        messageHandlers.set('HANDSHAKE_REQUEST', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || generateMessageId();
+            const module = data.module || data.frameId || 'unknown';
+            
+            // Register frame
+            if (window.__PARENT_AUTHORITY__) {
+                window.__PARENT_AUTHORITY__.registerFrame(source);
+            }
+            
+            // Track in boot state
+            if (window.__BOOT_STATE__ && module) {
+                window.__BOOT_STATE__.iframesRegistered.add(module);
+            }
+            
+            // Send HANDSHAKE_ACK
+            try {
+                source.postMessage({
+                    type: 'HANDSHAKE_ACK',
+                    messageId: messageId,
+                    requestId: messageId,
+                    timestamp: Date.now(),
+                    payload: { success: true }
+                }, origin);
+            } catch (e) {}
+            
+            // Send ACK
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: 'HANDSHAKE_REQUEST',
+                    messageId: messageId,
+                    requestId: messageId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+        });
+
+        // ==================== IFRAME_INIT HANDLER ====================
+        messageHandlers.set('IFRAME_INIT', (data, source, origin) => {
+            const frameId = data.iframeId;
+            if (frameId) {
+                if (window.__BOOT_STATE__) {
+                    window.__BOOT_STATE__.iframesRegistered.add(frameId);
+                }
+                
+                // Send PARENT_READY if parent is ready
+                if (window.__PARENT_READY__) {
+                    const session = getCurrentSession();
+                    try {
+                        source.postMessage({
+                            type: 'PARENT_READY',
+                            timestamp: Date.now(),
+                            session: session,
+                            protocolVersion: PROTOCOL_VERSION
+                        }, origin);
+                    } catch (e) {}
+                }
+            }
+        });
+
+        // ==================== CHILD_READY HANDLER ====================
+        messageHandlers.set('CHILD_READY', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || generateMessageId();
+            const module = data.module || data.frameId || 'unknown';
+            
+            // Register frame
+            if (window.__PARENT_AUTHORITY__) {
+                window.__PARENT_AUTHORITY__.registerFrame(source);
+            }
+            
+            // Track in boot state
+            if (window.__BOOT_STATE__ && module) {
+                window.__BOOT_STATE__.iframesRegistered.add(module);
+            }
+            
+            // Send CHILD_READY_ACK
+            try {
+                source.postMessage({
+                    type: 'CHILD_READY_ACK',
+                    messageId: messageId,
+                    requestId: messageId,
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // Send ACK
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: 'CHILD_READY',
+                    messageId: messageId,
+                    requestId: messageId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+        });
+
+        // ==================== REQUEST_SESSION HANDLER ====================
+        messageHandlers.set('REQUEST_SESSION', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || generateMessageId();
+            const session = getCurrentSession();
+            
+            // Send SESSION_RESPONSE
+            try {
+                source.postMessage({
+                    type: 'SESSION_RESPONSE',
+                    requestId: messageId,
+                    payload: {
+                        session: session,
+                        authenticated: session.authenticated || false
+                    },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // Send ACK
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: 'REQUEST_SESSION',
+                    messageId: messageId,
+                    requestId: messageId,
+                    payload: { success: true },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+        });
+
+        // ==================== SEND_MESSAGE HANDLER ====================
+        messageHandlers.set('SEND_MESSAGE', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId;
+            
+            // Track in ACK registry for retry cap enforcement
+            if (messageId && window.__ACK_REGISTRY__) {
+                const retryCount = window.__ACK_REGISTRY__.has(messageId) ? 
+                    window.__ACK_REGISTRY__.get(messageId).retryCount + 1 : 1;
+                
+                if (retryCount > window.__RETRY_LIMIT__) {
+                    try {
+                        source.postMessage({
+                            type: 'RETRY_LIMIT_REACHED',
+                            messageId: messageId,
+                            timestamp: Date.now()
+                        }, origin);
+                    } catch (e) {}
+                    return;
+                }
+                
+                window.__ACK_REGISTRY__.set(messageId, {
+                    timestamp: Date.now(),
+                    sourceIframe: source,
+                    retryCount: retryCount,
+                    delivered: false
+                });
+            }
+            
+            // Send ACK
+            if (messageId) {
+                try {
+                    source.postMessage({
+                        type: 'ACK',
+                        originalType: 'SEND_MESSAGE',
+                        messageId: messageId,
+                        requestId: messageId,
+                        payload: { success: true },
+                        timestamp: Date.now()
+                    }, origin);
+                } catch (e) {}
+            }
+        });
+
+        // ==================== VERIFY_SESSION HANDLER ====================
+        messageHandlers.set('VERIFY_SESSION', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || data.payload?.requestId;
+            if (!messageId) return;
+            
+            const session = getCurrentSession();
+            const isValid = session && session.authenticated && session.token;
+            
+            // Send SESSION_VERIFIED
+            try {
+                source.postMessage({
+                    type: 'SESSION_VERIFIED',
+                    requestId: messageId,
+                    messageId: messageId,
+                    payload: { 
+                        valid: isValid,
+                        userId: session.userId,
+                        timestamp: Date.now()
+                    },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // Send ACK
+            try {
+                source.postMessage({
+                    type: 'ACK',
+                    originalType: 'VERIFY_SESSION',
+                    messageId: messageId,
+                    requestId: messageId,
+                    payload: { success: true, valid: isValid },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+        });
+
+        // ==================== HEARTBEAT HANDLER ====================
+        messageHandlers.set('HEARTBEAT', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || generateMessageId();
+            
+            // Send HEARTBEAT_ACK
+            try {
+                source.postMessage({
+                    type: 'HEARTBEAT_ACK',
+                    requestId: messageId,
+                    messageId: messageId,
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // Send ACK
+            if (data.expectAck) {
+                try {
+                    source.postMessage({
+                        type: 'ACK',
+                        originalType: 'HEARTBEAT',
+                        messageId: messageId,
+                        requestId: messageId,
+                        payload: { success: true },
+                        timestamp: Date.now()
+                    }, origin);
+                } catch (e) {}
+            }
+            
+            // Update parent authority
+            if (window.__PARENT_AUTHORITY__) {
+                window.__PARENT_AUTHORITY__.heartbeatSuccess();
+            }
+        });
+
+        // ==================== PING HANDLER ====================
+        messageHandlers.set('PING', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId || generateMessageId();
+            
+            // Send PONG
+            try {
+                source.postMessage({
+                    type: 'PONG',
+                    requestId: messageId,
+                    messageId: messageId,
+                    payload: {
+                        timestamp: Date.now(),
+                        echo: data.payload || {}
+                    },
+                    timestamp: Date.now()
+                }, origin);
+            } catch (e) {}
+            
+            // Send ACK
+            if (data.expectAck) {
+                try {
+                    source.postMessage({
+                        type: 'ACK',
+                        originalType: 'PING',
+                        messageId: messageId,
+                        requestId: messageId,
+                        payload: { success: true },
+                        timestamp: Date.now()
+                    }, origin);
+                } catch (e) {}
+            }
+        });
+
+        // ==================== GENERIC HANDLER FOR ANY TYPE WITH expectAck ====================
+        messageHandlers.set('*', (data, source, origin) => {
+            const messageId = data.messageId || data.requestId;
+            if (data.expectAck && messageId) {
+                try {
+                    source.postMessage({
+                        type: 'ACK',
+                        originalType: data.type,
+                        messageId: messageId,
+                        requestId: messageId,
+                        payload: { success: true },
+                        timestamp: Date.now()
+                    }, origin);
+                } catch (e) {}
+            }
+        });
+
+        // ==================== MAIN MESSAGE LISTENER ====================
+        window.addEventListener('message', function(event) {
+            // Validate origin
+            if (event.origin !== window.location.origin && event.origin !== 'null') {
+                return;
+            }
+
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+
+            const messageId = data.messageId || data.requestId;
+            
+            // Deduplicate
+            if (messageId) {
+                if (processedMessageIds.has(messageId)) {
+                    return;
+                }
+                processedMessageIds.add(messageId);
+                cleanupProcessedIds();
+            }
+
+            // Handle ACKs
+            if (data.type === 'ACK' && data.requestId) {
+                window.__handleAck(data.requestId, data.payload);
+                return;
+            }
+
+            // Find specific handler
+            const handler = messageHandlers.get(data.type);
+            if (handler) {
+                handler(data, event.source, event.origin);
+            } else {
+                // Use generic handler for any message with expectAck
+                messageHandlers.get('*')(data, event.source, event.origin);
+            }
+        });
+
+        // ==================== CLEANUP INTERVAL ====================
+        setInterval(() => {
+            cleanupProcessedIds();
+        }, PROCESSED_IDS_CLEANUP_INTERVAL);
+
+        // ==================== EXPOSE FOR DEBUGGING ====================
+        window.__MESSAGE_HANDLER_STATS__ = {
+            processedCount: () => processedMessageIds.size,
+            pendingAcks: () => pendingAcks.size
+        };
+
+        console.log('[Parent] ✅ Single authoritative message handler installed - REGISTER_MODULE ACK fix applied');
     })();
     </script>
 

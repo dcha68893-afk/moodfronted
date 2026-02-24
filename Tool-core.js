@@ -1,6 +1,7 @@
 // =============================================
-// STABLE IFRAME CORE ENGINE v5.0.0
+// STABLE IFRAME CORE ENGINE v5.2.0
 // ENHANCED PARENT-CHILD SYNCHRONIZATION
+// DETERMINISTIC PARENT AUTHORITY COMMUNICATION LAYER
 // COMPLETE HANDSHAKE PROTOCOL IMPLEMENTATION
 // SECURE MESSAGING WITH FALLBACK SUPPORT
 // ENVIRONMENT-AWARE • RECOVERY-READY • ORIGIN-SECURE
@@ -14,6 +15,9 @@ const LOG_PREFIX = '[Tools]';
 const LOG_LEVELS = { DEBUG: 0, INFO: 1, SUCCESS: 2, WARN: 3, ERROR: 4, SILENT: 5 };
 let currentLogLevel = LOG_LEVELS.INFO;
 const loggedMessages = new Set();
+
+// Debug flag for console noise reduction - set to false to show only important logs
+const DEBUG = false;
 
 function logOnce(level, message, data = null) {
     const key = `${level}:${message}`;
@@ -33,6 +37,438 @@ function logOnce(level, message, data = null) {
 
 function logError(module, error, context = '') {
     logOnce('error', `${module} failed: ${error?.message || error}`, { context });
+}
+
+// Verbose logging wrapper
+function debugLog(...args) {
+    if (DEBUG) console.log(...args);
+}
+
+// =============================================
+// DETERMINISTIC BOOT STATE MACHINE
+// =============================================
+
+const BOOT_STATE = {
+    PREINIT: 'PREINIT',
+    WAIT_PARENT: 'WAIT_PARENT',
+    REGISTERING: 'REGISTERING',
+    WAIT_SESSION: 'WAIT_SESSION',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY',
+    DEGRADED: 'DEGRADED'
+};
+
+let currentBootState = BOOT_STATE.PREINIT;
+let bootStateLock = false;
+let parentReadyDetected = false;
+let parentReadyTimeout = null;
+let moduleRegistered = false;
+let sessionReceived = false;
+let authoritativeSession = null;
+let parentAuthorityMode = false;
+
+// Boot state machine controller
+const bootMachine = {
+    transition(newState) {
+        if (bootStateLock && currentBootState !== BOOT_STATE.DEGRADED) {
+            debugLog('[Boot] State transition locked, ignoring', newState);
+            return false;
+        }
+        
+        if (newState === currentBootState) return true;
+        
+        debugLog(`[Boot] State transition: ${currentBootState} -> ${newState}`);
+        currentBootState = newState;
+        _STATE.bootState = newState;
+        
+        // Emit state to parent if in iframe
+        if (_STATE.parentDetected && parentAuthorityMode) {
+            try {
+                window.parent.postMessage({
+                    type: 'BOOT_STATE',
+                    state: newState,
+                    module: 'marketplace',
+                    frameId: _STATE.frameId,
+                    timestamp: Date.now()
+                }, '*');
+            } catch (e) {}
+        }
+        
+        return true;
+    },
+    
+    getState() {
+        return currentBootState;
+    },
+    
+    isReady() {
+        return currentBootState === BOOT_STATE.READY;
+    },
+    
+    isDegraded() {
+        return currentBootState === BOOT_STATE.DEGRADED;
+    },
+    
+    lock() {
+        bootStateLock = true;
+    },
+    
+    unlock() {
+        bootStateLock = false;
+    }
+};
+
+// =============================================
+// PARENT CONTRACT COMPLIANCE LAYER
+// =============================================
+
+// Required message handlers that must be implemented
+const REQUIRED_PARENT_HANDLERS = new Set([
+    'SESSION_ACTIVE',
+    'SESSION_UPDATE',
+    'ACK',
+    'PING',
+    'NAVIGATE',
+    'PERMISSION_UPDATE',
+    'FORCE_LOGOUT',
+    // Add legacy message types that parent might send
+    'HANDSHAKE_RETRY',
+    'init',
+    'refreshData'
+]);
+
+// Required states to emit
+const REQUIRED_STATES = new Set([
+    'REGISTERING',
+    'REGISTERED',
+    'SESSION_PENDING',
+    'SESSION_ACTIVE',
+    'INITIALIZING',
+    'READY'
+]);
+
+class ParentContractCompliance {
+    constructor() {
+        this.handlers = new Map();
+        this.registeredHandlers = new Set();
+        this.statesEmitted = new Set();
+        this.complianceViolations = [];
+        this.handshakeRetryCount = 0;
+        this.maxHandshakeRetries = 3;
+        
+        // Register all required handlers
+        REQUIRED_PARENT_HANDLERS.forEach(type => {
+            this.registerRequiredHandler(type);
+        });
+    }
+    
+    registerRequiredHandler(type) {
+        if (this.registeredHandlers.has(type)) return;
+        
+        switch(type) {
+            case 'SESSION_ACTIVE':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling SESSION_ACTIVE');
+                    this.handleAuthoritativeSession(payload, message);
+                });
+                break;
+            case 'SESSION_UPDATE':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling SESSION_UPDATE');
+                    this.handleSessionUpdate(payload, message);
+                });
+                break;
+            case 'ACK':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling ACK');
+                    this.handleAck(payload, message);
+                });
+                break;
+            case 'PING':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling PING');
+                    this.handlePing(payload, message);
+                });
+                break;
+            case 'NAVIGATE':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling NAVIGATE');
+                    this.handleNavigate(payload, message);
+                });
+                break;
+            case 'PERMISSION_UPDATE':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling PERMISSION_UPDATE');
+                    this.handlePermissionUpdate(payload, message);
+                });
+                break;
+            case 'FORCE_LOGOUT':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling FORCE_LOGOUT');
+                    this.handleForceLogout(payload, message);
+                });
+                break;
+            case 'HANDSHAKE_RETRY':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling HANDSHAKE_RETRY');
+                    this.handleHandshakeRetry(payload, message);
+                });
+                break;
+            case 'init':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling init');
+                    this.handleParentInit(payload, message);
+                });
+                break;
+            case 'refreshData':
+                this.handlers.set(type, (payload, message) => {
+                    debugLog('[Contract] Handling refreshData');
+                    this.handleRefreshData(payload, message);
+                });
+                break;
+        }
+        
+        this.registeredHandlers.add(type);
+    }
+    
+    handleAuthoritativeSession(payload, message) {
+        if (!payload || !payload.session) return;
+        
+        parentAuthorityMode = true;
+        authoritativeSession = payload.session;
+        sessionReceived = true;
+        
+        // Disable local session restore - this is now authoritative
+        _STATE.sessionAuthority = 'parent';
+        _STATE.sessionActive = true;
+        _STATE.guestMode = false;
+        
+        // Process the session through existing session adapter
+        if (sessionAdapter) {
+            sessionAdapter.acceptParentSession(authoritativeSession);
+            
+            // Update window.currentUser
+            const session = sessionAdapter.getSession();
+            if (session) {
+                window.currentUser = {
+                    id: session.userId,
+                    displayName: session.displayName,
+                    email: session.email,
+                    photoURL: session.photoURL,
+                    isPremium: session.isPremium,
+                    trustLevel: session.trustLevel
+                };
+                window.userData = window.currentUser;
+            }
+        }
+        
+        // Emit required state
+        this.emitState('SESSION_ACTIVE');
+        
+        // If we're waiting for session, move to initializing
+        if (currentBootState === BOOT_STATE.WAIT_SESSION) {
+            bootMachine.transition(BOOT_STATE.INITIALIZING);
+            setTimeout(() => {
+                if (currentBootState === BOOT_STATE.INITIALIZING) {
+                    this.completeInitialization();
+                }
+            }, 100);
+        }
+    }
+    
+    handleHandshakeRetry(payload, message) {
+        // Parent is asking us to retry handshake
+        this.handshakeRetryCount++;
+        
+        if (this.handshakeRetryCount <= this.maxHandshakeRetries) {
+            debugLog('[Contract] Retrying handshake per parent request');
+            
+            // Resend CHILD_READY
+            if (_STATE.parentDetected) {
+                sendChildReady();
+            }
+            
+            // Resend REGISTER_MODULE
+            if (_STATE.parentDetected) {
+                sendRegisterModule();
+            }
+        } else {
+            debugLog('[Contract] Max handshake retries reached');
+            // Already in WAIT_PARENT state, let timeout handle it
+        }
+    }
+    
+    handleParentInit(payload, message) {
+        debugLog('[Contract] Parent init received');
+        
+        // This might contain session data
+        if (payload && payload.session) {
+            this.handleAuthoritativeSession({ session: payload.session }, message);
+        }
+        
+        // Also forward to existing handlers
+        if (router) {
+            router.handleParentInit(payload);
+        }
+    }
+    
+    handleRefreshData(payload, message) {
+        debugLog('[Contract] Refresh data requested');
+        
+        // Forward to existing handlers
+        if (router) {
+            router.handleRefreshDataRequest(payload);
+        }
+    }
+    
+    handleSessionUpdate(payload, message) {
+        if (!payload) return;
+        if (!authoritativeSession && !parentAuthorityMode) return;
+        
+        // Merge with authoritative session
+        if (authoritativeSession) {
+            authoritativeSession = { ...authoritativeSession, ...payload };
+        }
+        
+        // Forward to existing handlers
+        if (router) {
+            router.handleSessionUpdate(payload);
+        }
+    }
+    
+    handleAck(payload, message) {
+        if (!payload || !payload.messageId) return;
+        
+        // Mark message complete in reliability engine
+        if (reliabilityEngine) {
+            const pending = reliabilityEngine.ackTimeouts.get(payload.messageId);
+            if (pending) {
+                clearTimeout(pending.timeoutId);
+                reliabilityEngine.ackTimeouts.delete(payload.messageId);
+            }
+        }
+        
+        // Also handle in messaging
+        if (messaging) {
+            const pending = messaging.pendingAcks.get(payload.messageId);
+            if (pending) {
+                pending.cleanup?.();
+                messaging.pendingAcks.delete(payload.messageId);
+            }
+        }
+    }
+    
+    handlePing(payload, message) {
+        // Respond with PONG
+        if (iframeAuthority && _STATE.parentDetected) {
+            iframeAuthority.send('PONG', {
+                inResponseTo: message.messageId,
+                timestamp: Date.now()
+            }, { requireAck: false });
+        }
+    }
+    
+    handleNavigate(payload, message) {
+        if (!payload || !payload.url) return;
+        
+        // Forward to navigation guard
+        if (navigationGuard) {
+            navigationGuard.handleNavigate(payload);
+        }
+        
+        // Emit event for UI
+        window.dispatchEvent(new CustomEvent('marketplace:navigate', { 
+            detail: payload 
+        }));
+    }
+    
+    handlePermissionUpdate(payload, message) {
+        if (!payload || !payload.permissions) return;
+        
+        // Update permissions in state
+        _STATE.permissions = new Set(payload.permissions);
+        
+        // Emit event
+        window.dispatchEvent(new CustomEvent('marketplace:permissions-updated', {
+            detail: { permissions: payload.permissions }
+        }));
+    }
+    
+    handleForceLogout(payload, message) {
+        // Clear session and reset
+        if (sessionAdapter) {
+            sessionAdapter.clear();
+        }
+        
+        authoritativeSession = null;
+        sessionReceived = false;
+        parentAuthorityMode = false;
+        _STATE.sessionActive = false;
+        _STATE.guestMode = true;
+        
+        window.currentUser = null;
+        window.userData = null;
+        
+        // Emit event
+        window.dispatchEvent(new CustomEvent('marketplace:logout', {
+            detail: { forced: true, timestamp: Date.now() }
+        }));
+        
+        // Reset boot state
+        bootMachine.transition(BOOT_STATE.PREINIT);
+        setTimeout(() => {
+            initializeDeterministicBoot();
+        }, 1000);
+    }
+    
+    emitState(state) {
+        if (!REQUIRED_STATES.has(state)) return;
+        
+        if (this.statesEmitted.has(state)) return;
+        this.statesEmitted.add(state);
+        
+        debugLog(`[Contract] Emitting state: ${state}`);
+        
+        if (_STATE.parentDetected && parentAuthorityMode) {
+            try {
+                window.parent.postMessage({
+                    type: 'MODULE_STATE',
+                    state: state,
+                    module: 'marketplace',
+                    frameId: _STATE.frameId,
+                    timestamp: Date.now()
+                }, '*');
+            } catch (e) {}
+        }
+    }
+    
+    completeInitialization() {
+        bootMachine.transition(BOOT_STATE.READY);
+        this.emitState('READY');
+        
+        _STATE.ready = true;
+        _STATE.initialized = true;
+        isReady = true;
+        
+        // Set exposed flags
+        window.__MODULE_READY__ = true;
+        if (_STATE.sessionActive) {
+            window.__MODULE_SESSION_ACTIVE__ = true;
+        }
+        
+        logOnce('ready', 'MarketplaceCore ready');
+    }
+    
+    getHandler(type) {
+        return this.handlers.get(type);
+    }
+    
+    hasAllRequiredHandlers() {
+        for (const type of REQUIRED_PARENT_HANDLERS) {
+            if (!this.registeredHandlers.has(type)) return false;
+        }
+        return true;
+    }
 }
 
 // =============================================
@@ -85,6 +521,10 @@ const _STATE = {
     parentCapabilities: [],
     recoveryMode: false,
     recoveryAttempts: 0,
+    
+    // Boot state
+    bootState: BOOT_STATE.PREINIT,
+    sessionAuthority: 'unknown', // 'parent', 'local', 'guest'
     
     // Environment classification
     environment: {
@@ -532,7 +972,12 @@ export const PARENT_MESSAGE_TYPES = {
     
     // Diagnostics
     DIAGNOSTICS: 'DIAGNOSTICS',
-    METRICS: 'METRICS'
+    METRICS: 'METRICS',
+    
+    // Boot states
+    BOOT_STATE: 'BOOT_STATE',
+    MODULE_STATE: 'MODULE_STATE',
+    REGISTER_MODULE: 'REGISTER_MODULE'
 };
 
 export const DATA_TYPES = {
@@ -924,12 +1369,15 @@ class ReliabilityEngine {
         return new Promise((resolve) => {
             const { messageId, timeout, attempt } = config;
             let resolved = false;
+            
+            // Generate unique messageId if not provided
+            const finalMessageId = messageId || this.generateMessageId();
 
             const timeoutId = setTimeout(() => {
                 if (resolved) return;
                 resolved = true;
                 cleanup();
-                resolve({ success: false, error: 'timeout', attempt, messageId });
+                resolve({ success: false, error: 'timeout', attempt, messageId: finalMessageId });
             }, timeout);
 
             const ackHandler = (e) => {
@@ -939,22 +1387,22 @@ class ReliabilityEngine {
                 if (!data || typeof data !== 'object') return;
                 
                 if ((data.type === 'ACK' || data.type === PARENT_MESSAGE_TYPES.ACK) && 
-                    (data.inResponseTo === messageId || data.messageId === messageId)) {
+                    (data.inResponseTo === finalMessageId || data.messageId === finalMessageId)) {
                     if (resolved) return;
                     resolved = true;
                     cleanup();
                     _STATE.connectionMetrics.acksReceived++;
-                    resolve({ success: true, ack: data, attempt, messageId });
+                    resolve({ success: true, ack: data, attempt, messageId: finalMessageId });
                 }
             };
 
             const cleanup = () => {
                 clearTimeout(timeoutId);
                 window.removeEventListener('message', ackHandler);
-                this.ackTimeouts.delete(messageId);
+                this.ackTimeouts.delete(finalMessageId);
             };
 
-            this.ackTimeouts.set(messageId, { timeoutId, cleanup });
+            this.ackTimeouts.set(finalMessageId, { timeoutId, cleanup });
             window.addEventListener('message', ackHandler);
 
             try {
@@ -962,7 +1410,7 @@ class ReliabilityEngine {
                     throw new Error('Not in iframe');
                 }
 
-                const message = this.buildMessage(type, payload, { messageId, attempt });
+                const message = this.buildMessage(type, payload, { messageId: finalMessageId, attempt });
                 window.parent.postMessage(message, '*');
                 _STATE.connectionMetrics.messagesSent++;
                 
@@ -971,7 +1419,7 @@ class ReliabilityEngine {
                 }, timeout + 100);
             } catch (err) {
                 cleanup();
-                resolve({ success: false, error: err.message, attempt, messageId });
+                resolve({ success: false, error: err.message, attempt, messageId: finalMessageId });
             }
         });
     }
@@ -1108,8 +1556,6 @@ class ReliabilityEngine {
         }
     }
 }
-
-const reliabilityEngine = new ReliabilityEngine(environmentDetector);
 
 // =============================================
 // FIXED: MODULE 3 - STARTUP GOVERNOR with logging
@@ -1416,9 +1862,6 @@ class StartupGovernor {
     }
 }
 
-const startupGovernor = new StartupGovernor(environmentDetector, reliabilityEngine);
-startupGovernor.initialize();
-
 // =============================================
 // FIXED: MODULE 4 - HANDSHAKE AUTHORITY with logging
 // =============================================
@@ -1444,6 +1887,12 @@ class HandshakeAuthority {
         if (_STATE.handshakeComplete) {
             this.state.complete = true;
             return true;
+        }
+        
+        // In auth mode, limit retries
+        if (parentAuthorityMode && this.state.attempts >= MAX_AUTH_RETRIES) {
+            debugLog('[Handshake] Max retries reached in auth mode, entering degraded');
+            return false;
         }
 
         this.state.lock = true;
@@ -1477,7 +1926,9 @@ class HandshakeAuthority {
         } catch (error) {
             this.state.error = error.message;
             this.state.lock = false;
-            if (this.state.attempts < 3) {
+            
+            // Only retry if under limit
+            if (this.state.attempts < MAX_AUTH_RETRIES) {
                 this.state.stage = 'retry';
                 return this.retryHandshake();
             }
@@ -1493,7 +1944,8 @@ class HandshakeAuthority {
                 frameId: _STATE.frameId,
                 timestamp: Date.now(),
                 version: '5.0.0',
-                environment: this.environmentDetector.environment
+                environment: this.environmentDetector.environment,
+                once: true
             },
             { requireAck: true, timeout: 2000, maxRetries: 2, offlineBuffer: false, retryQueue: 'handshake' }
         );
@@ -1612,6 +2064,19 @@ class HandshakeAuthority {
         });
     }
 
+    reset() {
+        this.state = {
+            stage: 'idle',
+            attempts: 0,
+            startTime: 0,
+            complete: false,
+            error: null,
+            lock: false
+        };
+        this.timeouts.forEach(({ cleanup }) => cleanup?.());
+        this.timeouts.clear();
+    }
+
     getStatus() {
         return {
             stage: this.state.stage,
@@ -1620,8 +2085,6 @@ class HandshakeAuthority {
         };
     }
 }
-
-const handshake = new HandshakeAuthority(environmentDetector, reliabilityEngine);
 
 // =============================================
 // FIXED: MODULE 5 - SESSION CLIENT with logging
@@ -1644,6 +2107,7 @@ class SessionClient {
             expiresAt: null,
             lastSync: 0
         };
+        this.requestRetryCount = 0;
         this.loadFromCache();
     }
 
@@ -1675,10 +2139,22 @@ class SessionClient {
     }
 
     async requestSession(force = false) {
+        // In auth mode, respect authoritative session
+        if (parentAuthorityMode && this.sessionState.requested && !force) {
+            if (authoritativeSession) return { success: true, authoritative: true };
+        }
+        
         if (this.guestMode && !force) return this.currentSession;
         if (this.sessionState.requested && !force) return this.currentSession;
+        
+        // Check retry limit in auth mode
+        if (parentAuthorityMode && this.requestRetryCount >= MAX_AUTH_RETRIES) {
+            debugLog('[Session] Max retries reached in auth mode');
+            return { success: false, error: 'max_retries_auth_mode' };
+        }
 
         this.sessionState.requested = true;
+        this.requestRetryCount = (this.requestRetryCount || 0) + 1;
 
         const result = await this.reliabilityEngine.sendWithReliability(
             PARENT_MESSAGE_TYPES.REQUEST_SESSION,
@@ -1687,9 +2163,10 @@ class SessionClient {
                 timestamp: Date.now(),
                 force: force,
                 cached: !!this.sessionCache,
-                environment: this.environmentDetector.environment
+                environment: this.environmentDetector.environment,
+                authMode: parentAuthorityMode
             },
-            { requireAck: true, timeout: 3000, maxRetries: 3, retryQueue: 'session' }
+            { requireAck: true, timeout: 3000, maxRetries: MAX_AUTH_RETRIES, retryQueue: 'session' }
         );
 
         return result;
@@ -1742,6 +2219,7 @@ class SessionClient {
             this.demoMode = false;
             _STATE.sessionActive = true;
             _STATE.guestMode = false;
+            _STATE.sessionAuthority = 'parent';
 
             this.saveToCache(this.currentSession);
             this.notifyListeners('session:updated', this.currentSession);
@@ -1818,6 +2296,7 @@ class SessionClient {
         this.demoMode = false;
         _STATE.guestMode = true;
         _STATE.sessionActive = false;
+        _STATE.sessionAuthority = 'guest';
         
         this.currentSession = {
             userId: 'guest_' + Date.now(),
@@ -1838,8 +2317,10 @@ class SessionClient {
         this.guestMode = false;
         this.demoMode = false;
         this.sessionState = { requested: false, received: false, synced: false, acked: false, expiresAt: null, lastSync: 0 };
+        this.requestRetryCount = 0;
         _STATE.sessionActive = false;
         _STATE.guestMode = false;
+        _STATE.sessionAuthority = 'unknown';
         safeStorage.sessionRemove('core_session_cache');
         this.notifyListeners('session:cleared', null);
     }
@@ -1859,12 +2340,11 @@ class SessionClient {
             isValid: this.isValid(),
             guestMode: this.guestMode,
             demoMode: this.demoMode,
-            hasSession: !!this.currentSession
+            hasSession: !!this.currentSession,
+            authority: _STATE.sessionAuthority
         };
     }
 }
-
-const sessionAdapter = new SessionClient(environmentDetector, reliabilityEngine);
 
 // =============================================
 // FIXED: MODULE 6 - TRANSPORT LAYER with logging
@@ -1900,6 +2380,12 @@ class TransportLayer {
 
     async sendPing() {
         if (!_STATE.parentDetected || _STATE.guestMode) return;
+        
+        // In auth mode, limit ping retries
+        if (parentAuthorityMode && this.missedPongs >= 3) {
+            debugLog('[Transport] Too many missed pongs in auth mode');
+            return;
+        }
 
         this.lastPing = Date.now();
         _STATE.connectionMetrics.lastPing = this.lastPing;
@@ -1961,8 +2447,6 @@ class TransportLayer {
         this.listeners.forEach(cb => { try { cb(event, data); } catch {} });
     }
 }
-
-const transport = new TransportLayer(environmentDetector, reliabilityEngine);
 
 // =============================================
 // FIXED: MODULE 7 - RECOVERY MANAGER with logging
@@ -2154,8 +2638,6 @@ class RecoveryManager {
     }
 }
 
-const recovery = new RecoveryManager(environmentDetector, reliabilityEngine, handshake, sessionAdapter, transport);
-
 // =============================================
 // FIXED: MODULE 8 - DIAGNOSTICS AGENT with logging
 // =============================================
@@ -2247,7 +2729,8 @@ class DiagnosticsAgent {
                 active: _STATE.sessionActive,
                 guestMode: _STATE.guestMode,
                 demoMode: _STATE.demoMode,
-                fallbackMode: _STATE.fallbackMode
+                fallbackMode: _STATE.fallbackMode,
+                authority: _STATE.sessionAuthority
             }
         };
         check.status = _STATE.sessionActive ? 'pass' : (_STATE.guestMode ? 'warn' : 'fail');
@@ -2315,7 +2798,9 @@ class DiagnosticsAgent {
                 ready: _STATE.ready,
                 handshakeComplete: _STATE.handshakeComplete,
                 sessionActive: _STATE.sessionActive,
-                guestMode: _STATE.guestMode
+                guestMode: _STATE.guestMode,
+                bootState: currentBootState,
+                authority: _STATE.sessionAuthority
             },
             environment: this.environmentDetector.getEnvironmentReport()
         };
@@ -2340,8 +2825,6 @@ class DiagnosticsAgent {
         this.eventListeners.clear();
     }
 }
-
-const diagnostics = new DiagnosticsAgent(environmentDetector);
 
 // =============================================
 // FIXED: MODULE 9 - COMPATIBILITY BRIDGE
@@ -2444,8 +2927,6 @@ class CompatibilityBridge {
     }
 }
 
-const compatibility = new CompatibilityBridge();
-
 // =============================================
 // FIXED: MODULE 10 - SECURITY HARDENER
 // =============================================
@@ -2528,9 +3009,6 @@ class SecurityHardener {
     }
 }
 
-const securityHardener = new SecurityHardener(environmentDetector);
-securityHardener.initialize();
-
 // =============================================
 // FIXED: MODULE 11 - UI FAILSAFE
 // =============================================
@@ -2574,8 +3052,6 @@ class UIFailsafe {
     }
 }
 
-const uiFailsafe = new UIFailsafe();
-
 // =============================================
 // FIXED: MODULE 12 - NAVIGATION GUARD
 // =============================================
@@ -2590,9 +3066,25 @@ class NavigationGuard {
     canNavigate() {
         return _STATE.parentResponding || _STATE.guestMode || _STATE.fallbackMode;
     }
+    
+    handleNavigate(payload) {
+        if (payload.url && payload.url !== window.location.href) {
+            this.routeHistory.push({
+                url: window.location.href,
+                timestamp: Date.now()
+            });
+            
+            if (this.routeHistory.length > 50) {
+                this.routeHistory.shift();
+            }
+            
+            if (payload.internal) {
+                window.location.hash = payload.hash || '';
+                window.history.pushState({}, '', payload.url);
+            }
+        }
+    }
 }
-
-const navigationGuard = new NavigationGuard();
 
 // =============================================
 // FIXED: MODULE 13 - IFRAME AUTHORITY (Master Controller)
@@ -2622,9 +3114,10 @@ class IframeAuthority {
         _STATE.frameId = this.generateFrameId();
         this.detectSandboxRestrictions();
 
-        const startupResult = await this.startupGovernor.start();
+        // Use deterministic boot instead of startup governor
+        const bootResult = await initializeDeterministicBoot();
 
-        if (startupResult) {
+        if (bootResult && currentBootState === BOOT_STATE.READY) {
             this.transportLayer.start();
             this.recoveryManager.startMonitoring();
         }
@@ -2683,7 +3176,19 @@ class IframeAuthority {
             const data = e.data;
             if (!data || typeof data !== 'object') return;
             const transformed = this.compatibilityBridge.transformInbound(data);
-            if (transformed.type === type || data.type === type) {
+            
+            // First check contract handlers
+            const contractHandler = parentContract.getHandler(transformed.type || data.type);
+            if (contractHandler) {
+                try {
+                    contractHandler(transformed.payload || transformed.data || transformed, transformed);
+                } catch (err) {
+                    this.diagnosticsAgent.logError(err, { type: 'contract_handler', handlerType: transformed.type });
+                }
+            }
+            
+            // Then call custom handler
+            if ((transformed.type === type || data.type === type) && handler) {
                 try {
                     handler(transformed.payload || transformed.data || transformed, transformed);
                 } catch (err) {
@@ -2704,6 +3209,12 @@ class IframeAuthority {
             transport: this.transportLayer.getConnectionStatus(),
             recovery: this.recoveryManager.getStatus(),
             security: this.securityHardener.getSecurityContext(),
+            boot: {
+                state: currentBootState,
+                parentAuthority: parentAuthorityMode,
+                sessionAuthority: _STATE.sessionAuthority,
+                ready: currentBootState === BOOT_STATE.READY
+            },
             state: {
                 initialized: _STATE.initialized,
                 ready: _STATE.ready,
@@ -2724,6 +3235,11 @@ class IframeAuthority {
             window.__diagnostics = this.diagnosticsAgent;
             window.__reliability = this.reliabilityEngine;
             window.__transport = this.transportLayer;
+            window.__bootState = () => ({
+                state: currentBootState,
+                parentReady: parentReadyDetected,
+                parentAuthority: parentAuthorityMode
+            });
         }
     }
 
@@ -2735,8 +3251,6 @@ class IframeAuthority {
         this.initialized = false;
     }
 }
-
-const iframeAuthority = new IframeAuthority();
 
 // =============================================
 // FIXED: MODULE 14 - IFRAME MESSENGER (Enhanced)
@@ -2750,7 +3264,7 @@ class IframeMessenger {
         this.circuitFailures = 0;
         this.circuitOpen = false;
         this.messageCounter = 0;
-        this.frameId = iframeAuthority.generateFrameId();
+        this.frameId = null; // Will be set from iframeAuthority
         this.retryQueue = [];
         this.offlineBuffer = [];
         this.backoffTimers = new Map();
@@ -2780,7 +3294,7 @@ class IframeMessenger {
             type: type,
             source: "iframe",
             target: "parent",
-            frameId: this.frameId,
+            frameId: this.frameId || _STATE.frameId,
             timestamp: Date.now(),
             payload: this.sanitizePayload(payload),
             legacy: options.legacy || false,
@@ -2929,8 +3443,6 @@ class IframeMessenger {
     }
 }
 
-const messaging = new IframeMessenger(environmentDetector);
-
 // =============================================
 // FIXED: MODULE 15 - ORIGIN TRUST ADAPTER
 // =============================================
@@ -3030,8 +3542,6 @@ class OriginTrustAdapter {
     }
 }
 
-const originTrustAdapter = new OriginTrustAdapter(environmentDetector);
-
 // =============================================
 // FIXED: MODULE 16 - MESSAGE ROUTER (Enhanced)
 // =============================================
@@ -3076,6 +3586,16 @@ class MessageRouter {
         _STATE.connectionMetrics.messagesReceived++;
 
         if (!this.compatibility?.legacyMode && !securityHardener.validateMessage(message)) return;
+
+        // Handle contract messages first
+        const contractHandler = parentContract.getHandler(message.type);
+        if (contractHandler) {
+            try {
+                contractHandler(message.payload || message.data || message, message);
+            } catch (err) {
+                debugLog('[Router] Contract handler error:', err);
+            }
+        }
 
         if (message.type !== 'ACK' && message.type !== PARENT_MESSAGE_TYPES.ACK && 
             message.type !== 'PING' && message.type !== 'PONG' && message.expectAck) {
@@ -3175,8 +3695,9 @@ class MessageRouter {
         this.messaging.sendFireAndForget(PARENT_MESSAGE_TYPES.CHILD_READY, {
             id: _STATE.frameId,
             timestamp: Date.now(),
-            version: '5.0.0',
-            environment: environmentDetector.environment
+            version: '5.1.0',
+            environment: environmentDetector.environment,
+            once: true
         });
         if (!this.sessionClient.isValid()) setTimeout(() => this.requestSession(), 100);
     }
@@ -3278,9 +3799,6 @@ class MessageRouter {
     }
 }
 
-const router = new MessageRouter(messaging, sessionAdapter, environmentDetector, compatibility);
-router.startHeartbeatMonitor();
-
 // =============================================
 // FIXED: MODULE 17 - RESOURCE MANAGER
 // =============================================
@@ -3320,8 +3838,6 @@ class ResourceManager {
         this.intervals.clear();
     }
 }
-
-const resourceManager = new ResourceManager();
 
 // =============================================
 // FIXED: MODULE 18 - FEATURE SANDBOX
@@ -3389,8 +3905,6 @@ class FeatureSandbox {
         return fallback;
     }
 }
-
-const sandbox = new FeatureSandbox();
 
 // =============================================
 // FIXED: MODULE 19 - GLOBAL ERROR HANDLER (Enhanced)
@@ -3484,9 +3998,6 @@ class GlobalErrorHandler {
         };
     }
 }
-
-const errorHandler = new GlobalErrorHandler(diagnostics);
-errorHandler.initialize();
 
 // =============================================
 // FIXED: MODULE 20 - INITIALIZATION PIPELINE (Enhanced)
@@ -3663,7 +4174,8 @@ class InitializationPipeline {
                 guestMode: _STATE.guestMode,
                 sessionActive: _STATE.sessionActive,
                 handshakeComplete: _STATE.handshakeComplete,
-                environment: this.environmentDetector.environment
+                environment: this.environmentDetector.environment,
+                bootState: currentBootState
             }
         }));
         
@@ -3672,10 +4184,6 @@ class InitializationPipeline {
         return { ready: true, timestamp: Date.now() };
     }
 }
-
-const pipeline = new InitializationPipeline(
-    sessionAdapter, messaging, router, diagnostics, environmentDetector, startupGovernor
-);
 
 // =============================================
 // FIXED: MODULE 21 - DEPENDENCY MANAGER
@@ -3742,8 +4250,6 @@ class DependencyManager {
         return this.fallbackMode || _STATE.fallbackMode;
     }
 }
-
-const depManager = new DependencyManager();
 
 // =============================================
 // FIXED: MODULE 22 - MARKETPLACE CORE IMPLEMENTATION
@@ -4491,7 +4997,613 @@ class MarketplaceCoreImpl {
     }
 }
 
+// =============================================
+// CREATE INSTANCES AFTER ALL CLASSES ARE DEFINED
+// =============================================
+
+const parentContract = new ParentContractCompliance();
+const reliabilityEngine = new ReliabilityEngine(environmentDetector);
+const startupGovernor = new StartupGovernor(environmentDetector, reliabilityEngine);
+startupGovernor.initialize();
+const handshake = new HandshakeAuthority(environmentDetector, reliabilityEngine);
+const sessionAdapter = new SessionClient(environmentDetector, reliabilityEngine);
+const transport = new TransportLayer(environmentDetector, reliabilityEngine);
+const recovery = new RecoveryManager(environmentDetector, reliabilityEngine, handshake, sessionAdapter, transport);
+const diagnostics = new DiagnosticsAgent(environmentDetector);
+const compatibility = new CompatibilityBridge();
+const securityHardener = new SecurityHardener(environmentDetector);
+securityHardener.initialize();
+const uiFailsafe = new UIFailsafe();
+const navigationGuard = new NavigationGuard();
+const resourceManager = new ResourceManager();
+const sandbox = new FeatureSandbox();
+const errorHandler = new GlobalErrorHandler(diagnostics);
+errorHandler.initialize();
+const originTrustAdapter = new OriginTrustAdapter(environmentDetector);
+const messaging = new IframeMessenger(environmentDetector);
+messaging.frameId = _STATE.frameId;
+const router = new MessageRouter(messaging, sessionAdapter, environmentDetector, compatibility);
+const iframeAuthority = new IframeAuthority();
+const pipeline = new InitializationPipeline(sessionAdapter, messaging, router, diagnostics, environmentDetector, startupGovernor);
+const depManager = new DependencyManager();
 const marketplace = new MarketplaceCoreImpl();
+
+// Set frameId after iframeAuthority is created
+messaging.frameId = iframeAuthority.generateFrameId();
+_STATE.frameId = messaging.frameId;
+
+// =============================================
+// DETERMINISTIC BOOT SEQUENCE
+// =============================================
+
+async function initializeDeterministicBoot() {
+    if (bootStateLock) {
+        debugLog('[Boot] Already locked, skipping');
+        return false;
+    }
+    
+    bootMachine.lock();
+    
+    try {
+        logOnce('init', 'Deterministic boot started');
+        
+        // Start in PREINIT
+        bootMachine.transition(BOOT_STATE.PREINIT);
+        
+        // Check if we're in an iframe
+        const inIframe = (window.parent && window.parent !== window);
+        _STATE.parentDetected = inIframe;
+        
+        if (!inIframe) {
+            debugLog('[Boot] Not in iframe, entering degraded mode');
+            bootMachine.transition(BOOT_STATE.DEGRADED);
+            _STATE.guestMode = true;
+            _STATE.fallbackMode = true;
+            
+            // Still complete initialization in degraded mode
+            setTimeout(() => {
+                completeDegradedInitialization();
+            }, 100);
+            
+            bootMachine.unlock();
+            return true;
+        }
+        
+        // Transition to WAIT_PARENT
+        bootMachine.transition(BOOT_STATE.WAIT_PARENT);
+        logOnce('info', 'Waiting for parent ready signal');
+        
+        // Wait for parent ready signal - REDUCED TIMEOUT from 5000ms to 2000ms
+        const parentReady = await waitForParentReady();
+        
+        if (!parentReady) {
+            logOnce('warn', 'Parent ready timeout, entering degraded mode');
+            bootMachine.transition(BOOT_STATE.DEGRADED);
+            _STATE.guestMode = true;
+            _STATE.fallbackMode = true;
+            
+            setTimeout(() => {
+                completeDegradedInitialization();
+            }, 100);
+            
+            bootMachine.unlock();
+            return true;
+        }
+        
+        logOnce('ready', 'Parent ready detected');
+        
+        // Parent detected and ready
+        parentAuthorityMode = true;
+        
+        // Transition to REGISTERING
+        bootMachine.transition(BOOT_STATE.REGISTERING);
+        parentContract.emitState('REGISTERING');
+        
+        // Send CHILD_READY (only once)
+        sendChildReady();
+        
+        // Send REGISTER_MODULE
+        sendRegisterModule();
+        
+        parentContract.emitState('REGISTERED');
+        logOnce('ready', 'Module registered with parent');
+        
+        // Transition to WAIT_SESSION - REDUCED TIMEOUT from 5000ms to 2000ms
+        bootMachine.transition(BOOT_STATE.WAIT_SESSION);
+        parentContract.emitState('SESSION_PENDING');
+        logOnce('info', 'Waiting for authoritative session');
+        
+        // Wait for authoritative session (shortened timeout)
+        const sessionReceived = await waitForAuthoritativeSession(2000);
+        
+        if (!sessionReceived) {
+            logOnce('warn', 'Session timeout, checking for cached session');
+            
+            // Check if we have a cached session (legacy behavior)
+            const cachedSession = sessionAdapter ? sessionAdapter.getSession() : null;
+            
+            if (cachedSession && !parentAuthorityMode) {
+                logOnce('info', 'Using cached session (legacy mode)');
+                _STATE.sessionActive = true;
+                window.__MODULE_SESSION_ACTIVE__ = true;
+            } else {
+                logOnce('info', 'No session available, guest mode');
+                _STATE.guestMode = true;
+            }
+        } else {
+            logOnce('success', 'Authoritative session received');
+        }
+        
+        // Transition to INITIALIZING
+        bootMachine.transition(BOOT_STATE.INITIALIZING);
+        parentContract.emitState('INITIALIZING');
+        logOnce('info', 'Initializing components');
+        
+        // Complete initialization
+        await completeAuthoritativeInitialization();
+        
+        // Transition to READY
+        bootMachine.transition(BOOT_STATE.READY);
+        parentContract.emitState('READY');
+        
+        _STATE.ready = true;
+        _STATE.initialized = true;
+        isReady = true;
+        
+        // Set exposed flags
+        window.__MODULE_READY__ = true;
+        if (_STATE.sessionActive) {
+            window.__MODULE_SESSION_ACTIVE__ = true;
+        }
+        
+        logOnce('success', 'Deterministic boot complete');
+        
+        bootMachine.unlock();
+        return true;
+        
+    } catch (error) {
+        logError('DeterministicBoot', error);
+        bootMachine.transition(BOOT_STATE.DEGRADED);
+        _STATE.guestMode = true;
+        _STATE.fallbackMode = true;
+        
+        setTimeout(() => {
+            completeDegradedInitialization();
+        }, 100);
+        
+        bootMachine.unlock();
+        return false;
+    }
+}
+
+function waitForParentReady() {
+    return new Promise((resolve) => {
+        if (parentReadyDetected) {
+            resolve(true);
+            return;
+        }
+        
+        // Check for global flag
+        if (window.__PARENT_READY__ === true) {
+            parentReadyDetected = true;
+            resolve(true);
+            return;
+        }
+        
+        // REDUCED TIMEOUT from 5000ms to 2000ms
+        const timeout = 2000;
+        let resolved = false;
+        
+        const timeoutId = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            resolve(false);
+        }, timeout);
+        
+        const handler = (e) => {
+            try {
+                if (e.source !== window.parent) return;
+                const data = e.data;
+                if (!data || typeof data !== 'object') return;
+                
+                // Look for any parent ready message formats
+                if (data.type === 'PARENT_READY' || 
+                    data.type === 'PARENT_READY_ACK' ||
+                    data.type === 'init' ||
+                    data.type === 'HANDSHAKE_RETRY' ||
+                    (data.type === 'SESSION_DATA' && data.payload)) {
+                    
+                    parentReadyDetected = true;
+                    window.__PARENT_READY__ = true;
+                    
+                    if (resolved) return;
+                    resolved = true;
+                    cleanup();
+                    resolve(true);
+                }
+            } catch (err) {}
+        };
+        
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handler);
+        };
+        
+        window.addEventListener('message', handler);
+    });
+}
+
+function sendChildReady() {
+    if (!_STATE.parentDetected) return false;
+    
+    try {
+        // Send multiple formats to ensure compatibility
+        window.parent.postMessage({
+            type: 'CHILD_READY',
+            module: 'marketplace',
+            frameId: _STATE.frameId,
+            version: '5.2.0',
+            timestamp: Date.now(),
+            once: true
+        }, '*');
+        
+        // Also send legacy format
+        window.parent.postMessage({
+            type: 'CHILD_READY',
+            id: _STATE.frameId,
+            source: 'marketplace',
+            timestamp: Date.now()
+        }, '*');
+        
+        _STATE.childReadySent = true;
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+function sendRegisterModule() {
+    if (!_STATE.parentDetected) return false;
+    
+    try {
+        window.parent.postMessage({
+            type: 'REGISTER_MODULE',
+            module: 'marketplace',
+            frameId: _STATE.frameId,
+            capabilities: ['session', 'listings', 'messaging', 'storage'],
+            timestamp: Date.now()
+        }, '*');
+        
+        moduleRegistered = true;
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+function waitForAuthoritativeSession(timeoutMs = 2000) {
+    return new Promise((resolve) => {
+        if (sessionReceived) {
+            resolve(true);
+            return;
+        }
+        
+        const timeout = timeoutMs;
+        let resolved = false;
+        
+        const timeoutId = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            resolve(false);
+        }, timeout);
+        
+        const handler = (e) => {
+            try {
+                if (e.source !== window.parent) return;
+                const data = e.data;
+                if (!data || typeof data !== 'object') return;
+                
+                // Check for any session data format
+                if (data.type === 'SESSION_ACTIVE' || 
+                    data.type === 'SESSION_DATA' ||
+                    (data.type === 'init' && data.session)) {
+                    
+                    const session = data.session || data.payload?.session || data.data;
+                    if (session && (session.userId || session.user_id)) {
+                        sessionReceived = true;
+                        authoritativeSession = session;
+                        
+                        if (resolved) return;
+                        resolved = true;
+                        cleanup();
+                        resolve(true);
+                    }
+                }
+            } catch (err) {}
+        };
+        
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handler);
+        };
+        
+        window.addEventListener('message', handler);
+    });
+}
+
+async function completeAuthoritativeInitialization() {
+    // Initialize marketplace core if available
+    if (marketplace && typeof marketplace.initialize === 'function') {
+        try {
+            await marketplace.initialize();
+        } catch (err) {
+            debugLog('[Boot] Marketplace initialization error:', err);
+        }
+    }
+    
+    // Initialize other components
+    if (iframeAuthority && !iframeAuthority.initialized) {
+        try {
+            await iframeAuthority.initialize();
+        } catch (err) {
+            debugLog('[Boot] IframeAuthority initialization error:', err);
+        }
+    }
+    
+    // Start heartbeat monitor
+    if (router) {
+        router.startHeartbeatMonitor();
+    }
+    
+    if (transport) {
+        transport.start();
+    }
+    
+    // Set final flags
+    window.__MODULE_READY__ = true;
+    if (_STATE.sessionActive) {
+        window.__MODULE_SESSION_ACTIVE__ = true;
+    }
+}
+
+function completeDegradedInitialization() {
+    bootMachine.transition(BOOT_STATE.DEGRADED);
+    logOnce('info', 'Entering degraded mode');
+    
+    // Initialize in degraded mode
+    if (marketplace && typeof marketplace.initialize === 'function') {
+        try {
+            marketplace.initialize().catch(() => {});
+        } catch (err) {}
+    }
+    
+    _STATE.ready = true;
+    _STATE.initialized = true;
+    isReady = true;
+    window.__MODULE_READY__ = true;
+    
+    logOnce('ready', 'MarketplaceCore ready (degraded mode)');
+}
+
+// =============================================
+// CENTRALIZED ACK HANDLER
+// =============================================
+
+// Override reliability engine's ack handling to use centralized system
+const originalSendWithAck = ReliabilityEngine.prototype.sendWithAck;
+
+ReliabilityEngine.prototype.sendWithAck = function(type, payload, config) {
+    return new Promise((resolve) => {
+        const { messageId, timeout, attempt } = config;
+        let resolved = false;
+        
+        // Generate unique messageId if not provided
+        const finalMessageId = messageId || this.generateMessageId();
+        
+        const timeoutId = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            _STATE.connectionMetrics.acksMissed++;
+            resolve({ success: false, error: 'timeout', attempt, messageId: finalMessageId });
+        }, timeout);
+        
+        const ackHandler = (e) => {
+            if (!this.validateOrigin(e)) return;
+            
+            const data = e.data;
+            if (!data || typeof data !== 'object') return;
+            
+            // Handle both ACK and explicit messageId matching
+            if ((data.type === 'ACK' || data.type === PARENT_MESSAGE_TYPES.ACK) && 
+                (data.inResponseTo === finalMessageId || data.messageId === finalMessageId)) {
+                if (resolved) return;
+                resolved = true;
+                cleanup();
+                _STATE.connectionMetrics.acksReceived++;
+                resolve({ success: true, ack: data, attempt, messageId: finalMessageId });
+            }
+        };
+        
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', ackHandler);
+            this.ackTimeouts.delete(finalMessageId);
+        };
+        
+        this.ackTimeouts.set(finalMessageId, { timeoutId, cleanup });
+        window.addEventListener('message', ackHandler);
+        
+        try {
+            if (!window.parent || window.parent === window) {
+                throw new Error('Not in iframe');
+            }
+            
+            const message = this.buildMessage(type, payload, { messageId: finalMessageId, attempt });
+            window.parent.postMessage(message, '*');
+            _STATE.connectionMetrics.messagesSent++;
+            
+            setTimeout(() => {
+                if (!resolved) cleanup();
+            }, timeout + 100);
+        } catch (err) {
+            cleanup();
+            resolve({ success: false, error: err.message, attempt, messageId: finalMessageId });
+        }
+    });
+};
+
+// Override buildMessage to always include messageId
+ReliabilityEngine.prototype.buildMessage = function(type, payload, meta = {}) {
+    return {
+        protocol: _STATE.protocolVersion,
+        messageId: meta.messageId || this.generateMessageId(),
+        type: type,
+        source: 'iframe',
+        target: 'parent',
+        frameId: _STATE.frameId,
+        timestamp: Date.now(),
+        attempt: meta.attempt || 1,
+        payload: this.sanitizePayload(payload)
+    };
+};
+
+// =============================================
+// REMOVE INFINITE RETRY LOOPS
+// =============================================
+
+// Override retry mechanisms with bounded retries
+const MAX_AUTH_RETRIES = 2;
+
+// Store original methods
+const originalHandshakeStart = HandshakeAuthority.prototype.startHandshake;
+const originalSessionRequest = SessionClient.prototype.requestSession;
+const originalSendPing = TransportLayer.prototype.sendPing;
+
+// Override handshake with bounded retries
+HandshakeAuthority.prototype.startHandshake = async function() {
+    if (this.state.lock) return false;
+    if (_STATE.handshakeComplete) {
+        this.state.complete = true;
+        return true;
+    }
+    
+    // Check if we're in auth mode and limit retries
+    if (parentAuthorityMode && this.state.attempts >= MAX_AUTH_RETRIES) {
+        debugLog('[Handshake] Max retries reached in auth mode, entering degraded');
+        return false;
+    }
+    
+    this.state.lock = true;
+    this.state.attempts++;
+    this.state.startTime = Date.now();
+    this.state.stage = 'init';
+    
+    _STATE.handshakeStartTime = this.state.startTime;
+    _STATE.handshakeId = `handshake_${this.state.startTime}_${Math.random().toString(36).substring(2, 8)}`;
+    
+    try {
+        this.state.stage = 'child_ready';
+        const readyResult = await this.sendChildReady();
+        if (!readyResult.success) throw new Error('CHILD_READY failed');
+        
+        this.state.stage = 'wait_parent_ready';
+        const parentReady = await this.waitForParentReady();
+        if (!parentReady) throw new Error('PARENT_READY timeout');
+        
+        this.state.stage = 'handshake_request';
+        const requestResult = await this.sendHandshakeRequest();
+        if (!requestResult.success) throw new Error('HANDSHAKE_REQUEST failed');
+        
+        this.state.stage = 'wait_handshake_ack';
+        const ackReceived = await this.waitForHandshakeAck();
+        if (!ackReceived) throw new Error('HANDSHAKE_ACK timeout');
+        
+        this.completeHandshake();
+        return true;
+        
+    } catch (error) {
+        this.state.error = error.message;
+        this.state.lock = false;
+        
+        // Only retry if under limit
+        if (this.state.attempts < MAX_AUTH_RETRIES) {
+            this.state.stage = 'retry';
+            return this.retryHandshake();
+        }
+        return false;
+    }
+};
+
+// Override session request with bounded retries
+SessionClient.prototype.requestSession = async function(force = false) {
+    if (parentAuthorityMode && this.sessionState.requested && !force) {
+        // In auth mode, respect authoritative session
+        if (authoritativeSession) return { success: true, authoritative: true };
+    }
+    
+    if (this.guestMode && !force) return this.currentSession;
+    if (this.sessionState.requested && !force) return this.currentSession;
+    
+    // Check retry limit in auth mode
+    if (parentAuthorityMode && this.requestRetryCount >= MAX_AUTH_RETRIES) {
+        debugLog('[Session] Max retries reached in auth mode');
+        return { success: false, error: 'max_retries_auth_mode' };
+    }
+    
+    this.sessionState.requested = true;
+    this.requestRetryCount = (this.requestRetryCount || 0) + 1;
+    
+    const result = await this.reliabilityEngine.sendWithReliability(
+        PARENT_MESSAGE_TYPES.REQUEST_SESSION,
+        {
+            frameId: _STATE.frameId,
+            timestamp: Date.now(),
+            force: force,
+            cached: !!this.sessionCache,
+            environment: this.environmentDetector.environment,
+            authMode: parentAuthorityMode
+        },
+        { requireAck: true, timeout: 3000, maxRetries: MAX_AUTH_RETRIES, retryQueue: 'session' }
+    );
+    
+    return result;
+};
+
+// Override ping with bounded retries
+TransportLayer.prototype.sendPing = async function() {
+    if (!_STATE.parentDetected || _STATE.guestMode) return;
+    
+    // In auth mode, limit ping retries
+    if (parentAuthorityMode && this.missedPongs >= 3) {
+        debugLog('[Transport] Too many missed pongs in auth mode');
+        return;
+    }
+    
+    this.lastPing = Date.now();
+    _STATE.connectionMetrics.lastPing = this.lastPing;
+    
+    const result = await this.reliabilityEngine.sendWithReliability(
+        PARENT_MESSAGE_TYPES.PING,
+        { timestamp: this.lastPing },
+        { requireAck: true, timeout: 1500, maxRetries: 2, retryQueue: 'heartbeat', offlineBuffer: false }
+    );
+    
+    if (result.success) {
+        this.missedPongs = 0;
+        _STATE.parentResponding = true;
+        _STATE.health.missedHeartbeats = 0;
+    } else {
+        this.missedPongs++;
+        _STATE.health.missedHeartbeats++;
+        if (this.missedPongs >= 5) {
+            _STATE.parentResponding = false;
+            this.notifyListeners('transport:unresponsive', { missedPongs: this.missedPongs });
+        }
+    }
+};
 
 // =============================================
 // FIXED: EXPORTED CORE FUNCTIONS
@@ -4521,7 +5633,12 @@ initializeCore = async function(options = {}) {
         _STATE.frameId = messaging.frameId;
         window.parentCommunicationId = _STATE.frameId;
 
-        await pipeline.execute();
+        // Use deterministic boot instead of pipeline
+        const bootResult = await initializeDeterministicBoot();
+
+        if (bootResult) {
+            _STATE.ready = currentBootState === BOOT_STATE.READY || currentBootState === BOOT_STATE.DEGRADED;
+        }
 
         isReady = _STATE.ready;
         isInitializing = false;
@@ -4544,6 +5661,10 @@ initializeCore = async function(options = {}) {
 
         startPeriodicSync();
 
+        // Set exposed flags
+        window.__MODULE_READY__ = _STATE.ready;
+        window.__MODULE_SESSION_ACTIVE__ = _STATE.sessionActive;
+
         window.dispatchEvent(new CustomEvent('coreInitialized', {
             detail: {
                 state: _STATE,
@@ -4552,10 +5673,12 @@ initializeCore = async function(options = {}) {
                 guestMode: _STATE.guestMode,
                 sessionActive: _STATE.sessionActive,
                 handshakeComplete: _STATE.handshakeComplete,
-                environment: environmentDetector.environment
+                environment: environmentDetector.environment,
+                bootState: currentBootState
             }
         }));
 
+        logOnce('success', 'MarketplaceCore initialization complete');
         return _STATE;
 
     } catch (error) {
@@ -4568,6 +5691,8 @@ initializeCore = async function(options = {}) {
         isInitializing = false;
         isBootstrapped = true;
         sessionAdapter.enableGuestMode();
+        window.__MODULE_READY__ = true;
+        logOnce('warn', 'MarketplaceCore initialization failed, running in guest mode');
         return _STATE;
     }
 };
@@ -4582,9 +5707,12 @@ startHandshake = async function() {
         const result = await handshake.startHandshake();
         handshakeComplete = _STATE.handshakeComplete;
         handshakeInProgress = false;
+        if (result) logOnce('success', 'Handshake completed');
+        else logOnce('warn', 'Handshake failed');
         return result;
     } catch {
         handshakeInProgress = false;
+        logOnce('error', 'Handshake error');
         return false;
     }
 };
@@ -4665,6 +5793,8 @@ requestSession = async function(force = false) {
         sessionValid = sessionAdapter.isValid();
         sessionData = sessionAdapter.getSession();
         sessionValidationInProgress = false;
+        if (result.success) logOnce('success', 'Session request successful');
+        else logOnce('warn', 'Session request failed');
         return result.success || false;
     } catch {
         sessionValidationInProgress = false;
@@ -4711,6 +5841,10 @@ shutdownCore = function() {
     messageQueue = [];
     dataCache.clear();
 
+    window.__MODULE_READY__ = false;
+    window.__MODULE_SESSION_ACTIVE__ = false;
+
+    logOnce('info', 'Core shutdown complete');
     return true;
 };
 
@@ -4750,7 +5884,12 @@ checkParentHealth = function() {
         startupStatus: startupGovernor.getStatus(),
         environment: environmentDetector.getEnvironmentReport(),
         diagnostics: diagnostics.getReport(),
-        authorityStatus: iframeAuthority.getStatus()
+        authorityStatus: iframeAuthority.getStatus(),
+        boot: {
+            state: currentBootState,
+            parentAuthority: parentAuthorityMode,
+            sessionAuthority: _STATE.sessionAuthority
+        }
     };
 };
 
@@ -4987,6 +6126,7 @@ export const pageCore = {
         if (isInitializing || isReady || _STATE.initialized) return;
         
         isInitializing = true;
+        logOnce('init', 'pageCore initialization started');
         
         try {
             showStatusMessage('Loading marketplace, please wait...', 'info');
@@ -5002,13 +6142,16 @@ export const pageCore = {
             sendToParent(PARENT_MESSAGE_TYPES.CORE_READY, {
                 iframeId: window.parentCommunicationId || _STATE.frameId,
                 status: 'success',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                bootState: currentBootState
             }, { ack: false });
             
             processMessageQueue();
             showStatusMessage('Marketplace loaded successfully', 'success');
+            logOnce('success', 'pageCore initialization complete');
         } catch (error) {
             isInitializing = false;
+            logError('pageCore.init', error);
             sendToParent('error', {
                 iframeId: window.parentCommunicationId || _STATE.frameId,
                 message: error.message,
@@ -5253,7 +6396,7 @@ export function requestSessionFromParent() {
             source: 'marketplace_iframe',
             id: window.parentCommunicationId,
             timestamp: Date.now(),
-            version: '5.0.0',
+            version: '5.2.0',
             retryCount: sessionRetryAttempt,
             frameId: _STATE.frameId,
             environment: environmentDetector.environment
@@ -5296,6 +6439,14 @@ export function handleSecureParentMessage(event) {
         if (!message || typeof message !== 'object') return;
         
         const modern = compatibility.transformInbound(message);
+        
+        // Check contract handlers first
+        const contractHandler = parentContract.getHandler(modern?.type || message.type);
+        if (contractHandler) {
+            try {
+                contractHandler(modern?.payload || modern?.data || message, modern || message);
+            } catch (err) {}
+        }
         
         switch (modern?.type) {
             case PARENT_MESSAGE_TYPES.PARENT_READY:
@@ -5491,9 +6642,10 @@ export function startHandshakeProtocol() {
         sendToParent(PARENT_MESSAGE_TYPES.CHILD_READY, {
             id: window.parentCommunicationId || _STATE.frameId,
             type: 'marketplace',
-            version: '5.0.0',
+            version: '5.2.0',
             timestamp: Date.now(),
-            environment: environmentDetector.environment
+            environment: environmentDetector.environment,
+            once: true
         }, { ack: true });
         
         initiateHandshakeRetry();
@@ -5502,6 +6654,12 @@ export function startHandshakeProtocol() {
 
 export function initiateHandshakeRetry() {
     if (handshakeComplete || _STATE.handshakeComplete) return;
+    
+    // In auth mode, limit retries
+    if (parentAuthorityMode && handshakeRetryCount >= MAX_AUTH_RETRIES) {
+        handleParentUnavailable();
+        return;
+    }
     
     let retryCount = 0;
     const MAX_RETRY = 3;
@@ -5524,7 +6682,7 @@ export function initiateHandshakeRetry() {
                     lastAttempt: Date.now()
                 }, { ack: true });
                 
-                if (!handshakeComplete && !_STATE.handshakeComplete) {
+                if (!handshakeComplete && !_STATE.handshakeComplete && handshakeRetryCount < MAX_RETRY) {
                     initiateHandshakeRetry();
                 }
             }
@@ -5791,6 +6949,8 @@ export function clearSessionData() {
         dataCache.clear();
         
         sessionAdapter.clear();
+        
+        window.__MODULE_SESSION_ACTIVE__ = false;
     } catch {}
 }
 
@@ -5927,7 +7087,8 @@ export function startReconnectionAttempts() {
                 type: 'marketplace',
                 reconnection: true,
                 attempt: reconnectAttempts,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                once: true
             }, { ack: true });
             const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 30000);
             setTimeout(attemptReconnection, delay);
@@ -7361,7 +8522,7 @@ function normalizeOutgoingMessage(msg) {
             source: msg.source || 'marketplace_iframe',
             id: msg.id || Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             timestamp: msg.timestamp || Date.now(),
-            version: msg.version || '5.0.0'
+            version: msg.version || '5.2.0'
         };
     } catch {
         return { type: 'ERROR', source: 'marketplace', timestamp: Date.now(), error: 'Message normalization failed' };
@@ -7444,6 +8605,11 @@ export const AppState = {
     getStartupStatus: () => startupGovernor?.getStatus(),
     getEnvironment: () => environmentDetector?.environment,
     getAuthorityStatus: () => iframeAuthority?.getStatus(),
+    getBootState: () => ({
+        state: currentBootState,
+        parentAuthority: parentAuthorityMode,
+        sessionAuthority: _STATE.sessionAuthority
+    }),
     marketplace
 };
 
@@ -7459,6 +8625,8 @@ window.addEventListener('message', (e) => {
         if (e.data.type === 'PARENT_READY' || e.data.type === PARENT_MESSAGE_TYPES?.PARENT_READY) {
             _PARENT_READY_ = true;
             _HANDSHAKE_DONE_ = true;
+            parentReadyDetected = true;
+            window.__PARENT_READY__ = true;
         }
     } catch {}
 }, false);
@@ -7532,7 +8700,11 @@ if (typeof window !== 'undefined') {
                     recovery: recovery?.getStatus(),
                     startup: startupGovernor?.getStatus(),
                     environment: environmentDetector?.environment,
-                    authority: iframeAuthority?.getStatus()
+                    authority: iframeAuthority?.getStatus(),
+                    boot: {
+                        state: currentBootState,
+                        parentAuthority: parentAuthorityMode
+                    }
                 }),
                 enableDebug: () => diagnostics?.enableDebug(),
                 disableDebug: () => diagnostics?.disableDebug()
@@ -7541,7 +8713,9 @@ if (typeof window !== 'undefined') {
             _STATE,
             sessionAdapter,
             environmentDetector,
-            iframeAuthority
+            iframeAuthority,
+            __MODULE_READY__: () => window.__MODULE_READY__,
+            __MODULE_SESSION_ACTIVE__: () => window.__MODULE_SESSION_ACTIVE__
         };
         
         window.pageCore = pageCore;
@@ -7571,8 +8745,17 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         try {
             if (!checkDependencies()) {}
-            pageCore.init().catch(() => sessionAdapter.enableGuestMode());
+            
+            // Start deterministic boot
+            initializeDeterministicBoot().catch(() => {
+                sessionAdapter.enableGuestMode();
+            });
+            
             iframeAuthority.initialize().catch(() => {});
+            
+            // Also run pageCore.init for compatibility
+            pageCore.init().catch(() => {});
+            
         } catch {
             sessionAdapter.enableGuestMode();
         }
@@ -7684,12 +8867,17 @@ export async function updateTeamMemberRole(changes) {
 // [Tools] 🔵 READY - ErrorHandler initialized
 // [Tools] 🔵 READY - IframeTransport initialized
 // [Tools] 🔵 READY - ModuleCoordinator initialized
-// [Tools] 🚀 INIT - MarketplaceCore initialization started
-// [Tools] 🔵 READY - Startup complete
-// [Tools] 🔵 READY - Handshake complete
-// [Tools] 🔵 READY - Session data accepted
+// [Tools] 🚀 INIT - pageCore initialization started
+// [Tools] 🚀 INIT - Deterministic boot started
+// [Tools] ⚪ INFO - Waiting for parent ready signal
+// [Tools] 🔵 READY - Parent ready detected (or timeout after 2 seconds)
+// [Tools] 🔵 READY - Module registered with parent
+// [Tools] ⚪ INFO - Waiting for authoritative session
+// [Tools] ⚪ INFO - No session available, guest mode (or success message)
+// [Tools] ⚪ INFO - Initializing components
+// [Tools] ✅ SUCCESS - Deterministic boot complete
 // [Tools] 🔵 READY - MarketplaceCore ready
-// [Tools] ✅ SUCCESS - MarketplaceCore initialization complete
+// [Tools] ✅ SUCCESS - pageCore initialization complete
 // =============================================
 
 export default marketplace;

@@ -1,13 +1,25 @@
 // =============================================
 // PRODUCTION-READY GROUPS SYSTEM WITH PARENT SESSION AUTHORITY
 // COMPLETE CORE ENGINE - HIGHLY SECURE, XSS PROTECTED
-// VERSION: 4.0.0 - FIXED DUPLICATE MESSAGES, PROPER STATE TRACKING
+// VERSION: 4.1.0 - DETERMINISTIC PARENT AUTHORITY CONTRACT
 // =============================================
+
+// =============================================
+// DEBUG FLAG - CONTROL CONSOLE NOISE
+// =============================================
+const DEBUG = false;
+
+// Safe console logging wrapper
+function debugLog(...args) {
+    if (DEBUG) {
+        console.log(...args);
+    }
+}
 
 // =============================================
 // STATUS MACHINE - One Message Only Per State Change
 // =============================================
-const MODULE_VERSION = '4.0.0';
+const MODULE_VERSION = '4.1.0';
 
 const STATUS_MACHINE = (function() {
     'use strict';
@@ -52,10 +64,13 @@ const STATUS_MACHINE = (function() {
             const symbol = symbols[status] || '•';
             const detailStr = details ? ` ${details}` : '';
             
-            console.log(
-                `%c${symbol} ${status}${detailStr}`,
-                `color: ${colors[status] || '#aaa'}; font-weight: bold;`
-            );
+            // Only log critical statuses when DEBUG is false
+            if (DEBUG || status === 'INIT' || status === 'SUCCESS' || status === 'FAILED' || status === 'WARNING') {
+                console.log(
+                    `%c${symbol} ${status}${detailStr}`,
+                    `color: ${colors[status] || '#aaa'}; font-weight: bold;`
+                );
+            }
         },
         
         reset: function(context) {
@@ -78,6 +93,332 @@ const STATUS_MACHINE = (function() {
 
 window.__STATUS_MACHINE = STATUS_MACHINE;
 STATUS_MACHINE.log('group-core', 'INIT', 'Groups module loading');
+
+// =============================================
+// DETERMINISTIC PARENT AUTHORITY STATE MACHINE
+// =============================================
+
+const PARENT_AUTHORITY_STATES = {
+    PREINIT: 'PREINIT',
+    WAIT_PARENT: 'WAIT_PARENT',
+    REGISTERING: 'REGISTERING',
+    WAIT_SESSION: 'WAIT_SESSION',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY',
+    DEGRADED: 'DEGRADED'
+};
+
+const ParentAuthority = {
+    _state: PARENT_AUTHORITY_STATES.PREINIT,
+    _parentReady: false,
+    _sessionReceived: false,
+    _authoritativeSession: null,
+    _retryCount: 0,
+    _maxRetries: 2,
+    _registrationSent: false,
+    _initComplete: false,
+    _listeners: new Set(),
+    _handledMessageIds: new Set(),
+    _timeoutId: null,
+    _sessionTimeoutId: null,
+    _degradedMode: false,
+    
+    init() {
+        if (this._initComplete) return this;
+        
+        STATUS_MACHINE.log('authority', 'INIT', 'Parent authority layer');
+        this._transition(PARENT_AUTHORITY_STATES.WAIT_PARENT);
+        
+        // Set parent ready timeout
+        this._timeoutId = setTimeout(() => {
+            if (this._state === PARENT_AUTHORITY_STATES.WAIT_PARENT) {
+                debugLog('Parent ready timeout - entering degraded mode');
+                this._enterDegradedMode();
+            }
+        }, 5000);
+        
+        // Check if parent is already ready
+        if (window.__PARENT_READY__ === true) {
+            this.handleParentReady();
+        }
+        
+        this._initComplete = true;
+        return this;
+    },
+    
+    _transition(newState) {
+        if (this._state === newState) return;
+        
+        const oldState = this._state;
+        this._state = newState;
+        
+        debugLog(`ParentAuthority state: ${oldState} -> ${newState}`);
+        
+        // Emit state change
+        this._notifyListeners(newState, oldState);
+        
+        // Handle state entry actions
+        if (newState === PARENT_AUTHORITY_STATES.REGISTERING) {
+            this._sendRegistration();
+        } else if (newState === PARENT_AUTHORITY_STATES.READY) {
+            this._onReady();
+        } else if (newState === PARENT_AUTHORITY_STATES.DEGRADED) {
+            this._onDegraded();
+        }
+    },
+    
+    _sendRegistration() {
+        if (this._registrationSent) return;
+        
+        this._registrationSent = true;
+        
+        // Send CHILD_READY exactly once
+        const childReadyMsg = {
+            type: 'CHILD_READY',
+            module: 'groups',
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            version: MODULE_VERSION,
+            timestamp: Date.now()
+        };
+        
+        TransportAgent.send('CHILD_READY', childReadyMsg, { requiresAck: false }).catch(() => {});
+        
+        // Send REGISTER_MODULE
+        const registerMsg = {
+            type: 'REGISTER_MODULE',
+            module: 'groups',
+            frameId: SECURITY_CONFIG.FRAME_ID,
+            version: MODULE_VERSION,
+            timestamp: Date.now()
+        };
+        
+        TransportAgent.send('REGISTER_MODULE', registerMsg, { requiresAck: false }).catch(() => {});
+        
+        // Set session timeout
+        this._sessionTimeoutId = setTimeout(() => {
+            if (this._state === PARENT_AUTHORITY_STATES.WAIT_SESSION) {
+                debugLog('Session timeout - entering degraded mode');
+                this._enterDegradedMode();
+            }
+        }, 5000);
+    },
+    
+    _onReady() {
+        window.__MODULE_READY__ = true;
+        if (this._authoritativeSession) {
+            window.__MODULE_SESSION_ACTIVE__ = true;
+        }
+        
+        if (this._sessionTimeoutId) {
+            clearTimeout(this._sessionTimeoutId);
+            this._sessionTimeoutId = null;
+        }
+        
+        // Clear parent timeout if still pending
+        if (this._timeoutId) {
+            clearTimeout(this._timeoutId);
+            this._timeoutId = null;
+        }
+        
+        STATUS_MACHINE.log('authority', 'SUCCESS', 'Parent contract ready');
+    },
+    
+    _onDegraded() {
+        window.__MODULE_READY__ = true; // Still mark as ready for legacy fallback
+        this._degradedMode = true;
+        
+        STATUS_MACHINE.log('authority', 'WARNING', 'Degraded mode - using legacy behavior');
+        
+        // Clear all timeouts
+        if (this._timeoutId) {
+            clearTimeout(this._timeoutId);
+            this._timeoutId = null;
+        }
+        if (this._sessionTimeoutId) {
+            clearTimeout(this._sessionTimeoutId);
+            this._sessionTimeoutId = null;
+        }
+    },
+    
+    _enterDegradedMode() {
+        this._transition(PARENT_AUTHORITY_STATES.DEGRADED);
+    },
+    
+    handleParentReady() {
+        if (this._parentReady) return;
+        if (this._degradedMode) return;
+        
+        this._parentReady = true;
+        
+        if (this._state === PARENT_AUTHORITY_STATES.WAIT_PARENT) {
+            this._transition(PARENT_AUTHORITY_STATES.REGISTERING);
+        }
+    },
+    
+    handleSessionActive(sessionData) {
+        if (this._degradedMode) return;
+        if (this._sessionReceived) return;
+        
+        this._sessionReceived = true;
+        this._authoritativeSession = sessionData;
+        
+        // Clear session timeout
+        if (this._sessionTimeoutId) {
+            clearTimeout(this._sessionTimeoutId);
+            this._sessionTimeoutId = null;
+        }
+        
+        // If we're in WAIT_SESSION, move to INITIALIZING
+        if (this._state === PARENT_AUTHORITY_STATES.WAIT_SESSION) {
+            this._transition(PARENT_AUTHORITY_STATES.INITIALIZING);
+        } else if (this._state === PARENT_AUTHORITY_STATES.REGISTERING) {
+            // If we get session before transitioning, go to INITIALIZING directly
+            this._transition(PARENT_AUTHORITY_STATES.INITIALIZING);
+        }
+        
+        // After INITIALIZING, go to READY
+        setTimeout(() => {
+            if (this._state === PARENT_AUTHORITY_STATES.INITIALIZING && !this._degradedMode) {
+                this._transition(PARENT_AUTHORITY_STATES.READY);
+            }
+        }, 100);
+    },
+    
+    handleMessage(message) {
+        if (this._degradedMode) return;
+        if (!message || !message.type) return;
+        
+        // Handle ACK messages
+        if (message.type === 'ACK' && message.messageId) {
+            TransportAgent.handleAck(message);
+            return;
+        }
+        
+        // Handle PING
+        if (message.type === 'PING') {
+            TransportAgent.handlePing(message);
+            return;
+        }
+        
+        // Handle PARENT_READY
+        if (message.type === 'PARENT_READY') {
+            this.handleParentReady();
+            return;
+        }
+        
+        // Handle SESSION_ACTIVE (authoritative)
+        if (message.type === 'SESSION_ACTIVE') {
+            this.handleSessionActive(message.session || message.payload);
+            return;
+        }
+        
+        // Handle SESSION_UPDATE
+        if (message.type === 'SESSION_UPDATE') {
+            this.handleSessionUpdate(message.session || message.payload);
+            return;
+        }
+        
+        // Handle NAVIGATE
+        if (message.type === 'NAVIGATE') {
+            this.handleNavigate(message);
+            return;
+        }
+        
+        // Handle PERMISSION_UPDATE
+        if (message.type === 'PERMISSION_UPDATE') {
+            this.handlePermissionUpdate(message);
+            return;
+        }
+        
+        // Handle FORCE_LOGOUT
+        if (message.type === 'FORCE_LOGOUT') {
+            this.handleForceLogout();
+            return;
+        }
+    },
+    
+    handleSessionUpdate(updateData) {
+        if (this._degradedMode) return;
+        
+        // Update authoritative session
+        if (this._authoritativeSession) {
+            this._authoritativeSession = {
+                ...this._authoritativeSession,
+                ...updateData
+            };
+        }
+    },
+    
+    handleNavigate(message) {
+        if (this._degradedMode) return;
+        // Forward to existing navigation handler
+        if (ParentConnectionManager && ParentConnectionManager.handleNavigate) {
+            ParentConnectionManager.handleNavigate(message);
+        }
+    },
+    
+    handlePermissionUpdate(message) {
+        if (this._degradedMode) return;
+        // Update permissions if needed
+        if (message.permissions && SessionMirror) {
+            const session = SessionMirror.getState();
+            if (session) {
+                session.permissions = message.permissions;
+            }
+        }
+    },
+    
+    handleForceLogout() {
+        if (this._degradedMode) return;
+        
+        // Clear authoritative session
+        this._authoritativeSession = null;
+        this._sessionReceived = false;
+        
+        // Forward to existing logout handler
+        if (typeof handleLogout === 'function') {
+            handleLogout();
+        }
+        if (ParentConnectionManager && ParentConnectionManager.handleLogout) {
+            ParentConnectionManager.handleLogout();
+        }
+    },
+    
+    isAuthoritativeSession() {
+        return this._sessionReceived && this._authoritativeSession !== null;
+    },
+    
+    getAuthoritativeSession() {
+        return this._authoritativeSession ? { ...this._authoritativeSession } : null;
+    },
+    
+    isDegraded() {
+        return this._degradedMode;
+    },
+    
+    getState() {
+        return {
+            state: this._state,
+            parentReady: this._parentReady,
+            sessionReceived: this._sessionReceived,
+            degraded: this._degradedMode,
+            retryCount: this._retryCount
+        };
+    },
+    
+    subscribe(listener) {
+        this._listeners.add(listener);
+        return () => this._listeners.delete(listener);
+    },
+    
+    _notifyListeners(newState, oldState) {
+        this._listeners.forEach(listener => {
+            try {
+                listener(newState, oldState);
+            } catch (e) {}
+        });
+    }
+};
 
 // =============================================
 // MESSAGE DEDUPLICATION - Prevents duplicate logs
@@ -153,7 +494,7 @@ if (typeof window !== 'undefined' && !window.__GROUP_HANDSHAKE_INITIALIZED__) {
     window.__GROUP_HANDSHAKE_INITIALIZED__ = true;
     
     let handshakeAttempts = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 2; // Reduced from 5 to prevent infinite loops
     let handshakeInterval = null;
     let handshakeSuccess = false;
     
@@ -317,7 +658,7 @@ const SECURITY_CONFIG = {
         /<\/script/i
     ],
     HANDSHAKE_TIMEOUT: 5000,
-    HANDSHAKE_MAX_RETRIES: 3,
+    HANDSHAKE_MAX_RETRIES: 2, // Reduced from 3
     SESSION_REFRESH_INTERVAL: 60000,
     MESSAGE_QUEUE_MAX_SIZE: 100,
     
@@ -388,18 +729,19 @@ function safeGetElement(selector) {
 }
 
 // =============================================
-// STARTUP GOVERNOR
+// STARTUP GOVERNOR - INTEGRATED WITH PARENT AUTHORITY
 // =============================================
 
 const StartupGovernor = {
     _state: 'INIT',
     _lock: false,
     _initAttempts: 0,
-    _maxInitAttempts: 3,
+    _maxInitAttempts: 2, // Reduced from 3
     _initPromise: null,
     _initResolve: null,
     _stateListeners: new Set(),
     _stateHistory: [],
+    _authoritySubscribed: false,
     
     init() {
         if (this._lock) {
@@ -408,6 +750,19 @@ const StartupGovernor = {
         
         this._lock = true;
         this._initAttempts++;
+        
+        // Subscribe to parent authority
+        if (!this._authoritySubscribed) {
+            this._authoritySubscribed = true;
+            ParentAuthority.subscribe((newState) => {
+                if (newState === PARENT_AUTHORITY_STATES.READY) {
+                    this._handleAuthorityReady();
+                } else if (newState === PARENT_AUTHORITY_STATES.DEGRADED) {
+                    this._handleAuthorityDegraded();
+                }
+            });
+        }
+        
         this._transition('WAIT_PARENT');
         
         this._initPromise = new Promise((resolve, reject) => {
@@ -422,10 +777,34 @@ const StartupGovernor = {
     
     async _runPipeline() {
         try {
-            const parentAvailable = await this._waitForParent(5000);
+            // Check if parent authority is degraded
+            if (ParentAuthority.isDegraded()) {
+                return await this._runLegacyPipeline();
+            }
+            
+            // Wait for parent authority to reach registering state
+            await this._waitForAuthorityState([PARENT_AUTHORITY_STATES.REGISTERING, PARENT_AUTHORITY_STATES.WAIT_SESSION, PARENT_AUTHORITY_STATES.READY], 3000);
+            
+            const parentAvailable = ParentConnectionManager && ParentConnectionManager.parentAvailable;
             
             this._transition('HANDSHAKING');
             const handshakeResult = await this._performHandshake(parentAvailable);
+            
+            // If we have authoritative session, use it
+            if (ParentAuthority.isAuthoritativeSession()) {
+                const authSession = ParentAuthority.getAuthoritativeSession();
+                if (authSession) {
+                    await this._applyAuthoritativeSession(authSession);
+                    this._transition('ACTIVE');
+                    return {
+                        success: true,
+                        state: this._state,
+                        parentAvailable,
+                        handshake: handshakeResult,
+                        session: { success: true, fromCache: false, authoritative: true }
+                    };
+                }
+            }
             
             this._transition('SYNCING');
             const sessionResult = await this._syncSession(handshakeResult);
@@ -449,6 +828,11 @@ const StartupGovernor = {
                 return this._runPipeline();
             }
             
+            // Check if we can fall back to legacy
+            if (ParentAuthority.isDegraded()) {
+                return await this._runLegacyPipeline();
+            }
+            
             this._transition('DEGRADED');
             
             return {
@@ -458,6 +842,93 @@ const StartupGovernor = {
                 fallback: true
             };
         }
+    },
+    
+    async _runLegacyPipeline() {
+        debugLog('Running legacy pipeline (degraded mode)');
+        
+        const parentAvailable = ParentConnectionManager && ParentConnectionManager.parentAvailable;
+        
+        const handshakeResult = await this._performHandshake(parentAvailable);
+        const sessionResult = await this._syncSession(handshakeResult);
+        
+        this._transition('ACTIVE');
+        
+        return {
+            success: true,
+            state: this._state,
+            parentAvailable,
+            handshake: handshakeResult,
+            session: sessionResult,
+            degraded: true
+        };
+    },
+    
+    async _applyAuthoritativeSession(sessionData) {
+        if (!sessionData) return;
+        
+        // Update session mirror with authoritative data
+        if (SessionMirror) {
+            SessionMirror.updateFromParent({
+                user: sessionData.user,
+                token: sessionData.token,
+                timestamp: sessionData.timestamp,
+                permissions: sessionData.permissions || [],
+                authenticated: true,
+                fromCache: false
+            });
+        }
+        
+        // Update local state
+        if (sessionData.user) {
+            currentUser = sessionData.user;
+            userData = {
+                displayName: sessionData.user.displayName || sessionData.user.name || 'User',
+                username: sessionData.user.username || '',
+                email: sessionData.user.email || '',
+                photoURL: sessionData.user.photoURL || sessionData.user.avatar || ''
+            };
+            
+            // Save to localStorage as cache only, not as authoritative
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify({
+                    uid: sessionData.user.id || sessionData.user._id || sessionData.user.uid,
+                    displayName: sessionData.user.displayName || sessionData.user.name,
+                    email: sessionData.user.email,
+                    photoURL: sessionData.user.photoURL || sessionData.user.avatar
+                }));
+            } catch (e) {}
+        }
+        
+        if (sessionData.token) {
+            saveUnifiedToken(sessionData.token);
+        }
+        
+        authReady = true;
+        authCheckComplete = true;
+        __SESSION_READY__ = true;
+    },
+    
+    _waitForAuthorityState(states, timeout) {
+        return new Promise((resolve) => {
+            if (states.includes(ParentAuthority.getState().state)) {
+                resolve(true);
+                return;
+            }
+            
+            const timeoutId = setTimeout(() => {
+                unsubscribe();
+                resolve(false);
+            }, timeout);
+            
+            const unsubscribe = ParentAuthority.subscribe((newState) => {
+                if (states.includes(newState)) {
+                    clearTimeout(timeoutId);
+                    unsubscribe();
+                    resolve(true);
+                }
+            });
+        });
     },
     
     _waitForParent(timeout) {
@@ -488,7 +959,7 @@ const StartupGovernor = {
     },
     
     async _performHandshake(parentAvailable) {
-        if (!parentAvailable) {
+        if (!parentAvailable || ParentAuthority.isDegraded()) {
             return { success: false, reason: 'parent_unavailable' };
         }
         
@@ -510,6 +981,12 @@ const StartupGovernor = {
     
     async _syncSession(handshakeResult) {
         return new Promise((resolve) => {
+            // If we have authoritative session, resolve immediately
+            if (ParentAuthority.isAuthoritativeSession()) {
+                resolve({ success: true, fromCache: false, authoritative: true });
+                return;
+            }
+            
             if (SessionMirror && SessionMirror.isAuthenticated()) {
                 resolve({ success: true, fromCache: handshakeResult.fromCache });
                 return;
@@ -528,6 +1005,19 @@ const StartupGovernor = {
                 }
             });
         });
+    },
+    
+    _handleAuthorityReady() {
+        if (this._state === 'WAIT_PARENT' || this._state === 'HANDSHAKING') {
+            // Continue with current flow
+        }
+    },
+    
+    _handleAuthorityDegraded() {
+        // Continue with existing flow but in degraded mode
+        if (this._state === 'WAIT_PARENT') {
+            this._transition('HANDSHAKING');
+        }
     },
     
     _transition(newState) {
@@ -572,7 +1062,7 @@ const StartupGovernor = {
     },
     
     isDegraded() {
-        return this._state === 'DEGRADED';
+        return this._state === 'DEGRADED' || ParentAuthority.isDegraded();
     },
     
     reset() {
@@ -730,7 +1220,7 @@ const CanonicalMessageFormatter = {
 };
 
 // =============================================
-// TRANSPORT AGENT - FIXED WITH DEDUPLICATION
+// TRANSPORT AGENT - FIXED WITH DEDUPLICATION AND RETRY LIMITS
 // =============================================
 
 const TransportAgent = {
@@ -741,7 +1231,7 @@ const TransportAgent = {
     _heartbeatInterval: null,
     _lastHeartbeat: 0,
     _connectionState: 'disconnected',
-    _maxRetries: 3,
+    _maxRetries: 2, // Reduced from 3
     _baseBackoff: 500,
     _listeners: new Set(),
     _sentMessages: new Set(),
@@ -754,6 +1244,8 @@ const TransportAgent = {
         retried: 0,
         failed: 0
     },
+    _heartbeatRetryCount: 0,
+    _maxHeartbeatRetries: 2,
     
     init() {
         if (this._initialized) return this;
@@ -769,7 +1261,7 @@ const TransportAgent = {
         const requiresAck = options.requiresAck !== false;
         const timeout = options.timeout || SECURITY_CONFIG.ACK_TIMEOUT;
         const retryCount = options.retryCount || 0;
-        const maxRetries = options.maxRetries || this._maxRetries || 3;
+        const maxRetries = options.maxRetries || this._maxRetries;
         const priority = options.priority || 'normal';
         
         // Check if we already sent this message
@@ -901,7 +1393,12 @@ const TransportAgent = {
                 }).then(pending.resolve).catch(pending.reject);
             }, backoffDelay);
         } else {
-            STATUS_MACHINE.log('transport', 'FAILED', `${type} max retries`);
+            // Don't log failure for every timeout, only once
+            const failKey = `${type}_max_retries`;
+            if (!MessageDeduplicator.isProcessed(failKey)) {
+                STATUS_MACHINE.log('transport', 'FAILED', `${type} max retries`);
+                MessageDeduplicator.markProcessed(failKey);
+            }
             if (pending.reject) {
                 pending.reject(new Error('ACK timeout after max retries'));
             }
@@ -932,6 +1429,7 @@ const TransportAgent = {
         }, { requiresAck: false }).catch(() => {});
         
         this._lastHeartbeat = Date.now();
+        this._heartbeatRetryCount = 0; // Reset on successful ping
     },
     
     _generateMessageId() {
@@ -964,15 +1462,25 @@ const TransportAgent = {
             const parentAvailable = isInIframe && hasPostMessage;
             
             if (parentAvailable && this._connectionState === 'connected') {
-                this.send('PING', {
-                    timestamp: Date.now(),
-                    state: this._connectionState
-                }, { requiresAck: false }).catch(() => {});
-                
-                if (this._lastHeartbeat > 0 && 
-                    Date.now() - this._lastHeartbeat > SECURITY_CONFIG.HEARTBEAT_TIMEOUT) {
-                    this._connectionState = 'disconnected';
-                    this.reconnect();
+                // Limit heartbeat retries
+                if (this._heartbeatRetryCount < this._maxHeartbeatRetries) {
+                    this.send('PING', {
+                        timestamp: Date.now(),
+                        state: this._connectionState
+                    }, { requiresAck: false }).catch(() => {
+                        this._heartbeatRetryCount++;
+                    });
+                    
+                    if (this._lastHeartbeat > 0 && 
+                        Date.now() - this._lastHeartbeat > SECURITY_CONFIG.HEARTBEAT_TIMEOUT) {
+                        this._connectionState = 'disconnected';
+                        if (this._heartbeatRetryCount < this._maxHeartbeatRetries) {
+                            this.reconnect();
+                        } else {
+                            // Enter degraded mode silently
+                            this._connectionState = 'degraded';
+                        }
+                    }
                 }
             }
         }, SECURITY_CONFIG.HEARTBEAT_INTERVAL);
@@ -1037,17 +1545,19 @@ const TransportAgent = {
 };
 
 // =============================================
-// RECOVERY MANAGER
+// RECOVERY MANAGER - WITH RETRY LIMITS
 // =============================================
 
 const RecoveryManager = {
     _failureCount: 0,
-    _maxFailures: 5,
+    _maxFailures: 3, // Reduced from 5
     _recoveryTimer: null,
     _lastRecovery: 0,
     _recoveryInProgress: false,
     _strategies: null,
     _initialized: false,
+    _recoveryAttempts: 0,
+    _maxRecoveryAttempts: 2,
     
     init() {
         if (this._initialized) return this;
@@ -1066,14 +1576,23 @@ const RecoveryManager = {
         this._failureCount++;
         
         if (this._failureCount >= this._maxFailures) {
-            this.initiateRecovery('full');
+            if (this._recoveryAttempts < this._maxRecoveryAttempts) {
+                this.initiateRecovery('full');
+            } else {
+                // Enter degraded mode silently
+                this._failureCount = 0;
+                this._recoveryAttempts = 0;
+            }
         } else if (this._failureCount > 2) {
-            this.initiateRecovery('network');
+            if (this._recoveryAttempts < this._maxRecoveryAttempts) {
+                this.initiateRecovery('network');
+            }
         }
     },
     
     initiateRecovery(strategy = 'network') {
         if (this._recoveryInProgress) return;
+        if (this._recoveryAttempts >= this._maxRecoveryAttempts) return;
         
         if (this._recoveryTimer) {
             clearTimeout(this._recoveryTimer);
@@ -1081,13 +1600,15 @@ const RecoveryManager = {
         
         this._recoveryTimer = setTimeout(() => {
             this._executeRecovery(strategy);
-        }, 1000 * Math.min(this._failureCount, 5));
+        }, 1000 * Math.min(this._failureCount, 3));
     },
     
     async _executeRecovery(strategy) {
         if (this._recoveryInProgress) return;
+        if (this._recoveryAttempts >= this._maxRecoveryAttempts) return;
         
         this._recoveryInProgress = true;
+        this._recoveryAttempts++;
         
         try {
             const strategyFn = this._strategies[strategy] || this._strategies.network;
@@ -1095,11 +1616,12 @@ const RecoveryManager = {
             
             if (result.success) {
                 this._failureCount = 0;
+                this._recoveryAttempts = 0;
                 this._lastRecovery = Date.now();
             } else {
                 this._failureCount++;
                 
-                if (this._failureCount < this._maxFailures) {
+                if (this._failureCount < this._maxFailures && this._recoveryAttempts < this._maxRecoveryAttempts) {
                     this.initiateRecovery('full');
                 }
             }
@@ -1146,7 +1668,7 @@ const RecoveryManager = {
         try {
             await HandshakeClient.initiate({
                 timeout: SECURITY_CONFIG.HANDSHAKE_TIMEOUT,
-                maxRetries: 2
+                maxRetries: 1 // Reduced from 2
             });
             
             return { success: true };
@@ -1173,6 +1695,7 @@ const RecoveryManager = {
     
     reset() {
         this._failureCount = 0;
+        this._recoveryAttempts = 0;
         if (this._recoveryTimer) {
             clearTimeout(this._recoveryTimer);
             this._recoveryTimer = null;
@@ -1357,7 +1880,7 @@ const SandboxDetector = {
 };
 
 // =============================================
-// FIXED HANDSHAKE CLIENT - Proper state tracking
+// FIXED HANDSHAKE CLIENT - Proper state tracking with retry limits
 // =============================================
 
 const HandshakeClient = {
@@ -1372,6 +1895,7 @@ const HandshakeClient = {
     _handshakeAckReceived: false,
     _startTime: null,
     _handshakeComplete: false,
+    _maxHandshakeAttempts: 2, // Reduced from 3
     
     initiate: function(options = {}) {
         if (this._handshakeComplete || handshakeCompleted) {
@@ -1397,7 +1921,7 @@ const HandshakeClient = {
         this._startTime = Date.now();
         this._handshakeState = 'child_ready_sent';
         
-        const maxRetries = options.maxRetries || SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES;
+        const maxRetries = Math.min(options.maxRetries || SECURITY_CONFIG.HANDSHAKE_MAX_RETRIES, this._maxHandshakeAttempts);
         const timeout = options.timeout || SECURITY_CONFIG.HANDSHAKE_TIMEOUT;
         
         STATUS_MACHINE.log('handshake', 'SENDING', `Attempt ${this._handshakeAttempts}`);
@@ -1583,6 +2107,12 @@ const PARENT_MESSAGE_TYPES = {
     NAVIGATE: 'NAVIGATE',
     SESSION_VERIFIED: 'SESSION_VERIFIED',
     
+    // Contract messages
+    SESSION_ACTIVE: 'SESSION_ACTIVE',
+    PERMISSION_UPDATE: 'PERMISSION_UPDATE',
+    FORCE_LOGOUT: 'FORCE_LOGOUT',
+    REGISTER_MODULE: 'REGISTER_MODULE',
+    
     // Group-specific message types
     GROUP_CREATED: 'GROUP_CREATED',
     GROUP_UPDATED: 'GROUP_UPDATED',
@@ -1645,7 +2175,7 @@ export const ParentConnectionManager = {
     sessionSyncState: 'none',
     pendingMessages: new Map(),
     messageRetryCounts: new Map(),
-    maxRetries: 3,
+    maxRetries: 2, // Reduced from 3
     backoffBase: 500,
     
     ackCallbacks: new Map(),
@@ -1724,6 +2254,9 @@ export const ParentConnectionManager = {
             
             this.parentAvailable = true;
             
+            // First, let ParentAuthority handle contract messages
+            ParentAuthority.handleMessage(message);
+            
             if (message.type === PARENT_MESSAGE_TYPES.ACK) {
                 TransportAgent.handleAck(message);
                 return;
@@ -1736,6 +2269,26 @@ export const ParentConnectionManager = {
             
             if (message.type === PARENT_MESSAGE_TYPES.PARENT_READY) {
                 this.handleParentReady(message);
+                return;
+            }
+            
+            // Handle SESSION_ACTIVE (authoritative)
+            if (message.type === 'SESSION_ACTIVE') {
+                const sessionData = message.session || message.payload;
+                if (sessionData) {
+                    this.handleSessionData(sessionData);
+                    
+                    TransportAgent.send('SESSION_ACK', {
+                        received: true,
+                        timestamp: Date.now()
+                    }, { requiresAck: false }).catch(() => {});
+                    
+                    this.sessionSyncState = 'synced';
+                    __SESSION_REQUEST_PENDING__ = false;
+                    __SESSION_READY__ = true;
+                    
+                    processGroupActionQueue();
+                }
                 return;
             }
             
@@ -1791,7 +2344,7 @@ export const ParentConnectionManager = {
                 return;
             }
             
-            if (message.type === PARENT_MESSAGE_TYPES.LOGOUT) {
+            if (message.type === PARENT_MESSAGE_TYPES.LOGOUT || message.type === 'FORCE_LOGOUT') {
                 this.handleLogout();
                 return;
             }
@@ -1823,6 +2376,14 @@ export const ParentConnectionManager = {
             
             if (message.type === PARENT_MESSAGE_TYPES.UI_THEME) {
                 this.handleUITheme(message);
+                return;
+            }
+            
+            // Handle PERMISSION_UPDATE
+            if (message.type === 'PERMISSION_UPDATE') {
+                if (message.permissions && this.sessionMirror) {
+                    this.sessionMirror.permissions = message.permissions;
+                }
                 return;
             }
             
@@ -2019,7 +2580,7 @@ export const ParentConnectionManager = {
     },
     
     handleSessionData(message) {
-        const sessionData = message.payload || message.data;
+        const sessionData = message.payload || message.data || message.session || message;
         if (this.validateSessionData(sessionData)) {
             this.updateSessionMirror(sessionData);
             this.handshakeComplete = true;
@@ -2037,7 +2598,7 @@ export const ParentConnectionManager = {
     },
     
     handleSessionUpdate(message) {
-        const updateData = message.payload || message.data;
+        const updateData = message.payload || message.data || message.session || message;
         if (updateData) {
             this.updateSessionMirror({
                 ...this.sessionMirror,
@@ -2091,6 +2652,7 @@ export const ParentConnectionManager = {
         
         this.sessionData = sessionData;
         
+        // Save to localStorage as cache only
         try {
             if (sessionData.user) {
                 localStorage.setItem(LOCAL_STORAGE_KEYS.USER, JSON.stringify(sessionData.user));
@@ -2191,6 +2753,11 @@ export const ParentConnectionManager = {
     },
     
     tryCachedSession() {
+        // If parent authority is active, don't restore from cache
+        if (ParentAuthority.isAuthoritativeSession()) {
+            return false;
+        }
+        
         try {
             const cachedUser = localStorage.getItem(LOCAL_STORAGE_KEYS.USER);
             const cachedToken = localStorage.getItem('USER_TOKEN') || 
@@ -2235,7 +2802,10 @@ export const ParentConnectionManager = {
         this.connectionState = 'connecting';
         
         this.initiateHandshake().catch(() => {
-            this.tryCachedSession();
+            // Don't try cached session if parent authority is active
+            if (!ParentAuthority.isAuthoritativeSession()) {
+                this.tryCachedSession();
+            }
         });
     },
     
@@ -2350,7 +2920,10 @@ export const SessionMirror = {
         if (!this.authenticated) {
             setTimeout(() => {
                 if (!__SESSION_REQUEST_PENDING__ && !__SESSION_READY__ && !handshakeCompleted) {
-                    ParentConnectionManager.requestSession();
+                    // Don't request if parent authority is active
+                    if (!ParentAuthority.isAuthoritativeSession()) {
+                        ParentConnectionManager.requestSession();
+                    }
                 }
             }, 100);
         }
@@ -2461,7 +3034,7 @@ const SessionClient = {
             this.syncRequested = false;
             __SESSION_REQUEST_PENDING__ = false;
             
-            if (!ParentConnectionManager.sessionMirror.authenticated) {
+            if (!ParentConnectionManager.sessionMirror.authenticated && !ParentAuthority.isAuthoritativeSession()) {
                 ParentConnectionManager.tryCachedSession();
             }
         }, 5000);
@@ -2815,7 +3388,7 @@ export const LOCAL_STORAGE_KEYS = Object.freeze({
 
 const loggedErrors = new Set();
 const loggedWarnings = new Set();
-const maxRetries = 3;
+const maxRetries = 2; // Reduced from 3
 const retryCounters = new Map();
 
 function shouldRetry(operationId) {
@@ -2867,6 +3440,19 @@ export function initializeTokenSystem() {
         
         setTimeout(async () => {
             try {
+                // Check for authoritative session first
+                if (ParentAuthority.isAuthoritativeSession()) {
+                    const authSession = ParentAuthority.getAuthoritativeSession();
+                    if (authSession && authSession.token) {
+                        saveUnifiedToken(authSession.token);
+                        authReady = true;
+                        authCheckComplete = true;
+                        __SESSION_READY__ = true;
+                        if (tokenReadyResolve) tokenReadyResolve(authSession.token);
+                        return;
+                    }
+                }
+                
                 const parentToken = ParentConnectionManager.getToken();
                 if (parentToken) {
                     saveUnifiedToken(parentToken);
@@ -2914,6 +3500,17 @@ export function initializeTokenSystem() {
 
 export async function waitForTokenReady() {
     try {
+        // Check for authoritative session first
+        if (ParentAuthority.isAuthoritativeSession()) {
+            const authSession = ParentAuthority.getAuthoritativeSession();
+            if (authSession && authSession.token) {
+                authReady = true;
+                authCheckComplete = true;
+                saveUnifiedToken(authSession.token);
+                return authSession.token;
+            }
+        }
+        
         const parentToken = ParentConnectionManager.getToken();
         if (parentToken) {
             authReady = true;
@@ -2941,6 +3538,14 @@ export async function waitForTokenReady() {
 
 export function getUnifiedToken() {
     try {
+        // Check for authoritative session first
+        if (ParentAuthority.isAuthoritativeSession()) {
+            const authSession = ParentAuthority.getAuthoritativeSession();
+            if (authSession && authSession.token) {
+                return String(authSession.token).substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
+            }
+        }
+        
         const parentToken = ParentConnectionManager.getToken();
         if (parentToken) {
             return String(parentToken).substring(0, SECURITY_CONFIG.MAX_STRING_LENGTH);
@@ -2994,6 +3599,14 @@ export function saveUnifiedToken(token) {
 
 export function getCurrentUserLocal() {
     try {
+        // Check for authoritative session first
+        if (ParentAuthority.isAuthoritativeSession()) {
+            const authSession = ParentAuthority.getAuthoritativeSession();
+            if (authSession && authSession.user) {
+                return authSession.user;
+            }
+        }
+        
         const parentUser = ParentConnectionManager.getUser();
         if (parentUser) {
             return parentUser;
@@ -3109,7 +3722,7 @@ const API_WRAPPER = {
     },
     _cache: new Map(),
     _cacheTTL: 5 * 60 * 1000,
-    _maxRetries: 2,
+    _maxRetries: 1, // Reduced from 2
     _retryDelay: 1000,
     _initialized: false,
     _handshakeComplete: false,
@@ -3286,7 +3899,7 @@ const API_WRAPPER = {
             });
         }
         
-        const maxRetries = options.retry ?? this._maxRetries;
+        const maxRetries = Math.min(options.retry ?? this._maxRetries, 1);
         
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
@@ -3495,7 +4108,7 @@ export async function safeApiCall(endpoint, options = {}) {
 }
 
 // =============================================
-// INITIALIZATION PIPELINE
+// INITIALIZATION PIPELINE - INTEGRATED WITH PARENT AUTHORITY
 // =============================================
 
 let _initState = {
@@ -3512,6 +4125,9 @@ async function preflightStage() {
         
         IframeAuthority.init();
         API_WRAPPER.init();
+        
+        // Initialize parent authority
+        ParentAuthority.init();
         
         _initState.preflight = true;
         return { success: true };
@@ -3545,7 +4161,8 @@ async function handshakeStage(parentAvailable) {
             _initState.handshake = true;
             return { success: true };
         } catch (error) {
-            if (ParentConnectionManager.tryCachedSession()) {
+            // Try cached session only if not in authoritative mode
+            if (!ParentAuthority.isAuthoritativeSession() && ParentConnectionManager.tryCachedSession()) {
                 _initState.handshake = true;
                 return { success: true, fromCache: true };
             }
@@ -3563,6 +4180,24 @@ async function sessionStage(handshakeSuccess, fromCache) {
     try {
         SessionMirror.init();
         SessionClient.init();
+        
+        // Check for authoritative session
+        if (ParentAuthority.isAuthoritativeSession()) {
+            const authSession = ParentAuthority.getAuthoritativeSession();
+            if (authSession) {
+                currentUser = authSession.user;
+                userData = {
+                    displayName: authSession.user?.displayName || authSession.user?.name || 'User',
+                    username: authSession.user?.username || '',
+                    email: authSession.user?.email || '',
+                    photoURL: authSession.user?.photoURL || authSession.user?.avatar || ''
+                };
+                authReady = true;
+                __SESSION_READY__ = true;
+                _initState.session = true;
+                return { success: true, authoritative: true };
+            }
+        }
         
         const sessionPromise = new Promise((resolve) => {
             if (SessionMirror.isAuthenticated()) {
@@ -3612,12 +4247,19 @@ async function readyStage() {
         isPageInitialized = true;
         _initState.ready = true;
         
+        // Set module ready flag
+        window.__MODULE_READY__ = true;
+        if (__SESSION_READY__) {
+            window.__MODULE_SESSION_ACTIVE__ = true;
+        }
+        
         document.dispatchEvent(new CustomEvent('groupsCoreReady', {
             detail: {
                 version: MODULE_VERSION,
                 timestamp: Date.now(),
                 sessionValid: hasValidSession(),
-                authenticated: SessionMirror.isAuthenticated()
+                authenticated: SessionMirror.isAuthenticated(),
+                authoritative: ParentAuthority.isAuthoritativeSession()
             }
         }));
         
@@ -3652,6 +4294,7 @@ export async function initializeGroupsCore() {
             success: true,
             authenticated: session.success,
             fromCache: session.fromCache,
+            authoritative: session.authoritative || false,
             duration
         };
     } catch (error) {
@@ -3691,7 +4334,7 @@ const pageCore = {
     },
     
     errors: new Set(),
-    maxRetries: 3,
+    maxRetries: 2, // Reduced from 3
     retryCounts: new Map()
 };
 
@@ -3735,13 +4378,16 @@ async function setupParentListener() {
                 
                 const msg = event.data;
                 
+                // Let ParentAuthority handle it first
+                ParentAuthority.handleMessage(msg);
+                
                 if (!pageCore.isReady) {
                     pageCore.messageQueue.push(msg);
                 }
                 
                 if (msg.type === 'init' || msg.type === PARENT_MESSAGE_TYPES.SESSION_DATA || 
-                    msg.type === PARENT_MESSAGE_TYPES.SESSION_SYNC) {
-                    pageCore.data.session = msg.payload || {};
+                    msg.type === PARENT_MESSAGE_TYPES.SESSION_SYNC || msg.type === 'SESSION_ACTIVE') {
+                    pageCore.data.session = msg.payload || msg.session || {};
                     __SESSION_READY__ = true;
                     resolve();
                 }
@@ -3774,6 +4420,16 @@ async function setupParentListener() {
 
 pageCore.loadSession = async function() {
     try {
+        // Check for authoritative session first
+        if (ParentAuthority.isAuthoritativeSession()) {
+            const authSession = ParentAuthority.getAuthoritativeSession();
+            if (authSession) {
+                pageCore.data.session = authSession;
+                __SESSION_READY__ = true;
+                return;
+            }
+        }
+        
         const session = SessionMirror.getState();
         if (session.authenticated) {
             pageCore.data.session = session;
@@ -3782,10 +4438,11 @@ pageCore.loadSession = async function() {
             const initMessage = pageCore.messageQueue.find(msg => 
                 msg.type === 'init' || 
                 msg.type === PARENT_MESSAGE_TYPES.SESSION_DATA ||
-                msg.type === PARENT_MESSAGE_TYPES.SESSION_SYNC
+                msg.type === PARENT_MESSAGE_TYPES.SESSION_SYNC ||
+                msg.type === 'SESSION_ACTIVE'
             );
             if (initMessage) {
-                pageCore.data.session = initMessage.payload;
+                pageCore.data.session = initMessage.payload || initMessage.session;
                 __SESSION_READY__ = true;
             } else {
                 const saved = localStorage.getItem('knecta_groups_session');
@@ -4192,6 +4849,11 @@ export function clearLocalSessionState() {
 }
 
 export function handleParentUnavailable() {
+    // Don't restore from cache if parent authority is active
+    if (ParentAuthority.isAuthoritativeSession()) {
+        return;
+    }
+    
     const cachedUser = getCurrentUserLocal();
     const cachedToken = getUnifiedToken();
     
@@ -4389,7 +5051,7 @@ export function handleGroupTyping(groupId, userId, isTyping) {
 
 async function safeGroupPageInit() {
     let tries = 0;
-    const MAX_TRIES = 5;
+    const MAX_TRIES = 3; // Reduced from 5
 
     TransportAgent.send('CHILD_READY', {
         childId: SECURITY_CONFIG.FRAME_ID,
@@ -4435,7 +5097,10 @@ async function originalGroupPageInit() {
             __SESSION_READY__ = true;
         } else {
             if (!__SESSION_REQUEST_PENDING__ && !handshakeCompleted) {
-                ParentConnectionManager.requestSession();
+                // Don't request if parent authority is active
+                if (!ParentAuthority.isAuthoritativeSession()) {
+                    ParentConnectionManager.requestSession();
+                }
             }
             
             if (getCurrentUserLocal() && getUnifiedToken()) {
@@ -4914,7 +5579,7 @@ export function handleGroupAction(action, groupData, type, button) {
 // =============================================
 
 let _backgroundSyncRetryCount = 0;
-const MAX_BACKGROUND_RETRY = 3;
+const MAX_BACKGROUND_RETRY = 2; // Reduced from 3
 
 export function startBackgroundSync() {
     try {
@@ -8300,7 +8965,8 @@ if (typeof window !== 'undefined') {
         connection: ParentConnectionManager.getStatus(),
         transport: TransportAgent.getStats(),
         api: API_WRAPPER.getStats(),
-        handshake: HandshakeClient.getState()
+        handshake: HandshakeClient.getState(),
+        parentAuthority: ParentAuthority.getState()
     }));
 }
 
@@ -8326,6 +8992,9 @@ export {
         // Parent connection
         PARENT_MESSAGE_TYPES,
         HandshakeClient,
+        
+        // Parent authority
+        ParentAuthority,
 };
 
 // =============================================

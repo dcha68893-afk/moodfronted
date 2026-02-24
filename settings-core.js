@@ -1,27 +1,29 @@
 // =============================================
-// SETTINGS CORE - ULTRA-HARDENED v6.2.1 (FIXED)
+// SETTINGS CORE - ULTRA-HARDENED v6.4.0 (PARENT AUTHORITY)
 // COMPLETE INTEGRATION WITH PARENT ORCHESTRATION SYSTEM
 // ENVIRONMENT-AWARE | STARTUP GOVERNOR | HANDSHAKE CLIENT
 // SESSION BRIDGE | ORIGIN ADAPTER | RELIABILITY ENGINE
 // SECURITY HARDENING | MULTI-MODULE COORDINATION
 // API GATEWAY INTEGRATION | SILENT BACKGROUND OPERATIONS
+// PARENT AUTHORITY CONTRACT ENFORCEMENT | DETERMINISTIC BOOT
 // =============================================
 
 // =============================================
 // MODULE IDENTITY & VERSION
 // =============================================
 const MODULE_NAME = 'settings-core';
-const MODULE_VERSION = '6.2.1-production-ultimate';
+const MODULE_VERSION = '6.4.0-parent-authority';
 const PROTOCOL_VERSION = '2.1';
 const PROTOCOL_CANONICAL = 'KYN-2.0';
 let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
 // =============================================
-// GLOBAL DEBUG FLAG - ENABLED FOR CONSOLE LOGS
+// GLOBAL DEBUG FLAG - REDUCED NOISE BY DEFAULT
 // =============================================
-window.__IFRAME_DEBUG__ = true;
-let DEBUG_ENABLED = true;
-let CONSOLE_NOISE_SUPPRESSED = false;
+const DEBUG = false; // Set to false to reduce console noise
+window.__IFRAME_DEBUG__ = DEBUG;
+let DEBUG_ENABLED = DEBUG;
+let CONSOLE_NOISE_SUPPRESSED = true;
 
 // Log throttling to prevent spam
 const logThrottle = new Map();
@@ -31,7 +33,72 @@ let lastPingTime = 0;
 const PING_RATE_LIMIT = 5000;
 let sessionRequestTimeout = null;
 
+// Deterministic Parent Authority State Machine
+const PARENT_AUTHORITY_STATES = {
+    PREINIT: 'PREINIT',
+    WAIT_PARENT: 'WAIT_PARENT',
+    REGISTERING: 'REGISTERING',
+    WAIT_SESSION: 'WAIT_SESSION',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY'
+};
+
+let parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
+let parentReadyDetected = false;
+let parentRegistrationSent = false;
+let parentAuthorityTimeout = null;
+let parentAuthorityRetryCount = 0;
+const MAX_PARENT_AUTHORITY_RETRIES = 2;
+const PARENT_AUTHORITY_TIMEOUT = 5000;
+let parentAuthoritativeSession = null;
+
+let parentContractEnforced = false;
+let moduleRegistered = false;
+
+// Required Parent Contract Message Types
+const REQUIRED_PARENT_MESSAGES = {
+    SESSION_ACTIVE: 'SESSION_ACTIVE',
+    SESSION_UPDATE: 'SESSION_UPDATE',
+    ACK: 'ACK',
+    PING: 'PING',
+    NAVIGATE: 'NAVIGATE',
+    PERMISSION_UPDATE: 'PERMISSION_UPDATE',
+    FORCE_LOGOUT: 'FORCE_LOGOUT'
+};
+
+// Emitted States (Parent Contract)
+const EMITTED_STATES = {
+    REGISTERING: 'REGISTERING',
+    REGISTERED: 'REGISTERED',
+    SESSION_PENDING: 'SESSION_PENDING',
+    SESSION_ACTIVE: 'SESSION_ACTIVE',
+    INITIALIZING: 'INITIALIZING',
+    READY: 'READY'
+};
+
+// Exposed flags for parent inspection
+window.__MODULE_READY__ = false;
+window.__MODULE_SESSION_ACTIVE__ = false;
+window.__MODULE_STATE__ = parentAuthorityState;
+
+// Retry limiting
+const MAX_RETRIES = 2;
+let handshakeRetryCount = 0;
+let pingRetryCount = 0;
+let sessionSyncRetryCount = 0;
+let verifySessionRetryCount = 0;
+let mirrorSyncRetryCount = 0;
+let recoveryAttemptCount = 0;
+
+// Single initialization lock
+let initializationLock = false;
+let readyEmitted = false;
+
 function throttledLog(level, message, data = null, throttleMs = 5000) {
+    if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success' && level !== 'receive') {
+        return; // Skip non-critical logs when DEBUG is false
+    }
+    
     const key = `${level}:${message}`;
     const lastLog = logThrottle.get(key);
     const now = Date.now();
@@ -61,13 +128,13 @@ function throttledLog(level, message, data = null, throttleMs = 5000) {
             console.warn(`[${MODULE_NAME}] ⚠️ ${message}`, data || '');
             break;
         case 'info': 
-            console.info(`[${MODULE_NAME}] ℹ️ ${message}`, data || '');
+            if (DEBUG) console.info(`[${MODULE_NAME}] ℹ️ ${message}`, data || '');
             break;
         case 'debug': 
-            if (DEBUG_ENABLED) console.debug(`[${MODULE_NAME}] 🔍 ${message}`, data || '');
+            if (DEBUG) console.debug(`[${MODULE_NAME}] 🔍 ${message}`, data || '');
             break;
         case 'send': 
-            console.log(`[${MODULE_NAME}] 📤 ${message}`, data || '');
+            if (DEBUG) console.log(`[${MODULE_NAME}] 📤 ${message}`, data || '');
             break;
         case 'receive': 
             console.log(`[${MODULE_NAME}] 📥 ${message}`, data || '');
@@ -79,7 +146,7 @@ function throttledLog(level, message, data = null, throttleMs = 5000) {
             console.log(`[${MODULE_NAME}] 🚀 ${message}`, data || '');
             break;
         default:
-            console.log(`[${MODULE_NAME}] 🔵 ${message}`, data || '');
+            if (DEBUG) console.log(`[${MODULE_NAME}] 🔵 ${message}`, data || '');
     }
 }
 
@@ -136,6 +203,13 @@ function clearSessionTimeouts() {
 }
 
 // =============================================
+// UNIQUE MESSAGE ID GENERATOR
+// =============================================
+function generateUniqueId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${Math.random().toString(36).substring(2, 5)}`;
+}
+
+// =============================================
 // API CORE GATEWAY - SECURE CENTRALIZED API ACCESS
 // =============================================
 export const ApiCore = {
@@ -175,7 +249,7 @@ export const ApiCore = {
         window.addEventListener('online', () => {
             this._circuitBreaker.isOpen = false;
             this._circuitBreaker.failures = 0;
-            debugLog('API Gateway back online');
+            if (DEBUG) debugLog('API Gateway back online');
         });
         
         return this;
@@ -210,7 +284,7 @@ export const ApiCore = {
         
         if (this._circuitBreaker.failures >= this._circuitBreaker.threshold) {
             this._circuitBreaker.isOpen = true;
-            debugLog('Circuit breaker opened');
+            if (DEBUG) debugLog('Circuit breaker opened');
         }
     },
     
@@ -520,21 +594,21 @@ export const IframeEnvironment = {
             if (hostname === 'localhost' || hostname === '127.0.0.1' || 
                 hostname.startsWith('192.168.') || protocol === 'file:') {
                 this._environment = ENV_TYPES.LOCAL_DEV;
-                debugLog('Environment detected: LOCAL_DEV');
+                if (DEBUG) debugLog('Environment detected: LOCAL_DEV');
             } else if (hostname.includes('onrender.com')) {
                 this._environment = ENV_TYPES.RENDER_HOSTED;
-                debugLog('Environment detected: RENDER_HOSTED');
+                if (DEBUG) debugLog('Environment detected: RENDER_HOSTED');
             } else if (this._features.rtt > 300 || 
                       (this._features.connectionType === '4g' && this._features.rtt > 200) ||
                       navigator.connection?.saveData) {
                 this._environment = ENV_TYPES.VPN_NETWORK;
-                debugLog('Environment detected: VPN_NETWORK');
+                if (DEBUG) debugLog('Environment detected: VPN_NETWORK');
             } else if (isSecure && hostname.includes('.')) {
                 this._environment = ENV_TYPES.PRODUCTION;
-                debugLog('Environment detected: PRODUCTION');
+                if (DEBUG) debugLog('Environment detected: PRODUCTION');
             } else {
                 this._environment = ENV_TYPES.UNKNOWN;
-                debugLog('Environment detected: UNKNOWN');
+                if (DEBUG) debugLog('Environment detected: UNKNOWN');
             }
             
             // Don't check backend directly - assume reachable via parent
@@ -629,7 +703,7 @@ export const SafeStorage = {
                 Object.entries(data).forEach(([key, value]) => {
                     this._memoryCache.set(key, value);
                 });
-                debugLog('Loaded memory fallback cache');
+                if (DEBUG) debugLog('Loaded memory fallback cache');
             }
         } catch (e) {}
         
@@ -661,7 +735,7 @@ export const SafeStorage = {
             
             if (!this._quotaWarningIssued) {
                 this._quotaWarningIssued = true;
-                debugLog('Storage unavailable, using memory fallback');
+                if (DEBUG) debugLog('Storage unavailable, using memory fallback');
             }
         }
         
@@ -735,7 +809,7 @@ export const SafeStorage = {
                     this._quotaExceeded = true;
                     if (!this._quotaWarningIssued) {
                         this._quotaWarningIssued = true;
-                        debugLog('Storage quota exceeded');
+                        if (DEBUG) debugLog('Storage quota exceeded');
                     }
                 }
                 return false;
@@ -898,7 +972,7 @@ export const CompatibilityBridge = {
         
         this._enabled = true;
         this._reason = reason;
-        debugLog('Compatibility mode enabled:', reason);
+        if (DEBUG) debugLog('Compatibility mode enabled:', reason);
         
         this._setupLegacyAPIs();
         this._setupMessageTranslation();
@@ -1001,7 +1075,7 @@ export const StartupGovernor = {
     _transitionListeners: new Set(),
     _recoveryTimer: null,
     _degradedTimer: null,
-    _silent: false,
+    _silent: true, // Set to true to reduce noise
     
     states: {
         INIT: 'INIT',
@@ -1026,7 +1100,9 @@ export const StartupGovernor = {
         const oldState = this._state;
         this._state = newState;
         
-        debugLog(`State: ${oldState} → ${newState} (${reason})`);
+        if (!this._silent) {
+            debugLog(`State: ${oldState} → ${newState} (${reason})`);
+        }
         
         this._stateHistory.push({
             from: oldState,
@@ -1112,7 +1188,7 @@ export const StartupGovernor = {
                 setTimeout(() => {
                     if (this._state === this.states.RECOVERING) {
                         this.transition(this.states.ACTIVE, 'recovery_success');
-                        successLog('Recovery successful');
+                        if (!this._silent) successLog('Recovery successful');
                     }
                 }, 5000);
             }
@@ -1276,7 +1352,7 @@ export const OriginAdapter = {
         this._parentOrigin = origin;
         this._parentVerified = true;
         this.addTrustedOrigin(origin);
-        debugLog('Parent origin set:', origin);
+        if (DEBUG) debugLog('Parent origin set:', origin);
     },
     
     getParentOrigin() {
@@ -1344,11 +1420,11 @@ export const IframeTransport = {
     _sequence: 0,
     _frameId: 'settings',
     _protocolVersion: PROTOCOL_VERSION,
-    _maxRetries: 3,
+    _maxRetries: MAX_RETRIES, // Use limited retries
     _baseTimeout: 5000,
     _circuitBreakers: new Map(),
     _enabled: true,
-    _silent: false,
+    _silent: true, // Reduce noise
     
     init() {
         initLog('IframeTransport initializing');
@@ -1378,6 +1454,23 @@ export const IframeTransport = {
             // DEDUPLICATION
             if (isMessageDuplicate(message.messageId || message.requestId, message.type)) {
                 return;
+            }
+            
+            // Handle required parent contract messages
+            if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_ACTIVE) {
+                handleAuthoritativeSession(message);
+            } else if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_UPDATE) {
+                handleAuthoritativeSessionUpdate(message);
+            } else if (message.type === REQUIRED_PARENT_MESSAGES.ACK) {
+                this.handleAck(message);
+            } else if (message.type === REQUIRED_PARENT_MESSAGES.PING) {
+                this.send('PONG', { inResponseTo: message.messageId }, { expectAck: false }).catch(() => {});
+            } else if (message.type === REQUIRED_PARENT_MESSAGES.NAVIGATE) {
+                handleParentNavigation(message);
+            } else if (message.type === REQUIRED_PARENT_MESSAGES.PERMISSION_UPDATE) {
+                handlePermissionUpdate(message);
+            } else if (message.type === REQUIRED_PARENT_MESSAGES.FORCE_LOGOUT) {
+                handleParentForceLogout();
             }
             
             if (message.type === 'ACK' && message.inResponseTo) {
@@ -1412,6 +1505,18 @@ export const IframeTransport = {
             });
             
         } catch (error) {}
+    },
+    
+    handleAck(message) {
+        const pending = this._pendingAcks.get(message.inResponseTo || message.messageId);
+        if (pending) {
+            clearTimeout(pending.timer);
+            pending.resolve(message);
+            this._pendingAcks.delete(message.inResponseTo || message.messageId);
+            
+            const breaker = this._getCircuitBreaker(pending.type);
+            if (breaker) breaker.recordSuccess();
+        }
     },
     
     _getCircuitBreaker(type) {
@@ -1512,7 +1617,7 @@ export const IframeTransport = {
                     }
                 }
                 
-                const messageId = `msg_${Date.now()}_${this._messageId++}_${Math.random().toString(36).substring(2, 7)}`;
+                const messageId = options.messageId || generateUniqueId();
                 const timestamp = Date.now();
                 
                 const message = {
@@ -1560,7 +1665,7 @@ export const IframeTransport = {
                     }
                 }
                 
-                sendLog(`${type} - MessageId: ${messageId}`);
+                if (DEBUG || !this._silent) sendLog(`${type} - MessageId: ${messageId}`);
                 try {
                     parentWin.postMessage(finalMessage, origin);
                 } catch (e) {
@@ -1657,7 +1762,13 @@ export const IframeTransport = {
     },
     
     ping() {
-        return this.send('PING', {}, { expectAck: true, timeout: 3000 });
+        pingRetryCount++;
+        if (pingRetryCount > MAX_RETRIES) {
+            return Promise.resolve({ success: false, error: 'max_retries_exceeded' });
+        }
+        return this.send('PING', {}, { expectAck: true, timeout: 3000 }).catch(() => {
+            return { success: false, error: 'ping_failed' };
+        });
     },
     
     enable() {
@@ -1698,7 +1809,7 @@ export const IframeHandshakeAuthority = {
     _handshakeId: null,
     _handshakeComplete: false,
     _handshakeAttempts: 0,
-    _maxAttempts: 10,
+    _maxAttempts: MAX_RETRIES, // Limited retries
     _backoffMs: 500,
     _parentReady: false,
     _handshakeAcked: false,
@@ -1707,12 +1818,12 @@ export const IframeHandshakeAuthority = {
     _retryTimer: null,
     _inProgress: false,
     _completedState: null,
-    _silent: false,
+    _silent: true,
     
     async startHandshake(options = {}) {
         const {
             timeout = 10000,
-            retryCount = 10,
+            retryCount = MAX_RETRIES,
             backoffMs = 500,
             force = false
         } = options;
@@ -1732,7 +1843,7 @@ export const IframeHandshakeAuthority = {
         this._handshakeId = `hs_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         this._handshakeAttempts = 0;
         
-        debugLog(`Starting handshake (attempt 1/${adjustedRetries})`);
+        if (!this._silent) debugLog(`Starting handshake (attempt 1/${adjustedRetries})`);
         
         return new Promise((resolve) => {
             const attemptHandshake = async () => {
@@ -1831,7 +1942,7 @@ export const IframeHandshakeAuthority = {
                     } else {
                         this._inProgress = false;
                         StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'handshake_failed');
-                        errorLog('Handshake failed:', error);
+                        if (!this._silent) errorLog('Handshake failed:', error);
                         resolve({ success: false, error: error.message });
                     }
                 }
@@ -1844,7 +1955,7 @@ export const IframeHandshakeAuthority = {
     onParentReady() {
         this._parentReady = true;
         this.emit('parent_ready');
-        debugLog('Parent ready received');
+        if (!this._silent) debugLog('Parent ready received');
     },
     
     once(event, listener) {
@@ -1903,6 +2014,267 @@ export const IframeHandshakeAuthority = {
 };
 
 // =============================================
+// PARENT AUTHORITY FUNCTIONS
+// =============================================
+
+// Wait for parent ready signal
+function waitForParentAuthority(timeout = PARENT_AUTHORITY_TIMEOUT) {
+    return new Promise((resolve) => {
+        if (parentReadyDetected || window.__PARENT_READY__ === true) {
+            parentReadyDetected = true;
+            resolve(true);
+            return;
+        }
+        
+        const checkParentReady = () => {
+            if (window.__PARENT_READY__ === true) {
+                parentReadyDetected = true;
+                clearTimeout(parentAuthorityTimeout);
+                window.removeEventListener('message', parentMessageHandler);
+                resolve(true);
+            }
+        };
+        
+        const parentMessageHandler = (event) => {
+            if (event.data && event.data.type === 'PARENT_READY') {
+                parentReadyDetected = true;
+                clearTimeout(parentAuthorityTimeout);
+                window.removeEventListener('message', parentMessageHandler);
+                resolve(true);
+            }
+        };
+        
+        window.addEventListener('message', parentMessageHandler);
+        
+        parentAuthorityTimeout = setTimeout(() => {
+            window.removeEventListener('message', parentMessageHandler);
+            // Fallback to legacy mode if parent not detected
+            resolve(false);
+        }, timeout);
+    });
+}
+
+// Send module registration exactly once
+function sendModuleRegistration() {
+    if (moduleRegistered) return;
+    
+    parentAuthorityState = EMITTED_STATES.REGISTERING;
+    window.__MODULE_STATE__ = parentAuthorityState;
+    
+    // Send CHILD_READY exactly once
+    IframeTransport.send('CHILD_READY', {
+        module: MODULE_NAME,
+        frameId: 'settings',
+        timestamp: Date.now()
+    }, { expectAck: true, maxRetries: 1 }).catch(() => {});
+    
+    // Send REGISTER_MODULE exactly once
+    IframeTransport.send('REGISTER_MODULE', {
+        module: MODULE_NAME,
+        version: MODULE_VERSION,
+        capabilities: ['session', 'settings', 'storage']
+    }, { expectAck: true, maxRetries: 1 }).then(() => {
+        moduleRegistered = true;
+        parentAuthorityState = EMITTED_STATES.REGISTERED;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        if (DEBUG) successLog('Module registered with parent');
+    }).catch(() => {
+        // Silent fallback
+    });
+}
+
+// Handle authoritative session from parent
+function handleAuthoritativeSession(message) {
+    if (!message.session) return;
+    
+    parentAuthoritativeSession = message.session;
+    parentSessionReceived = true;
+    parentContractEnforced = true;
+    
+    // Disable local session restore - authoritative source is parent
+    parentAuthorityState = EMITTED_STATES.SESSION_ACTIVE;
+    window.__MODULE_STATE__ = parentAuthorityState;
+    window.__MODULE_SESSION_ACTIVE__ = true;
+    
+    // Update session with parent data (do NOT override with localStorage)
+    SessionClient.updateSession(
+        message.session.user,
+        message.session.token,
+        message.session.expiry
+    );
+    
+    successLog('Authoritative session received from parent');
+    
+    // Proceed to initialization
+    if (parentAuthorityState === EMITTED_STATES.SESSION_ACTIVE) {
+        proceedToInitialization();
+    }
+}
+
+// Handle session update from parent
+function handleAuthoritativeSessionUpdate(message) {
+    if (!message.session) return;
+    
+    parentAuthoritativeSession = message.session;
+    
+    // Update session but keep parent as authoritative
+    SessionClient.updateSession(
+        message.session.user,
+        message.session.token,
+        message.session.expiry
+    );
+    
+    if (DEBUG) debugLog('Session updated from parent');
+}
+
+// Handle parent navigation request
+function handleParentNavigation(message) {
+    const event = new CustomEvent('parentNavigation', {
+        detail: {
+            path: message.path,
+            params: message.params
+        }
+    });
+    window.dispatchEvent(event);
+}
+
+// Handle permission update from parent
+function handlePermissionUpdate(message) {
+    const event = new CustomEvent('permissionUpdate', {
+        detail: {
+            permissions: message.permissions
+        }
+    });
+    window.dispatchEvent(event);
+}
+
+// Handle force logout from parent
+function handleParentForceLogout() {
+    resetUIForLogout();
+    const event = new CustomEvent('parentForceLogout');
+    window.dispatchEvent(event);
+}
+
+// Proceed to initialization after parent authority
+function proceedToInitialization() {
+    if (parentAuthorityState === EMITTED_STATES.INITIALIZING) return;
+    
+    parentAuthorityState = EMITTED_STATES.INITIALIZING;
+    window.__MODULE_STATE__ = parentAuthorityState;
+    
+    // Continue with normal initialization
+    completeInitialization();
+}
+
+// Complete initialization process
+function completeInitialization() {
+    if (readyEmitted) return;
+    
+    parentAuthorityState = EMITTED_STATES.READY;
+    window.__MODULE_STATE__ = parentAuthorityState;
+    window.__MODULE_READY__ = true;
+    readyEmitted = true;
+    
+    successLog('Module READY - Parent authority established');
+}
+
+// Deterministic boot sequence
+async function executeParentAuthorityBoot() {
+    if (initializationLock) return;
+    initializationLock = true;
+    
+    try {
+        // 1. PREINIT
+        parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        
+        // 2. WAIT_PARENT - wait for parent ready signal
+        parentAuthorityState = PARENT_AUTHORITY_STATES.WAIT_PARENT;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        
+        const parentAvailable = await waitForParentAuthority();
+        
+        if (!parentAvailable) {
+            // No parent authority detected - fallback to legacy mode
+            if (DEBUG) debugLog('Parent authority not detected - falling back to legacy mode');
+            initializationLock = false;
+            return false; // Allow legacy initialization to proceed
+        }
+        
+        // 3. REGISTERING - send registration exactly once
+        parentAuthorityState = PARENT_AUTHORITY_STATES.REGISTERING;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        sendModuleRegistration();
+        
+        // 4. WAIT_SESSION - wait for authoritative session
+        parentAuthorityState = PARENT_AUTHORITY_STATES.WAIT_SESSION;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        
+        // Wait for session with timeout
+        const sessionReceived = await new Promise((resolve) => {
+            const sessionTimeout = setTimeout(() => {
+                resolve(false); // Timeout - fallback to local session
+            }, PARENT_AUTHORITY_TIMEOUT);
+            
+            const checkSession = () => {
+                if (parentAuthoritativeSession || parentSessionReceived) {
+                    clearTimeout(sessionTimeout);
+                    resolve(true);
+                }
+            };
+            
+            // Check every 100ms
+            const interval = setInterval(checkSession, 100);
+            
+            // Also listen for session active message
+            const sessionHandler = (message) => {
+                if (message.type === 'SESSION_ACTIVE' && message.session) {
+                    clearTimeout(sessionTimeout);
+                    clearInterval(interval);
+                    resolve(true);
+                }
+            };
+            
+            window.addEventListener('message', sessionHandler);
+            
+            // Cleanup function
+            setTimeout(() => {
+                clearInterval(interval);
+                window.removeEventListener('message', sessionHandler);
+            }, PARENT_AUTHORITY_TIMEOUT + 100);
+        });
+        
+        if (sessionReceived) {
+            // Parent provided authoritative session
+            parentAuthorityState = EMITTED_STATES.SESSION_ACTIVE;
+            window.__MODULE_STATE__ = parentAuthorityState;
+            window.__MODULE_SESSION_ACTIVE__ = true;
+        } else {
+            // No session from parent - fallback to local session logic (unchanged)
+            if (DEBUG) debugLog('No authoritative session from parent - using local session');
+        }
+        
+        // 5. INITIALIZING
+        parentAuthorityState = EMITTED_STATES.INITIALIZING;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        
+        // 6. READY
+        parentAuthorityState = EMITTED_STATES.READY;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        window.__MODULE_READY__ = true;
+        readyEmitted = true;
+        
+        successLog('Parent authority boot sequence complete');
+        return true;
+        
+    } catch (error) {
+        errorLog('Parent authority boot error:', error);
+        initializationLock = false;
+        return false; // Fallback to legacy
+    }
+}
+
+// =============================================
 // SESSION CLIENT 
 // =============================================
 export const SessionClient = {
@@ -1917,23 +2289,30 @@ export const SessionClient = {
     _pendingAck: false,
     _sessionLock: false,
     _refreshAttempts: 0,
-    _maxRefreshAttempts: 5,
+    _maxRefreshAttempts: MAX_RETRIES, // Limited retries
     _offlineMode: false,
     _syncInProgress: false,
-    _silent: false,
+    _silent: true,
     
     init() {
         initLog('SessionClient initializing');
-        try {
-            const cached = SafeStorage.getJSON('session_client', null, true);
-            if (cached && cached.session && cached.expiry > Date.now()) {
-                this._session = cached.session;
-                this._sessionToken = cached.token;
-                this._sessionExpiry = cached.expiry;
-                this._sessionVersion = cached.version || 0;
-                debugLog('Loaded cached session');
-            }
-        } catch (e) {}
+        
+        // Only load cached session if parent hasn't provided authoritative session
+        if (!parentAuthoritativeSession && !parentSessionReceived) {
+            try {
+                const cached = SafeStorage.getJSON('session_client', null, true);
+                if (cached && cached.session && cached.expiry > Date.now()) {
+                    this._session = cached.session;
+                    this._sessionToken = cached.token;
+                    this._sessionExpiry = cached.expiry;
+                    this._sessionVersion = cached.version || 0;
+                    if (DEBUG) debugLog('Loaded cached session');
+                }
+            } catch (e) {}
+        } else {
+            // Parent is authoritative - disable local restore
+            if (DEBUG) debugLog('Parent authoritative - skipping local session restore');
+        }
         
         this._startSync();
         this._scheduleRefresh();
@@ -1946,13 +2325,22 @@ export const SessionClient = {
         const interval = IframeEnvironment.isVPN() ? 60000 : 30000;
         
         this._syncInterval = setInterval(() => {
-            if (StartupGovernor.isStable() || StartupGovernor.isDegraded()) {
+            // Only sync if parent hasn't provided authoritative session or we're in degraded mode
+            if (!parentAuthoritativeSession && !parentContractEnforced && 
+                (StartupGovernor.isStable() || StartupGovernor.isDegraded())) {
                 this.sync();
             }
         }, interval);
     },
     
     async sync() {
+        // Limit retries
+        sessionSyncRetryCount++;
+        if (sessionSyncRetryCount > MAX_RETRIES) {
+            if (DEBUG) debugLog('Session sync retry limit reached - entering degraded mode');
+            return false;
+        }
+        
         if (this._sessionLock || this._syncInProgress) return false;
         
         this._syncInProgress = true;
@@ -1964,7 +2352,7 @@ export const SessionClient = {
                 childId: 'settings',
                 version: this._sessionVersion,
                 timestamp: Date.now()
-            }, { expectAck: true, timeout: 5000 });
+            }, { expectAck: true, timeout: 5000, maxRetries: MAX_RETRIES });
             
             if (response && response.payload?.session) {
                 this.updateSession(
@@ -1978,8 +2366,9 @@ export const SessionClient = {
                     childId: 'settings',
                     version: this._sessionVersion,
                     timestamp: Date.now()
-                }, { expectAck: false });
+                }, { expectAck: false, maxRetries: 1 });
                 
+                sessionSyncRetryCount = 0;
                 return true;
             }
             
@@ -1995,6 +2384,12 @@ export const SessionClient = {
     },
     
     updateSession(session, token, expiry) {
+        // If parent is authoritative, do not override with local updates unless it's from parent
+        if (parentContractEnforced && !parentAuthoritativeSession && !parentSessionReceived) {
+            if (DEBUG) debugLog('Parent authoritative - ignoring local session update');
+            return false;
+        }
+        
         if (this._sessionLock) return false;
         
         this._sessionLock = true;
@@ -2007,10 +2402,12 @@ export const SessionClient = {
                 currentUser = this._session;
                 coreData.user = this._session;
                 state.session = this._session;
-                parentSessionData = { user: this._session, token, expiry };
-                parentSessionReceived = true;
+                if (!parentAuthoritativeSession && !parentSessionReceived) {
+                    parentSessionData = { user: this._session, token, expiry };
+                    parentSessionReceived = true;
+                }
                 sessionValidated = true;
-                debugLog('Session updated:', this._session?.name);
+                if (DEBUG) debugLog('Session updated:', this._session?.name);
             }
             
             if (token) {
@@ -2029,13 +2426,16 @@ export const SessionClient = {
             this._lastSync = Date.now();
             this._offlineMode = false;
             
-            SafeStorage.setJSON('session_client', {
-                session: this._session ? { id: this._session.id, name: this._session.name } : null,
-                token: this._sessionToken,
-                expiry: this._sessionExpiry,
-                version: this._sessionVersion,
-                lastSync: this._lastSync
-            }, true);
+            // Only cache if parent is not authoritative
+            if (!parentContractEnforced) {
+                SafeStorage.setJSON('session_client', {
+                    session: this._session ? { id: this._session.id, name: this._session.name } : null,
+                    token: this._sessionToken,
+                    expiry: this._sessionExpiry,
+                    version: this._sessionVersion,
+                    lastSync: this._lastSync
+                }, true);
+            }
             
             this.emit('session_updated', {
                 session: this._session,
@@ -2070,11 +2470,12 @@ export const SessionClient = {
     },
     
     async refresh() {
+        // Limit refresh attempts
+        this._refreshAttempts++;
         if (this._refreshAttempts >= this._maxRefreshAttempts) {
+            if (DEBUG) debugLog('Refresh retry limit reached');
             return false;
         }
-        
-        this._refreshAttempts++;
         
         try {
             sendLog('SESSION_REQUEST refresh');
@@ -2082,7 +2483,7 @@ export const SessionClient = {
                 childId: 'settings',
                 refresh: true,
                 timestamp: Date.now()
-            }, { expectAck: true, timeout: 8000 });
+            }, { expectAck: true, timeout: 8000, maxRetries: MAX_RETRIES });
             
             if (response && response.payload?.session) {
                 this.updateSession(
@@ -2118,20 +2519,41 @@ export const SessionClient = {
     },
     
     getSession() {
+        // Return authoritative session if available
+        if (parentAuthoritativeSession) {
+            return parentAuthoritativeSession.user || parentAuthoritativeSession;
+        }
         return this._session ? { ...this._session } : null;
     },
     
     getToken() {
+        // Return token from authoritative session if available
+        if (parentAuthoritativeSession && parentAuthoritativeSession.token) {
+            return parentAuthoritativeSession.token;
+        }
         return this._sessionToken;
     },
     
     isValid() {
+        // Check authoritative session first
+        if (parentAuthoritativeSession) {
+            const expiry = parentAuthoritativeSession.expiry || parentAuthoritativeSession.expiresAt;
+            return !!parentAuthoritativeSession.user && 
+                   !!parentAuthoritativeSession.token && 
+                   (!expiry || expiry > Date.now());
+        }
+        
         return !!this._session && 
                !!this._sessionToken && 
                (!this._sessionExpiry || this._sessionExpiry > Date.now());
     },
     
     isExpired() {
+        if (parentAuthoritativeSession) {
+            const expiry = parentAuthoritativeSession.expiry || parentAuthoritativeSession.expiresAt;
+            return !!expiry && expiry <= Date.now();
+        }
+        
         return !!this._sessionExpiry && this._sessionExpiry <= Date.now();
     },
     
@@ -2150,7 +2572,7 @@ export const SessionClient = {
         SafeStorage.remove('session_client');
         
         this.emit('session_cleared');
-        debugLog('Session cleared');
+        if (DEBUG) debugLog('Session cleared');
     },
     
     getDiagnostics() {
@@ -2163,7 +2585,8 @@ export const SessionClient = {
             refreshAttempts: this._refreshAttempts,
             isValid: this.isValid(),
             isExpired: this.isExpired(),
-            offlineMode: this._offlineMode
+            offlineMode: this._offlineMode,
+            parentAuthoritative: !!parentAuthoritativeSession
         };
     },
     
@@ -2171,8 +2594,6 @@ export const SessionClient = {
         this._silent = silent;
     }
 };
-
-SessionClient.init();
 
 // =============================================
 // RELIABILITY ENGINE 
@@ -2196,7 +2617,7 @@ export const ReliabilityEngine = {
     _listeners: new Set(),
     _enabled: true,
     _quality: 'unknown',
-    _silent: false,
+    _silent: true,
     
     init() {
         initLog('ReliabilityEngine initializing');
@@ -2234,6 +2655,13 @@ export const ReliabilityEngine = {
     },
     
     async _sendPing() {
+        // Limit ping retries
+        pingRetryCount++;
+        if (pingRetryCount > MAX_RETRIES) {
+            if (DEBUG) debugLog('Ping retry limit reached - reducing frequency');
+            return;
+        }
+        
         const pingId = `ping_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         this._lastPing = Date.now();
         
@@ -2241,12 +2669,14 @@ export const ReliabilityEngine = {
             const pong = await IframeTransport.send('PING', { pingId }, { 
                 expectAck: true, 
                 timeout: this._pingTimeout,
-                retryCount: 0
+                retryCount: 0,
+                maxRetries: 1
             });
             
             if (pong) {
                 this._lastPong = Date.now();
                 this._pingFailures = 0;
+                pingRetryCount = 0;
                 
                 const latency = this._lastPong - this._lastPing;
                 this._latencyHistory.push(latency);
@@ -2320,7 +2750,7 @@ export const ReliabilityEngine = {
                     sessionValid: SessionClient.isValid(),
                     quality: this._quality,
                     timestamp: Date.now()
-                }, { expectAck: false }).catch(() => {});
+                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
             }
         }, interval);
     },
@@ -2353,6 +2783,13 @@ export const ReliabilityEngine = {
     },
     
     async _attemptRecovery() {
+        // Limit recovery attempts
+        recoveryAttemptCount++;
+        if (recoveryAttemptCount > MAX_RETRIES) {
+            if (DEBUG) debugLog('Recovery attempt limit reached');
+            return;
+        }
+        
         if (this._recoveryTimer) clearTimeout(this._recoveryTimer);
         
         this._recoveryTimer = setTimeout(async () => {
@@ -2363,6 +2800,7 @@ export const ReliabilityEngine = {
                 await SessionClient.sync();
                 StartupGovernor.transition(StartupGovernor.states.ACTIVE, 'recovery_success');
                 this.emit('recovered');
+                recoveryAttemptCount = 0;
             } catch (error) {
                 StartupGovernor.transition(StartupGovernor.states.DEGRADED, 'recovery_failed');
                 this._recoveryTimer = setTimeout(() => this._attemptRecovery(), 60000);
@@ -2390,7 +2828,7 @@ export const ReliabilityEngine = {
         this._offlineBuffer = [];
         
         buffer.forEach(item => {
-            IframeTransport.send(item.message.type, item.message.payload, { expectAck: false })
+            IframeTransport.send(item.message.type, item.message.payload, { expectAck: false, maxRetries: 1 })
                 .catch(() => {
                     this.bufferOffline(item.message);
                 });
@@ -2516,13 +2954,13 @@ ReliabilityEngine.init();
 // =============================================
 export const RecoveryManager = {
     _attempts: 0,
-    _maxAttempts: 5,
+    _maxAttempts: MAX_RETRIES, // Limited retries
     _backoffMs: 1000,
     _recoveryInProgress: false,
     _recoveryTimer: null,
     _listeners: new Set(),
     _recoveryStrategies: new Map(),
-    _silent: false,
+    _silent: true,
     
     init() {
         initLog('RecoveryManager initializing');
@@ -2532,18 +2970,33 @@ export const RecoveryManager = {
     
     _registerDefaultStrategies() {
         this.registerStrategy('handshake', async () => {
+            verifySessionRetryCount++;
+            if (verifySessionRetryCount > MAX_RETRIES) {
+                return false;
+            }
             const result = await IframeHandshakeAuthority.startHandshake({ force: true });
+            if (result.success) verifySessionRetryCount = 0;
             return result.success;
         });
         
         this.registerStrategy('session', async () => {
+            sessionSyncRetryCount++;
+            if (sessionSyncRetryCount > MAX_RETRIES) {
+                return false;
+            }
             const result = await SessionClient.sync();
+            if (result) sessionSyncRetryCount = 0;
             return result;
         });
         
         this.registerStrategy('ping', async () => {
+            pingRetryCount++;
+            if (pingRetryCount > MAX_RETRIES) {
+                return false;
+            }
             try {
                 await IframeTransport.ping();
+                pingRetryCount = 0;
                 return true;
             } catch (e) {
                 return false;
@@ -2576,7 +3029,7 @@ export const RecoveryManager = {
         this._recoveryInProgress = true;
         this._attempts++;
         
-        debugLog(`Recovery attempt ${this._attempts}/${maxAttempts} - Reason: ${reason}`);
+        if (!this._silent) debugLog(`Recovery attempt ${this._attempts}/${maxAttempts} - Reason: ${reason}`);
         this.emit('attempt', { attempt: this._attempts, reason });
         
         try {
@@ -2591,7 +3044,7 @@ export const RecoveryManager = {
                     this._attempts = 0;
                     this.emit('success', { strategy, attempts: this._attempts });
                     ReliabilityEngine.flushOffline();
-                    successLog('Recovery successful via', strategy);
+                    if (!this._silent) successLog('Recovery successful via', strategy);
                     return true;
                 }
                 
@@ -2672,7 +3125,7 @@ export const DiagnosticsAgent = {
         recoveries: 0
     },
     _stateSnapshots: [],
-    _logToConsole: true,
+    _logToConsole: DEBUG,
     
     enable(debug = false) {
         this._enabled = true;
@@ -2695,6 +3148,7 @@ export const DiagnosticsAgent = {
     
     log(level, message, data = null) {
         if (!this._enabled) return;
+        if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success') return;
         
         const entry = {
             level,
@@ -2769,7 +3223,14 @@ export const DiagnosticsAgent = {
             recovery: RecoveryManager.getDiagnostics(),
             metrics: this.getMetrics(),
             logs: this._logBuffer.slice(-20),
-            stateSnapshots: this._stateSnapshots.slice(-10)
+            stateSnapshots: this._stateSnapshots.slice(-10),
+            parentAuthority: {
+                state: parentAuthorityState,
+                parentReadyDetected,
+                moduleRegistered,
+                parentAuthoritative: !!parentAuthoritativeSession,
+                parentContractEnforced
+            }
         };
     },
     
@@ -2809,7 +3270,7 @@ export const MultiModuleCoordinator = {
     _sharedSession: null,
     _masterModule: false,
     _handshakeCoordinator: null,
-    _silent: false,
+    _silent: true,
     
     init() {
         initLog('MultiModuleCoordinator initializing');
@@ -2891,11 +3352,14 @@ export const MultiModuleCoordinator = {
             case 'SESSION_UPDATE':
                 if (data.session && !this._sharedSession) {
                     this._sharedSession = data.session;
-                    SessionClient.updateSession(
-                        data.session.user,
-                        data.session.token,
-                        data.session.expiry
-                    );
+                    // Only update if parent hasn't provided authoritative session
+                    if (!parentAuthoritativeSession) {
+                        SessionClient.updateSession(
+                            data.session.user,
+                            data.session.token,
+                            data.session.expiry
+                        );
+                    }
                 }
                 break;
                 
@@ -2922,7 +3386,7 @@ export const MultiModuleCoordinator = {
         IframeTransport.send('MODULE_BROADCAST', {
             payload: message,
             timestamp: Date.now()
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     },
     
     on(event, listener) {
@@ -2956,6 +3420,10 @@ export const MultiModuleCoordinator = {
     },
     
     getSharedSession() {
+        // Return authoritative session if available
+        if (parentAuthoritativeSession) {
+            return parentAuthoritativeSession;
+        }
         return this._sharedSession;
     },
     
@@ -2989,7 +3457,7 @@ export const NavigationGuard = {
     _pendingNavigation: null,
     _listeners: new Set(),
     _guardedPaths: ['/settings', '/profile', '/account'],
-    _silent: false,
+    _silent: true,
     
     init() {
         initLog('NavigationGuard initializing');
@@ -3113,7 +3581,7 @@ export const UIFailsafe = {
     _listeners: new Set(),
     _fallbackMode: false,
     _disabledElements: new Set(),
-    _silent: false,
+    _silent: true,
     
     init() {
         initLog('UIFailsafe initializing');
@@ -3324,14 +3792,14 @@ export let lastPongTime = 0;
 export let pingInterval = null;
 export let recoveryAgentActive = false;
 export let recoveryAttempts = 0;
-export let maxRecoveryAttempts = 5;
+export let maxRecoveryAttempts = MAX_RETRIES;
 export let originBoundToken = null;
 export let tokenBindingNonce = null;
 
-export let MAX_API_RETRIES = 5;
+export let MAX_API_RETRIES = MAX_RETRIES;
 export let AUTH_CHECK_INTERVAL = 30000;
 export let TOKEN_CHECK_INTERVAL = 1000;
-export let MAX_HANDSHAKE_ATTEMPTS = 10;
+export let MAX_HANDSHAKE_ATTEMPTS = MAX_RETRIES;
 export let HANDSHAKE_RETRY_INTERVAL = 1000;
 export let SESSION_SYNC_TIMEOUT = 5000;
 export let HEARTBEAT_INTERVAL = 30000;
@@ -3787,11 +4255,11 @@ const originPatterns = [
 // =============================================
 const Log = {
     _warnings: new Set(),
-    _debug: true,
+    _debug: DEBUG,
     _logBuffer: [],
     _maxBufferSize: 500,
-    _logLevel: 'debug',
-    _silent: false,
+    _logLevel: DEBUG ? 'debug' : 'error',
+    _silent: !DEBUG,
     
     _metrics: {
         startTime: Date.now(),
@@ -3837,6 +4305,8 @@ const Log = {
     },
     
     _addToBuffer(level, message, data) {
+        if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success') return;
+        
         const entry = {
             level,
             message,
@@ -3855,13 +4325,13 @@ const Log = {
     getBuffer() { return [...this._logBuffer]; },
     
     info(message, data = null) {
-        if (this._silent) return;
+        if (this._silent || !DEBUG) return;
         infoLog(message, data);
         this._addToBuffer('info', message, data);
     },
     
     warn(message, once = true) {
-        if (this._silent) return;
+        if (this._silent || !DEBUG) return;
         if (once && this._warnings.has(message)) return;
         this._warnings.add(message);
         this._metrics.warnings++;
@@ -3884,13 +4354,13 @@ const Log = {
     },
     
     debug(message, data = null) {
-        if (this._silent) return;
+        if (this._silent || !DEBUG) return;
         debugLog(message, data);
         this._addToBuffer('debug', message, data);
     },
     
     metric(name, value) {
-        if (this._silent) return;
+        if (this._silent || !DEBUG) return;
         console.debug(`[${MODULE_NAME}] 📊 ${name}:`, value);
     },
     
@@ -3939,11 +4409,14 @@ const SessionMirror = {
     _syncInterval: null,
     
     init() {
-        const cached = SafeStorage.getJSON('session_mirror', null, true);
-        if (cached) {
-            this._mirror = { ...this._mirror, ...cached };
-            if (this._mirror.boundOrigin && this._mirror.boundOrigin !== window.location.origin) {
-                this.clear();
+        // Only load cached if parent hasn't provided authoritative session
+        if (!parentAuthoritativeSession && !parentSessionReceived) {
+            const cached = SafeStorage.getJSON('session_mirror', null, true);
+            if (cached) {
+                this._mirror = { ...this._mirror, ...cached };
+                if (this._mirror.boundOrigin && this._mirror.boundOrigin !== window.location.origin) {
+                    this.clear();
+                }
             }
         }
         this._startAutoSync();
@@ -3958,6 +4431,12 @@ const SessionMirror = {
     
     update(sessionData) {
         if (!sessionData) return false;
+        
+        // If parent is authoritative, do not override with local updates
+        if (parentContractEnforced && !parentAuthoritativeSession && !parentSessionReceived) {
+            return false;
+        }
+        
         const previousVersion = this._mirror.version;
         
         if (sessionData.user) this._mirror.user = { ...sessionData.user };
@@ -3978,8 +4457,10 @@ const SessionMirror = {
             coreData.user = this._mirror.user;
             state.session = this._mirror.user;
             state.sessionMirror = { ...this._mirror };
-            parentSessionData = this._mirror;
-            parentSessionReceived = true;
+            if (!parentAuthoritativeSession && !parentSessionReceived) {
+                parentSessionData = this._mirror;
+                parentSessionReceived = true;
+            }
             sessionValidated = true;
             
             if (this._mirror.token) {
@@ -3993,13 +4474,16 @@ const SessionMirror = {
             }
         }
         
-        SafeStorage.setJSON('session_mirror', {
-            user: this._mirror.user ? { id: this._mirror.user.id, name: this._mirror.user.name } : null,
-            version: this._mirror.version,
-            expiresAt: this._mirror.expiresAt,
-            boundOrigin: this._mirror.boundOrigin,
-            capabilities: this._mirror.capabilities
-        }, true);
+        // Only cache if parent is not authoritative
+        if (!parentContractEnforced) {
+            SafeStorage.setJSON('session_mirror', {
+                user: this._mirror.user ? { id: this._mirror.user.id, name: this._mirror.user.name } : null,
+                version: this._mirror.version,
+                expiresAt: this._mirror.expiresAt,
+                boundOrigin: this._mirror.boundOrigin,
+                capabilities: this._mirror.capabilities
+            }, true);
+        }
         
         this._notifySubscribers();
         DiagnosticsAgent.track('session_update', { version: this._mirror.version });
@@ -4032,6 +4516,12 @@ const SessionMirror = {
     },
     
     sync() {
+        // Limit sync retries
+        mirrorSyncRetryCount++;
+        if (mirrorSyncRetryCount > MAX_RETRIES) {
+            return false;
+        }
+        
         if (this._syncInProgress) return false;
         this._lastSyncAttempt = Date.now();
         this._syncInProgress = true;
@@ -4040,9 +4530,10 @@ const SessionMirror = {
             version: this._mirror.version,
             timestamp: Date.now(),
             source: MODULE_NAME
-        }, { expectAck: true, timeout: 3000 }).then(response => {
+        }, { expectAck: true, timeout: 3000, maxRetries: 1 }).then(response => {
             if (response?.payload?.session) {
                 this.update(response.payload.session);
+                mirrorSyncRetryCount = 0;
             }
         }).catch(() => {}).finally(() => {
             this._syncInProgress = false;
@@ -4191,7 +4682,7 @@ function formatCanonicalMessage(type, payload = {}, options = {}) {
 // MESSAGE ID GENERATOR 
 // =============================================
 function generateMessageId() {
-    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}_${state.messageSequence++}`;
+    return generateUniqueId();
 }
 
 // =============================================
@@ -4263,7 +4754,7 @@ function detectParent() {
             }
             parentOrigin = state.parentOrigin;
             OriginAdapter.setParentOrigin(state.parentOrigin);
-            debugLog('Parent detected:', state.parentOrigin);
+            if (DEBUG) debugLog('Parent detected:', state.parentOrigin);
             return true;
         }
     } catch (error) {}
@@ -4300,13 +4791,16 @@ function waitForParent(timeout = 5000) {
 // ENHANCED SEND TO PARENT 
 // =============================================
 export function sendToParent(payload, retryCount = 0, expectAck = false) {
+    const messageId = generateUniqueId();
     return IframeTransport.send(
         payload.type || 'UNKNOWN',
         payload.payload || payload,
         { 
             expectAck, 
             retryCount,
-            timeout: payload.timeout || 5000
+            timeout: payload.timeout || 5000,
+            maxRetries: MAX_RETRIES,
+            messageId
         }
     );
 }
@@ -4342,7 +4836,7 @@ export async function executeStartupSequence() {
             supportsGovernor: true,
             supportsSessionClient: true
         }
-    }, { expectAck: true, timeout: 5000 }).catch(() => {});
+    }, { expectAck: true, timeout: 5000, maxRetries: 1 }).catch(() => {});
     
     state.handshakeState = 'waiting_parent_ready';
     
@@ -4364,6 +4858,28 @@ export function requestSession(timeout = 5000) {
     
     return new Promise((resolve) => {
         try {
+            // If parent has provided authoritative session, use it
+            if (parentAuthoritativeSession) {
+                const session = parentAuthoritativeSession.user || parentAuthoritativeSession;
+                const token = parentAuthoritativeSession.token;
+                
+                state.sessionSynced = true;
+                state.authMode = 'authenticated';
+                parentSessionReceived = true;
+                sessionValidated = true;
+                
+                sendSessionAck({ user: session, token });
+                successLog('Authoritative session from parent');
+                
+                resolve({
+                    session,
+                    token,
+                    mode: 'authenticated',
+                    fromParent: true
+                });
+                return;
+            }
+            
             if (SessionClient.isValid()) {
                 const session = SessionClient.getSession();
                 const token = SessionClient.getToken();
@@ -4460,7 +4976,8 @@ export function requestSession(timeout = 5000) {
             }, { 
                 expectAck: true, 
                 timeout: timeout - 500,
-                messageId
+                messageId,
+                maxRetries: 1
             }).catch(() => {
                 cleanup();
                 enableDemoMode();
@@ -4499,7 +5016,7 @@ function enableDemoMode() {
     tokenAvailable = false;
     
     SessionClient.updateSession(demoUser, 'demo-token', Date.now() + 86400000);
-    debugLog('Demo mode enabled');
+    if (DEBUG) debugLog('Demo mode enabled');
     
     if (!userSettings) {
         userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -4521,32 +5038,46 @@ function enableGuestMode() {
     tokenAvailable = false;
     SessionClient.clear();
     notifyParentAuthState(false);
-    debugLog('Guest mode enabled');
+    if (DEBUG) debugLog('Guest mode enabled');
 }
 
 // =============================================
 // INITIALIZE CORE 
 // =============================================
 export async function initializeCore(options = {}) {
+    // Single initialization lock - prevent parallel bootstrap paths
+    if (initializationLock) {
+        return { success: false, message: 'Initialization already in progress' };
+    }
+    
     if (state.initialized) {
         return { success: true, mode: state.authMode, alreadyInitialized: true };
     }
     
-    if (initializationInProgress) {
-        return { success: false, message: 'Initialization already in progress' };
+    initializationLock = true;
+    
+    // First, run parent authority boot sequence
+    const parentAuthoritySuccess = await executeParentAuthorityBoot();
+    
+    // If parent authority succeeded, we're already in READY state
+    if (parentAuthoritySuccess && parentAuthorityState === EMITTED_STATES.READY) {
+        initializationLock = false;
+        return { success: true, mode: state.authMode || 'parent_authority', parentAuthority: true };
     }
+    
+    // Otherwise, proceed with legacy initialization (backward compatible)
     
     initializationInProgress = true;
     coreError = null;
     
-    initLog('Core initialization started');
+    initLog('Core initialization started (legacy mode)');
     
     const {
         handshakeTimeout = 5000,
         sessionTimeout = 5000,
         autoStart = true,
         demoMode = true,
-        debug = true,
+        debug = DEBUG,
         forceParentCheck = true
     } = options;
     
@@ -4596,7 +5127,7 @@ export async function initializeCore(options = {}) {
             if (parentResult) {
                 return await IframeHandshakeAuthority.startHandshake({
                     timeout: handshakeTimeout,
-                    retryCount: 3
+                    retryCount: MAX_RETRIES
                 });
             }
             return { success: false, mode: 'demo' };
@@ -4657,6 +5188,12 @@ export async function initializeCore(options = {}) {
         initializationInProgress = false;
         state.health.status = 'ready';
         
+        // Set exposed flags
+        window.__MODULE_READY__ = true;
+        if (SessionClient.isValid()) {
+            window.__MODULE_SESSION_ACTIVE__ = true;
+        }
+        
         startPassiveAuthMonitoring();
         startSessionWatchdog();
         
@@ -4670,7 +5207,7 @@ export async function initializeCore(options = {}) {
             childId: 'settings',
             source: MODULE_NAME,
             environment: IframeEnvironment.getEnvironment()
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         
         notifyParentReady();
         processMessageQueue();
@@ -4679,6 +5216,8 @@ export async function initializeCore(options = {}) {
         
         DiagnosticsAgent.track('core_initialized', { mode: state.authMode });
         successLog('Core initialization complete');
+        
+        initializationLock = false;
         
         return {
             success: true,
@@ -4702,8 +5241,10 @@ export async function initializeCore(options = {}) {
             state.initialized = true;
             isReady = true;
             state.health.status = 'demo';
+            window.__MODULE_READY__ = true;
             syncWithGlobalState();
             executeReadyCallbacks();
+            initializationLock = false;
             return {
                 success: true,
                 mode: 'demo',
@@ -4711,6 +5252,8 @@ export async function initializeCore(options = {}) {
                 error: error.message
             };
         }
+        
+        initializationLock = false;
         
         return {
             success: false,
@@ -4731,10 +5274,10 @@ async function executeStage(stageName, fn, options = {}) {
             state.timeouts.add(timer);
         });
         const result = await Promise.race([fn(), timeoutPromise]);
-        debugLog(`Stage ${stageName} completed`);
+        if (DEBUG) debugLog(`Stage ${stageName} completed`);
         return result;
     } catch (error) {
-        debugLog(`Stage ${stageName} failed:`, error);
+        if (DEBUG) debugLog(`Stage ${stageName} failed:`, error);
         if (fallback !== null) {
             return typeof fallback === 'function' ? fallback() : fallback;
         }
@@ -4765,7 +5308,7 @@ export function shutdownCore() {
             timestamp: Date.now(),
             childId: 'settings',
             source: MODULE_NAME
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         
         state.intervals.forEach(interval => clearInterval(interval));
         state.intervals.clear();
@@ -4839,7 +5382,10 @@ export function shutdownCore() {
         tokenAvailable = false;
         backgroundTasksStarted = false;
         
-        debugLog('Core shutdown complete');
+        window.__MODULE_READY__ = false;
+        window.__MODULE_SESSION_ACTIVE__ = false;
+        
+        if (DEBUG) debugLog('Core shutdown complete');
         return true;
         
     } catch (error) {
@@ -4912,7 +5458,15 @@ export function resetUIForLogout() {
         IframeHandshakeAuthority.reset();
         OriginAdapter.reset();
         
-        debugLog('UI reset for logout');
+        // Reset parent authority state
+        parentAuthoritativeSession = null;
+        parentSessionReceived = false;
+        parentContractEnforced = false;
+        parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        window.__MODULE_SESSION_ACTIVE__ = false;
+        
+        if (DEBUG) debugLog('UI reset for logout');
         return true;
     } catch (error) {
         return false;
@@ -4947,6 +5501,7 @@ export function checkAuthenticationState() {
         if (SessionClient.isValid()) return true;
         if (parentSessionReceived || state.authMode === 'authenticated' || tokenReady) return true;
         if (state.authMode === 'demo') return true;
+        if (parentAuthoritativeSession) return true;
         return false;
     } catch (error) {
         return false;
@@ -4979,14 +5534,14 @@ export async function bootstrapIframe() {
 
 export async function waitForSession(timeout = 10000) {
     return new Promise((resolve) => {
-        if (SessionClient.isValid()) {
+        if (SessionClient.isValid() || parentAuthoritativeSession) {
             resolve(true);
             return;
         }
         const startTime = Date.now();
         const checkInterval = setInterval(() => {
             try {
-                if (SessionClient.isValid() || (parentSessionReceived && sessionValidated)) {
+                if (SessionClient.isValid() || (parentSessionReceived && sessionValidated) || parentAuthoritativeSession) {
                     clearInterval(checkInterval);
                     clearTimeout(timeoutId);
                     resolve(true);
@@ -5044,7 +5599,7 @@ export function setupBasicEventListeners() {
                                     timestamp: Date.now(),
                                     source: MODULE_NAME,
                                     unsavedChanges: true
-                                }, { expectAck: false }).catch(() => {});
+                                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
                             }
                         }
                     });
@@ -5054,7 +5609,7 @@ export function setupBasicEventListeners() {
                         childId: 'settings',
                         timestamp: Date.now(),
                         source: MODULE_NAME
-                    }, { expectAck: false }).catch(() => {});
+                    }, { expectAck: false, maxRetries: 1 }).catch(() => {});
                 }
             };
             backToAppBtn.addEventListener('click', handler);
@@ -5091,7 +5646,7 @@ export function startTokenMonitoring() {
 
 export function checkTokenAvailability() {
     try {
-        if (SessionClient.isValid()) {
+        if (SessionClient.isValid() || parentAuthoritativeSession) {
             if (!tokenAvailable) {
                 tokenAvailable = true;
                 tokenReady = true;
@@ -5151,7 +5706,7 @@ export function notifyTokenReady() {
             }
         });
         window.dispatchEvent(event);
-        debugLog('Token ready');
+        if (DEBUG) debugLog('Token ready');
     } catch (error) {}
 }
 
@@ -5166,12 +5721,18 @@ export function notifyTokenLost() {
             }
         });
         window.dispatchEvent(event);
-        debugLog('Token lost');
+        if (DEBUG) debugLog('Token lost');
     } catch (error) {}
 }
 
 export function getSecureToken() {
     try {
+        // Check authoritative session first
+        if (parentAuthoritativeSession && parentAuthoritativeSession.token) {
+            originBoundToken = parentAuthoritativeSession.token;
+            return parentAuthoritativeSession.token;
+        }
+        
         if (originBoundToken && originBoundToken !== '' && originBoundToken !== 'null' && originBoundToken !== 'undefined') {
             return originBoundToken;
         }
@@ -5323,14 +5884,14 @@ function simulateResponse(endpoint, method, useFallback = false) {
 
 export async function waitForToken(timeout = 10000) {
     return new Promise((resolve) => {
-        if (tokenReady || SessionClient.isValid()) {
+        if (tokenReady || SessionClient.isValid() || parentAuthoritativeSession) {
             resolve(true);
             return;
         }
         const startTime = Date.now();
         const checkInterval = setInterval(() => {
             try {
-                if (tokenReady || SessionClient.isValid()) {
+                if (tokenReady || SessionClient.isValid() || parentAuthoritativeSession) {
                     clearInterval(checkInterval);
                     clearTimeout(timeoutId);
                     resolve(true);
@@ -5371,7 +5932,7 @@ export function startPassiveAuthMonitoring() {
 export function startBackgroundTasks() {
     try {
         if (backgroundTasksStarted) return;
-        if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return;
+        if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return;
         
         backgroundTasksStarted = true;
         
@@ -5389,10 +5950,22 @@ export function startBackgroundTasks() {
 }
 
 export async function safeLoadUserData() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') {
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) {
         return null;
     }
     try {
+        // Check authoritative session first
+        if (parentAuthoritativeSession) {
+            const user = parentAuthoritativeSession.user || parentAuthoritativeSession;
+            if (user) {
+                currentUser = user;
+                coreData.user = user;
+                state.session = user;
+                SafeStorage.setJSON('current_user', currentUser);
+                return currentUser;
+            }
+        }
+        
         const clientUser = SessionClient.getSession();
         if (clientUser) {
             currentUser = clientUser;
@@ -5424,7 +5997,7 @@ export async function safeLoadUserData() {
 }
 
 export async function safeLoadSettings() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') {
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) {
         return null;
     }
     try {
@@ -5450,7 +6023,7 @@ export async function safeLoadSettings() {
 }
 
 export async function safeLoadBlockedUsers() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
     try {
         const response = await secureFetchWrapper('/api/users/blocked', 'GET');
         const blockedData = response?.data?.blockedUsers || response?.blockedUsers || [];
@@ -5465,7 +6038,7 @@ export async function safeLoadBlockedUsers() {
 }
 
 export async function safeLoadActiveSessions() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
     try {
         const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
         const sessionsData = response?.data?.sessions || response?.sessions || [];
@@ -5480,7 +6053,7 @@ export async function safeLoadActiveSessions() {
 }
 
 export async function safeLoadUserContacts() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
     try {
         const response = await secureFetchWrapper('/api/contacts', 'GET');
         const contactsData = response?.data?.contacts || response?.contacts || [];
@@ -5495,7 +6068,7 @@ export async function safeLoadUserContacts() {
 }
 
 export async function safeLoadUserGroups() {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') return null;
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) return null;
     try {
         const response = await secureFetchWrapper('/api/group', 'GET');
         const groupsData = response?.data?.groups || response?.groups || [];
@@ -5511,7 +6084,7 @@ export async function safeLoadUserGroups() {
 }
 
 export async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
-    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest') {
+    if (!tokenReady && !parentSessionReceived && state.authMode === 'guest' && !parentAuthoritativeSession) {
         throw new Error('Authentication not available');
     }
     return await secureFetchWrapper(endpoint, method, data, options);
@@ -5522,7 +6095,7 @@ export async function saveSettings() {
         SafeStorage.setJSON('user_settings', userSettings);
         coreData.settings = userSettings;
         
-        if (tokenReady || parentSessionReceived || state.authMode === 'authenticated') {
+        if (tokenReady || parentSessionReceived || state.authMode === 'authenticated' || parentAuthoritativeSession) {
             await secureFetchWrapper('/api/settings', 'POST', { settings: userSettings });
             
             // Notify parent about settings update
@@ -5562,7 +6135,7 @@ export function notifyParentAuthState(hasAuth) {
             mirrorVersion: SessionMirror.getMirror().version,
             handshakeState: state.handshakeState,
             environment: IframeEnvironment.getEnvironment()
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     } catch (error) {}
 }
 
@@ -5575,7 +6148,7 @@ export function notifyParentAuthError() {
             tokenExpired: true,
             timestamp: Date.now(),
             source: MODULE_NAME
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         authErrorNotified = true;
     } catch (error) {}
 }
@@ -6000,7 +6573,7 @@ function notifyParentReady() {
                     environment: IframeEnvironment.getEnvironment()
                 },
                 source: MODULE_NAME
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         }
     } catch (error) {}
 }
@@ -6015,7 +6588,7 @@ function notifyParentError(error) {
                     timestamp: Date.now()
                 },
                 source: MODULE_NAME
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         }
     } catch (error) {}
 }
@@ -6095,7 +6668,7 @@ function handleIncomingMessage(event) {
         if (!OriginAdapter.isTrusted(event.origin)) {
             if (!untrustedOriginLogged) {
                 untrustedOriginLogged = true;
-                debugLog('Untrusted origin:', event.origin);
+                if (DEBUG) debugLog('Untrusted origin:', event.origin);
             }
             return;
         }
@@ -6113,6 +6686,23 @@ function handleIncomingMessage(event) {
         // DEDUPLICATION
         if (isMessageDuplicate(message.messageId || message.requestId, message.type)) {
             return;
+        }
+        
+        // Handle required parent contract messages
+        if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_ACTIVE) {
+            handleAuthoritativeSession(message);
+        } else if (message.type === REQUIRED_PARENT_MESSAGES.SESSION_UPDATE) {
+            handleAuthoritativeSessionUpdate(message);
+        } else if (message.type === REQUIRED_PARENT_MESSAGES.ACK) {
+            IframeTransport.handleAck(message);
+        } else if (message.type === REQUIRED_PARENT_MESSAGES.PING) {
+            IframeTransport.send('PONG', { inResponseTo: message.messageId }, { expectAck: false }).catch(() => {});
+        } else if (message.type === REQUIRED_PARENT_MESSAGES.NAVIGATE) {
+            handleParentNavigation(message);
+        } else if (message.type === REQUIRED_PARENT_MESSAGES.PERMISSION_UPDATE) {
+            handlePermissionUpdate(message);
+        } else if (message.type === REQUIRED_PARENT_MESSAGES.FORCE_LOGOUT) {
+            handleParentForceLogout();
         }
         
         if (CompatibilityBridge.isEnabled()) {
@@ -6156,7 +6746,7 @@ function handleIncomingMessage(event) {
             IframeTransport.send('PONG', {
                 inResponseTo: message.messageId,
                 timestamp: Date.now()
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
             return;
         }
         
@@ -6168,6 +6758,7 @@ function handleIncomingMessage(event) {
         if (message.type === 'PARENT_READY') {
             state.parentReadyReceived = true;
             parentReady = true;
+            parentReadyDetected = true;
             IframeHandshakeAuthority.onParentReady();
             
             if (state.handshakeState === 'waiting_parent_ready') {
@@ -6254,7 +6845,7 @@ function handleIncomingMessage(event) {
                     timestamp: Date.now(),
                     childId: 'settings',
                     source: MODULE_NAME
-                }, { expectAck: false }).catch(() => {});
+                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
                 break;
             case 'SHUTDOWN':
                 shutdownCore();
@@ -6271,7 +6862,7 @@ function handleIncomingMessage(event) {
                     childId: 'settings',
                     timestamp: Date.now(),
                     source: MODULE_NAME
-                }, { expectAck: false }).catch(() => {});
+                }, { expectAck: false, maxRetries: 1 }).catch(() => {});
                 break;
             case 'HANDSHAKE_RESPONSE':
                 if (message.session) {
@@ -6322,7 +6913,7 @@ function handleRecoveryRequest(message) {
         childId: 'settings',
         accepted: true,
         timestamp: Date.now()
-    }, { expectAck: false }).catch(() => {});
+    }, { expectAck: false, maxRetries: 1 }).catch(() => {});
 }
 
 function handleInitMessage(message) {
@@ -6345,7 +6936,7 @@ function handleInitMessage(message) {
             timestamp: Date.now(),
             source: MODULE_NAME,
             mirrorVersion: SessionMirror.getMirror().version
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     } catch (error) {}
 }
 
@@ -6374,7 +6965,7 @@ function handleSessionResponse(message) {
             validated: true,
             source: MODULE_NAME,
             mirrorVersion: SessionMirror.getMirror().version
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     } catch (error) {}
 }
 
@@ -6390,7 +6981,7 @@ function handleSessionUpdate(message) {
             IframeTransport.send('SESSION_UPDATE_ACK', {
                 childId: 'settings',
                 timestamp: Date.now()
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         }
     } catch (error) {}
 }
@@ -6418,6 +7009,14 @@ function handleLogout() {
         state.handshakeAcked = false;
         state.sessionAcked = false;
         
+        // Reset parent authority state
+        parentAuthoritativeSession = null;
+        parentSessionReceived = false;
+        parentContractEnforced = false;
+        parentAuthorityState = PARENT_AUTHORITY_STATES.PREINIT;
+        window.__MODULE_STATE__ = parentAuthorityState;
+        window.__MODULE_SESSION_ACTIVE__ = false;
+        
         StartupGovernor.reset();
         IframeHandshakeAuthority.reset();
         
@@ -6425,7 +7024,7 @@ function handleLogout() {
             childId: 'settings',
             timestamp: Date.now(),
             source: MODULE_NAME
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     } catch (error) {}
 }
 
@@ -6452,7 +7051,7 @@ async function handleRefreshData(message) {
                 dataType: dataType,
                 timestamp: Date.now(),
                 source: MODULE_NAME
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
             dispatchDataUpdatedEvent(dataType);
         } else {
             await loadAllData();
@@ -6461,7 +7060,7 @@ async function handleRefreshData(message) {
                 childId: 'settings',
                 timestamp: Date.now(),
                 source: MODULE_NAME
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
             dispatchDataUpdatedEvent('all');
         }
     } catch (error) {
@@ -6470,7 +7069,7 @@ async function handleRefreshData(message) {
             error: error.message,
             timestamp: Date.now(),
             source: MODULE_NAME
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     }
 }
 
@@ -6484,7 +7083,7 @@ function handleUpdateData(message) {
                 dataType: dataType,
                 timestamp: Date.now(),
                 source: MODULE_NAME
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         }
     } catch (error) {}
 }
@@ -6496,7 +7095,7 @@ function sendSessionAck(sessionData) {
         childId: 'settings',
         sessionVersion: sessionData?.version || 0,
         timestamp: Date.now()
-    }, { expectAck: false }).catch(() => {});
+    }, { expectAck: false, maxRetries: 1 }).catch(() => {});
 }
 
 // =============================================
@@ -6586,7 +7185,7 @@ export function buildSettingsMenu(container = null, config = {}) {
                 menu: SETTINGS_MENU,
                 timestamp: Date.now(),
                 mode: state.authMode,
-                authenticated: SessionClient.isValid()
+                authenticated: SessionClient.isValid() || !!parentAuthoritativeSession
             }
         });
         window.dispatchEvent(event);
@@ -6616,7 +7215,7 @@ function setupVisibilityTracking() {
             IframeTransport.send('VISIBILITY_RESUME', {
                 childId: 'settings',
                 timestamp: Date.now()
-            }, { expectAck: false }).catch(() => {});
+            }, { expectAck: false, maxRetries: 1 }).catch(() => {});
         }
     });
 }
@@ -6661,7 +7260,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 demoMode: true,
                 forceParentCheck: true,
                 handshakeTimeout: 3000,
-                debug: true
+                debug: DEBUG
             }).then(result => {
                 if (result.success) {
                     successLog('Core initialized in mode:', result.mode);
@@ -6700,7 +7299,7 @@ export const safeApiCall = async (endpoint, options = {}) => {
 };
 
 export const sendMessageWithAck = async (type, payload, timeout = 5000) => {
-    return IframeTransport.send(type, payload, { expectAck: true, timeout });
+    return IframeTransport.send(type, payload, { expectAck: true, timeout, maxRetries: MAX_RETRIES });
 };
 
 export const broadcastToAllIframes = (type, payload) => {
@@ -6709,7 +7308,7 @@ export const broadcastToAllIframes = (type, payload) => {
         IframeTransport.send(type, {
             target: frameId,
             ...payload
-        }, { expectAck: false }).catch(() => {});
+        }, { expectAck: false, maxRetries: 1 }).catch(() => {});
     });
 };
 
@@ -6732,7 +7331,14 @@ export const getHealthMetrics = () => ({
     authMode: state.authMode,
     sessionValid: SessionClient.isValid(),
     environment: IframeEnvironment.getEnvironment(),
-    governorState: StartupGovernor.getState()
+    governorState: StartupGovernor.getState(),
+    parentAuthority: {
+        state: parentAuthorityState,
+        parentReadyDetected,
+        moduleRegistered,
+        parentAuthoritative: !!parentAuthoritativeSession,
+        parentContractEnforced
+    }
 });
 
 // =============================================
@@ -6785,9 +7391,9 @@ export const forceRecovery = () => {
 };
 
 // =============================================
-// SET ALL COMPONENTS TO SILENT MODE - DISABLED FOR DEBUG
+// SET ALL COMPONENTS TO SILENT MODE 
 // =============================================
-export function setSilentMode(silent = false) {
+export function setSilentMode(silent = !DEBUG) {
     CONSOLE_NOISE_SUPPRESSED = silent;
     Log.setSilent(silent);
     StartupGovernor.setSilent(silent);
@@ -6801,12 +7407,12 @@ export function setSilentMode(silent = false) {
     MultiModuleCoordinator.setSilent(silent);
 }
 
-setSilentMode(false);
+setSilentMode(!DEBUG);
 
 // =============================================
 // EXPOSE DEBUG INTERFACE 
 // =============================================
-window.__IFRAME_DEBUG__ = true;
+window.__IFRAME_DEBUG__ = DEBUG;
 window.__getDiagnostics = () => DiagnosticsAgent.getFullReport();
 window.__forceRecovery = forceRecovery;
 window.__resetCore = () => {
@@ -6819,6 +7425,13 @@ window.__getSessionStatus = () => SessionClient.getDiagnostics();
 window.__getReliabilityStatus = () => ReliabilityEngine.getDiagnostics();
 window.__getUIFailsafe = () => UIFailsafe.getDiagnostics();
 window.__getApiCore = () => ApiCore.getDiagnostics();
+window.__getParentAuthority = () => ({
+    state: parentAuthorityState,
+    parentReadyDetected,
+    moduleRegistered,
+    parentAuthoritative: !!parentAuthoritativeSession,
+    parentContractEnforced
+});
 
 // =============================================
 // ENABLE DEBUG IF URL PARAM

@@ -1778,6 +1778,22 @@
         }
     </style>
 
+    <!-- Exposed flags for parent inspection -->
+    <script>
+        // Parent inspection flags - set initial values
+        window.__PARENT_READY__ = false;
+        window.__MODULE_READY__ = false;
+        window.__MODULE_SESSION_ACTIVE__ = false;
+        window.__MODULE_STATE__ = 'PREINIT';
+        
+        // Allow parent to set ready flag
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'PARENT_READY') {
+                window.__PARENT_READY__ = true;
+            }
+        });
+    </script>
+
 </head>
 <body>
     <!-- Offline Mode Badge - Only shown when offline -->
@@ -2249,9 +2265,7 @@
     <!-- Fallback color picker (hidden) -->
     <div id="fallbackColorPickerContainer" style="display: none;"></div>
 
-    <!-- API must load first -->
-   
-    <!-- Settings JS - Core and UI -->
+    <!-- Settings JS - Core and UI - Order preserved -->
     <script type="module" src="settings-core.js"></script>
     <script type="module" src="settings-ui.js"></script>
     

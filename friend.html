@@ -1999,25 +1999,20 @@
         <span id="dataSourceText">Loading...</span>
     </div>
     
-    <!-- KYN Health Status (Debug Only) -->
-    <div class="health-status" id="healthStatus">
-        <span id="healthText">KYN: Initializing...</span>
-    </div>
-    
-    <!-- Connection Overlay (Shown during handshake/recovery) - Minimal, no text -->
+    <!-- Connection Overlay (Shown during handshake) -->
     <div class="connection-overlay" id="connectionOverlay">
         <div class="connection-content">
             <i class="fas fa-sync-alt fa-spin"></i>
-            <p></p>
-            <p class="subtext"></p>
+            <p>Connecting to parent...</p>
+            <p class="subtext">Establishing secure connection</p>
         </div>
     </div>
     
-    <!-- Recovery Indicator - Minimal, no text -->
+    <!-- Recovery Indicator -->
     <div class="recovery-indicator" id="recoveryIndicator">
         <i class="fas fa-heartbeat fa-pulse"></i>
-        <p></p>
-        <p class="subtext"></p>
+        <p>Reconnecting...</p>
+        <p class="subtext">Attempting to restore connection</p>
     </div>
     
     <!-- Authentication Error Overlay -->
@@ -2105,10 +2100,10 @@
             <div class="sidebar-header">
                 <h2>Friends</h2>
                 <div style="display: flex; gap: 10px; align-items: center;">
-                    <!-- Connection Status Indicator (KYN v2) - Minimal, no text -->
+                    <!-- Connection Status Indicator -->
                     <div class="connection-status connecting" id="connectionStatus">
                         <i class="fas fa-sync-alt fa-spin"></i>
-                        <span></span>
+                        <span>Connecting</span>
                     </div>
                     <button class="add-friend-btn" id="startNewChatBtn" title="Start New Chat">
                         <i class="fas fa-comments"></i>
@@ -2578,94 +2573,10 @@
 
     <!-- Core API Module FIRST -->
     
-    <!-- Core friend module (Enhanced v2.5.1) -->
+    <!-- Core friend module (Parent-Authority Compliant) -->
     <script type="module" src="friend-core.js"></script>
     
-    <!-- UI module (Enhanced v2.5.1) -->
+    <!-- UI module (Parent-Authority Compliant) -->
     <script type="module" src="friend-ui.js"></script>
-    
-    <!-- Initialize the friend page after all modules are loaded -->
-    <script type="module">
-        // Wait for DOM to be ready
-        document.addEventListener('DOMContentLoaded', function() {
-            // Wait for API to be available
-            const checkAPI = setInterval(() => {
-                if (window.knectaAPI && !window.API_LOADING) {
-                    clearInterval(checkAPI);
-                    
-                    // Initialize friend modules if they export init functions
-                    if (window.friendCore && typeof window.friendCore.init === 'function') {
-                        window.friendCore.init();
-                    }
-                    
-                    if (window.friendUI && typeof window.friendUI.init === 'function') {
-                        window.friendUI.init();
-                    }
-                    
-                    // Show health status in development only
-                    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                        const healthEl = document.getElementById('healthStatus');
-                        if (healthEl) {
-                            healthEl.classList.add('active');
-                            
-                            // Update health status periodically
-                            setInterval(() => {
-                                if (window.KYN && window.DiagnosticsAgent) {
-                                    const health = window.DiagnosticsAgent.getHealth();
-                                    document.getElementById('healthText').textContent = 
-                                        `KYN: ${health.status} | P:${health.metrics?.startupPhase || '?'} | H:${health.metrics?.handshakeCompleted ? '✅' : '❌'} | S:${health.metrics?.sessionValid ? '✅' : '❌'} | L:${health.metrics?.queueLength || 0}`;
-                                }
-                            }, 2000);
-                        }
-                    }
-                    
-                    // Enable debug mode with Ctrl+Shift+D
-                    document.addEventListener('keydown', (e) => {
-                        if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-                            if (!document.getElementById('kynDebugPanel')) {
-                                const panel = document.createElement('div');
-                                panel.id = 'kynDebugPanel';
-                                panel.className = 'kyn-debug-panel';
-                                document.body.appendChild(panel);
-                                
-                                const updateDebug = () => {
-                                    if (window.KYN && window.DiagnosticsAgent) {
-                                        const health = window.DiagnosticsAgent.getHealth();
-                                        panel.innerHTML = `
-                                            <div class="debug-title">🔍 KYN Debug v2.5.1</div>
-                                            <div class="debug-row"><span class="debug-label">Environment:</span> <span class="debug-value">${health.environment || 'unknown'}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Phase:</span> <span class="debug-value">${health.metrics?.startupPhase || '?'}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Handshake:</span> <span class="debug-value ${health.metrics?.handshakeCompleted ? '' : 'warning'}">${health.metrics?.handshakeCompleted ? '✅' : '❌'}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Parent Ready:</span> <span class="debug-value ${health.metrics?.parentReady ? '' : 'warning'}">${health.metrics?.parentReady ? '✅' : '❌'}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Session:</span> <span class="debug-value ${health.metrics?.sessionValid ? '' : 'warning'}">${health.metrics?.sessionValid ? '✅' : '❌'}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Compatibility:</span> <span class="debug-value ${health.metrics?.compatibilityMode ? 'warning' : ''}">${health.metrics?.compatibilityMode ? '✅' : '❌'}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Queue:</span> <span class="debug-value">${health.metrics?.queueLength || 0}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Renders:</span> <span class="debug-value">${health.metrics?.renderCount || 0}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Errors:</span> <span class="debug-value error">${health.metrics?.errorCount || 0}</span></div>
-                                            <div class="debug-row"><span class="debug-label">Recoveries:</span> <span class="debug-value">${health.metrics?.recoveryCount || 0}</span></div>
-                                        `;
-                                    }
-                                };
-                                
-                                updateDebug();
-                                setInterval(updateDebug, 1000);
-                            } else {
-                                document.getElementById('kynDebugPanel').remove();
-                            }
-                        }
-                    });
-                }
-            }, 100);
-            
-            // Timeout after 10 seconds
-            setTimeout(() => {
-                if (window.API_LOADING) {
-                    clearInterval(checkAPI);
-                    document.getElementById('authErrorOverlay').classList.add('active');
-                    document.getElementById('authErrorMessage').textContent = 'API loading timeout. Please check your connection.';
-                }
-            }, 10000);
-        });
-    </script>
 </body>
 </html>
